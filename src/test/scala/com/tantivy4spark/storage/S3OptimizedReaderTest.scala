@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.storage
 
-import com.tantivy4spark.{QuickwitTestBase, TestSchemas, TestOptions}
+import com.tantivy4spark.{TantivyTestBase, TestSchemas, TestOptions}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 import org.scalatest.flatspec.AnyFlatSpec
@@ -28,7 +28,7 @@ import com.amazonaws.services.s3.AmazonS3
 import com.amazonaws.services.s3.model.{GetObjectRequest, S3Object, S3ObjectInputStream}
 import java.io.ByteArrayInputStream
 
-class S3OptimizedReaderTest extends AnyFlatSpec with Matchers with QuickwitTestBase {
+class S3OptimizedReaderTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   
   "S3OptimizedReader" should "initialize with configuration" in {
     val hadoopConf = createTestConfiguration()
@@ -187,7 +187,7 @@ class DataLocationTest extends AnyFlatSpec with Matchers {
   }
 }
 
-class S3OptimizedReaderIntegrationTest extends AnyFlatSpec with Matchers with QuickwitTestBase {
+class S3OptimizedReaderIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   
   "S3OptimizedReader integration" should "handle realistic data scenarios" in {
     val hadoopConf = createTestConfiguration()

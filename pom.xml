@@ -5,8 +5,8 @@
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.searchhandler</groupId>
-    <artifactId>spark-quickwit-handler</artifactId>
+    <groupId>com.tantivy4spark</groupId>
+    <artifactId>spark-tantivy-handler</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
@@ -15,7 +15,7 @@
         <maven.compiler.target>8</maven.compiler.target>
         <scala.version>2.12.15</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
-        <spark.version>3.4.1</spark.version>
+        <spark.version>3.5.4</spark.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -69,7 +69,7 @@
         
         <!-- Native dependencies handled by JNI -->
         
-        <!-- HTTP client for Quickwit REST API -->
+        <!-- HTTP client for REST API -->
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>okhttp</artifactId>

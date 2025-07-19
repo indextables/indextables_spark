@@ -34,7 +34,7 @@ trait TestUtils {
   
   def initializeSpark(): Unit = {
     spark = SparkSession.builder()
-      .appName("QuickwitHandlerTest")
+      .appName("TantivyHandlerTest")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .getOrCreate()
@@ -48,7 +48,7 @@ trait TestUtils {
     }
   }
   
-  def createTempDir(prefix: String = "quickwit-test"): Path = {
+  def createTempDir(prefix: String = "tantivy-test"): Path = {
     Files.createTempDirectory(prefix)
   }
   
@@ -143,7 +143,7 @@ object TestDataGenerator {
   }
 }
 
-object MockQuickwitNative {
+object MockTantivyNative {
   
   var searchResults: Map[String, String] = Map.empty
   var indexedDocuments: List[String] = List.empty
@@ -198,7 +198,7 @@ case class TestOptions(
   def toMap: Map[String, String] = {
     Map(
       "index.id" -> indexId,
-      "quickwit.base.path" -> basePath,
+      "tantivy.base.path" -> basePath,
       "max.results" -> maxResults.toString,
       "batch.size" -> batchSize.toString,
       "segment.size" -> segmentSize.toString
@@ -209,7 +209,7 @@ case class TestOptions(
 object FileTestUtils {
   
   def withTempFile[T](suffix: String = ".tmp")(block: File => T): T = {
-    val file = File.createTempFile("quickwit-test", suffix)
+    val file = File.createTempFile("tantivy-test", suffix)
     try {
       block(file)
     } finally {
@@ -217,7 +217,7 @@ object FileTestUtils {
     }
   }
   
-  def withTempDir[T](prefix: String = "quickwit-test")(block: Path => T): T = {
+  def withTempDir[T](prefix: String = "tantivy-test")(block: Path => T): T = {
     val dir = Files.createTempDirectory(prefix)
     try {
       block(dir)
@@ -240,7 +240,7 @@ object FileTestUtils {
   }
 }
 
-trait QuickwitTestBase extends TestUtils with Suite with BeforeAndAfterAll with BeforeAndAfterEach with MockitoSugar {
+trait TantivyTestBase extends TestUtils with Suite with BeforeAndAfterAll with BeforeAndAfterEach with MockitoSugar {
   
   protected var testDir: Path = _
   protected val testOptions = TestOptions()
@@ -257,8 +257,8 @@ trait QuickwitTestBase extends TestUtils with Suite with BeforeAndAfterAll with 
 
   override def beforeEach(): Unit = {
     super.beforeEach()
-    testDir = createTempDir("quickwit-test")
-    MockQuickwitNative.reset()
+    testDir = createTempDir("tantivy-test")
+    MockTantivyNative.reset()
   }
   
   override def afterEach(): Unit = {

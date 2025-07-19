@@ -17,12 +17,12 @@
 
 package com.tantivy4spark.transaction
 
-import com.tantivy4spark.{QuickwitTestBase, TestOptions, FileTestUtils}
+import com.tantivy4spark.{TantivyTestBase, TestOptions, FileTestUtils}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.util.Random
 
-class TransactionLogTest extends AnyFlatSpec with Matchers with QuickwitTestBase {
+class TransactionLogTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   
   "TransactionLog" should "initialize with base path and options" in {
     val txLog = new TransactionLog(testDir.toString, testOptions.toMap)
@@ -302,7 +302,7 @@ class TransactionEntryTest extends AnyFlatSpec with Matchers {
   }
 }
 
-class TransactionLogIntegrationTest extends AnyFlatSpec with Matchers with QuickwitTestBase {
+class TransactionLogIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   
   "TransactionLog integration" should "handle realistic transaction scenarios" in {
     val txLog = new TransactionLog(testDir.toString, testOptions.toMap)

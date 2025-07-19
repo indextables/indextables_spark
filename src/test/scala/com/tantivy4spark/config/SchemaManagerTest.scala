@@ -17,14 +17,14 @@
 
 package com.tantivy4spark.config
 
-import com.tantivy4spark.{QuickwitTestBase, TestSchemas, TestOptions, FileTestUtils}
+import com.tantivy4spark.{TantivyTestBase, TestSchemas, TestOptions, FileTestUtils}
 import org.apache.spark.sql.types._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.util.{Success, Failure}
 import java.nio.file.{Files, Paths}
 
-class SchemaManagerTest extends AnyFlatSpec with Matchers with QuickwitTestBase {
+class SchemaManagerTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   
   private def createSchemaManager(): SchemaManager = {
     val options = testOptions.copy(additional = Map(
