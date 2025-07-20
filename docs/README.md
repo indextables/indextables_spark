@@ -1,8 +1,8 @@
-# Documentation Index - Spark Quickwit Handler
+# Documentation Index - Spark Tantivy Handler
 
 ## Overview
 
-This directory contains comprehensive human-readable design documentation for the Spark Quickwit Handler project, including detailed UML diagrams, architectural overviews, and deployment guides.
+This directory contains comprehensive human-readable design documentation for the Spark Tantivy Handler project, including detailed UML diagrams, architectural overviews, and deployment guides.
 
 ## Documentation Structure
 
@@ -134,4 +134,4 @@ When updating the documentation:
 
 ---
 
-*This documentation provides a comprehensive view of the Spark Quickwit Handler architecture, designed to help developers, operators, and stakeholders understand the system from multiple perspectives.*
+*This documentation provides a comprehensive view of the Spark Tantivy Handler architecture, designed to help developers, operators, and stakeholders understand the system from multiple perspectives.*
