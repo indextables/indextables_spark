@@ -32,7 +32,8 @@ class SchemaManager(options: Map[String, String]) {
   
   def saveSchema(indexId: String, sparkSchema: StructType): Try[Unit] = {
     Try {
-      val quickwitConfig = TantivyConfig.fromSpark(sparkSchema, options)
+      val optionsWithIndexId = options + ("index.id" -> indexId)
+      val quickwitConfig = TantivyConfig.fromSpark(sparkSchema, optionsWithIndexId)
       val schemaJson = TantivyConfig.toJson(quickwitConfig)
       
       // Ensure schema directory exists

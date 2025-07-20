@@ -146,10 +146,10 @@ class TantivyConfigTest extends AnyFlatSpec with Matchers with TantivyTestBase {
     val config = TantivyConfig.fromSpark(TestSchemas.basicSchema, testOptions.toMap)
     val json = TantivyConfig.toJson(config)
     
-    json should include("basePath")
+    json should include("base_path")
     json should include("indexes")
     json should include("metastore")
-    json should include("fieldMappings")
+    json should include("field_mappings")
   }
   
   it should "deserialize from JSON correctly" in {

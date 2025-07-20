@@ -27,7 +27,7 @@ class TantivyOutputWriterFactory(
     dataSchema: StructType
 ) extends OutputWriterFactory {
   
-  override def getFileExtension(context: TaskAttemptContext): String = ".tantv"
+  override def getFileExtension(context: TaskAttemptContext): String = ".tnt"
   
   override def newInstance(
       path: String,

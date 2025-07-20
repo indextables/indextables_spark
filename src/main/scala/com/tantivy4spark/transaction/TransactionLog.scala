@@ -20,6 +20,10 @@ package com.tantivy4spark.transaction
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.mutable.ListBuffer
 
+object TransactionLog {
+  private val nextTransactionId = new AtomicLong(System.currentTimeMillis())
+}
+
 case class TransactionEntry(
     timestamp: Long,
     operation: String,
@@ -36,7 +40,7 @@ case class WriteResult(
 
 class TransactionLog(basePath: String, options: Map[String, String]) {
   
-  private val transactionId = new AtomicLong(System.currentTimeMillis())
+  private val transactionId = TransactionLog.nextTransactionId.incrementAndGet()
   private val entries = ListBuffer[TransactionEntry]()
   private val logPath = s"$basePath/_transaction_log"
   
@@ -49,7 +53,7 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
         "bytes_written" -> writeResult.bytesWritten.toString,
         "record_count" -> writeResult.recordCount.toString,
         "checksum" -> writeResult.checksum,
-        "transaction_id" -> transactionId.get().toString
+        "transaction_id" -> transactionId.toString
       )
     )
     entries += entry
@@ -61,7 +65,7 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
       operation = "COMMIT",
       filePath = logPath,
       metadata = Map(
-        "transaction_id" -> transactionId.get().toString,
+        "transaction_id" -> transactionId.toString,
         "entries_count" -> entries.length.toString
       )
     )
@@ -76,7 +80,7 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
       operation = "ROLLBACK",
       filePath = logPath,
       metadata = Map(
-        "transaction_id" -> transactionId.get().toString,
+        "transaction_id" -> transactionId.toString,
         "entries_count" -> entries.length.toString
       )
     )

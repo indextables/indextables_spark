@@ -209,8 +209,8 @@ class SchemaManagerTest extends AnyFlatSpec with Matchers with TantivyTestBase {
     val sampleConfig = manager.generateSampleConfig(TestSchemas.basicSchema)
     
     sampleConfig should not be empty
-    sampleConfig should include("fieldMappings")
-    sampleConfig should include("indexId")
+    sampleConfig should include("field_mappings")
+    sampleConfig should include("index_id")
   }
   
   it should "get schema statistics" in {
