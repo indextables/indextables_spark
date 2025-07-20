@@ -43,49 +43,76 @@ object TantivyNative {
     "libtantivy_jni.so"
   }
   
+  // Track whether the library has been loaded
+  @volatile private var libraryLoaded = false
+  private val loadLock = new Object()
+  
   // Load the native library from classpath
   private def loadNativeLibrary(): Unit = {
-    try {
-      // First try to load from system library path
-      System.loadLibrary("tantivy_jni")
-    } catch {
-      case _: UnsatisfiedLinkError =>
-        // Extract from classpath and load
-        val resourcePath = s"/native/$libraryName"
-        val inputStream = getClass.getResourceAsStream(resourcePath)
-        
-        if (inputStream == null) {
-          throw new RuntimeException(s"Native library not found in resources: $resourcePath")
-        }
-        
-        val extension = if (libraryName.endsWith(".dll")) ".dll" 
-                       else if (libraryName.endsWith(".dylib")) ".dylib" 
-                       else ".so"
-        val tempFile = java.io.File.createTempFile("tantivy_jni", extension)
-        tempFile.deleteOnExit()
-        
-        val outputStream = new java.io.FileOutputStream(tempFile)
-        try {
-          val buffer = new Array[Byte](8192)
-          var bytesRead = inputStream.read(buffer)
-          while (bytesRead != -1) {
-            outputStream.write(buffer, 0, bytesRead)
-            bytesRead = inputStream.read(buffer)
+    if (!libraryLoaded) {
+      loadLock.synchronized {
+        if (!libraryLoaded) {
+          try {
+            // First try to load from system library path
+            println("Attempting to load tantivy_jni from system library path...")
+            System.loadLibrary("tantivy_jni")
+            println("Successfully loaded tantivy_jni from system library path")
+            libraryLoaded = true
+          } catch {
+            case e: UnsatisfiedLinkError =>
+              println(s"Failed to load from system path: ${e.getMessage}")
+              // Extract from classpath and load
+              val resourcePath = s"/native/$libraryName"
+              println(s"Attempting to load from classpath: $resourcePath")
+              val inputStream = getClass.getResourceAsStream(resourcePath)
+              
+              if (inputStream == null) {
+                throw new RuntimeException(s"Native library not found in resources: $resourcePath")
+              }
+              
+              println(s"Found library in classpath, size: ${inputStream.available()} bytes")
+              
+              val extension = if (libraryName.endsWith(".dll")) ".dll" 
+                             else if (libraryName.endsWith(".dylib")) ".dylib" 
+                             else ".so"
+              val tempFile = java.io.File.createTempFile("tantivy_jni", extension)
+              tempFile.deleteOnExit()
+              
+              val outputStream = new java.io.FileOutputStream(tempFile)
+              try {
+                val buffer = new Array[Byte](8192)
+                var bytesRead = inputStream.read(buffer)
+                while (bytesRead != -1) {
+                  outputStream.write(buffer, 0, bytesRead)
+                  bytesRead = inputStream.read(buffer)
+                }
+              } finally {
+                inputStream.close()
+                outputStream.close()
+              }
+              
+              println(s"Extracted library to: ${tempFile.getAbsolutePath}, size: ${tempFile.length()}")
+              
+              try {
+                System.load(tempFile.getAbsolutePath)
+                println("Successfully loaded native library!")
+                libraryLoaded = true
+              } catch {
+                case loadError: Exception =>
+                  println(s"Failed to load extracted library: ${loadError.getMessage}")
+                  throw loadError
+              }
           }
-        } finally {
-          inputStream.close()
-          outputStream.close()
         }
-        
-        System.load(tempFile.getAbsolutePath)
+      }
     }
   }
   
-  // Load the library when the object is first accessed
-  loadNativeLibrary()
-  
-  // Singleton instance for easy access
-  private val instance = new TantivyNative()
+  // Lazy initialization that ensures library is loaded first
+  private lazy val instance: TantivyNative = {
+    loadNativeLibrary()
+    new TantivyNative()
+  }
   
   // Convenience methods that delegate to the instance
   def createConfig(configJson: String): Long = instance.createConfig(configJson)

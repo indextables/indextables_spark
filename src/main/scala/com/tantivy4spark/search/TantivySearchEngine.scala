@@ -17,8 +17,10 @@
 
 package com.tantivy4spark.search
 
+import org.apache.spark.sql.types.StructType
 import com.tantivy4spark.storage.DataLocation
 import com.tantivy4spark.native.TantivyNative
+import com.tantivy4spark.config.{TantivyConfig, TantivyGlobalConfig, TantivyFieldMapping, TantivyDocMapping, TantivyIndexConfig, TantivySearchSettings, TantivyIndexingSettings, TantivyMetastoreConfig}
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import scala.collection.mutable
@@ -49,7 +51,7 @@ case class TantivySearchResponse(
     elapsedTimeMicros: Long
 )
 
-class TantivySearchEngine(options: Map[String, String]) {
+class TantivySearchEngine(options: Map[String, String], schema: Option[StructType] = None) {
   
   private val indexCache = new mutable.LinkedHashMap[String, TantivyIndex]()
   private val maxResults = options.getOrElse("max.results", "1000").toInt
@@ -62,18 +64,69 @@ class TantivySearchEngine(options: Map[String, String]) {
   
   // Initialize Tantivy configuration
   private def initializeConfig(): Long = {
-    val config = Map(
-      "base_path" -> options.getOrElse("tantivy.base.path", "./tantivy-data"),
-      "index_config" -> Map(
-        "index_id" -> options.getOrElse("index.id", "default_index"),
-        "doc_mapping" -> Map(
-          "mode" -> "strict"
-        )
+    println(s"[DEBUG] TantivySearchEngine.initializeConfig: schema = $schema")
+    val globalConfig = schema match {
+      case Some(s) => 
+        println(s"[DEBUG] Using schema with ${s.fields.length} fields: ${s.fields.map(_.name).mkString(", ")}")
+        TantivyConfig.fromSpark(s, options)
+      case None => 
+        println(s"[DEBUG] No schema provided, using default config")
+        createDefaultConfig()
+    }
+    
+    val configJson = TantivyConfig.toJson(globalConfig)
+    println(s"[DEBUG] Generated config JSON length: ${configJson.length}")
+    TantivyNative.createConfig(configJson)
+  }
+  
+  private def createDefaultConfig(): TantivyGlobalConfig = {
+    import com.tantivy4spark.config._
+    
+    val fieldMappings = Map(
+      "id" -> TantivyFieldMapping("text", indexed = true, stored = true, fast = false, fieldNorms = false),
+      "title" -> TantivyFieldMapping("text", indexed = true, stored = true, fast = false, fieldNorms = true),
+      "content" -> TantivyFieldMapping("text", indexed = true, stored = true, fast = false, fieldNorms = true),
+      "timestamp" -> TantivyFieldMapping("datetime", indexed = true, stored = true, fast = true, fieldNorms = false),
+      "_key" -> TantivyFieldMapping("text", indexed = true, stored = true, fast = false, fieldNorms = false),
+      "_offset" -> TantivyFieldMapping("i64", indexed = false, stored = true, fast = false, fieldNorms = false),
+      "_length" -> TantivyFieldMapping("i64", indexed = false, stored = true, fast = false, fieldNorms = false)
+    )
+    
+    val docMapping = TantivyDocMapping(
+      mode = "strict",
+      fieldMappings = fieldMappings,
+      timestampField = Some("timestamp"),
+      defaultSearchFields = List("title", "content")
+    )
+    
+    val indexConfig = TantivyIndexConfig(
+      indexId = options.getOrElse("index.id", "default_index"),
+      indexUri = s"file://${options.getOrElse("tantivy.base.path", "./tantivy-data")}/${options.getOrElse("index.id", "default_index")}",
+      docMapping = docMapping,
+      searchSettings = TantivySearchSettings(
+        defaultSearchFields = List("title", "content"),
+        maxHits = 10000,
+        enableAggregations = true
+      ),
+      indexingSettings = TantivyIndexingSettings(
+        commitTimeoutSecs = 60,
+        splitNumDocs = 10000000L,
+        splitNumBytes = 2000000000L,
+        mergePolicy = "log_merge"
       )
     )
     
-    val configJson = objectMapper.writeValueAsString(config)
-    TantivyNative.createConfig(configJson)
+    val metastore = TantivyMetastoreConfig(
+      metastoreUri = s"${options.getOrElse("tantivy.base.path", "./tantivy-data")}/metastore",
+      metastoreType = "file"
+    )
+    
+    TantivyGlobalConfig(
+      basePath = options.getOrElse("tantivy.base.path", "./tantivy-data"),
+      metastore = metastore,
+      storageUri = s"file://${options.getOrElse("tantivy.base.path", "./tantivy-data")}",
+      indexes = List(indexConfig)
+    )
   }
   
   def search(query: String, indexPath: String): Iterator[SearchResult] = {

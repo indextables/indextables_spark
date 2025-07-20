@@ -54,6 +54,13 @@ pub struct IndexingSettings {
     pub split_num_docs: u64,
     pub split_num_bytes: u64,
     pub merge_policy: String,
+    pub resources: ResourceSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceSettings {
+    pub max_merge_write_throughput: String,
+    pub heap_size: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +117,19 @@ impl TantivyConfigWrapper {
         };
             
         // Parse index configuration
-        let index_config = if let Some(index_config_value) = config_value.get("index_config") {
+        let index_config = if let Some(indexes_value) = config_value.get("indexes") {
+            if let Some(indexes_array) = indexes_value.as_array() {
+                if let Some(first_index) = indexes_array.first() {
+                    serde_json::from_value(first_index.clone())
+                        .map_err(|e| TantivyError::ConfigError(format!("Invalid index config: {}", e)))?
+                } else {
+                    return Err(TantivyError::ConfigError("Empty indexes array".to_string()));
+                }
+            } else {
+                return Err(TantivyError::ConfigError("indexes field is not an array".to_string()));
+            }
+        } else if let Some(index_config_value) = config_value.get("index_config") {
+            // Fallback to old format for backward compatibility
             serde_json::from_value(index_config_value.clone())
                 .map_err(|e| TantivyError::ConfigError(format!("Invalid index config: {}", e)))?
         } else {
@@ -157,6 +176,10 @@ impl TantivyConfigWrapper {
                 split_num_docs: 10_000_000,
                 split_num_bytes: 2_000_000_000,
                 merge_policy: "log_merge".to_string(),
+                resources: ResourceSettings {
+                    max_merge_write_throughput: "100MB".to_string(),
+                    heap_size: "2GB".to_string(),
+                },
             },
             search_settings: SearchSettings {
                 default_search_fields: vec![],

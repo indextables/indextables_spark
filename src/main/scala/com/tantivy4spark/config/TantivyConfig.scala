@@ -19,48 +19,50 @@ package com.tantivy4spark.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.annotation.JsonProperty
 import org.apache.spark.sql.types.StructType
 import scala.util.{Try, Success, Failure}
 
 case class TantivyFieldMapping(
-    fieldType: String,
+    @JsonProperty("field_type") fieldType: String,
     indexed: Boolean = true,
     stored: Boolean = true,
     fast: Boolean = false,
-    fieldNorms: Boolean = true
+    @JsonProperty("field_norms") fieldNorms: Boolean = true
 )
 
 case class TantivyDocMapping(
     mode: String = "strict", // strict, lenient, or dynamic
-    fieldMappings: Map[String, TantivyFieldMapping],
-    timestampField: Option[String] = Some("_timestamp"),
-    defaultSearchFields: List[String] = List.empty
+    @JsonProperty("field_mappings") fieldMappings: Map[String, TantivyFieldMapping],
+    @JsonProperty("timestamp_field") timestampField: Option[String] = Some("_timestamp"),
+    @JsonProperty("default_search_fields") defaultSearchFields: List[String] = List.empty
 )
 
 case class TantivyIndexConfig(
-    indexId: String,
-    indexUri: String,
-    docMapping: TantivyDocMapping,
-    searchSettings: TantivySearchSettings = TantivySearchSettings(),
-    indexingSettings: TantivyIndexingSettings = TantivyIndexingSettings()
+    @JsonProperty("index_id") indexId: String,
+    @JsonProperty("index_uri") indexUri: String,
+    @JsonProperty("doc_mapping") docMapping: TantivyDocMapping,
+    @JsonProperty("search_settings") searchSettings: TantivySearchSettings = TantivySearchSettings(),
+    @JsonProperty("indexing_settings") indexingSettings: TantivyIndexingSettings = TantivyIndexingSettings()
 )
 
 case class TantivySearchSettings(
-    defaultSearchFields: List[String] = List.empty,
-    maxHits: Int = 10000,
-    enableAggregations: Boolean = true
+    @JsonProperty("default_search_fields") defaultSearchFields: List[String] = List.empty,
+    @JsonProperty("max_hits") maxHits: Int = 10000,
+    @JsonProperty("enable_aggregations") enableAggregations: Boolean = true
 )
 
 case class TantivyIndexingSettings(
-    commitTimeoutSecs: Int = 60,
-    splitNumDocs: Long = 10000000L,
-    splitNumBytes: Long = 2000000000L, // 2GB
+    @JsonProperty("commit_timeout_secs") commitTimeoutSecs: Int = 60,
+    @JsonProperty("split_num_docs") splitNumDocs: Long = 10000000L,
+    @JsonProperty("split_num_bytes") splitNumBytes: Long = 2000000000L, // 2GB
+    @JsonProperty("merge_policy") mergePolicy: String = "log_merge",
     resources: TantivyResources = TantivyResources()
 )
 
 case class TantivyResources(
-    maxMergeWriteThroughput: String = "100MB",
-    heapSize: String = "2GB"
+    @JsonProperty("max_merge_write_throughput") maxMergeWriteThroughput: String = "100MB",
+    @JsonProperty("heap_size") heapSize: String = "2GB"
 )
 
 case class TantivySourceConfig(
@@ -70,14 +72,14 @@ case class TantivySourceConfig(
 )
 
 case class TantivyMetastoreConfig(
-    metastoreUri: String,
-    metastoreType: String = "file" // file, postgresql, etc.
+    @JsonProperty("metastore_uri") metastoreUri: String,
+    @JsonProperty("metastore_type") metastoreType: String = "file" // file, postgresql, etc.
 )
 
 case class TantivyGlobalConfig(
-    basePath: String,
+    @JsonProperty("base_path") basePath: String,
     metastore: TantivyMetastoreConfig,
-    storageUri: String,
+    @JsonProperty("storage_uri") storageUri: String,
     indexes: List[TantivyIndexConfig] = List.empty
 )
 

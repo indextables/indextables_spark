@@ -21,6 +21,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{StructType, DataType, StringType, LongType, DoubleType, BooleanType, TimestampType}
 import com.tantivy4spark.transaction.WriteResult
 import com.tantivy4spark.native.TantivyNative
+import com.tantivy4spark.config.TantivyConfig
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import java.security.MessageDigest
@@ -66,17 +67,8 @@ class TantivyIndexWriter(
   }
   
   private def initializeConfig(): Long = {
-    val config = Map(
-      "base_path" -> options.getOrElse("tantivy.base.path", "./tantivy-data"),
-      "index_config" -> Map(
-        "index_id" -> options.getOrElse("index.id", "spark_index"),
-        "doc_mapping" -> Map(
-          "mode" -> "strict"
-        )
-      )
-    )
-    
-    val configJson = objectMapper.writeValueAsString(config)
+    val globalConfig = TantivyConfig.fromSpark(dataSchema, options)
+    val configJson = TantivyConfig.toJson(globalConfig)
     TantivyNative.createConfig(configJson)
   }
   

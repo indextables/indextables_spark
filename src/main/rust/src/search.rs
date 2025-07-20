@@ -71,14 +71,17 @@ impl SearchEngineWrapper {
             .try_into()
             .map_err(|e| TantivyError::SearchError(format!("Failed to create reader: {}", e)))?;
             
-        // Create query parser
-        let default_fields: Vec<Field> = config.index_config.doc_mapping.default_search_fields
-            .iter()
-            .filter_map(|field_name| field_map.get(field_name))
+        // Create query parser with all indexed fields available
+        let all_indexed_fields: Vec<Field> = field_map.values()
             .copied()
             .collect();
             
-        let query_parser = QueryParser::for_index(&index, default_fields);
+        info!("Creating query parser with {} fields", all_indexed_fields.len());
+        for (name, field) in &field_map {
+            info!("Field available for querying: {} -> {:?}", name, field);
+        }
+            
+        let query_parser = QueryParser::for_index(&index, all_indexed_fields);
         
         Ok(SearchEngineWrapper {
             index,
@@ -95,7 +98,9 @@ impl SearchEngineWrapper {
         let mut schema_builder = SchemaBuilder::default();
         let mut field_map = HashMap::new();
         
+        info!("Building schema with {} field mappings", config.index_config.doc_mapping.field_mappings.len());
         for (field_name, field_mapping) in &config.index_config.doc_mapping.field_mappings {
+            info!("Adding field: {} of type: {}", field_name, field_mapping.field_type);
             let field = match field_mapping.field_type.as_str() {
                 "text" => {
                     let mut text_options = TextOptions::default();
@@ -142,6 +147,7 @@ impl SearchEngineWrapper {
             };
             
             field_map.insert(field_name.clone(), field);
+            info!("Added field '{}' to field_map", field_name);
         }
         
         let schema = schema_builder.build();

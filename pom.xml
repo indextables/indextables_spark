@@ -87,6 +87,13 @@
             <artifactId>jackson-module-scala_${scala.binary.version}</artifactId>
             <version>2.15.2</version>
         </dependency>
+        
+        <!-- Override Maven's built-in Guice with newer compatible version -->
+        <dependency>
+            <groupId>com.google.inject</groupId>
+            <artifactId>guice</artifactId>
+            <version>7.0.0</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -97,7 +104,7 @@
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>4.8.1</version>
+                <version>4.5.6</version>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
                     <recompileMode>incremental</recompileMode>
@@ -108,6 +115,9 @@
                     <jvmArgs>
                         <jvmArg>-Xmx2g</jvmArg>
                         <jvmArg>-XX:MaxMetaspaceSize=512m</jvmArg>
+                        <jvmArg>--add-opens=java.base/sun.misc=ALL-UNNAMED</jvmArg>
+                        <jvmArg>--add-opens=java.base/java.lang=ALL-UNNAMED</jvmArg>
+                        <jvmArg>-XX:+IgnoreUnrecognizedVMOptions</jvmArg>
                     </jvmArgs>
                 </configuration>
                 <executions>

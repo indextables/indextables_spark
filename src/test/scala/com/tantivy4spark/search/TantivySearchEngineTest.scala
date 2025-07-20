@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4spark.{TantivyTestBase, TestDataGenerator, TestOptions, MockTantivyNative}
+import com.tantivy4spark.{TantivyTestBase, TestDataGenerator, TestOptions, TestSchemas, MockTantivyNative}
 import com.tantivy4spark.storage.DataLocation
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
@@ -37,12 +37,12 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   }
   
   "TantivySearchEngine" should "initialize with default options" in {
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     engine shouldNot be(null)
   }
   
   it should "handle empty search results" in {
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("test query", testDir.toString)
     
     results.hasNext shouldBe false
@@ -89,7 +89,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val configId = MockTantivyNative.createMockConfig()
     val engineId = MockTantivyNative.createMockEngine(configId)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("test query", testDir.toString).toList
     
     results should have length 2
@@ -107,7 +107,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   it should "handle malformed search results gracefully" in {
     MockTantivyNative.addSearchResult("bad query", "invalid json")
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("bad query", testDir.toString)
     
     results.hasNext shouldBe false
@@ -137,7 +137,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val expectedQuery = "(test) AND (category:tech AND status:active)"
     MockTantivyNative.addSearchResult(expectedQuery, responseJson)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val filters = Map("category" -> "tech", "status" -> "active")
     val results = engine.searchWithFilters("test", testDir.toString, filters).toList
     
@@ -155,7 +155,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val responseJson = objectMapper.writeValueAsString(mockResponse)
     MockTantivyNative.addSearchResult("test", responseJson)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.searchWithFilters("test", testDir.toString, Map.empty)
     
     results.hasNext shouldBe false
@@ -180,7 +180,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val responseJson = objectMapper.writeValueAsString(mockResponse)
     MockTantivyNative.addSearchResult("minimal", responseJson)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("minimal", testDir.toString).toList
     
     results should have length 1
@@ -213,7 +213,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val responseJson = objectMapper.writeValueAsString(mockResponse)
     MockTantivyNative.addSearchResult("numeric", responseJson)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("numeric", testDir.toString).toList
     
     results should have length 1
@@ -223,14 +223,14 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   }
   
   it should "refresh index correctly" in {
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     
     // This should not throw an exception
     engine.refreshIndex(testDir.toString)
   }
   
   it should "close resources properly" in {
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     
     // This should not throw an exception
     engine.close()
@@ -263,7 +263,7 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
     val responseJson = objectMapper.writeValueAsString(mockResponse)
     MockTantivyNative.addSearchResult("no_id", responseJson)
     
-    val engine = new TantivySearchEngine(testOptions.toMap)
+    val engine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val results = engine.search("no_id", testDir.toString).toList
     
     results should have length 1

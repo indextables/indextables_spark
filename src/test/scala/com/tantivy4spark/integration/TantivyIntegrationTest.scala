@@ -28,10 +28,12 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.hadoop.mapreduce.TaskAttemptContext
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.mockito.MockitoSugar
 import org.mockito.Mockito._
+import com.amazonaws.services.s3.AmazonS3
 import scala.util.Success
 
-class TantivyIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestBase {
+class TantivyIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestBase with MockitoSugar {
   
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -53,7 +55,7 @@ class TantivyIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestB
     writer.close()
     
     // 2. Read data using TantivySearchEngine
-    val searchEngine = new TantivySearchEngine(testOptions.toMap)
+    val searchEngine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val searchResults = searchEngine.search("*", indexPath).toList
     
     // Since we're using mocks, we won't get actual results,
@@ -161,7 +163,7 @@ class TantivyIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestB
     writeResult shouldBe a[WriteResult]
     
     // Test search engine with invalid query
-    val searchEngine = new TantivySearchEngine(testOptions.toMap)
+    val searchEngine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     val invalidResults = searchEngine.search("", "/invalid/path")
     
     // Should return empty iterator for invalid queries
@@ -238,7 +240,7 @@ class TantivyWorkflowIntegrationTest extends AnyFlatSpec with Matchers with Tant
     writer.close()
     
     // 3. Search and Retrieval Phase
-    val searchEngine = new TantivySearchEngine(testOptions.toMap)
+    val searchEngine = new TantivySearchEngine(testOptions.toMap, Some(TestSchemas.basicSchema))
     
     // Perform various searches
     val searches = List(
@@ -372,9 +374,10 @@ class TantivyPerformanceIntegrationTest extends AnyFlatSpec with Matchers with T
     val concurrentPath = testDir.resolve("concurrent_reads").toString
     val hadoopConf = createTestConfiguration()
     
-    // Create multiple readers
+    // Create multiple readers with mock S3 client
+    val mockS3 = mock[AmazonS3]
     val readers = (1 to 5).map { _ =>
-      new S3OptimizedReader(hadoopConf, testOptions.toMap)
+      new S3OptimizedReader(hadoopConf, testOptions.toMap, Some(mockS3))
     }
     
     val startTime = System.currentTimeMillis()

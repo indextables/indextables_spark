@@ -37,6 +37,13 @@ trait TestUtils {
       .appName("TantivyHandlerTest")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
+      .config("spark.driver.host", "localhost")
+      .config("spark.driver.bindAddress", "localhost")
+      .config("spark.sql.adaptive.enabled", "false")
+      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrationRequired", "false")
+      .config("spark.sql.execution.arrow.pyspark.enabled", "false")
       .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")

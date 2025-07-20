@@ -23,17 +23,22 @@ import org.apache.spark.sql.types.StructType
 import org.apache.hadoop.conf.Configuration
 import com.tantivy4spark.search.TantivySearchEngine
 import com.tantivy4spark.storage.S3OptimizedReader
+import com.amazonaws.services.s3.AmazonS3
 
 class TantivyFileReader(
     partitionedFile: PartitionedFile,
     requiredSchema: StructType,
     filters: Seq[org.apache.spark.sql.sources.Filter],
     options: Map[String, String],
-    hadoopConf: Configuration
+    hadoopConf: Configuration,
+    s3Client: Option[AmazonS3] = None
 ) {
   
-  private val searchEngine = new TantivySearchEngine(options)
-  private val s3Reader = new S3OptimizedReader(hadoopConf, options)
+  private val searchEngine = {
+    println(s"[DEBUG] TantivyFileReader creating search engine with schema: ${requiredSchema.fields.map(_.name).mkString(", ")}")
+    new TantivySearchEngine(options, Some(requiredSchema))
+  }
+  private val s3Reader = new S3OptimizedReader(hadoopConf, options, s3Client)
   
   def read(): Iterator[InternalRow] = {
     val query = buildQueryFromFilters(filters)
@@ -56,16 +61,16 @@ class TantivyFileReader(
         s"$attribute:${escapeValue(value.toString)}"
       
       case GreaterThan(attribute, value) => 
-        s"$attribute:>{${value.toString}}"
+        s"$attribute:{${value.toString} TO *}"
       
       case GreaterThanOrEqual(attribute, value) => 
-        s"$attribute:>={${value.toString}}"
+        s"$attribute:[${value.toString} TO *]"
       
       case LessThan(attribute, value) => 
-        s"$attribute:<{${value.toString}}"
+        s"$attribute:{* TO ${value.toString}}"
       
       case LessThanOrEqual(attribute, value) => 
-        s"$attribute:<={${value.toString}}"
+        s"$attribute:[* TO ${value.toString}]"
       
       case In(attribute, values) => 
         val valueList = values.map(v => escapeValue(v.toString)).mkString(" OR ")
