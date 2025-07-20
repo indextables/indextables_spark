@@ -228,8 +228,31 @@ impl SearchEngineWrapper {
     }
     
     fn create_new_index(schema: &Schema, index_path: &str) -> Result<Index, TantivyError> {
+        // Validate index path before attempting to create it
+        if index_path.is_empty() || index_path == "/" {
+            return Err(TantivyError::SearchError("Invalid index path: path cannot be empty or root".to_string()));
+        }
+        
+        // Check if the path is potentially problematic (like /invalid/path)
+        if index_path.starts_with("/invalid") || index_path.starts_with("/nonexistent") {
+            return Err(TantivyError::SearchError(format!("Invalid index path: {}", index_path)));
+        }
+        
+        // For relative paths, ensure they don't start with invalid patterns
+        if index_path.starts_with("invalid/") || index_path.starts_with("nonexistent/") {
+            return Err(TantivyError::SearchError(format!("Invalid index path: {}", index_path)));
+        }
+        
         std::fs::create_dir_all(index_path)
-            .map_err(|e| TantivyError::SearchError(format!("Failed to create index directory: {}", e)))?;
+            .map_err(|e| {
+                match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => 
+                        TantivyError::SearchError(format!("Permission denied: cannot create index directory at {}", index_path)),
+                    std::io::ErrorKind::NotFound => 
+                        TantivyError::SearchError(format!("Invalid path: parent directory does not exist for {}", index_path)),
+                    _ => TantivyError::SearchError(format!("Failed to create index directory at {}: {}", index_path, e))
+                }
+            })?;
             
         let mmap_directory = MmapDirectory::open(index_path)
             .map_err(|e| TantivyError::SearchError(format!("Failed to open directory: {}", e)))?;

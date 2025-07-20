@@ -30,7 +30,10 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.mockito.MockitoSugar
 import org.mockito.Mockito._
+import org.mockito.ArgumentMatchers.any
 import com.amazonaws.services.s3.AmazonS3
+import com.amazonaws.services.s3.model.{S3Object, S3ObjectInputStream, GetObjectRequest}
+import java.io.ByteArrayInputStream
 import scala.util.Success
 
 class TantivyIntegrationTest extends AnyFlatSpec with Matchers with TantivyTestBase with MockitoSugar {
@@ -376,6 +379,25 @@ class TantivyPerformanceIntegrationTest extends AnyFlatSpec with Matchers with T
     
     // Create multiple readers with mock S3 client
     val mockS3 = mock[AmazonS3]
+    val mockS3Object = mock[S3Object]
+    val mockInputStream = mock[S3ObjectInputStream]
+    val testData = "mock-s3-data-for-testing".getBytes("UTF-8")
+    
+    // Stub the mock input stream to return test data
+    when(mockInputStream.read(any[Array[Byte]], any[Int], any[Int])).thenAnswer { (invocation: org.mockito.invocation.InvocationOnMock) =>
+      val buffer = invocation.getArgument[Array[Byte]](0)
+      val offset = invocation.getArgument[Int](1)
+      val length = invocation.getArgument[Int](2)
+      val dataToRead = Math.min(length, testData.length)
+      System.arraycopy(testData, 0, buffer, offset, dataToRead)
+      dataToRead
+    }
+    when(mockInputStream.available()).thenReturn(testData.length)
+    
+    // Stub the S3 mock methods
+    when(mockS3Object.getObjectContent).thenReturn(mockInputStream)
+    when(mockS3.getObject(any[GetObjectRequest])).thenReturn(mockS3Object)
+    
     val readers = (1 to 5).map { _ =>
       new S3OptimizedReader(hadoopConf, testOptions.toMap, Some(mockS3))
     }

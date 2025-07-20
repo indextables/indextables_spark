@@ -28,31 +28,52 @@ import java.io.File
 import java.nio.file.{Files, Path, Paths}
 import scala.util.Random
 
+object SharedSparkSession {
+  @volatile private var _spark: SparkSession = _
+  
+  def getOrCreate(): SparkSession = {
+    if (_spark == null || _spark.sparkContext.isStopped) {
+      synchronized {
+        if (_spark == null || _spark.sparkContext.isStopped) {
+          _spark = SparkSession.builder()
+            .appName("TantivyHandlerTest")
+            .master("local[2]")
+            .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
+            .config("spark.driver.host", "localhost")
+            .config("spark.driver.bindAddress", "localhost")
+            .config("spark.sql.adaptive.enabled", "false")
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+            .config("spark.kryo.registrationRequired", "false")
+            .config("spark.sql.execution.arrow.pyspark.enabled", "false")
+            .getOrCreate()
+          
+          _spark.sparkContext.setLogLevel("WARN")
+        }
+      }
+    }
+    _spark
+  }
+  
+  def stop(): Unit = {
+    if (_spark != null && !_spark.sparkContext.isStopped) {
+      _spark.stop()
+      _spark = null
+    }
+  }
+}
+
 trait TestUtils {
   
-  var spark: SparkSession = _
+  def spark: SparkSession = SharedSparkSession.getOrCreate()
   
   def initializeSpark(): Unit = {
-    spark = SparkSession.builder()
-      .appName("TantivyHandlerTest")
-      .master("local[2]")
-      .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
-      .config("spark.driver.host", "localhost")
-      .config("spark.driver.bindAddress", "localhost")
-      .config("spark.sql.adaptive.enabled", "false")
-      .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
-      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.kryo.registrationRequired", "false")
-      .config("spark.sql.execution.arrow.pyspark.enabled", "false")
-      .getOrCreate()
-    
-    spark.sparkContext.setLogLevel("WARN")
+    SharedSparkSession.getOrCreate()
   }
   
   def stopSpark(): Unit = {
-    if (spark != null) {
-      spark.stop()
-    }
+    // Only stop if this is the last test or explicit cleanup
+    // SharedSparkSession.stop()
   }
   
   def createTempDir(prefix: String = "tantivy-test"): Path = {
@@ -62,7 +83,27 @@ trait TestUtils {
   def deleteTempDir(path: Path): Unit = {
     if (Files.exists(path)) {
       import scala.collection.JavaConverters._
-      Files.walk(path).iterator().asScala.toList.reverse.foreach(Files.deleteIfExists(_))
+      import scala.util.{Try, Success, Failure}
+      
+      // Use try-with-resources pattern to ensure stream is closed
+      Try {
+        val stream = Files.walk(path)
+        try {
+          // Collect all paths first, then delete in reverse order
+          val pathsToDelete = stream.iterator().asScala.toList.reverse
+          pathsToDelete.foreach { p =>
+            Try(Files.deleteIfExists(p)) match {
+              case Success(_) => // File deleted successfully
+              case Failure(_) => // Ignore failures - file might already be deleted
+            }
+          }
+        } finally {
+          stream.close()
+        }
+      } match {
+        case Success(_) => // Directory deletion completed
+        case Failure(_) => // Ignore failures - directory might already be cleaned up
+      }
     }
   }
 }
@@ -236,7 +277,27 @@ object FileTestUtils {
   private def deleteRecursively(path: Path): Unit = {
     if (Files.exists(path)) {
       import scala.collection.JavaConverters._
-      Files.walk(path).iterator().asScala.toList.reverse.foreach(Files.deleteIfExists(_))
+      import scala.util.{Try, Success, Failure}
+      
+      // Use try-with-resources pattern to ensure stream is closed
+      Try {
+        val stream = Files.walk(path)
+        try {
+          // Collect all paths first, then delete in reverse order
+          val pathsToDelete = stream.iterator().asScala.toList.reverse
+          pathsToDelete.foreach { p =>
+            Try(Files.deleteIfExists(p)) match {
+              case Success(_) => // File deleted successfully
+              case Failure(_) => // Ignore failures - file might already be deleted
+            }
+          }
+        } finally {
+          stream.close()
+        }
+      } match {
+        case Success(_) => // Directory deletion completed
+        case Failure(_) => // Ignore failures - directory might already be cleaned up
+      }
     }
   }
   
@@ -258,7 +319,8 @@ trait TantivyTestBase extends TestUtils with Suite with BeforeAndAfterAll with B
   }
 
   override def afterAll(): Unit = {
-    stopSpark()
+    // Don't stop Spark here - let it be shared across test classes
+    // Only clean up test-specific resources
     super.afterAll()  
   }
 
