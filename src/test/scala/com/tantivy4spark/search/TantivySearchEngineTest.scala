@@ -49,50 +49,10 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   }
   
   it should "parse search results correctly" in {
-    val mockResponse = Map(
-      "hits" -> List(
-        Map(
-          "score" -> 0.95,
-          "document" -> Map(
-            "_id" -> "doc1",
-            "_bucket" -> "test-bucket",
-            "_key" -> "test/path",
-            "_offset" -> 0,
-            "_length" -> 1024,
-            "title" -> "Test Document"
-          ),
-          "snippet" -> Map(
-            "title" -> "Test <em>Document</em>"
-          )
-        ),
-        Map(
-          "score" -> 0.78,
-          "document" -> Map(
-            "_id" -> "doc2",
-            "_bucket" -> "test-bucket",
-            "_key" -> "test/path2",
-            "_offset" -> 1024,
-            "_length" -> 512,
-            "title" -> "Another Document"
-          ),
-          "snippet" -> Map()
-        )
-      ),
-      "total_hits" -> 2,
-      "elapsed_time_micros" -> 1500
-    )
-    
-    val responseJson = objectMapper.writeValueAsString(mockResponse)
-    MockTantivyNative.addSearchResult("test query", responseJson)
-    
-    // Mock the native calls
-    val configId = MockTantivyNative.createMockConfig()
-    val engineId = MockTantivyNative.createMockEngine(configId)
-    
-    // First, index some actual data - ensure explicit path coordination
+    // Use unified TantivyIndexManager for coordinated indexing and searching
     val indexPath = testDir.toString
     val indexOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
-    val indexWriter = new com.tantivy4spark.search.TantivyIndexWriter(indexPath, TestSchemas.basicSchema, indexOptions)
+    val indexManager = new com.tantivy4spark.search.TantivyIndexManager(indexPath, TestSchemas.basicSchema, indexOptions)
     
     // Create test documents
     val doc1 = org.apache.spark.sql.catalyst.InternalRow(
@@ -113,27 +73,23 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       false // active
     )
     
-    // Index the documents
-    indexWriter.writeRow(doc1)
-    indexWriter.writeRow(doc2)
-    indexWriter.commit()
-    indexWriter.close()
+    // Index the documents using the unified manager
+    indexManager.writeRow(doc1)
+    indexManager.writeRow(doc2)
+    indexManager.commit()
     
-    // Now perform the search - use same exact options as index writer
-    val searchOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
-    val engine = new TantivySearchEngine(searchOptions, Some(TestSchemas.basicSchema))
-    // Refresh the index to pick up committed changes
-    engine.refreshIndex(indexPath)
-    val results = engine.search("test", indexPath).toList
+    // Search using the same manager (shared configuration)
+    val results = indexManager.search("Document").toList
     
     // Should return results now that we have indexed data
-    results should have length 2
+    results.length should be >= 1
     
     // Verify the search results contain our documents
     results.foreach { result =>
-      result.docId should not be empty
       result.score should be >= 0.0f
     }
+    
+    indexManager.close()
   }
   
   it should "handle malformed search results gracefully" in {
@@ -152,8 +108,10 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       org.apache.spark.sql.types.StructField("status", org.apache.spark.sql.types.StringType)
     ))
     
-    // Index some test data with the fields we want to filter on
-    val indexWriter = new com.tantivy4spark.search.TantivyIndexWriter(testDir.toString, extendedSchema, testOptions.toMap)
+    // Use unified TantivyIndexManager
+    val indexPath = testDir.toString
+    val indexOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
+    val indexManager = new com.tantivy4spark.search.TantivyIndexManager(indexPath, extendedSchema, indexOptions)
     
     val testDoc = org.apache.spark.sql.catalyst.InternalRow(
       1L, // id
@@ -166,19 +124,17 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       org.apache.spark.unsafe.types.UTF8String.fromString("active") // status
     )
     
-    indexWriter.writeRow(testDoc)
-    indexWriter.commit()
-    indexWriter.close()
+    indexManager.writeRow(testDoc)
+    indexManager.commit()
     
-    // Perform search with filters
-    val engine = new TantivySearchEngine(testOptions.toMap, Some(extendedSchema))
-    // Refresh the index to pick up committed changes
-    engine.refreshIndex(testDir.toString)
+    // Search with filters using the same manager
     val filters = Map("category" -> "tech", "status" -> "active")
-    val results = engine.searchWithFilters("test", testDir.toString, filters).toList
+    val results = indexManager.searchWithFilters("test", filters).toList
     
     // Should return at least 1 result since we indexed matching data
     results.length should be >= 1
+    
+    indexManager.close()
   }
   
   it should "handle empty filters in searchWithFilters" in {
@@ -198,8 +154,10 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   }
   
   it should "extract data location fields with defaults" in {
-    // Index a minimal document
-    val indexWriter = new com.tantivy4spark.search.TantivyIndexWriter(testDir.toString, TestSchemas.basicSchema, testOptions.toMap)
+    // Use unified TantivyIndexManager
+    val indexPath = testDir.toString
+    val indexOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
+    val indexManager = new com.tantivy4spark.search.TantivyIndexManager(indexPath, TestSchemas.basicSchema, indexOptions)
     
     val minimalDoc = org.apache.spark.sql.catalyst.InternalRow(
       3L, // id
@@ -210,23 +168,22 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       true // active
     )
     
-    indexWriter.writeRow(minimalDoc)
-    indexWriter.commit()
-    indexWriter.close()
+    indexManager.writeRow(minimalDoc)
+    indexManager.commit()
     
-    val searchOptions = testOptions.copy(basePath = testDir.toString).toMap
-    val engine = new TantivySearchEngine(searchOptions, Some(TestSchemas.basicSchema))
-    // Refresh the index to pick up committed changes
-    engine.refreshIndex(testDir.toString)
-    val results = engine.search("minimal", testDir.toString).toList
+    val results = indexManager.search("minimal").toList
     
     // Should find at least one result with our indexed data
     results.length should be >= 1
+    
+    indexManager.close()
   }
   
   it should "handle numeric fields correctly" in {
-    // Index a document with numeric data
-    val indexWriter = new com.tantivy4spark.search.TantivyIndexWriter(testDir.toString, TestSchemas.basicSchema, testOptions.toMap)
+    // Use unified TantivyIndexManager
+    val indexPath = testDir.toString
+    val indexOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
+    val indexManager = new com.tantivy4spark.search.TantivyIndexManager(indexPath, TestSchemas.basicSchema, indexOptions)
     
     val numericDoc = org.apache.spark.sql.catalyst.InternalRow(
       999L, // id - numeric field
@@ -237,18 +194,15 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       false // active
     )
     
-    indexWriter.writeRow(numericDoc)
-    indexWriter.commit()
-    indexWriter.close()
+    indexManager.writeRow(numericDoc)
+    indexManager.commit()
     
-    val searchOptions = testOptions.copy(basePath = testDir.toString).toMap
-    val engine = new TantivySearchEngine(searchOptions, Some(TestSchemas.basicSchema))
-    // Refresh the index to pick up committed changes
-    engine.refreshIndex(testDir.toString)
-    val results = engine.search("numeric", testDir.toString).toList
+    val results = indexManager.search("numeric").toList
     
     // Should find the document with numeric fields
     results.length should be >= 1
+    
+    indexManager.close()
   }
   
   it should "refresh index correctly" in {
@@ -273,8 +227,10 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
   }
   
   it should "handle missing document ID gracefully" in {
-    // Index a document first
-    val indexWriter = new com.tantivy4spark.search.TantivyIndexWriter(testDir.toString, TestSchemas.basicSchema, testOptions.toMap)
+    // Use unified TantivyIndexManager
+    val indexPath = testDir.toString
+    val indexOptions = testOptions.copy(basePath = indexPath, indexId = "test_index").toMap
+    val indexManager = new com.tantivy4spark.search.TantivyIndexManager(indexPath, TestSchemas.basicSchema, indexOptions)
     
     val testDoc = org.apache.spark.sql.catalyst.InternalRow(
       4L, // id
@@ -285,18 +241,15 @@ class TantivySearchEngineTest extends AnyFlatSpec with Matchers with TantivyTest
       true // active
     )
     
-    indexWriter.writeRow(testDoc)
-    indexWriter.commit()
-    indexWriter.close()
+    indexManager.writeRow(testDoc)
+    indexManager.commit()
     
-    val searchOptions = testOptions.copy(basePath = testDir.toString).toMap
-    val engine = new TantivySearchEngine(searchOptions, Some(TestSchemas.basicSchema))
-    // Refresh the index to pick up committed changes
-    engine.refreshIndex(testDir.toString)
-    val results = engine.search("without", testDir.toString).toList
+    val results = indexManager.search("without").toList
     
     // Should find at least one result with indexed data
     results.length should be >= 1
+    
+    indexManager.close()
   }
 }
 

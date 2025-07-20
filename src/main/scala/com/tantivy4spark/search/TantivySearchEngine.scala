@@ -62,6 +62,15 @@ class TantivySearchEngine(options: Map[String, String], schema: Option[StructTyp
   private var configId: Option[Long] = None
   private var engineId: Option[Long] = None
   
+  // Unified manager for shared configuration (when available)
+  private var indexManager: Option[TantivyIndexManager] = None
+  
+  // Constructor that accepts a shared index manager
+  def this(manager: TantivyIndexManager) = {
+    this(Map.empty, None)
+    indexManager = Some(manager)
+  }
+  
   // Initialize Tantivy configuration
   private def initializeConfig(): Long = {
     println(s"[DEBUG] TantivySearchEngine.initializeConfig: schema = $schema")
@@ -130,22 +139,29 @@ class TantivySearchEngine(options: Map[String, String], schema: Option[StructTyp
   }
   
   def search(query: String, indexPath: String): Iterator[SearchResult] = {
-    ensureInitialized(indexPath)
-    
-    engineId match {
-      case Some(id) =>
-        Try {
-          val resultsJson = TantivyNative.search(id, query, maxResults)
-          parseSearchResults(resultsJson)
-        } match {
-          case Success(results) => results
-          case Failure(exception) =>
-            println(s"Search failed: ${exception.getMessage}")
+    // Use unified index manager if available
+    indexManager match {
+      case Some(manager) =>
+        manager.search(query)
+      case None =>
+        // Fall back to original implementation
+        ensureInitialized(indexPath)
+        
+        engineId match {
+          case Some(id) =>
+            Try {
+              val resultsJson = TantivyNative.search(id, query, maxResults)
+              parseSearchResults(resultsJson)
+            } match {
+              case Success(results) => results
+              case Failure(exception) =>
+                println(s"Search failed: ${exception.getMessage}")
+                Iterator.empty
+            }
+          case None =>
+            println("Search engine not initialized")
             Iterator.empty
         }
-      case None =>
-        println("Search engine not initialized")
-        Iterator.empty
     }
   }
   
@@ -230,14 +246,21 @@ class TantivySearchEngine(options: Map[String, String], schema: Option[StructTyp
   }
   
   def searchWithFilters(query: String, indexPath: String, filters: Map[String, String]): Iterator[SearchResult] = {
-    val filterQuery = if (filters.nonEmpty) {
-      val filterClauses = filters.map { case (field, value) => s"$field:$value" }.mkString(" AND ")
-      s"($query) AND ($filterClauses)"
-    } else {
-      query
+    // Use unified index manager if available
+    indexManager match {
+      case Some(manager) =>
+        manager.searchWithFilters(query, filters)
+      case None =>
+        // Fall back to original implementation
+        val filterQuery = if (filters.nonEmpty) {
+          val filterClauses = filters.map { case (field, value) => s"$field:$value" }.mkString(" AND ")
+          s"($query) AND ($filterClauses)"
+        } else {
+          query
+        }
+        
+        search(filterQuery, indexPath)
     }
-    
-    search(filterQuery, indexPath)
   }
   
   private def extractIndexName(indexPath: String): String = {
@@ -250,10 +273,16 @@ class TantivySearchEngine(options: Map[String, String], schema: Option[StructTyp
   }
   
   def refreshIndex(indexPath: String): Unit = {
-    indexCache.remove(indexPath)
-    // Recreate search engine to pick up index changes
-    engineId.foreach(TantivyNative.destroySearchEngine)
-    engineId = None
+    indexManager match {
+      case Some(manager) =>
+        manager.refreshIndex()
+      case None =>
+        // Fall back to original implementation
+        indexCache.remove(indexPath)
+        // Recreate search engine to pick up index changes
+        engineId.foreach(TantivyNative.destroySearchEngine)
+        engineId = None
+    }
   }
   
   def close(): Unit = {
