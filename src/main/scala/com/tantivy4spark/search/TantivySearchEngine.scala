@@ -23,6 +23,7 @@ import com.tantivy4spark.native.TantivyNative
 import com.tantivy4spark.config.{TantivyConfig, TantivyGlobalConfig, TantivyFieldMapping, TantivyDocMapping, TantivyIndexConfig, TantivySearchSettings, TantivyIndexingSettings, TantivyMetastoreConfig}
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.annotation.JsonProperty
 import scala.collection.mutable
 import scala.util.{Try, Success, Failure}
 
@@ -47,8 +48,8 @@ case class TantivySearchHit(
 
 case class TantivySearchResponse(
     hits: List[TantivySearchHit],
-    totalHits: Long,
-    elapsedTimeMicros: Long
+    @JsonProperty("total_hits") totalHits: Long,
+    @JsonProperty("elapsed_time_micros") elapsedTimeMicros: Long
 )
 
 class TantivySearchEngine(options: Map[String, String], schema: Option[StructType] = None) {
