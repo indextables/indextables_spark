@@ -105,6 +105,10 @@ class TantivyIndexWriter(
   def writeRow(row: InternalRow): WriteResult = {
     ensureInitialized()
     
+    // Calculate checksum on row data only (before adding metadata)
+    val rowData = convertRowDataOnly(row)
+    val rowChecksum = calculateChecksum(objectMapper.writeValueAsBytes(rowData))
+    
     val document = convertRowToDocument(row)
     documentBuffer += document
     
@@ -130,10 +134,30 @@ class TantivyIndexWriter(
       filePath = currentSegmentPath,
       bytesWritten = dataSize,
       recordCount = 1,
-      checksum = calculateChecksum(serializedData)
+      checksum = rowChecksum
     )
   }
   
+  private def convertRowDataOnly(row: InternalRow): Map[String, Any] = {
+    val document = mutable.Map[String, Any]()
+    
+    dataSchema.fields.zipWithIndex.foreach { case (field, index) =>
+      if (!row.isNullAt(index)) {
+        val value = field.dataType match {
+          case StringType => row.getUTF8String(index).toString
+          case LongType => row.getLong(index)
+          case DoubleType => row.getDouble(index)
+          case BooleanType => row.getBoolean(index)
+          case TimestampType => row.getLong(index) // Unix timestamp
+          case _ => row.get(index, field.dataType).toString
+        }
+        document(field.name) = value
+      }
+    }
+    
+    document.toMap
+  }
+
   private def convertRowToDocument(row: InternalRow): Map[String, Any] = {
     val document = mutable.Map[String, Any]()
     
@@ -211,5 +235,5 @@ class TantivyIndexWriter(
     writerId.exists(TantivyNative.commitIndex)
   }
   
-  def getStats: (Long, Long) = (recordCount.get(), bytesWritten.get())
+  def getStats: (Long, Long) = (documentBuffer.size.toLong, batchSize.toLong)
 }

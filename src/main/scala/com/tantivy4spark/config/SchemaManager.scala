@@ -99,7 +99,8 @@ class SchemaManager(options: Map[String, String]) {
     loadSchema(indexId) match {
       case Success(existingConfig) =>
         Try {
-          val newConfig = TantivyConfig.fromSpark(newSchema, options)
+          val optionsWithIndexId = options + ("index.id" -> indexId)
+          val newConfig = TantivyConfig.fromSpark(newSchema, optionsWithIndexId)
           compareSchemas(existingConfig, newConfig)
         }
       case Failure(_) =>
@@ -136,9 +137,16 @@ class SchemaManager(options: Map[String, String]) {
         }
       }
       
-      // Check for timestamp field changes
+      // Check for timestamp field changes (only warn if we're not just adding fields)
       if (existingIndex.docMapping.timestampField != updatedIndex.docMapping.timestampField) {
-        warnings += "Warning: Timestamp field configuration changed"
+        // Only warn if fields were removed or types changed, not if we just added fields
+        if (removedFields.nonEmpty || commonFields.exists { fieldName =>
+          val existingType = existingIndex.docMapping.fieldMappings(fieldName).fieldType
+          val updatedType = updatedIndex.docMapping.fieldMappings(fieldName).fieldType
+          existingType != updatedType
+        }) {
+          warnings += "Warning: Timestamp field configuration changed"
+        }
       }
     }
     
