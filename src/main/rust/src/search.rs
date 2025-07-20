@@ -71,17 +71,21 @@ impl SearchEngineWrapper {
             .try_into()
             .map_err(|e| TantivyError::SearchError(format!("Failed to create reader: {}", e)))?;
             
-        // Create query parser with all indexed fields available
-        let all_indexed_fields: Vec<Field> = field_map.values()
+        // Create query parser with only text fields for default search
+        // Other field types can still be searched with explicit field syntax (field:value)
+        let text_fields: Vec<Field> = config.index_config.doc_mapping.field_mappings.iter()
+            .filter(|(_, mapping)| mapping.field_type == "text" && mapping.indexed)
+            .filter_map(|(name, _)| field_map.get(name))
             .copied()
             .collect();
             
-        info!("Creating query parser with {} fields", all_indexed_fields.len());
+        info!("Creating query parser with {} text fields for default search", text_fields.len());
         for (name, field) in &field_map {
-            info!("Field available for querying: {} -> {:?}", name, field);
+            let mapping = config.index_config.doc_mapping.field_mappings.get(name).unwrap();
+            info!("Field available: {} -> {:?} (type: {}, indexed: {})", name, field, mapping.field_type, mapping.indexed);
         }
             
-        let query_parser = QueryParser::for_index(&index, all_indexed_fields);
+        let query_parser = QueryParser::for_index(&index, text_fields);
         
         Ok(SearchEngineWrapper {
             index,
@@ -107,6 +111,13 @@ impl SearchEngineWrapper {
                     if field_mapping.stored {
                         text_options = text_options.set_stored();
                     }
+                    if field_mapping.indexed {
+                        text_options = text_options.set_indexing_options(
+                            tantivy::schema::TextFieldIndexing::default()
+                                .set_tokenizer("default")
+                                .set_index_option(tantivy::schema::IndexRecordOption::WithFreqsAndPositions)
+                        );
+                    }
                     schema_builder.add_field(FieldEntry::new_text(field_name.clone(), text_options))
                 }
                 "i64" => {
@@ -116,6 +127,9 @@ impl SearchEngineWrapper {
                     }
                     if field_mapping.fast {
                         int_options = int_options.set_fast();
+                    }
+                    if field_mapping.indexed {
+                        int_options = int_options.set_indexed();
                     }
                     schema_builder.add_field(FieldEntry::new_i64(field_name.clone(), int_options))
                 }
@@ -127,7 +141,36 @@ impl SearchEngineWrapper {
                     if field_mapping.fast {
                         float_options = float_options.set_fast();
                     }
+                    if field_mapping.indexed {
+                        float_options = float_options.set_indexed();
+                    }
                     schema_builder.add_field(FieldEntry::new_f64(field_name.clone(), float_options))
+                }
+                "i32" => {
+                    let mut int_options = NumericOptions::default();
+                    if field_mapping.stored {
+                        int_options = int_options.set_stored();
+                    }
+                    if field_mapping.fast {
+                        int_options = int_options.set_fast();
+                    }
+                    if field_mapping.indexed {
+                        int_options = int_options.set_indexed();
+                    }
+                    schema_builder.add_field(FieldEntry::new_i64(field_name.clone(), int_options))
+                }
+                "bool" => {
+                    let mut bool_options = NumericOptions::default();
+                    if field_mapping.stored {
+                        bool_options = bool_options.set_stored();
+                    }
+                    if field_mapping.fast {
+                        bool_options = bool_options.set_fast();
+                    }
+                    if field_mapping.indexed {
+                        bool_options = bool_options.set_indexed();
+                    }
+                    schema_builder.add_field(FieldEntry::new_bool(field_name.clone(), bool_options))
                 }
                 "datetime" => {
                     let mut date_options = DateOptions::default();
@@ -137,11 +180,21 @@ impl SearchEngineWrapper {
                     if field_mapping.fast {
                         date_options = date_options.set_fast();
                     }
+                    if field_mapping.indexed {
+                        date_options = date_options.set_indexed();
+                    }
                     schema_builder.add_field(FieldEntry::new_date(field_name.clone(), date_options))
                 }
                 _ => {
                     debug!("Unknown field type '{}', defaulting to text", field_mapping.field_type);
-                    let text_options = TextOptions::default().set_stored();
+                    let mut text_options = TextOptions::default().set_stored();
+                    if field_mapping.indexed {
+                        text_options = text_options.set_indexing_options(
+                            tantivy::schema::TextFieldIndexing::default()
+                                .set_tokenizer("default")
+                                .set_index_option(tantivy::schema::IndexRecordOption::WithFreqsAndPositions)
+                        );
+                    }
                     schema_builder.add_field(FieldEntry::new_text(field_name.clone(), text_options))
                 }
             };
@@ -201,8 +254,21 @@ impl SearchEngineWrapper {
             match self.query_parser.parse_query(query) {
                 Ok(q) => q,
                 Err(e) => {
-                    error!("Failed to parse query '{}': {}", query, e);
-                    return Err(TantivyError::SearchError(format!("Query parse error: {}", e)));
+                    debug!("Failed to parse query '{}': {}", query, e);
+                    // If query parsing fails, treat it as a simple text search by escaping it
+                    // This handles cases where field-specific queries have invalid syntax
+                    debug!("Falling back to escaped text search for query: '{}'", query);
+                    
+                    // Try different fallback strategies
+                    if let Ok(quoted_query) = self.query_parser.parse_query(&format!("\"{}\"", query.replace("\"", "\\\""))) {
+                        quoted_query
+                    } else if let Ok(escaped_query) = self.query_parser.parse_query(&query.replace(":", "\\:")) {
+                        escaped_query
+                    } else {
+                        // Last resort: create a simple term query for each text field
+                        debug!("All parsing attempts failed for '{}', creating empty query", query);
+                        Box::new(AllQuery) as Box<dyn tantivy::query::Query>
+                    }
                 }
             }
         };

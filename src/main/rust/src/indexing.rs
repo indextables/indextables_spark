@@ -42,6 +42,7 @@ pub struct IndexWriterWrapper {
     document_buffer: VecDeque<Value>,
     buffer_size: usize,
     field_map: HashMap<String, Field>,
+    field_types: HashMap<String, String>,
     documents_indexed: u64,
     bytes_written: u64,
 }
@@ -65,7 +66,7 @@ impl IndexWriterWrapper {
         info!("Initializing index writer for index: {} at path: {}", index_id, index_path);
         
         // Build schema from configuration
-        let (schema, field_map) = Self::build_schema_from_config(config)?;
+        let (schema, field_map, field_types) = Self::build_schema_from_config(config)?;
         
         // Create or open the index
         let index = Self::create_or_open_index(&schema, index_path)?;
@@ -86,14 +87,16 @@ impl IndexWriterWrapper {
             document_buffer: VecDeque::new(),
             buffer_size,
             field_map,
+            field_types,
             documents_indexed: 0,
             bytes_written: 0,
         })
     }
     
-    fn build_schema_from_config(config: &TantivyConfigWrapper) -> Result<(Schema, HashMap<String, Field>), TantivyError> {
+    fn build_schema_from_config(config: &TantivyConfigWrapper) -> Result<(Schema, HashMap<String, Field>, HashMap<String, String>), TantivyError> {
         let mut schema_builder = tantivy::schema::SchemaBuilder::default();
         let mut field_map = HashMap::new();
+        let mut field_types = HashMap::new();
         
         for (field_name, field_mapping) in &config.index_config.doc_mapping.field_mappings {
             let field = match field_mapping.field_type.as_str() {
@@ -101,6 +104,13 @@ impl IndexWriterWrapper {
                     let mut text_options = TextOptions::default();
                     if field_mapping.stored {
                         text_options = text_options.set_stored();
+                    }
+                    if field_mapping.indexed {
+                        text_options = text_options.set_indexing_options(
+                            tantivy::schema::TextFieldIndexing::default()
+                                .set_tokenizer("default")
+                                .set_index_option(tantivy::schema::IndexRecordOption::WithFreqsAndPositions)
+                        );
                     }
                     schema_builder.add_field(FieldEntry::new_text(field_name.clone(), text_options))
                 }
@@ -112,6 +122,9 @@ impl IndexWriterWrapper {
                     if field_mapping.fast {
                         int_options = int_options.set_fast();
                     }
+                    if field_mapping.indexed {
+                        int_options = int_options.set_indexed();
+                    }
                     schema_builder.add_field(FieldEntry::new_i64(field_name.clone(), int_options))
                 }
                 "f64" => {
@@ -122,7 +135,36 @@ impl IndexWriterWrapper {
                     if field_mapping.fast {
                         float_options = float_options.set_fast();
                     }
+                    if field_mapping.indexed {
+                        float_options = float_options.set_indexed();
+                    }
                     schema_builder.add_field(FieldEntry::new_f64(field_name.clone(), float_options))
+                }
+                "i32" => {
+                    let mut int_options = NumericOptions::default();
+                    if field_mapping.stored {
+                        int_options = int_options.set_stored();
+                    }
+                    if field_mapping.fast {
+                        int_options = int_options.set_fast();
+                    }
+                    if field_mapping.indexed {
+                        int_options = int_options.set_indexed();
+                    }
+                    schema_builder.add_field(FieldEntry::new_i64(field_name.clone(), int_options))
+                }
+                "bool" => {
+                    let mut bool_options = NumericOptions::default();
+                    if field_mapping.stored {
+                        bool_options = bool_options.set_stored();
+                    }
+                    if field_mapping.fast {
+                        bool_options = bool_options.set_fast();
+                    }
+                    if field_mapping.indexed {
+                        bool_options = bool_options.set_indexed();
+                    }
+                    schema_builder.add_field(FieldEntry::new_bool(field_name.clone(), bool_options))
                 }
                 "datetime" => {
                     let mut date_options = DateOptions::default();
@@ -132,20 +174,31 @@ impl IndexWriterWrapper {
                     if field_mapping.fast {
                         date_options = date_options.set_fast();
                     }
+                    if field_mapping.indexed {
+                        date_options = date_options.set_indexed();
+                    }
                     schema_builder.add_field(FieldEntry::new_date(field_name.clone(), date_options))
                 }
                 _ => {
                     warn!("Unknown field type '{}' for field '{}', defaulting to text", field_mapping.field_type, field_name);
-                    let text_options = TextOptions::default().set_stored();
+                    let mut text_options = TextOptions::default().set_stored();
+                    if field_mapping.indexed {
+                        text_options = text_options.set_indexing_options(
+                            tantivy::schema::TextFieldIndexing::default()
+                                .set_tokenizer("default")
+                                .set_index_option(tantivy::schema::IndexRecordOption::WithFreqsAndPositions)
+                        );
+                    }
                     schema_builder.add_field(FieldEntry::new_text(field_name.clone(), text_options))
                 }
             };
             
             field_map.insert(field_name.clone(), field);
+            field_types.insert(field_name.clone(), field_mapping.field_type.clone());
         }
         
         let schema = schema_builder.build();
-        Ok((schema, field_map))
+        Ok((schema, field_map, field_types))
     }
     
     fn create_or_open_index(schema: &Schema, index_path: &str) -> Result<Index, TantivyError> {
@@ -262,24 +315,126 @@ impl IndexWriterWrapper {
     }
     
     fn json_value_to_tantivy_value(&self, json_value: &Value, field_name: &str) -> Result<Option<tantivy::schema::OwnedValue>, TantivyError> {
-        match json_value {
-            Value::String(s) => Ok(Some(tantivy::schema::OwnedValue::Str(s.clone()))),
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Ok(Some(tantivy::schema::OwnedValue::I64(i)))
-                } else if let Some(f) = n.as_f64() {
-                    Ok(Some(tantivy::schema::OwnedValue::F64(f)))
-                } else {
-                    Err(TantivyError::IndexingError(format!("Invalid number format for field '{}'", field_name)))
+        if let Some(field_type) = self.field_types.get(field_name) {
+            match field_type.as_str() {
+                "text" => match json_value {
+                    Value::String(s) => Ok(Some(tantivy::schema::OwnedValue::Str(s.clone()))),
+                    Value::Number(n) => Ok(Some(tantivy::schema::OwnedValue::Str(n.to_string()))),
+                    Value::Bool(b) => Ok(Some(tantivy::schema::OwnedValue::Str(b.to_string()))),
+                    Value::Null => Ok(None),
+                    _ => {
+                        let json_str = serde_json::to_string(json_value)
+                            .map_err(|e| TantivyError::IndexingError(format!("Failed to serialize value: {}", e)))?;
+                        Ok(Some(tantivy::schema::OwnedValue::Str(json_str)))
+                    }
+                },
+                "i64" | "i32" => match json_value {
+                    Value::Number(n) => {
+                        if let Some(i) = n.as_i64() {
+                            Ok(Some(tantivy::schema::OwnedValue::I64(i)))
+                        } else {
+                            Err(TantivyError::IndexingError(format!("Expected integer for field '{}', got {}", field_name, n)))
+                        }
+                    },
+                    Value::String(s) => {
+                        s.parse::<i64>()
+                            .map(|i| Some(tantivy::schema::OwnedValue::I64(i)))
+                            .map_err(|_| TantivyError::IndexingError(format!("Could not parse '{}' as integer for field '{}'", s, field_name)))
+                    },
+                    Value::Null => Ok(None),
+                    _ => Err(TantivyError::IndexingError(format!("Invalid type for i64 field '{}': expected number or string", field_name)))
+                },
+                "f64" => match json_value {
+                    Value::Number(n) => {
+                        if let Some(f) = n.as_f64() {
+                            Ok(Some(tantivy::schema::OwnedValue::F64(f)))
+                        } else {
+                            Err(TantivyError::IndexingError(format!("Expected float for field '{}', got {}", field_name, n)))
+                        }
+                    },
+                    Value::String(s) => {
+                        s.parse::<f64>()
+                            .map(|f| Some(tantivy::schema::OwnedValue::F64(f)))
+                            .map_err(|_| TantivyError::IndexingError(format!("Could not parse '{}' as float for field '{}'", s, field_name)))
+                    },
+                    Value::Null => Ok(None),
+                    _ => Err(TantivyError::IndexingError(format!("Invalid type for f64 field '{}': expected number or string", field_name)))
+                },
+                "bool" => match json_value {
+                    Value::Bool(b) => Ok(Some(tantivy::schema::OwnedValue::Bool(*b))),
+                    Value::String(s) => {
+                        match s.to_lowercase().as_str() {
+                            "true" | "1" => Ok(Some(tantivy::schema::OwnedValue::Bool(true))),
+                            "false" | "0" => Ok(Some(tantivy::schema::OwnedValue::Bool(false))),
+                            _ => Err(TantivyError::IndexingError(format!("Could not parse '{}' as boolean for field '{}'", s, field_name)))
+                        }
+                    },
+                    Value::Number(n) => {
+                        if let Some(i) = n.as_i64() {
+                            Ok(Some(tantivy::schema::OwnedValue::Bool(i != 0)))
+                        } else {
+                            Err(TantivyError::IndexingError(format!("Invalid number for boolean field '{}': {}", field_name, n)))
+                        }
+                    },
+                    Value::Null => Ok(None),
+                    _ => Err(TantivyError::IndexingError(format!("Invalid type for bool field '{}': expected boolean, string, or number", field_name)))
+                },
+                "datetime" => match json_value {
+                    Value::Number(n) => {
+                        if let Some(timestamp) = n.as_i64() {
+                            // Convert Unix timestamp to Tantivy Date
+                            let date = tantivy::DateTime::from_timestamp_micros(timestamp * 1_000_000);
+                            Ok(Some(tantivy::schema::OwnedValue::Date(date)))
+                        } else {
+                            Err(TantivyError::IndexingError(format!("Expected integer timestamp for datetime field '{}', got {}", field_name, n)))
+                        }
+                    },
+                    Value::String(s) => {
+                        // Try to parse as timestamp first, then as ISO date
+                        if let Ok(timestamp) = s.parse::<i64>() {
+                            let date = tantivy::DateTime::from_timestamp_micros(timestamp * 1_000_000);
+                            Ok(Some(tantivy::schema::OwnedValue::Date(date)))
+                        } else {
+                            // Try to parse as ISO datetime
+                            Err(TantivyError::IndexingError(format!("Could not parse '{}' as datetime for field '{}': use Unix timestamp", s, field_name)))
+                        }
+                    },
+                    Value::Null => Ok(None),
+                    _ => Err(TantivyError::IndexingError(format!("Invalid type for datetime field '{}': expected number or string", field_name)))
+                },
+                _ => {
+                    // Fallback to string conversion for unknown types
+                    match json_value {
+                        Value::String(s) => Ok(Some(tantivy::schema::OwnedValue::Str(s.clone()))),
+                        Value::Null => Ok(None),
+                        _ => {
+                            let json_str = serde_json::to_string(json_value)
+                                .map_err(|e| TantivyError::IndexingError(format!("Failed to serialize value: {}", e)))?;
+                            Ok(Some(tantivy::schema::OwnedValue::Str(json_str)))
+                        }
+                    }
                 }
-            },
-            Value::Bool(b) => Ok(Some(tantivy::schema::OwnedValue::I64(if *b { 1 } else { 0 }))),
-            Value::Null => Ok(None),
-            Value::Array(_) | Value::Object(_) => {
-                // Convert complex types to JSON strings
-                let json_str = serde_json::to_string(json_value)
-                    .map_err(|e| TantivyError::IndexingError(format!("Failed to serialize complex value: {}", e)))?;
-                Ok(Some(tantivy::schema::OwnedValue::Str(json_str)))
+            }
+        } else {
+            // If field type is unknown, use the old generic conversion
+            match json_value {
+                Value::String(s) => Ok(Some(tantivy::schema::OwnedValue::Str(s.clone()))),
+                Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        Ok(Some(tantivy::schema::OwnedValue::I64(i)))
+                    } else if let Some(f) = n.as_f64() {
+                        Ok(Some(tantivy::schema::OwnedValue::F64(f)))
+                    } else {
+                        Err(TantivyError::IndexingError(format!("Invalid number format for field '{}'", field_name)))
+                    }
+                },
+                Value::Bool(b) => Ok(Some(tantivy::schema::OwnedValue::Bool(*b))),
+                Value::Null => Ok(None),
+                Value::Array(_) | Value::Object(_) => {
+                    let json_str = serde_json::to_string(json_value)
+                        .map_err(|e| TantivyError::IndexingError(format!("Failed to serialize complex value: {}", e)))?;
+                    Ok(Some(tantivy::schema::OwnedValue::Str(json_str)))
+                }
             }
         }
     }
