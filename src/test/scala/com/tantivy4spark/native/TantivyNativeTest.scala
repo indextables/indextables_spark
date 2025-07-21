@@ -17,18 +17,17 @@
 
 package com.tantivy4spark.native
 
-import com.tantivy4spark.{TantivyTestBase, MockTantivyNative}
+import com.tantivy4spark.TantivyTestBase
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import org.apache.spark.sql.types._
+import com.tantivy4spark.config.TantivyConfig
+import scala.util.{Try, Success, Failure}
+import java.nio.file.{Files, Paths}
 
 class TantivyNativeTest extends AnyFlatSpec with Matchers with TantivyTestBase {
-  
-  override def beforeEach(): Unit = {
-    super.beforeEach()
-    MockTantivyNative.reset()
-  }
   
   "TantivyNative" should "have correct library name detection" in {
     // Test library name selection based on platform
@@ -58,130 +57,15 @@ class TantivyNativeTest extends AnyFlatSpec with Matchers with TantivyTestBase {
     
     val configJson = objectMapper.writeValueAsString(config)
     
-    // Mock the native library behavior
-    // In a real test, this would call TantivyNative.createConfig(configJson)
-    // For now, we test the JSON generation
+    // Test the JSON generation and parsing
     configJson should include("base_path")
     configJson should include("index_config")
     configJson should include("test_index")
-  }
-  
-  it should "handle search engine lifecycle" in {
-    // Mock configuration and engine creation
-    val configId = MockTantivyNative.createMockConfig()
-    configId should be > 0L
     
-    val engineId = MockTantivyNative.createMockEngine(configId)
-    engineId should be > 0L
-    
-    // Test that different configs get different IDs
-    val anotherConfigId = MockTantivyNative.createMockConfig()
-    anotherConfigId should not equal configId
-  }
-  
-  it should "handle index writer lifecycle" in {
-    // Mock configuration and writer creation
-    val configId = MockTantivyNative.createMockConfig()
-    val writerId = MockTantivyNative.createMockWriter(configId)
-    
-    writerId should be > 0L
-    
-    // Test multiple writers from same config
-    val anotherWriterId = MockTantivyNative.createMockWriter(configId)
-    anotherWriterId should not equal writerId
-  }
-  
-  it should "generate unique IDs for different components" in {
-    val config1 = MockTantivyNative.createMockConfig()
-    val config2 = MockTantivyNative.createMockConfig()
-    val engine1 = MockTantivyNative.createMockEngine(config1)
-    val engine2 = MockTantivyNative.createMockEngine(config2)
-    val writer1 = MockTantivyNative.createMockWriter(config1)
-    val writer2 = MockTantivyNative.createMockWriter(config2)
-    
-    val allIds = Set(config1, config2, engine1, engine2, writer1, writer2)
-    allIds should have size 6 // All IDs should be unique
-  }
-  
-  it should "handle search operations with mock results" in {
-    val query = "test query"
-    val expectedResult = """{"hits": [], "total_hits": 0, "elapsed_time_micros": 100}"""
-    
-    MockTantivyNative.addSearchResult(query, expectedResult)
-    
-    val result = MockTantivyNative.searchResults.get(query)
-    result shouldBe Some(expectedResult)
-  }
-  
-  it should "track indexed documents" in {
-    // Ensure clean state with synchronized access
-    MockTantivyNative.synchronized {
-      MockTantivyNative.reset()
-      
-      val documents = List(
-        """{"id": "doc1", "title": "Test Document 1"}""",
-        """{"id": "doc2", "title": "Test Document 2"}"""
-      )
-      
-      // Verify initial state
-      MockTantivyNative.indexedDocuments should have length 0
-      
-      documents.foreach { doc =>
-        MockTantivyNative.indexedDocuments = MockTantivyNative.indexedDocuments :+ doc
-      }
-      
-      //MockTantivyNative.indexedDocuments should have length 2
-      MockTantivyNative.indexedDocuments should contain(documents.head)
-      MockTantivyNative.indexedDocuments should contain(documents.last)
-    }
-  }
-  
-  it should "reset state correctly" in {
-    MockTantivyNative.synchronized {
-      // Add some data
-      MockTantivyNative.createMockConfig()
-      MockTantivyNative.addSearchResult("test", "result")
-      MockTantivyNative.indexedDocuments = List("doc1", "doc2")
-      
-      // Verify data exists
-      MockTantivyNative.configs should not be empty
-      MockTantivyNative.searchResults should not be empty
-      MockTantivyNative.indexedDocuments should not be empty
-      
-      // Reset
-      MockTantivyNative.reset()
-      
-      // Verify clean state
-      MockTantivyNative.configs shouldBe empty
-      MockTantivyNative.searchResults shouldBe empty
-      MockTantivyNative.indexedDocuments shouldBe empty
-      MockTantivyNative.engines shouldBe empty
-      MockTantivyNative.writers shouldBe empty
-      MockTantivyNative.nextId shouldBe 1
-    }
-  }
-  
-  it should "handle concurrent mock operations" in {
-    import scala.concurrent.{Future, ExecutionContext}
-    import scala.concurrent.duration._
-    
-    MockTantivyNative.synchronized {
-      MockTantivyNative.reset() // Start with clean state
-      
-      implicit val ec: ExecutionContext = ExecutionContext.global
-      
-      // Create multiple configs concurrently
-      val configFutures = (1 to 10).map { _ =>
-        Future {
-          MockTantivyNative.createMockConfig()
-        }
-      }
-      
-      val configIds = scala.concurrent.Await.result(Future.sequence(configFutures), 10.seconds)
-      
-      configIds should have length 10
-      configIds.toSet should have size 10 // All should be unique
-    }
+    // Test that we can parse it back
+    val parsedConfig = objectMapper.readValue(configJson, classOf[Map[String, Any]])
+    parsedConfig should contain key "base_path"
+    parsedConfig should contain key "index_config"
   }
   
   it should "validate JSON structure for configurations" in {
@@ -232,24 +116,230 @@ class TantivyNativeTest extends AnyFlatSpec with Matchers with TantivyTestBase {
     parsedSchema should contain key "field_mappings"
   }
   
-  it should "simulate document indexing workflow" in {
-    val configId = MockTantivyNative.createMockConfig()
-    val writerId = MockTantivyNative.createMockWriter(configId)
+  it should "generate valid TantivyConfig from Spark schema" in {
+    val sparkSchema = StructType(Seq(
+      StructField("id", LongType, nullable = false),
+      StructField("title", StringType, nullable = false),
+      StructField("content", StringType, nullable = true),
+      StructField("timestamp", TimestampType, nullable = false),
+      StructField("score", DoubleType, nullable = true),
+      StructField("active", BooleanType, nullable = false)
+    ))
     
-    // Simulate indexing documents
-    val documents = (1 to 5).map { i =>
-      s"""{"id": "doc$i", "title": "Document $i", "content": "Content for document $i"}"""
+    val options = Map(
+      "index.id" -> "test_index",
+      "tantivy.base.path" -> testDir.toString
+    )
+    
+    val config = TantivyConfig.fromSpark(sparkSchema, options)
+    
+    // Verify the configuration structure
+    config.basePath should be(testDir.toString)
+    config.indexes should have length 1
+    
+    val indexConfig = config.indexes.head
+    indexConfig.indexId should be("test_index")
+    indexConfig.docMapping.fieldMappings should have size 6
+    
+    // Verify field mappings
+    indexConfig.docMapping.fieldMappings should contain key "id"
+    indexConfig.docMapping.fieldMappings should contain key "title"
+    indexConfig.docMapping.fieldMappings should contain key "content"
+    
+    // Verify type mappings
+    indexConfig.docMapping.fieldMappings("id").fieldType should be("i64")
+    indexConfig.docMapping.fieldMappings("title").fieldType should be("text")
+    indexConfig.docMapping.fieldMappings("active").fieldType should be("bool")
+  }
+  
+  it should "handle round-trip type conversion correctly" in {
+    import org.apache.spark.sql.types._
+    
+    val testCases = Map(
+      StringType -> "text",
+      IntegerType -> "i32", 
+      LongType -> "i64",
+      FloatType -> "f32",
+      DoubleType -> "f64",
+      BooleanType -> "bool",
+      TimestampType -> "datetime",
+      DateType -> "date"
+    )
+
+    testCases.foreach { case (sparkType, expectedTantivyType) =>
+      val tantivyType = TantivyConfig.mapSparkTypeToTantivy(sparkType)
+      tantivyType should be (expectedTantivyType)
+      
+      val roundTripSparkType = TantivyConfig.mapTantivyTypeToSpark(tantivyType)
+      roundTripSparkType should be (sparkType)
+    }
+  }
+  
+  it should "convert TantivyConfig back to Spark schema correctly" in {
+    val originalSchema = StructType(Seq(
+      StructField("product_id", StringType, nullable = false),
+      StructField("name", StringType, nullable = true),
+      StructField("price", DoubleType, nullable = false),
+      StructField("in_stock", BooleanType, nullable = true)
+    ))
+    
+    val options = Map(
+      "index.id" -> "product_index",
+      "tantivy.base.path" -> testDir.toString
+    )
+    
+    // Convert Spark schema to TantivyConfig and back
+    val config = TantivyConfig.fromSpark(originalSchema, options)
+    val convertedSchema = TantivyConfig.toSparkSchema(config)
+    
+    // Verify the schema conversion
+    convertedSchema.fields.length should be >= originalSchema.fields.length
+    
+    // Check that all original fields are present
+    originalSchema.fields.foreach { originalField =>
+      val convertedField = convertedSchema.fields.find(_.name == originalField.name)
+      convertedField should be (defined)
+      
+      // Check type compatibility through round-trip conversion
+      val expectedType = TantivyConfig.mapTantivyTypeToSpark(
+        TantivyConfig.mapSparkTypeToTantivy(originalField.dataType)
+      )
+      convertedField.get.dataType should be (expectedType)
+    }
+  }
+  
+  it should "serialize and deserialize configurations as JSON" in {
+    val sparkSchema = StructType(Seq(
+      StructField("user_id", LongType, nullable = false),
+      StructField("username", StringType, nullable = true),
+      StructField("email", StringType, nullable = false)
+    ))
+    
+    val options = Map(
+      "index.id" -> "user_index",
+      "tantivy.base.path" -> testDir.toString
+    )
+    
+    // Create config and serialize to JSON
+    val originalConfig = TantivyConfig.fromSpark(sparkSchema, options)
+    val configJson = TantivyConfig.toJson(originalConfig)
+    
+    // JSON should contain expected elements
+    configJson should include("base_path")
+    configJson should include("user_index")
+    configJson should include("field_mappings")
+    
+    // Deserialize and verify
+    TantivyConfig.fromJson(configJson) match {
+      case Success(deserializedConfig) =>
+        deserializedConfig.basePath should be(originalConfig.basePath)
+        deserializedConfig.indexes should have length 1
+        deserializedConfig.indexes.head.indexId should be("user_index")
+        
+      case Failure(exception) =>
+        fail(s"Failed to deserialize config: ${exception.getMessage}")
+    }
+  }
+  
+  it should "handle invalid configurations gracefully" in {
+    // Test with invalid JSON
+    val invalidJson = """{"incomplete": "config"}"""
+    
+    TantivyConfig.fromJson(invalidJson) match {
+      case Success(_) => 
+        fail("Should have failed to parse invalid configuration")
+      case Failure(_) => 
+        // Expected behavior - invalid JSON should fail
+        succeed
+    }
+  }
+  
+  it should "validate configuration requirements" in {
+    val validSchema = StructType(Seq(
+      StructField("id", StringType, nullable = false),
+      StructField("content", StringType, nullable = true)
+    ))
+    
+    val validOptions = Map(
+      "index.id" -> "valid_index",
+      "tantivy.base.path" -> testDir.toString
+    )
+    
+    val config = TantivyConfig.fromSpark(validSchema, validOptions)
+    val validationErrors = TantivyConfig.validateConfig(config)
+    
+    // Should have no validation errors for valid config
+    validationErrors should be (empty)
+  }
+  
+  it should "detect validation errors in invalid configurations" in {
+    val invalidSchema = StructType(Seq()) // Empty schema
+    
+    val invalidOptions = Map(
+      "index.id" -> "", // Empty index ID
+      "tantivy.base.path" -> ""  // Empty base path
+    )
+    
+    val config = TantivyConfig.fromSpark(invalidSchema, invalidOptions)
+    val validationErrors = TantivyConfig.validateConfig(config)
+    
+    // Should detect validation errors
+    validationErrors should not be empty
+    validationErrors.exists(_.contains("Base path")) should be (true)
+    validationErrors.exists(_.contains("Index ID")) should be (true)
+  }
+  
+  it should "handle schema inference error scenarios gracefully" in {
+    // Test schema inference with non-existent path
+    val nonExistentPath = Paths.get(testDir.toString, "non_existent_index").toString
+    
+    val inferenceResult = TantivyConfig.inferSchemaFromIndex(nonExistentPath)
+    
+    // Should fail gracefully for non-existent index
+    inferenceResult match {
+      case Success(_) => 
+        fail("Expected schema inference to fail for non-existent index")
+      case Failure(exception) => 
+        // Expected behavior - should fail with meaningful error
+        exception.getMessage should include("Failed to retrieve schema")
+    }
+  }
+  
+  it should "handle concurrent configuration operations safely" in {
+    import scala.concurrent.{Future, ExecutionContext}
+    import scala.concurrent.duration._
+    
+    implicit val ec: ExecutionContext = ExecutionContext.global
+    
+    val schema = StructType(Seq(
+      StructField("id", LongType, nullable = false),
+      StructField("data", StringType, nullable = true)
+    ))
+    
+    // Create multiple configurations concurrently
+    val configFutures = (1 to 10).map { i =>
+      Future {
+        val options = Map(
+          "index.id" -> s"concurrent_index_$i",
+          "tantivy.base.path" -> testDir.toString
+        )
+        TantivyConfig.fromSpark(schema, options)
+      }
     }
     
-    documents.foreach { doc =>
-      MockTantivyNative.indexedDocuments = MockTantivyNative.indexedDocuments :+ doc
-    }
+    val configs = scala.concurrent.Await.result(Future.sequence(configFutures), 10.seconds)
     
-    MockTantivyNative.indexedDocuments should have length 5
+    // All configurations should be created successfully
+    configs should have length 10
     
-    // Verify all documents were indexed
-    documents.foreach { doc =>
-      MockTantivyNative.indexedDocuments should contain(doc)
+    // Each should have unique index ID
+    val indexIds = configs.map(_.indexes.head.indexId).toSet
+    indexIds should have size 10
+    
+    // All should have the same field mappings
+    configs.foreach { config =>
+      config.indexes.head.docMapping.fieldMappings should contain key "id"
+      config.indexes.head.docMapping.fieldMappings should contain key "data"
     }
   }
 }
