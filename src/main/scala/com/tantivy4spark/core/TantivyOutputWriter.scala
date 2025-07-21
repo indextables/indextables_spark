@@ -37,6 +37,22 @@ class TantivyOutputWriter(
   private val transactionLog = new TransactionLog(outputPath, options)
   private val indexWriter = new TantivyIndexWriter(outputPath, dataSchema, options)
   
+  // Set the schema in transaction log for this write session
+  transactionLog.setDatasetSchema(dataSchema)
+  
+  // Validate schema compatibility for existing datasets
+  private val validationResult = SchemaCompatibilityValidator.validateSchemaForWrite(outputPath, dataSchema, options)
+  if (!validationResult.isCompatible) {
+    val errorMessage = s"Schema validation failed: ${validationResult.errors.mkString(", ")}"
+    println(s"[ERROR] $errorMessage")
+    throw new IllegalArgumentException(errorMessage)
+  }
+  
+  // Log warnings if any
+  validationResult.warnings.foreach { warning =>
+    println(s"[WARNING] Schema validation: $warning")
+  }
+  
   // Log the storage strategy being used
   private val usingS3Optimization = FileProtocolUtils.shouldUseS3OptimizedIO(outputPath, options)
   println(s"[INFO] TantivyOutputWriter using ${if (usingS3Optimization) "S3-optimized" else "standard Hadoop"} storage for path: $outputPath")

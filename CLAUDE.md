@@ -91,3 +91,59 @@ df.write.format("tantivy")
 df.write.format("tantivy").save("hdfs://namenode/path")
 df.write.format("tantivy").save("file:///local/path")
 ```
+
+### Schema Inference and Management
+
+The system implements comprehensive schema inference with transaction log integration:
+
+#### Schema Persistence Strategy
+1. **New Datasets**: Uses supplied DataFrame schema for writes, persists schema in transaction log
+2. **Existing Datasets**: Sources schema from transaction log for consistency
+3. **Reads**: Automatically infers schema from transaction log, falls back to index introspection
+
+#### Schema Validation
+- **Compatibility Checking**: Validates schema changes for existing datasets
+- **Safe Evolution**: Allows adding nullable fields and safe type promotions (int→long, float→double)
+- **Strict Mode**: `schema.compatibility.strict = true` prevents any schema changes
+
+#### Configuration Options
+- `schema.compatibility.strict = true` - Enforces strict schema validation
+- `schema.evolution.enabled = false` - Disables schema evolution entirely
+
+#### Schema Inference Flow
+1. **Write Operations**:
+   - Check existing schema from transaction log
+   - Validate compatibility if dataset exists
+   - Persist new schema in transaction log entry
+   - Generate Tantivy field mappings
+
+2. **Read Operations**:
+   - First attempt: Extract schema from transaction log
+   - Fallback: Infer from Tantivy index metadata
+   - Final fallback: Use default schema (id, content, timestamp)
+
+#### Usage Examples
+```scala
+// Write with automatic schema persistence
+df.write.format("tantivy").save("/path/to/dataset")
+
+// Write with strict schema validation
+df.write.format("tantivy")
+  .option("schema.compatibility.strict", "true")
+  .save("/path/to/existing/dataset")
+
+// Read with automatic schema inference
+val df = spark.read.format("tantivy").load("/path/to/dataset")
+
+// Schema evolution example
+val originalSchema = StructType(Array(
+  StructField("id", LongType, false),
+  StructField("name", StringType, true)
+))
+
+val evolvedSchema = StructType(Array(
+  StructField("id", LongType, false),
+  StructField("name", StringType, true),
+  StructField("email", StringType, true) // New nullable field - allowed
+))
+```

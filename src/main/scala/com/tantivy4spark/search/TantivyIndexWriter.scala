@@ -70,7 +70,21 @@ class TantivyIndexWriter(
       if (id >= 0) {
         writerId = Some(id)
         saveInferredSchema()
+        logSchemaToTransactionLog()
       }
+    }
+  }
+  
+  private def logSchemaToTransactionLog(): Unit = {
+    try {
+      import com.tantivy4spark.transaction.TransactionLog
+      val txnLog = new TransactionLog(basePath, options)
+      txnLog.appendSchemaEntry(dataSchema)
+      txnLog.commit()
+      println(s"[DEBUG] Schema logged to transaction log for dataset at: $basePath")
+    } catch {
+      case e: Exception =>
+        println(s"[WARNING] Failed to log schema to transaction log: ${e.getMessage}")
     }
   }
   

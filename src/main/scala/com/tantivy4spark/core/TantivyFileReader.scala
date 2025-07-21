@@ -35,7 +35,7 @@ class TantivyFileReader(
 ) {
   
   private val actualSchema = if (requiredSchema.isEmpty) {
-    inferSchemaFromIndex()
+    inferSchemaFromDataset()
   } else {
     requiredSchema
   }
@@ -47,16 +47,29 @@ class TantivyFileReader(
   private val s3Reader = new S3OptimizedReader(hadoopConf, options, s3Client)
   private val standardReader = new StandardFileReader(hadoopConf, options)
   
-  private def inferSchemaFromIndex(): StructType = {
+  private def inferSchemaFromDataset(): StructType = {
     import com.tantivy4spark.config.TantivyConfig
+    import com.tantivy4spark.transaction.TransactionLog
     import scala.util.{Success, Failure}
     
-    val indexPath = partitionedFile.filePath.toString
-    println(s"[DEBUG] Inferring schema from Tantivy index at: $indexPath")
+    val datasetPath = partitionedFile.filePath.toString.split("/").init.mkString("/")
+    println(s"[DEBUG] Inferring schema from dataset at: $datasetPath")
     
+    // First, try to get schema from transaction log
+    val txnLog = new TransactionLog(datasetPath, options)
+    txnLog.inferSchemaFromTransactionLog(datasetPath) match {
+      case Some(schema) =>
+        println(s"[DEBUG] Schema found in transaction log with ${schema.fields.length} fields: ${schema.fields.map(_.name).mkString(", ")}")
+        return schema
+      case None =>
+        println(s"[DEBUG] No schema found in transaction log, trying to infer from index")
+    }
+    
+    // Fallback to inferring from the actual index file
+    val indexPath = partitionedFile.filePath.toString
     TantivyConfig.inferSchemaFromIndex(indexPath) match {
       case Success(schema) =>
-        println(s"[DEBUG] Inferred schema with ${schema.fields.length} fields: ${schema.fields.map(_.name).mkString(", ")}")
+        println(s"[DEBUG] Inferred schema from index with ${schema.fields.length} fields: ${schema.fields.map(_.name).mkString(", ")}")
         schema
       case Failure(exception) =>
         println(s"[WARNING] Failed to infer schema from index: ${exception.getMessage}")
