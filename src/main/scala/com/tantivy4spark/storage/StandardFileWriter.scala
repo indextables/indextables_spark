@@ -101,7 +101,7 @@ class StandardFileWriter(
     Try {
       val path = new Path(dirPath)
       val fs = FileSystem.get(path.toUri, hadoopConf)
-      if (fs.exists(path) && fs.isDirectory(path)) {
+      if (fs.exists(path) && fs.getFileStatus(path).isDirectory) {
         fs.listStatus(path).map(_.getPath.toString).toList
       } else {
         List.empty
