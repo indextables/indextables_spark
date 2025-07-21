@@ -213,7 +213,7 @@ object MockTantivyNative {
     searchResults = searchResults + (query -> result)
   }
   
-  def createMockConfig(): Long = {
+  def createMockConfig(): Long =  {
     val id = nextId
     nextId += 1
     configs = configs + (id -> "mock_config")

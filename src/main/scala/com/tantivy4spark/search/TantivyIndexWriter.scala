@@ -62,7 +62,23 @@ class TantivyIndexWriter(
       val id = TantivyNative.createIndexWriter(configId.get, basePath, schemaJson)
       if (id >= 0) {
         writerId = Some(id)
+        saveInferredSchema()
       }
+    }
+  }
+  
+  private def saveInferredSchema(): Unit = {
+    import com.tantivy4spark.config.SchemaManager
+    import scala.util.{Success, Failure}
+    
+    val schemaManager = new SchemaManager(options)
+    val indexId = options.getOrElse("index.id", s"index_${System.currentTimeMillis()}")
+    
+    schemaManager.saveSchema(indexId, dataSchema) match {
+      case Success(_) => 
+        println(s"[DEBUG] Schema inferred and saved for index: $indexId")
+      case Failure(exception) => 
+        println(s"[WARNING] Failed to save inferred schema: ${exception.getMessage}")
     }
   }
   

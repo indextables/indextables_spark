@@ -24,6 +24,7 @@ class TantivyNative {
   
   @native def createSearchEngine(configId: Long, indexPath: String): Long  
   @native def search(engineId: Long, query: String, maxHits: Long): String
+  @native def getIndexSchema(indexPath: String): String
   @native def destroySearchEngine(engineId: Long): Unit
   
   @native def createIndexWriter(configId: Long, indexPath: String, schemaJson: String): Long
@@ -120,6 +121,7 @@ object TantivyNative {
   
   def createSearchEngine(configId: Long, indexPath: String): Long = instance.createSearchEngine(configId, indexPath)
   def search(engineId: Long, query: String, maxHits: Long = 100): String = instance.search(engineId, query, maxHits)
+  def getIndexSchema(indexPath: String): String = instance.getIndexSchema(indexPath)
   def destroySearchEngine(engineId: Long): Unit = instance.destroySearchEngine(engineId)
   
   def createIndexWriter(configId: Long, indexPath: String, schemaJson: String): Long = instance.createIndexWriter(configId, indexPath, schemaJson)

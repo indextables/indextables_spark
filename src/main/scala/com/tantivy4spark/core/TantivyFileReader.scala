@@ -34,20 +34,56 @@ class TantivyFileReader(
     s3Client: Option[AmazonS3] = None
 ) {
   
+  private val actualSchema = if (requiredSchema.isEmpty) {
+    inferSchemaFromIndex()
+  } else {
+    requiredSchema
+  }
+  
   private val searchEngine = {
-    println(s"[DEBUG] TantivyFileReader creating search engine with schema: ${requiredSchema.fields.map(_.name).mkString(", ")}")
-    new TantivySearchEngine(options, Some(requiredSchema))
+    println(s"[DEBUG] TantivyFileReader creating search engine with schema: ${actualSchema.fields.map(_.name).mkString(", ")}")
+    new TantivySearchEngine(options, Some(actualSchema))
   }
   private val s3Reader = new S3OptimizedReader(hadoopConf, options, s3Client)
+  
+  private def inferSchemaFromIndex(): StructType = {
+    import com.tantivy4spark.config.TantivyConfig
+    import scala.util.{Success, Failure}
+    
+    val indexPath = partitionedFile.filePath.toString
+    println(s"[DEBUG] Inferring schema from Tantivy index at: $indexPath")
+    
+    TantivyConfig.inferSchemaFromIndex(indexPath) match {
+      case Success(schema) =>
+        println(s"[DEBUG] Inferred schema with ${schema.fields.length} fields: ${schema.fields.map(_.name).mkString(", ")}")
+        schema
+      case Failure(exception) =>
+        println(s"[WARNING] Failed to infer schema from index: ${exception.getMessage}")
+        println(s"[DEBUG] Falling back to default schema")
+        createDefaultSchema()
+    }
+  }
+  
+  private def createDefaultSchema(): StructType = {
+    import org.apache.spark.sql.types._
+    
+    new StructType(Array(
+      StructField("id", StringType, nullable = true),
+      StructField("content", StringType, nullable = true),
+      StructField("timestamp", TimestampType, nullable = true)
+    ))
+  }
   
   def read(): Iterator[InternalRow] = {
     val query = buildQueryFromFilters(filters)
     val searchResults = searchEngine.search(query, partitionedFile.filePath.toString)
     
     searchResults.flatMap { result =>
-      s3Reader.readWithPredictiveIO(result.dataLocation, requiredSchema)
+      s3Reader.readWithPredictiveIO(result.dataLocation, actualSchema)
     }
   }
+  
+  def getSchema(): StructType = actualSchema
   
   private def buildQueryFromFilters(filters: Seq[org.apache.spark.sql.sources.Filter]): String = {
     import org.apache.spark.sql.sources._

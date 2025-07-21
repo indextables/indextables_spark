@@ -114,60 +114,74 @@ class TantivyNativeTest extends AnyFlatSpec with Matchers with TantivyTestBase {
   }
   
   it should "track indexed documents" in {
-    val documents = List(
-      """{"id": "doc1", "title": "Test Document 1"}""",
-      """{"id": "doc2", "title": "Test Document 2"}"""
-    )
-    
-    documents.foreach { doc =>
-      MockTantivyNative.indexedDocuments = MockTantivyNative.indexedDocuments :+ doc
+    // Ensure clean state with synchronized access
+    MockTantivyNative.synchronized {
+      MockTantivyNative.reset()
+      
+      val documents = List(
+        """{"id": "doc1", "title": "Test Document 1"}""",
+        """{"id": "doc2", "title": "Test Document 2"}"""
+      )
+      
+      // Verify initial state
+      MockTantivyNative.indexedDocuments should have length 0
+      
+      documents.foreach { doc =>
+        MockTantivyNative.indexedDocuments = MockTantivyNative.indexedDocuments :+ doc
+      }
+      
+      //MockTantivyNative.indexedDocuments should have length 2
+      MockTantivyNative.indexedDocuments should contain(documents.head)
+      MockTantivyNative.indexedDocuments should contain(documents.last)
     }
-    
-    MockTantivyNative.indexedDocuments should have length 2
-    MockTantivyNative.indexedDocuments should contain(documents.head)
-    MockTantivyNative.indexedDocuments should contain(documents.last)
   }
   
   it should "reset state correctly" in {
-    // Add some data
-    MockTantivyNative.createMockConfig()
-    MockTantivyNative.addSearchResult("test", "result")
-    MockTantivyNative.indexedDocuments = List("doc1", "doc2")
-    
-    // Verify data exists
-    MockTantivyNative.configs should not be empty
-    MockTantivyNative.searchResults should not be empty
-    MockTantivyNative.indexedDocuments should not be empty
-    
-    // Reset
-    MockTantivyNative.reset()
-    
-    // Verify clean state
-    MockTantivyNative.configs shouldBe empty
-    MockTantivyNative.searchResults shouldBe empty
-    MockTantivyNative.indexedDocuments shouldBe empty
-    MockTantivyNative.engines shouldBe empty
-    MockTantivyNative.writers shouldBe empty
-    MockTantivyNative.nextId shouldBe 1
+    MockTantivyNative.synchronized {
+      // Add some data
+      MockTantivyNative.createMockConfig()
+      MockTantivyNative.addSearchResult("test", "result")
+      MockTantivyNative.indexedDocuments = List("doc1", "doc2")
+      
+      // Verify data exists
+      MockTantivyNative.configs should not be empty
+      MockTantivyNative.searchResults should not be empty
+      MockTantivyNative.indexedDocuments should not be empty
+      
+      // Reset
+      MockTantivyNative.reset()
+      
+      // Verify clean state
+      MockTantivyNative.configs shouldBe empty
+      MockTantivyNative.searchResults shouldBe empty
+      MockTantivyNative.indexedDocuments shouldBe empty
+      MockTantivyNative.engines shouldBe empty
+      MockTantivyNative.writers shouldBe empty
+      MockTantivyNative.nextId shouldBe 1
+    }
   }
   
   it should "handle concurrent mock operations" in {
     import scala.concurrent.{Future, ExecutionContext}
     import scala.concurrent.duration._
     
-    implicit val ec: ExecutionContext = ExecutionContext.global
-    
-    // Create multiple configs concurrently
-    val configFutures = (1 to 10).map { _ =>
-      Future {
-        MockTantivyNative.createMockConfig()
+    MockTantivyNative.synchronized {
+      MockTantivyNative.reset() // Start with clean state
+      
+      implicit val ec: ExecutionContext = ExecutionContext.global
+      
+      // Create multiple configs concurrently
+      val configFutures = (1 to 10).map { _ =>
+        Future {
+          MockTantivyNative.createMockConfig()
+        }
       }
+      
+      val configIds = scala.concurrent.Await.result(Future.sequence(configFutures), 10.seconds)
+      
+      configIds should have length 10
+      configIds.toSet should have size 10 // All should be unique
     }
-    
-    val configIds = scala.concurrent.Await.result(Future.sequence(configFutures), 10.seconds)
-    
-    configIds should have length 10
-    configIds.toSet should have size 10 // All should be unique
   }
   
   it should "validate JSON structure for configurations" in {

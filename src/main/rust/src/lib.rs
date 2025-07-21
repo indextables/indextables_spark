@@ -181,6 +181,35 @@ pub extern "system" fn Java_com_tantivy4spark_native_TantivyNative_search(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_tantivy4spark_native_TantivyNative_getIndexSchema(
+    mut env: JNIEnv,
+    _class: JClass,
+    index_path: JString,
+) -> jstring {
+    let result = (|| -> Result<jstring, TantivyError> {
+        let path_str = jstring_to_string(&mut env, index_path)?;
+        info!("Getting schema for index at path: {}", path_str);
+        
+        // Attempt to read schema from existing index
+        let schema_json = search::get_index_schema(&path_str)?;
+        
+        string_to_jstring(&mut env, schema_json)
+    })();
+    
+    match result {
+        Ok(jstr) => jstr,
+        Err(e) => {
+            error!("Failed to get index schema: {}", e);
+            // Return empty JSON object on failure
+            match string_to_jstring(&mut env, "{}".to_string()) {
+                Ok(jstr) => jstr,
+                Err(_) => std::ptr::null_mut()
+            }
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_tantivy4spark_native_TantivyNative_destroySearchEngine(
     _env: JNIEnv,
     _class: JClass,

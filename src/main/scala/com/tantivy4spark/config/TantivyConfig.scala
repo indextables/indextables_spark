@@ -155,7 +155,7 @@ object TantivyConfig {
     }.toMap
   }
   
-  private def mapSparkTypeToTantivy(dataType: org.apache.spark.sql.types.DataType): String = {
+  def mapSparkTypeToTantivy(dataType: org.apache.spark.sql.types.DataType): String = {
     import org.apache.spark.sql.types._
     
     dataType match {
@@ -195,6 +195,65 @@ object TantivyConfig {
     Try(objectMapper.readValue(json, classOf[TantivyGlobalConfig]))
   }
   
+  def toSparkSchema(config: TantivyGlobalConfig): StructType = {
+    import org.apache.spark.sql.types._
+    
+    if (config.indexes.isEmpty) {
+      return new StructType()
+    }
+    
+    val fieldMappings = config.indexes.head.docMapping.fieldMappings
+    val fields = fieldMappings.filter { case (name, _) =>
+      !name.startsWith("_") // Filter out internal fields like _timestamp, _key, etc.
+    }.map { case (fieldName, fieldMapping) =>
+      val dataType = mapTantivyTypeToSpark(fieldMapping.fieldType)
+      val nullable = !fieldMapping.indexed || fieldMapping.fieldType != "text" // Assume text fields are required
+      StructField(fieldName, dataType, nullable)
+    }.toArray
+    
+    new StructType(fields)
+  }
+  
+  def mapTantivyTypeToSpark(tantivyType: String): org.apache.spark.sql.types.DataType = {
+    import org.apache.spark.sql.types._
+    
+    tantivyType match {
+      case "text" => StringType
+      case "i32" => IntegerType
+      case "i64" => LongType
+      case "f32" => FloatType
+      case "f64" => DoubleType
+      case "bool" => BooleanType
+      case "datetime" => TimestampType
+      case "date" => DateType
+      case "json" => StringType // Default JSON fields to strings
+      case _ => StringType // Default fallback
+    }
+  }
+  
+  def inferSchemaFromIndex(indexPath: String): Try[StructType] = {
+    import com.tantivy4spark.native.TantivyNative
+    
+    Try {
+      val schemaJson = TantivyNative.getIndexSchema(indexPath)
+      
+      // Check for empty JSON response (indicates failure)
+      if (schemaJson == null || schemaJson.trim.isEmpty || schemaJson.trim == "{}") {
+        throw new RuntimeException(s"Failed to retrieve schema from index at: $indexPath")
+      }
+      
+      fromJson(schemaJson) match {
+        case Success(config) => 
+          // Verify we have a valid configuration with indexes
+          if (config.indexes.isEmpty) {
+            throw new RuntimeException(s"No index configuration found in schema at: $indexPath")
+          }
+          toSparkSchema(config)
+        case Failure(exception) => throw exception
+      }
+    }
+  }
+
   def validateConfig(config: TantivyGlobalConfig): List[String] = {
     val errors = scala.collection.mutable.ListBuffer[String]()
     

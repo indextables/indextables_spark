@@ -432,3 +432,108 @@ impl SearchEngineWrapper {
             .map_err(|e| TantivyError::SearchError(format!("Failed to serialize stats: {}", e)))?)
     }
 }
+
+/// Get schema information from an existing Tantivy index
+pub fn get_index_schema(index_path: &str) -> Result<String, TantivyError> {
+    info!("Reading schema from index at: {}", index_path);
+    
+    let index_dir = Path::new(index_path);
+    
+    if !index_dir.exists() || !index_dir.is_dir() {
+        return Err(TantivyError::SearchError(format!("Index directory does not exist: {}", index_path)));
+    }
+    
+    // Try to open the existing index
+    let index = Index::open_in_dir(index_dir)
+        .map_err(|e| TantivyError::SearchError(format!("Failed to open index at {}: {}", index_path, e)))?;
+    
+    let schema = index.schema();
+    
+    // Convert schema to our configuration format
+    let mut field_mappings = HashMap::new();
+    let mut default_search_fields = Vec::new();
+    
+    for (field, field_entry) in schema.fields() {
+        let field_name = field_entry.name().to_string();
+        
+        // Determine field type and options based on Tantivy field type
+        let (field_type, indexed, stored, fast) = match field_entry.field_type() {
+            tantivy::schema::FieldType::Str(text_options) => {
+                let indexed = text_options.get_indexing_options().is_some();
+                let stored = text_options.is_stored();
+                if indexed {
+                    default_search_fields.push(field_name.clone());
+                }
+                ("text", indexed, stored, false)
+            },
+            tantivy::schema::FieldType::I64(options) => {
+                ("i64", options.is_indexed(), options.is_stored(), options.is_fast())
+            },
+            tantivy::schema::FieldType::F64(options) => {
+                ("f64", options.is_indexed(), options.is_stored(), options.is_fast())
+            },
+            tantivy::schema::FieldType::Bool(options) => {
+                ("bool", options.is_indexed(), options.is_stored(), options.is_fast())
+            },
+            tantivy::schema::FieldType::Date(options) => {
+                ("datetime", options.is_indexed(), options.is_stored(), options.is_fast())
+            },
+            _ => {
+                debug!("Unknown field type for field '{}', defaulting to text", field_name);
+                ("text", true, true, false)
+            }
+        };
+        
+        field_mappings.insert(field_name.clone(), json!({
+            "field_type": field_type,
+            "indexed": indexed,
+            "stored": stored,
+            "fast": fast,
+            "field_norms": true
+        }));
+    }
+    
+    // Create a compatible configuration structure
+    let config = json!({
+        "base_path": index_path,
+        "metastore": {
+            "metastore_uri": format!("file://{}/metastore", index_path),
+            "metastore_type": "file"
+        },
+        "storage_uri": format!("file://{}", index_path),
+        "indexes": [{
+            "index_id": std::path::Path::new(index_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("inferred_index"),
+            "index_uri": format!("file://{}", index_path),
+            "doc_mapping": {
+                "mode": "strict",
+                "field_mappings": field_mappings,
+                "timestamp_field": null,
+                "default_search_fields": default_search_fields
+            },
+            "search_settings": {
+                "default_search_fields": default_search_fields,
+                "max_hits": 10000,
+                "enable_aggregations": true
+            },
+            "indexing_settings": {
+                "commit_timeout_secs": 60,
+                "split_num_docs": 10000000,
+                "split_num_bytes": 2000000000,
+                "merge_policy": "log_merge",
+                "resources": {
+                    "max_merge_write_throughput": "100MB",
+                    "heap_size": "2GB"
+                }
+            }
+        }]
+    });
+    
+    let schema_json = serde_json::to_string(&config)
+        .map_err(|e| TantivyError::SearchError(format!("Failed to serialize schema: {}", e)))?;
+    
+    info!("Successfully extracted schema from index with {} fields", field_mappings.len());
+    Ok(schema_json)
+}
