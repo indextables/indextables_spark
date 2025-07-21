@@ -34,14 +34,16 @@ class TantivyOutputWriter(
   
   override def path(): String = outputPath
   
-  private val transactionLog = new TransactionLog(outputPath, options)
+  // Use the final dataset path if available, otherwise fall back to outputPath
+  private val finalDatasetPath = options.getOrElse("dataset.final.path", outputPath)
+  private val transactionLog = new TransactionLog(finalDatasetPath, options)
   private val indexWriter = new TantivyIndexWriter(outputPath, dataSchema, options)
   
   // Set the schema in transaction log for this write session
   transactionLog.setDatasetSchema(dataSchema)
   
-  // Validate schema compatibility for existing datasets
-  private val validationResult = SchemaCompatibilityValidator.validateSchemaForWrite(outputPath, dataSchema, options)
+  // Validate schema compatibility for existing datasets using the final dataset path
+  private val validationResult = SchemaCompatibilityValidator.validateSchemaForWrite(finalDatasetPath, dataSchema, options)
   if (!validationResult.isCompatible) {
     val errorMessage = s"Schema validation failed: ${validationResult.errors.mkString(", ")}"
     println(s"[ERROR] $errorMessage")

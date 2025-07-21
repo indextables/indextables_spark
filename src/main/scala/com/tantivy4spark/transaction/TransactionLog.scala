@@ -50,12 +50,19 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
   
   private val transactionId = TransactionLog.nextTransactionId.incrementAndGet()
   private val entries = ListBuffer[TransactionEntry]()
-  private val logPath = s"$basePath/_transaction_log"
+  
+  // Use the final dataset path directly - no more path extraction hacks
+  private val finalBasePath = options.getOrElse("dataset.final.path", basePath)
+  private val logPath = s"$finalBasePath/_transaction_log"
+  
   private val objectMapper = new ObjectMapper()
   objectMapper.registerModule(DefaultScalaModule)
   
   private val standardWriter = new StandardFileWriter(new Configuration(), options)
   private var datasetSchema: Option[StructType] = None
+  
+  println(s"[DEBUG] TransactionLog: Using final dataset path: $finalBasePath")
+  println(s"[DEBUG] TransactionLog: Transaction log path: $logPath")
   
   def setDatasetSchema(schema: StructType): Unit = {
     datasetSchema = Some(schema)
@@ -72,13 +79,12 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
         "checksum" -> writeResult.checksum,
         "transaction_id" -> transactionId.toString
       ),
-      schemaJson = datasetSchema.map(schema => objectMapper.writeValueAsString(schema.json))
+      schemaJson = datasetSchema.map(schema => schema.json)
     )
     entries += entry
   }
   
   def appendSchemaEntry(schema: StructType): Unit = {
-    val schemaJson = objectMapper.writeValueAsString(schema.json)
     val entry = TransactionEntry(
       timestamp = System.currentTimeMillis(),
       operation = "SCHEMA",
@@ -87,7 +93,7 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
         "transaction_id" -> transactionId.toString,
         "schema_version" -> "1.0"
       ),
-      schemaJson = Some(schemaJson)
+      schemaJson = Some(schema.json)
     )
     entries += entry
     datasetSchema = Some(schema)
@@ -137,19 +143,15 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
       }
       
       val logData = objectMapper.writeValueAsString(logEntries.toList)
-      val logFileName = s"${logPath}_${transactionId}.json"
+      val logDir = logPath // Use the logPath which already includes _transaction_log
+      val logFileName = s"$logDir/txn_${transactionId}.json"
       
-      if (FileProtocolUtils.shouldUseS3OptimizedIO(logFileName, options)) {
-        // For S3, we'll still use standard writer for simplicity in transaction logs
-        standardWriter.writeToFile(logFileName, logData.getBytes("UTF-8")) match {
-          case Success(_) => println(s"[DEBUG] Transaction log written to: $logFileName")
-          case Failure(exception) => println(s"[ERROR] Failed to write transaction log: ${exception.getMessage}")
-        }
-      } else {
-        standardWriter.writeToFile(logFileName, logData.getBytes("UTF-8")) match {
-          case Success(_) => println(s"[DEBUG] Transaction log written to: $logFileName")
-          case Failure(exception) => println(s"[ERROR] Failed to write transaction log: ${exception.getMessage}")
-        }
+      // Ensure the log directory exists
+      standardWriter.mkdirs(logDir)
+      
+      standardWriter.writeToFile(logFileName, logData.getBytes("UTF-8")) match {
+        case Success(_) => println(s"[DEBUG] Transaction log written to: $logFileName")
+        case Failure(exception) => println(s"[ERROR] Failed to write transaction log: ${exception.getMessage}")
       }
     } catch {
       case e: Exception => println(s"[ERROR] Failed to write transaction log: ${e.getMessage}")
@@ -166,14 +168,38 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
   
   def inferSchemaFromTransactionLog(basePath: String): Option[StructType] = {
     try {
-      val logFiles = standardWriter.listFiles(basePath)
-        .filter(_.contains("_transaction_log_"))
-        .filter(_.endsWith(".json"))
-        .sorted.reverse // Get most recent first
+      import org.apache.hadoop.fs.{FileSystem, Path}
+      import org.apache.hadoop.conf.Configuration
+      
+      val path = new Path(basePath)
+      val fs = FileSystem.get(path.toUri, new Configuration())
+      
+      if (!fs.exists(path) || !fs.getFileStatus(path).isDirectory) {
+        println(s"[DEBUG] Base path does not exist or is not a directory: $basePath")
+        return None
+      }
+      
+      // Look for _transaction_log subdirectory
+      val txnLogPath = new Path(path, "_transaction_log")
+      if (!fs.exists(txnLogPath) || !fs.getFileStatus(txnLogPath).isDirectory) {
+        println(s"[DEBUG] Transaction log directory does not exist: $txnLogPath")
+        return None
+      }
+      
+      val logFiles = fs.listStatus(txnLogPath)
+        .filter(_.isFile)
+        .filter(_.getPath.getName.startsWith("txn_"))
+        .filter(_.getPath.getName.endsWith(".json"))
+        .sortBy(_.getModificationTime).reverse // Get most recent first
+        .map(_.getPath.toString)
+      
+      println(s"[DEBUG] Found ${logFiles.length} transaction log files in $basePath")
       
       for (logFile <- logFiles) {
+        println(s"[DEBUG] Checking transaction log file: $logFile")
         val schemaOpt = extractSchemaFromLogFile(logFile)
         if (schemaOpt.isDefined) {
+          println(s"[DEBUG] Found schema in transaction log file: $logFile")
           return schemaOpt
         }
       }
@@ -182,6 +208,7 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
     } catch {
       case e: Exception =>
         println(s"[ERROR] Failed to infer schema from transaction log: ${e.getMessage}")
+        e.printStackTrace()
         None
     }
   }
@@ -198,21 +225,40 @@ class TransactionLog(basePath: String, options: Map[String, String]) {
         val inputStream = fs.open(path)
         try {
           val jsonContent = scala.io.Source.fromInputStream(inputStream).mkString
-          val entries = objectMapper.readValue(jsonContent, classOf[List[Map[String, Any]]])
+          import com.fasterxml.jackson.core.`type`.TypeReference
+          import scala.collection.JavaConverters._
+          
+          val typeRef = new TypeReference[java.util.List[java.util.Map[String, Object]]]() {}
+          val entries = objectMapper.readValue(jsonContent, typeRef).asScala
+          
+          println(s"[DEBUG] Parsed ${entries.length} entries from transaction log")
           
           // Look for the most recent schema entry or write entry with schema
           for (entryMap <- entries.reverse) {
-            val operation = entryMap.getOrElse("operation", "").toString
-            val schemaJsonOpt = Option(entryMap.getOrElse("schemaJson", "").toString)
+            val operation = Option(entryMap.get("operation")).map(_.toString).getOrElse("")
+            val schemaJsonOpt = Option(entryMap.get("schemaJson"))
+              .map(_.toString)
               .filter(_.nonEmpty)
+            
+            println(s"[DEBUG] Processing entry: operation=$operation, hasSchema=${schemaJsonOpt.isDefined}")
             
             if ((operation == "SCHEMA" || operation == "WRITE") && schemaJsonOpt.isDefined) {
               try {
                 val schemaJson = schemaJsonOpt.get
-                val sparkSchema = DataType.fromJson(schemaJson).asInstanceOf[StructType]
+                println(s"[DEBUG] Attempting to parse schema JSON: ${schemaJson.take(100)}...")
+                
+                // Parse the StructType from its JSON representation
+                val sparkSchema = DataType.fromJson(schemaJson) match {
+                  case struct: StructType => struct
+                  case other => throw new RuntimeException(s"Expected StructType, got ${other.getClass.getSimpleName}")
+                }
+                
+                println(s"[DEBUG] Successfully parsed schema with ${sparkSchema.fields.length} fields")
                 return Some(sparkSchema)
               } catch {
-                case _: Exception => // Continue to next entry
+                case e: Exception => 
+                  println(s"[DEBUG] Failed to parse schema JSON: ${e.getMessage}")
+                  // Continue to next entry
               }
             }
           }
