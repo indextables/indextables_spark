@@ -22,6 +22,7 @@ import org.apache.spark.sql.types.{StructType, DataType, StringType, LongType, D
 import com.tantivy4spark.transaction.WriteResult
 import com.tantivy4spark.native.TantivyNative
 import com.tantivy4spark.config.TantivyConfig
+import com.tantivy4spark.storage.{FileProtocolUtils, StandardFileWriter}
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import java.security.MessageDigest
@@ -50,6 +51,12 @@ class TantivyIndexWriter(
   // Document buffer for batch processing
   private val documentBuffer = mutable.ListBuffer[Map[String, Any]]()
   private val batchSize = options.getOrElse("batch.size", "100").toInt
+  
+  // File writer for non-S3 storage
+  private val standardWriter = new StandardFileWriter(
+    new org.apache.hadoop.conf.Configuration(), // TODO: Get from context
+    options
+  )
   
   // Initialize on first write
   private def ensureInitialized(): Unit = {
@@ -191,10 +198,18 @@ class TantivyIndexWriter(
       }
     }
     
-    // Add metadata fields for S3 integration
+    // Add metadata fields
     document("_timestamp") = System.currentTimeMillis()
-    document("_bucket") = options.getOrElse("s3.bucket", "default-bucket")
-    document("_key") = currentSegmentPath
+    
+    if (FileProtocolUtils.shouldUseS3OptimizedIO(basePath, options)) {
+      // S3-specific metadata
+      document("_bucket") = options.getOrElse("s3.bucket", "default-bucket")
+      document("_key") = currentSegmentPath
+    } else {
+      // Standard file path
+      document("_path") = currentSegmentPath
+    }
+    
     document("_offset") = bytesWritten.get()
     document("_length") = 0L // Will be updated on segment finalization
     

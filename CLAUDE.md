@@ -42,8 +42,10 @@ The project includes comprehensive test coverage across all critical components:
 
 ### Key Components
 - `TantivyFileFormat` - Main Spark DataSource V1 implementation
-- `TantivyFileReader/Writer` - Handle read/write operations
+- `TantivyFileReader/Writer` - Handle read/write operations with protocol-aware storage
 - `S3OptimizedReader` - Implements aggressive predictive IO for S3
+- `StandardFileReader/Writer` - Standard Hadoop file operations for non-S3 protocols
+- `FileProtocolUtils` - Protocol detection and storage strategy selection
 - `TransactionLog` - Delta-style append-only transaction logging
 - `TantivySearchEngine` - Embedded search functionality via JNI
 - `TantivyIndexWriter` - Writes data in native Tantivy format
@@ -62,3 +64,30 @@ This project integrates with Tantivy via JNI (Java Native Interface):
 - Requires Rust toolchain for building JNI library
 - Tantivy Rust crates embedded via Cargo.toml
 - Cross-platform native library support (Linux, macOS, Windows)
+
+### Storage Strategy Configuration
+
+The system automatically detects the storage protocol and uses the appropriate I/O strategy:
+
+#### Protocol Detection
+- **S3 protocols** (s3://, s3a://, s3n://): Uses S3OptimizedReader with predictive I/O and caching
+- **Other protocols** (hdfs://, file://, local paths): Uses StandardFileReader with standard Hadoop operations
+
+#### Configuration Options
+- `spark.tantivy.storage.force.standard = true` - Forces use of standard Hadoop file operations even for S3 protocols
+- This option is useful for environments where S3-specific optimizations cause issues or when using S3-compatible storage that works better with standard Hadoop operations
+
+#### Usage Examples
+```scala
+// Use S3-optimized I/O (default behavior)
+df.write.format("tantivy").save("s3://bucket/path")
+
+// Force standard Hadoop operations for S3
+df.write.format("tantivy")
+  .option("spark.tantivy.storage.force.standard", "true")
+  .save("s3://bucket/path")
+
+// Standard operations (automatic detection)
+df.write.format("tantivy").save("hdfs://namenode/path")
+df.write.format("tantivy").save("file:///local/path")
+```

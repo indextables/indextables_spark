@@ -22,7 +22,7 @@ import org.apache.spark.sql.execution.datasources.PartitionedFile
 import org.apache.spark.sql.types.StructType
 import org.apache.hadoop.conf.Configuration
 import com.tantivy4spark.search.TantivySearchEngine
-import com.tantivy4spark.storage.S3OptimizedReader
+import com.tantivy4spark.storage.{S3OptimizedReader, StandardFileReader, FileProtocolUtils}
 import com.amazonaws.services.s3.AmazonS3
 
 class TantivyFileReader(
@@ -45,6 +45,7 @@ class TantivyFileReader(
     new TantivySearchEngine(options, Some(actualSchema))
   }
   private val s3Reader = new S3OptimizedReader(hadoopConf, options, s3Client)
+  private val standardReader = new StandardFileReader(hadoopConf, options)
   
   private def inferSchemaFromIndex(): StructType = {
     import com.tantivy4spark.config.TantivyConfig
@@ -77,9 +78,22 @@ class TantivyFileReader(
   def read(): Iterator[InternalRow] = {
     val query = buildQueryFromFilters(filters)
     val searchResults = searchEngine.search(query, partitionedFile.filePath.toString)
+    val filePath = partitionedFile.filePath.toString
     
-    searchResults.flatMap { result =>
-      s3Reader.readWithPredictiveIO(result.dataLocation, actualSchema)
+    if (FileProtocolUtils.shouldUseS3OptimizedIO(filePath, options)) {
+      searchResults.flatMap { result =>
+        s3Reader.readWithPredictiveIO(result.dataLocation, actualSchema)
+      }
+    } else {
+      searchResults.flatMap { result =>
+        import com.tantivy4spark.storage.StandardDataLocation
+        val standardLocation = StandardDataLocation(
+          path = result.dataLocation.bucket + "/" + result.dataLocation.key, // Adjust path format
+          offset = result.dataLocation.offset,
+          length = result.dataLocation.length
+        )
+        standardReader.readWithStandardIO(standardLocation, actualSchema)
+      }
     }
   }
   

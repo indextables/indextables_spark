@@ -23,6 +23,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.hadoop.mapreduce.TaskAttemptContext
 import com.tantivy4spark.transaction.TransactionLog
 import com.tantivy4spark.search.TantivyIndexWriter
+import com.tantivy4spark.storage.FileProtocolUtils
 
 class TantivyOutputWriter(
     outputPath: String,
@@ -35,6 +36,10 @@ class TantivyOutputWriter(
   
   private val transactionLog = new TransactionLog(outputPath, options)
   private val indexWriter = new TantivyIndexWriter(outputPath, dataSchema, options)
+  
+  // Log the storage strategy being used
+  private val usingS3Optimization = FileProtocolUtils.shouldUseS3OptimizedIO(outputPath, options)
+  println(s"[INFO] TantivyOutputWriter using ${if (usingS3Optimization) "S3-optimized" else "standard Hadoop"} storage for path: $outputPath")
   
   override def write(row: InternalRow): Unit = {
     val writeResult = indexWriter.writeRow(row)

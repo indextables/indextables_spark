@@ -453,7 +453,7 @@ pub fn get_index_schema(index_path: &str) -> Result<String, TantivyError> {
     let mut field_mappings = HashMap::new();
     let mut default_search_fields = Vec::new();
     
-    for (field, field_entry) in schema.fields() {
+    for (_field, field_entry) in schema.fields() {
         let field_name = field_entry.name().to_string();
         
         // Determine field type and options based on Tantivy field type
