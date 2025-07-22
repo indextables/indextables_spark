@@ -27,6 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.search.TantivySearchEngine
 import com.tantivy4spark.storage.{S3OptimizedReader, StandardFileReader, TantivyArchiveFormat}
+import com.tantivy4spark.util.StatisticsCalculator
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
@@ -168,11 +169,13 @@ class Tantivy4SparkDataWriter(
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
   private val searchEngine = new TantivySearchEngine(writeSchema)
+  private val statistics = new StatisticsCalculator.DatasetStatistics(writeSchema)
   private var recordCount = 0L
 
   override def write(record: InternalRow): Unit = {
     println(s"Adding document $recordCount to Tantivy index")
     searchEngine.addDocument(record)
+    statistics.updateRow(record)
     recordCount += 1
   }
 
@@ -199,13 +202,18 @@ class Tantivy4SparkDataWriter(
       outputStream.close()
     }
     
+    val minValues = statistics.getMinValues
+    val maxValues = statistics.getMaxValues
+    
     val addAction = AddAction(
       path = filePath.toString,
       partitionValues = Map.empty,
       size = archiveData.length.toLong,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
-      numRecords = Some(recordCount)
+      numRecords = Some(recordCount),
+      minValues = if (minValues.nonEmpty) Some(minValues) else None,
+      maxValues = if (maxValues.nonEmpty) Some(maxValues) else None
     )
     
     logger.info(s"Committed writer for partition $partitionId with $recordCount records")
