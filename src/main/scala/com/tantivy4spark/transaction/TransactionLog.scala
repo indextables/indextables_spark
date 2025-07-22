@@ -1,0 +1,168 @@
+package com.tantivy4spark.transaction
+
+import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.types.{DataType, StructType}
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import org.slf4j.LoggerFactory
+import scala.collection.mutable.ListBuffer
+import scala.util.{Try, Success, Failure}
+
+class TransactionLog(tablePath: Path, spark: SparkSession) {
+  
+  private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
+  private val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
+  private val transactionLogPath = new Path(tablePath, "_transaction_log")
+  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
+
+  def initialize(schema: StructType): Unit = {
+    if (!fs.exists(transactionLogPath)) {
+      fs.mkdirs(transactionLogPath)
+      
+      // Write initial metadata file
+      val metadataAction = MetadataAction(
+        id = java.util.UUID.randomUUID().toString,
+        name = None,
+        description = None,
+        format = FileFormat("tantivy4spark", Map.empty),
+        schemaString = schema.json,
+        partitionColumns = Seq.empty,
+        configuration = Map.empty,
+        createdTime = Some(System.currentTimeMillis())
+      )
+      
+      writeAction(0, metadataAction)
+    }
+  }
+
+  def addFile(addAction: AddAction): Long = {
+    val version = getLatestVersion() + 1
+    writeAction(version, addAction)
+    version
+  }
+
+  def listFiles(): Seq[AddAction] = {
+    val files = ListBuffer[AddAction]()
+    val versions = getVersions()
+    
+    for (version <- versions) {
+      val actions = readVersion(version)
+      actions.foreach {
+        case add: AddAction => files += add
+        case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+        case _ => // Ignore other actions for file listing
+      }
+    }
+    
+    files.toSeq
+  }
+
+  def getSchema(): Option[StructType] = {
+    Try {
+      val versions = getVersions()
+      if (versions.nonEmpty) {
+        val actions = readVersion(versions.head)
+        actions.collectFirst {
+          case metadata: MetadataAction => DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+        }
+      } else {
+        None
+      }
+    }.getOrElse(None)
+  }
+
+  def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
+    val version = getLatestVersion() + 1
+    val removeAction = RemoveAction(
+      path = path,
+      deletionTimestamp = Some(deletionTimestamp),
+      dataChange = true,
+      extendedFileMetadata = None,
+      partitionValues = None,
+      size = None
+    )
+    writeAction(version, removeAction)
+    version
+  }
+
+  private def writeAction(version: Long, action: Action): Unit = {
+    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    
+    // Wrap actions in the appropriate delta log format
+    val wrappedAction = action match {
+      case metadata: MetadataAction => Map("metaData" -> metadata)
+      case add: AddAction => Map("add" -> add)
+      case remove: RemoveAction => Map("remove" -> remove)
+    }
+    
+    val actionJson = mapper.writeValueAsString(wrappedAction)
+    
+    val output = fs.create(versionFile)
+    try {
+      output.writeBytes(actionJson + "\n")
+    } finally {
+      output.close()
+    }
+    
+    logger.info(s"Written action to version $version: ${action.getClass.getSimpleName}")
+  }
+
+  private def readVersion(version: Long): Seq[Action] = {
+    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    
+    if (!fs.exists(versionFile)) {
+      return Seq.empty
+    }
+
+    Try {
+      val input = fs.open(versionFile)
+      try {
+        val content = scala.io.Source.fromInputStream(input).getLines().mkString("\n")
+        val lines = content.split("\n").filter(_.nonEmpty)
+        
+        lines.map { line =>
+          val jsonNode = mapper.readTree(line)
+          
+          if (jsonNode.has("metaData")) {
+            val metadataNode = jsonNode.get("metaData")
+            mapper.readValue(metadataNode.toString, classOf[MetadataAction])
+          } else if (jsonNode.has("add")) {
+            val addNode = jsonNode.get("add")
+            mapper.readValue(addNode.toString, classOf[AddAction])
+          } else if (jsonNode.has("remove")) {
+            val removeNode = jsonNode.get("remove")
+            mapper.readValue(removeNode.toString, classOf[RemoveAction])
+          } else {
+            throw new IllegalArgumentException(s"Unknown action type in line: $line")
+          }
+        }.toSeq
+      } finally {
+        input.close()
+      }
+    } match {
+      case Success(actions) => actions
+      case Failure(ex) =>
+        logger.error(s"Failed to read version $version", ex)
+        Seq.empty
+    }
+  }
+
+  private def getVersions(): Seq[Long] = {
+    Try {
+      val status = fs.listStatus(transactionLogPath)
+      val result: Seq[Long] = status
+        .filter(_.isFile)
+        .map(_.getPath.getName)
+        .filter(_.endsWith(".json"))
+        .map(_.replace(".json", "").toLong)
+        .sorted.toSeq
+      result
+    }.getOrElse(Seq.empty[Long])
+  }
+
+  private def getLatestVersion(): Long = {
+    val versions = getVersions()
+    if (versions.nonEmpty) versions.max else -1L
+  }
+}
