@@ -7,11 +7,9 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest}
 import org.slf4j.LoggerFactory
+import com.tantivy4spark.util.ErrorUtil
 import java.io.{ByteArrayOutputStream, IOException}
-import java.net.URI
-import java.util.concurrent.{ConcurrentHashMap, Executors, Future, CompletableFuture}
-import scala.collection.mutable
-import scala.util.{Try, Success, Failure}
+import java.util.concurrent.{ConcurrentHashMap, Executors, CompletableFuture}
 
 class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy {
   
@@ -47,8 +45,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
       response.contentLength()
     } catch {
       case ex: Exception =>
-        logger.error(s"Failed to get file size for s3://$bucket/$key", ex)
-        throw new IOException(s"Failed to get file size: ${ex.getMessage}", ex)
+        ErrorUtil.logAndThrow(logger, s"Failed to get file size for s3://$bucket/$key", ex)
     }
   }
 
@@ -76,8 +73,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
         result.toByteArray
       } catch {
         case ex: Exception =>
-          logger.error(s"Failed to read file s3://$bucket/$key", ex)
-          throw new IOException(s"Failed to read file: ${ex.getMessage}", ex)
+          ErrorUtil.logAndThrow(logger, s"Failed to read file s3://$bucket/$key", ex)
       }
     }
   }
@@ -143,8 +139,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
       response.readAllBytes()
     } catch {
       case ex: Exception =>
-        logger.error(s"Failed to read range $rangeHeader from s3://$bucket/$key", ex)
-        throw new IOException(s"Failed to read S3 range: ${ex.getMessage}", ex)
+        ErrorUtil.logAndThrow(logger, s"Failed to read range $rangeHeader from s3://$bucket/$key", ex)
     }
   }
 

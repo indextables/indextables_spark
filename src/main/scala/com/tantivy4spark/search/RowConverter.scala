@@ -1,6 +1,7 @@
 package com.tantivy4spark.search
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.tantivy4spark.util.TypeConversionUtil
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.{ArrayData, ArrayBasedMapData}
 import org.apache.spark.sql.types._
@@ -65,14 +66,19 @@ object RowConverter {
     case _ => row.get(index, dataType)
   }
 
-  private def extractArrayElement(arrayData: ArrayData, index: Int, dataType: DataType): Any = dataType match {
-    case StringType => arrayData.getUTF8String(index).toString
-    case IntegerType => arrayData.getInt(index)
-    case LongType => arrayData.getLong(index)
-    case FloatType => arrayData.getFloat(index)
-    case DoubleType => arrayData.getDouble(index)
-    case BooleanType => arrayData.getBoolean(index)
-    case _ => arrayData.get(index, dataType)
+  private def extractArrayElement(arrayData: ArrayData, index: Int, dataType: DataType): Any = {
+    TypeConversionUtil.extractBasicValue(
+      dt => dt match {
+        case StringType => arrayData.getUTF8String(index).toString
+        case IntegerType => arrayData.getInt(index)
+        case LongType => arrayData.getLong(index)
+        case FloatType => arrayData.getFloat(index)
+        case DoubleType => arrayData.getDouble(index)
+        case BooleanType => arrayData.getBoolean(index)
+        case _ => arrayData.get(index, dt)
+      },
+      dataType
+    )
   }
 
   private def convertToInternalValue(value: Any, dataType: DataType): Any = (value, dataType) match {

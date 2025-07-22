@@ -3,8 +3,7 @@ package com.tantivy4spark.transaction
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{DataType, StructType}
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.tantivy4spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
@@ -14,7 +13,6 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
   private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
   private val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
-  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
 
   def initialize(schema: StructType): Unit = {
     if (!fs.exists(transactionLogPath)) {
@@ -96,7 +94,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
       case remove: RemoveAction => Map("remove" -> remove)
     }
     
-    val actionJson = mapper.writeValueAsString(wrappedAction)
+    val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
     
     val output = fs.create(versionFile)
     try {
@@ -122,17 +120,17 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
         val lines = content.split("\n").filter(_.nonEmpty)
         
         lines.map { line =>
-          val jsonNode = mapper.readTree(line)
+          val jsonNode = JsonUtil.mapper.readTree(line)
           
           if (jsonNode.has("metaData")) {
             val metadataNode = jsonNode.get("metaData")
-            mapper.readValue(metadataNode.toString, classOf[MetadataAction])
+            JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
           } else if (jsonNode.has("add")) {
             val addNode = jsonNode.get("add")
-            mapper.readValue(addNode.toString, classOf[AddAction])
+            JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
           } else if (jsonNode.has("remove")) {
             val removeNode = jsonNode.get("remove")
-            mapper.readValue(removeNode.toString, classOf[RemoveAction])
+            JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
           } else {
             throw new IllegalArgumentException(s"Unknown action type in line: $line")
           }

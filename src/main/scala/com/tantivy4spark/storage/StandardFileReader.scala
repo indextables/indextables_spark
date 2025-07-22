@@ -3,6 +3,7 @@ package com.tantivy4spark.storage
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{Path, FSDataInputStream}
 import org.slf4j.LoggerFactory
+import com.tantivy4spark.util.ErrorUtil
 import java.io.IOException
 
 class StandardFileReader(path: Path, conf: Configuration) extends StorageStrategy {
@@ -17,8 +18,7 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
       status.getLen
     } catch {
       case ex: Exception =>
-        logger.error(s"Failed to get file size for $path", ex)
-        throw new IOException(s"Failed to get file size: ${ex.getMessage}", ex)
+        ErrorUtil.logAndThrow(logger, s"Failed to get file size for $path", ex)
     }
   }
 
@@ -29,8 +29,7 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
         logger.debug(s"Opened input stream for $path")
       } catch {
         case ex: Exception =>
-          logger.error(s"Failed to open input stream for $path", ex)
-          throw new IOException(s"Failed to open file: ${ex.getMessage}", ex)
+          ErrorUtil.logAndThrow(logger, s"Failed to open input stream for $path", ex)
       }
     }
     inputStream
@@ -61,8 +60,7 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
       buffer
     } catch {
       case ex: Exception =>
-        logger.error(s"Failed to read file $path", ex)
-        throw new IOException(s"Failed to read file: ${ex.getMessage}", ex)
+        ErrorUtil.logAndThrow(logger, s"Failed to read file $path", ex)
     }
   }
 
@@ -94,8 +92,7 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
       }
     } catch {
       case ex: Exception =>
-        logger.error(s"Failed to read range [$offset, ${offset + length}) from $path", ex)
-        throw new IOException(s"Failed to read range: ${ex.getMessage}", ex)
+        ErrorUtil.logAndThrow(logger, s"Failed to read range [$offset, ${offset + length}) from $path", ex)
     }
   }
 
