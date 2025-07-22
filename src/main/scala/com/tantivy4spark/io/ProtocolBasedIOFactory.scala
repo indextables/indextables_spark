@@ -19,7 +19,6 @@ package com.tantivy4spark.io
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
-import com.tantivy4spark.storage.DataLocation
 
 object ProtocolBasedIOFactory {
   

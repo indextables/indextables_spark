@@ -152,6 +152,20 @@
                 <version>3.1.0</version>
                 <executions>
                     <execution>
+                        <id>cargo-clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>cargo</executable>
+                            <workingDirectory>${project.basedir}/src/main/rust</workingDirectory>
+                            <arguments>
+                                <argument>clean</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>cargo-build</id>
                         <phase>compile</phase>
                         <goals>
@@ -181,7 +195,7 @@
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>${project.build.outputDirectory}/native</outputDirectory>
+                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
                             <resources>
                                 <resource>
                                     <directory>${project.basedir}/src/main/rust/target/debug</directory>
