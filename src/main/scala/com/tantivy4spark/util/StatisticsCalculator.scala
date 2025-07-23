@@ -90,16 +90,66 @@ object StatisticsCalculator {
     }
     
     private def extractValue(row: InternalRow, index: Int, dataType: DataType): Any = {
-      dataType match {
-        case StringType => row.getUTF8String(index).toString
-        case IntegerType => row.getInt(index)
-        case LongType => row.getLong(index)
-        case FloatType => row.getFloat(index)
-        case DoubleType => row.getDouble(index)
-        case BooleanType => row.getBoolean(index)
-        case TimestampType => row.getLong(index)
-        case DateType => row.getInt(index)
-        case _ => row.get(index, dataType)
+      try {
+        dataType match {
+          case StringType => row.getUTF8String(index).toString
+          case IntegerType => 
+            try {
+              row.getInt(index)
+            } catch {
+              case _: ClassCastException => 
+                val value = row.get(index, dataType)
+                if (value.isInstanceOf[java.lang.Long]) {
+                  value.asInstanceOf[java.lang.Long].intValue()
+                } else {
+                  value
+                }
+            }
+          case LongType => 
+            try {
+              row.getLong(index)
+            } catch {
+              case _: ClassCastException => 
+                val value = row.get(index, dataType)
+                if (value.isInstanceOf[java.lang.Integer]) {
+                  value.asInstanceOf[java.lang.Integer].longValue()
+                } else {
+                  value
+                }
+            }
+          case FloatType => row.getFloat(index)
+          case DoubleType => row.getDouble(index)
+          case BooleanType => row.getBoolean(index)
+          case TimestampType => 
+            try {
+              row.getLong(index)
+            } catch {
+              case _: ClassCastException => 
+                val value = row.get(index, dataType)
+                if (value.isInstanceOf[java.lang.Integer]) {
+                  value.asInstanceOf[java.lang.Integer].longValue()
+                } else {
+                  value
+                }
+            }
+          case DateType => 
+            try {
+              row.getInt(index)
+            } catch {
+              case _: ClassCastException => 
+                val value = row.get(index, dataType)
+                if (value.isInstanceOf[java.lang.Long]) {
+                  value.asInstanceOf[java.lang.Long].intValue()
+                } else {
+                  value
+                }
+            }
+          case _ => row.get(index, dataType)
+        }
+      } catch {
+        case _: Exception =>
+          // Fallback to generic extraction if any casting fails
+          row.get(index, dataType)
       }
     }
   }
