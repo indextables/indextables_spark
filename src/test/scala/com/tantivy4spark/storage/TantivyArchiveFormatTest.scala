@@ -19,9 +19,7 @@
 package com.tantivy4spark.storage
 
 import com.tantivy4spark.TestBase
-import org.apache.hadoop.fs.Path
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
-import java.nio.file.{Files, Paths}
+import java.io.ByteArrayOutputStream
 import scala.util.Random
 
 class TantivyArchiveFormatTest extends TestBase {

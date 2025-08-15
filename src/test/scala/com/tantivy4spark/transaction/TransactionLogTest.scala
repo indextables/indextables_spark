@@ -20,7 +20,6 @@ package com.tantivy4spark.transaction
 
 import com.tantivy4spark.TestBase
 import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.types._
 
 class TransactionLogTest extends TestBase {
 

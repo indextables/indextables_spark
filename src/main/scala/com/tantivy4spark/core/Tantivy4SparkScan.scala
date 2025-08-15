@@ -24,7 +24,6 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
 // Removed unused imports
-import org.apache.hadoop.fs.Path
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkScan(

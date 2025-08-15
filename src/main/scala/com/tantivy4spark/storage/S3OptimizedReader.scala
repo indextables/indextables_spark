@@ -26,7 +26,7 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest}
 import org.slf4j.LoggerFactory
 import com.tantivy4spark.util.ErrorUtil
-import java.io.{ByteArrayOutputStream, IOException}
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.{ConcurrentHashMap, Executors, CompletableFuture}
 
 class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy {

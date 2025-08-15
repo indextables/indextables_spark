@@ -189,6 +189,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
       
       // Note: This test may not capture SLF4J logs, but demonstrates the approach
       println("✅ Logging test completed - data skipping statistics should be logged")
+      println(s"Captured output length: ${output.length} characters")
       
     } finally {
       System.setOut(originalOut)

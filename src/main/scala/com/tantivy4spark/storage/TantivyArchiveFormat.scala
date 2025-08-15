@@ -18,7 +18,7 @@
 
 package com.tantivy4spark.storage
 
-import java.io.{ByteArrayOutputStream, DataOutputStream, OutputStream}
+import java.io.{DataOutputStream, OutputStream}
 import java.nio.ByteBuffer
 import scala.collection.mutable
 import org.slf4j.LoggerFactory

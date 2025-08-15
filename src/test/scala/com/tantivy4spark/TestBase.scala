@@ -24,7 +24,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.Files
 import scala.util.Random
 
 trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
@@ -60,8 +60,8 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
   }
 
   protected def createTestDataFrame(): DataFrame = {
-    val sqlContext = spark.sqlContext
-    import sqlContext.implicits._
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
 
     val data = Seq(
       (1, "John Doe", 30, "Engineer", 75000.0, true),
@@ -75,16 +75,16 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
   }
 
   protected def createLargeTestDataFrame(numRows: Int = 10000): DataFrame = {
-    val sqlContext = spark.sqlContext
-    import sqlContext.implicits._
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
 
     val random = new Random(42) // Deterministic seed for tests
     val roles = Array("Engineer", "Data Scientist", "Manager", "Designer", "Developer")
-    val names = Array("John", "Jane", "Bob", "Alice", "Charlie", "Diana", "Eve", "Frank")
-    val lastNames = Array("Doe", "Smith", "Johnson", "Brown", "Wilson", "Davis", "Miller", "Moore")
+    val _names = Array("John", "Jane", "Bob", "Alice", "Charlie", "Diana", "Eve", "Frank")
+    val _lastNames = Array("Doe", "Smith", "Johnson", "Brown", "Wilson", "Davis", "Miller", "Moore")
 
-    val data = (1 until numRows + 1).map { i =>
-      val name = s"${names(random.nextInt(names.length))} ${lastNames(random.nextInt(lastNames.length))}"
+    val data = 1.until(numRows + 1).map { i =>
+      val name = s"${_names(random.nextInt(_names.length))} ${_lastNames(random.nextInt(_lastNames.length))}"
       val age = 20 + random.nextInt(40)
       val role = roles(random.nextInt(roles.length))
       val salary = 50000 + random.nextInt(100000)

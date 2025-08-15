@@ -26,7 +26,6 @@ class StorageStrategyTest extends TestBase {
 
   test("should create S3OptimizedReader for S3 paths") {
     val s3Path = new Path("s3://bucket/path/file.tnt4s")
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // This would normally create an S3OptimizedReader, but we'll test the factory logic
     val protocol = s3Path.toUri.getScheme

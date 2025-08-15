@@ -20,8 +20,7 @@ package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.search.TantivyNative
-import org.apache.spark.sql.functions._
-import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 
 class NativeLibraryTest extends TestBase {

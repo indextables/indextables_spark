@@ -173,7 +173,7 @@ class Tantivy4SparkDataWriter(
   private var recordCount = 0L
 
   override def write(record: InternalRow): Unit = {
-    println(s"Adding document $recordCount to Tantivy index")
+    //println(s"Adding document $recordCount to Tantivy index")
     searchEngine.addDocument(record)
     statistics.updateRow(record)
     recordCount += 1
