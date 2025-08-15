@@ -60,12 +60,11 @@ class SchemaConverterTest extends TestBase {
     activeField("type") shouldBe "i64" // Boolean stored as i64
   }
 
-  test("should handle complex data types") {
+  test("should handle supported complex data types") {
     val sparkSchema = StructType(Array(
       StructField("timestamp", TimestampType, nullable = true),
       StructField("date", DateType, nullable = true),
-      StructField("binary_data", BinaryType, nullable = true),
-      StructField("complex_field", ArrayType(StringType), nullable = true)
+      StructField("binary_data", BinaryType, nullable = true)
     ))
 
     val tantivySchemaJson = SchemaConverter.sparkToTantivySchema(sparkSchema)
@@ -81,9 +80,41 @@ class SchemaConverterTest extends TestBase {
     
     val binaryField = fields.find(_("name") == "binary_data").get
     binaryField("type") shouldBe "bytes"
+  }
+
+  test("should reject unsupported complex data types") {
+    val schemaWithArray = StructType(Array(
+      StructField("id", IntegerType, nullable = false),
+      StructField("tags", ArrayType(StringType), nullable = true)
+    ))
     
-    val complexField = fields.find(_("name") == "complex_field").get
-    complexField("type") shouldBe "text" // Fallback to text for complex types
+    // Should throw exception for array types
+    intercept[UnsupportedOperationException] {
+      SchemaConverter.sparkToTantivySchema(schemaWithArray)
+    }.getMessage should include("Array types are not supported by Tantivy4Spark")
+
+    val schemaWithMap = StructType(Array(
+      StructField("id", IntegerType, nullable = false),
+      StructField("metadata", MapType(StringType, StringType), nullable = true)
+    ))
+    
+    // Should throw exception for map types
+    intercept[UnsupportedOperationException] {
+      SchemaConverter.sparkToTantivySchema(schemaWithMap)
+    }.getMessage should include("Map types are not supported by Tantivy4Spark")
+
+    val schemaWithStruct = StructType(Array(
+      StructField("id", IntegerType, nullable = false),
+      StructField("details", StructType(Array(
+        StructField("name", StringType, nullable = true),
+        StructField("value", IntegerType, nullable = true)
+      )), nullable = true)
+    ))
+    
+    // Should throw exception for struct types
+    intercept[UnsupportedOperationException] {
+      SchemaConverter.sparkToTantivySchema(schemaWithStruct)
+    }.getMessage should include("Struct types are not supported by Tantivy4Spark")
   }
 
   test("should handle empty schema") {

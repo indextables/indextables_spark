@@ -213,8 +213,20 @@ class Tantivy4SparkRelation(
                       case org.apache.spark.sql.types.DoubleType => internalRow.getDouble(idx)
                       case org.apache.spark.sql.types.BooleanType => internalRow.getBoolean(idx)
                       case org.apache.spark.sql.types.StringType => internalRow.getUTF8String(idx).toString
-                      case _: org.apache.spark.sql.types.TimestampType => new java.sql.Timestamp(internalRow.getLong(idx))
-                      case _: org.apache.spark.sql.types.DateType => new java.sql.Date(internalRow.getLong(idx))
+                      case _: org.apache.spark.sql.types.TimestampType => 
+                        val longVal = try {
+                          internalRow.getLong(idx)
+                        } catch {
+                          case _: ClassCastException => internalRow.getInt(idx).toLong
+                        }
+                        new java.sql.Timestamp(longVal)
+                      case _: org.apache.spark.sql.types.DateType => 
+                        val longVal = try {
+                          internalRow.getLong(idx)
+                        } catch {
+                          case _: ClassCastException => internalRow.getInt(idx).toLong
+                        }
+                        new java.sql.Date(longVal)
                       case _ => internalRow.get(idx, field.dataType)
                     }
                   } else {

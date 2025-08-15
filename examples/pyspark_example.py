@@ -25,6 +25,7 @@ import os
 
 # Configuration
 TANTIVY4SPARK_JAR = "target/tantivy4spark-1.0.0-SNAPSHOT.jar"  # Adjust path as needed
+TANTIVY4SPARK_JAR = "target/tantivy4spark-1.0.0-SNAPSHOT-shaded.jar"
 
 def create_spark_session():
     """Create SparkSession with Tantivy4Spark configuration"""
@@ -242,7 +243,7 @@ def run_text_search_queries(spark):
     except Exception as e:
         print(f"❌ Error running text search queries: {e}")
 
-def run_advanced_queries(df):
+def run_advanced_queries(spark, df):
     """Run more advanced analytical queries"""
     
     print("\n📊 Running Advanced Analytics")
@@ -326,7 +327,7 @@ def demonstrate_tantivy_features():
                 # Run queries on the data read from Tantivy
                 run_basic_queries(read_df)
                 run_text_search_queries(spark)
-                run_advanced_queries(read_df)
+                run_advanced_queries(spark, read_df)
             else:
                 print("⚠️  Unable to read from Tantivy format, running queries on original DataFrame")
                 run_basic_queries(df)

@@ -23,6 +23,7 @@ import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.bloom.{BloomFilterManager, BloomFilterStorage, TextTokenizer}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -59,16 +60,90 @@ class Tantivy4SparkScan(
       return addActions
     }
 
-    val skippedCount = addActions.count { addAction =>
+    // Apply traditional min/max data skipping
+    val traditionalSkipped = addActions.filterNot { addAction =>
       filters.exists(filter => shouldSkipFile(addAction, filter))
     }
 
-    val remainingActions = addActions.filterNot { addAction =>
-      filters.exists(filter => shouldSkipFile(addAction, filter))
-    }
+    // Apply bloom filter-based text search skipping
+    val bloomFilterSkipped = applyBloomFilterSkipping(traditionalSkipped, filters)
 
-    logger.info(s"Data skipping: ${skippedCount} files skipped, ${remainingActions.length} files remaining")
-    remainingActions
+    val totalSkipped = addActions.length - bloomFilterSkipped.length
+    logger.info(s"Data skipping: ${addActions.length} files -> ${bloomFilterSkipped.length} files (skipped $totalSkipped)")
+
+    bloomFilterSkipped
+  }
+  
+  /**
+   * Apply bloom filter-based file skipping for text search acceleration
+   * This is where the Splunk-style optimization happens
+   */
+  private def applyBloomFilterSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
+    val bloomFilterManager = new BloomFilterManager()
+    val bloomFilterStorage = BloomFilterStorage.getInstance
+    val textTokenizer = new TextTokenizer()
+    
+    // Extract text search terms from filters
+    val textSearchTerms = extractTextSearchTerms(filters)
+    
+    if (textSearchTerms.isEmpty) {
+      logger.debug("No text search terms found in filters, skipping bloom filter optimization")
+      return addActions
+    }
+    
+    logger.info(s"Applying bloom filter skipping with search terms: ${textSearchTerms.mkString(", ")}")
+    
+    // Preload bloom filters for batch processing (S3 optimization)
+    val fileBloomFilters = addActions.flatMap { addAction =>
+      addAction.bloomFilters.map(addAction.path -> _)
+    }.toMap
+    
+    if (fileBloomFilters.nonEmpty) {
+      bloomFilterStorage.preloadBloomFilters(fileBloomFilters)
+    }
+    
+    // Filter files using bloom filters
+    val candidateFiles = addActions.filter { addAction =>
+      addAction.bloomFilters match {
+        case Some(encodedFilters) =>
+          try {
+            val bloomFilters = bloomFilterStorage.decodeBloomFilters(encodedFilters, addAction.path)
+            bloomFilterManager.mightContainAnyTerm(bloomFilters, textSearchTerms)
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to decode bloom filters for ${addAction.path}, including file conservatively", e)
+              true // Include file if bloom filter processing fails
+          }
+        case None =>
+          true // Include file if no bloom filters available
+      }
+    }
+    
+    val skippedByBloom = addActions.length - candidateFiles.length
+    logger.info(s"Bloom filter skipping: ${addActions.length} -> ${candidateFiles.length} files (skipped $skippedByBloom by bloom filters)")
+    
+    candidateFiles
+  }
+  
+  /**
+   * Extract text search terms from Spark filters
+   * Handles Contains, StringStartsWith, StringEndsWith, etc.
+   */
+  private def extractTextSearchTerms(filters: Array[Filter]): Set[String] = {
+    import org.apache.spark.sql.sources._
+    
+    val terms = scala.collection.mutable.Set[String]()
+    
+    filters.foreach {
+      case StringContains(_, value) => terms += value
+      case StringStartsWith(_, value) => terms += value
+      case StringEndsWith(_, value) => terms += value
+      case EqualTo(_, value: String) => terms += value
+      case _ => // Other filter types don't contribute to text search
+    }
+    
+    logger.debug(s"Extracted ${terms.size} text search terms from ${filters.length} filters")
+    terms.toSet
   }
 
   private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {

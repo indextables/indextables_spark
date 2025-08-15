@@ -44,7 +44,14 @@ object TypeConversionUtil {
     case BinaryType => "bytes"
     case TimestampType => "i64" // Store as epoch millis
     case DateType => "i64" // Store as days since epoch
-    case _ => "text" // Fallback to text for complex types
+    case ArrayType(_, _) => 
+      throw new UnsupportedOperationException(s"Array types are not supported by Tantivy4Spark: $dataType")
+    case MapType(_, _, _) => 
+      throw new UnsupportedOperationException(s"Map types are not supported by Tantivy4Spark: $dataType")
+    case StructType(_) => 
+      throw new UnsupportedOperationException(s"Struct types are not supported by Tantivy4Spark: $dataType")
+    case _ => 
+      throw new UnsupportedOperationException(s"Unsupported data type for Tantivy4Spark: $dataType")
   }
   
 }

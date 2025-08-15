@@ -48,7 +48,8 @@ case class AddAction(
   tags: Option[Map[String, String]] = None,
   @JsonProperty("minValues") minValues: Option[Map[String, String]] = None,
   @JsonProperty("maxValues") maxValues: Option[Map[String, String]] = None,
-  @JsonProperty("numRecords") numRecords: Option[Long] = None
+  @JsonProperty("numRecords") numRecords: Option[Long] = None,
+  @JsonProperty("bloomFilters") bloomFilters: Option[Map[String, String]] = None
 ) extends Action
 
 case class RemoveAction(

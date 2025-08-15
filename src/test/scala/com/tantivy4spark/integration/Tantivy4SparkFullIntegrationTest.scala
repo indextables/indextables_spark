@@ -582,11 +582,11 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     withTempPath { tempPath =>
       val originalData = createComprehensiveTestDataFrame()
       
-      // Simulate schema evolution by adding columns
+      // Simulate schema evolution by adding columns (avoiding array types which Tantivy doesn't support)
       val evolvedData = originalData
         .withColumn("new_field", lit("default_value"))
         .withColumn("rating", lit(4.5))
-        .withColumn("tags", split(lit("tag1,tag2,tag3"), ","))
+        .withColumn("tags_string", lit("tag1,tag2,tag3")) // Use string instead of array
       
       // Test write with evolved schema - should succeed
       evolvedData.write
