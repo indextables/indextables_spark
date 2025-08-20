@@ -51,6 +51,19 @@ object RowConverter {
     InternalRow.fromSeq(values)
   }
 
+  def internalRowToMap(row: InternalRow, schema: StructType): Map[String, Any] = {
+    val map = mutable.Map[String, Any]()
+    
+    schema.fields.zipWithIndex.foreach { case (field, index) =>
+      if (!row.isNullAt(index)) {
+        val value = extractValue(row, index, field.dataType)
+        map(field.name) = value
+      }
+    }
+    
+    map.toMap
+  }
+
   private def extractValue(row: InternalRow, index: Int, dataType: DataType): Any = dataType match {
     case StringType => row.getUTF8String(index).toString
     case IntegerType => row.getInt(index)

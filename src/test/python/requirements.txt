@@ -1,0 +1,19 @@
+# Python dependencies for Tantivy4Spark PySpark integration tests
+
+# Core PySpark dependency
+pyspark>=3.5.0,<4.0.0
+
+# Testing framework
+pytest>=7.0.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.0.0
+
+# Optional: For enhanced test reporting
+pytest-html>=3.1.0
+pytest-cov>=4.0.0
+
+# Optional: For parallel test execution
+pytest-parallel>=0.1.0
+
+# Optional: For test benchmarking
+pytest-benchmark>=4.0.0

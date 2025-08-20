@@ -35,11 +35,11 @@ The system implements a custom Spark DataSource V2 provider modeled after [Delta
 - **Bloom filter skipping**: Accelerates text searches using probabilistic data structures
 - **File format integration**: Similar to [Delta's ParquetFileFormat](https://github.com/delta-io/delta/blob/51150999ee12f120d370b26b8273b6c293f39a43/spark/src/main/scala/org/apache/spark/sql/delta/DeltaParquetFileFormat.scala)
 
-### Native Integration (JNI)
-- **Rust implementation**: `src/main/rust/` contains JNI bindings to Tantivy
-- **Build integration**: Native library built with Cargo and embedded in JAR
+### Java Integration (via tantivy4java)
+- **Pure Java bindings**: Uses tantivy4java library for Tantivy integration
+- **No native compilation**: Eliminates Rust/Cargo build dependencies
 - **Schema mapping**: Automatic conversion between Spark and Tantivy data types
-- **Cross-platform**: Supports Linux, macOS, and Windows
+- **Cross-platform**: Supports Linux, macOS, and Windows via tantivy4java native libraries
 
 ### Bloom Filter Architecture (Splunk-style Text Search Acceleration)
 
@@ -83,6 +83,7 @@ src/main/scala/com/tantivy4spark/
 │   └── ...
 ├── search/         # Tantivy search engine integration
 │   ├── TantivySearchEngine.scala          # Main search interface
+│   ├── TantivyJavaInterface.scala         # tantivy4java integration adapter
 │   ├── SchemaConverter.scala              # Spark ↔ Tantivy schema mapping
 │   └── RowConverter.scala                 # Row data conversion
 ├── storage/        # Storage abstraction layer
@@ -96,13 +97,6 @@ src/main/scala/com/tantivy4spark/
     ├── TransactionLog.scala               # Main transaction log interface
     └── Actions.scala                      # Action types (ADD, REMOVE, METADATA)
 
-src/main/rust/      # Native JNI implementation  
-├── Cargo.toml      # Rust dependencies (Tantivy crates)
-└── src/
-    ├── lib.rs                             # JNI exports and method bindings
-    ├── index_manager.rs                   # Tantivy index management
-    ├── schema_mapper.rs                   # Schema conversion utilities
-    └── error.rs                           # Error handling and conversions
 ```
 
 ## Build System
@@ -112,24 +106,22 @@ src/main/rust/      # Native JNI implementation
 - **Scala**: 2.12.17  
 - **Apache Spark**: 3.5.3
 - **Hadoop**: 3.3.4
-- **Rust toolchain**: For building JNI native library (Rust 2021 edition)
 - **Maven**: 3.6+ (primary build system)
 
 ### Dependencies
 - **AWS SDK**: 2.20.26+ for S3 optimized storage
 - **Jackson**: 2.15.2+ for JSON processing
-- **Tantivy**: 0.22+ (Rust crate for search engine)
-- **JNI**: 0.21+ (Rust crate for Java integration)
+- **tantivy4java**: 0.24.0+ (Java bindings for Tantivy search engine)
 
 ### Build Commands
 ```bash
-# Full build (includes Rust native library)
+# Full build (using tantivy4java dependency)
 mvn clean compile
 
 # Run tests
 mvn test
 
-# Package with native library
+# Package JAR
 mvn package
 ```
 
@@ -284,11 +276,11 @@ The project is registered as a Spark data source via:
 - `META-INF/services/org.apache.spark.sql.sources.DataSourceRegister`
 - `META-INF/services/org.apache.spark.sql.connector.catalog.TableProvider`
 
-### Native Library Management
-- **Loading Strategy**: TantivyNative.ensureLibraryLoaded() with resource extraction
-- **Platform Detection**: Automatic detection of OS and architecture
-- **Resource Bundling**: Native libraries packaged in JAR under `/` root path
-- **Exception Handling**: UnsatisfiedLinkError gracefully handled in tests
+### tantivy4java Integration
+- **Library Loading**: Automatic native library loading via tantivy4java
+- **Platform Detection**: Handled by tantivy4java for OS and architecture
+- **Resource Management**: tantivy4java manages native library lifecycle
+- **Exception Handling**: Integration errors gracefully handled
 
 ### Performance Optimizations
 - **Predictive I/O**: S3OptimizedReader prefetches sequential chunks
@@ -304,23 +296,23 @@ The project is registered as a Spark data source via:
 - **Transaction isolation**: ACID properties through transaction log
 - **Type safety**: Explicit rejection of unsupported data types with clear error messages
 - **Error handling**: Graceful degradation when native library unavailable
-- **JNI Integration**: Native method bindings with proper Scala object name encoding (`00024`)
+- **tantivy4java Integration**: Pure Java bindings via tantivy4java library
 - **Search Engine**: Uses Tantivy's AllQuery for comprehensive document retrieval
 - **Type Conversion**: Robust handling of Spark ↔ Tantivy type mappings (Integer/Long/Boolean)
 - **Archive Format**: Custom `.tnt4s` format with footer-based component indexing
 - **Shaded Dependencies**: Google Guava repackaged to avoid conflicts (`tantivy4spark.com.google.common`)
 
 ### Build Integration
-- **Cargo Integration**: Maven executes Cargo for Rust compilation via exec plugin
-- **Native Library**: `libtantivy4spark.dylib` (macOS) embedded in JAR resources
+- **Maven Dependencies**: Uses tantivy4java as a standard Maven dependency
+- **Native Library**: Managed by tantivy4java, no custom native compilation needed
 - **Service Registration**: Auto-discovery via META-INF service provider files
-- **Cross-Platform**: Native library built per platform during CI/CD
+- **Cross-Platform**: tantivy4java handles platform-specific native libraries
 
 ### Runtime Configuration
-- **Native Library Loading**: Automatic extraction and loading from JAR resources
-- **Memory Management**: Proper cleanup of native handles and resources
-- **Logging Integration**: SLF4J logging for both Scala and native components
-- **Error Propagation**: Structured error handling from Rust through JNI to Spark
+- **Library Integration**: tantivy4java handles native library loading automatically
+- **Memory Management**: tantivy4java manages native handles and resources
+- **Logging Integration**: SLF4J logging for Scala components and tantivy4java integration
+- **Error Propagation**: Structured error handling from tantivy4java to Spark
 
 ---
 

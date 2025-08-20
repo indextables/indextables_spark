@@ -53,5 +53,15 @@ object TypeConversionUtil {
     case _ => 
       throw new UnsupportedOperationException(s"Unsupported data type for Tantivy4Spark: $dataType")
   }
+
+  def tantivyTypeToSparkType(tantivyType: String): DataType = tantivyType match {
+    case "text" => StringType
+    case "i64" => LongType // Default to Long, can be specialized as needed
+    case "f64" => DoubleType
+    case "boolean" => BooleanType
+    case "bytes" => BinaryType
+    case _ => 
+      throw new UnsupportedOperationException(s"Unsupported Tantivy type: $tantivyType")
+  }
   
 }

@@ -40,4 +40,23 @@ object SchemaConverter {
 
     JsonUtil.mapper.writeValueAsString(schemaMap)
   }
+
+  def tantivyToSparkSchema(schemaJson: String): StructType = {
+    val schemaMap = JsonUtil.mapper.readValue(schemaJson, classOf[Map[String, Any]])
+    
+    val fields = schemaMap.get("fields") match {
+      case Some(fieldsList: List[Map[String, Any]]@unchecked) =>
+        fieldsList.map { fieldMap =>
+          val name = fieldMap("name").asInstanceOf[String]
+          val tantivyType = fieldMap("type").asInstanceOf[String]
+          val sparkType = TypeConversionUtil.tantivyTypeToSparkType(tantivyType)
+          val nullable = true // Default to nullable for simplicity
+          StructField(name, sparkType, nullable)
+        }.toArray
+      case _ =>
+        throw new RuntimeException("Invalid schema JSON: missing or invalid fields array")
+    }
+    
+    StructType(fields)
+  }
 }
