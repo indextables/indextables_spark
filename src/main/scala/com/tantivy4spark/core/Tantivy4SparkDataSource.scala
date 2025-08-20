@@ -34,6 +34,162 @@ import org.apache.spark.sql.SparkSession
 import java.util
 import scala.collection.JavaConverters._
 
+object Tantivy4SparkRelation {
+  def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {
+    val bais = new java.io.ByteArrayInputStream(zipData)
+    val zis = new java.util.zip.ZipInputStream(bais)
+    
+    try {
+      var entry: java.util.zip.ZipEntry = zis.getNextEntry
+      while (entry != null) {
+        if (!entry.isDirectory) {
+          val filePath = targetDir.resolve(entry.getName)
+          val fos = new java.io.FileOutputStream(filePath.toFile)
+          
+          try {
+            val buffer = new Array[Byte](1024)
+            var len = zis.read(buffer)
+            while (len != -1) {
+              fos.write(buffer, 0, len)
+              len = zis.read(buffer)
+            }
+          } finally {
+            fos.close()
+          }
+        }
+        
+        zis.closeEntry()
+        entry = zis.getNextEntry
+      }
+    } finally {
+      zis.close()
+      bais.close()
+    }
+  }
+  
+  // Standalone function for Spark serialization - no class dependencies
+  def processFile(
+      filePath: String, 
+      serializableSchema: StructType, 
+      hadoopConfProps: Map[String, String]
+  ): Iterator[org.apache.spark.sql.Row] = {
+    // Recreate Hadoop configuration in executor context
+    val localHadoopConf = new org.apache.hadoop.conf.Configuration()
+    hadoopConfProps.foreach { case (key, value) =>
+      localHadoopConf.set(key, value)
+    }
+    
+    // Create storage reader for the Tantivy archive file
+    val reader = new com.tantivy4spark.storage.StandardFileReader(new Path(filePath), localHadoopConf)
+    val rows = scala.collection.mutable.ListBuffer[org.apache.spark.sql.Row]()
+    
+    try {
+      // Read the Tantivy archive and extract directly to temp directory
+      println(s"Reading Tantivy archive: $filePath")
+      val indexComponents = com.tantivy4spark.storage.TantivyArchiveFormat.readAllComponents(reader)
+      println(s"Read ${indexComponents.size} components: ${indexComponents.keys.mkString(", ")}")
+      
+      // Extract ZIP directly to temp directory and open index from path (more efficient)
+      println(s"Extracting archive and opening index directly from directory")
+      val tempDir = java.nio.file.Files.createTempDirectory("tantivy4spark_read_")
+      val extractedIndexPath = try {
+        indexComponents.get("tantivy_index.zip") match {
+          case Some(zipData) =>
+            // Extract ZIP to temp directory
+            Tantivy4SparkRelation.extractZipToDirectory(zipData, tempDir)
+            Some(tempDir)
+          case None =>
+            println(s"WARNING: No tantivy_index.zip found in archive")
+            None
+        }
+      } catch {
+        case ex: Exception =>
+          println(s"WARNING: Failed to extract ZIP archive: ${ex.getMessage}")
+          None
+      }
+      
+      // Create search engine directly from extracted directory (no components needed)
+      val searchEngine = extractedIndexPath match {
+        case Some(indexPath) =>
+          println(s"Creating search engine directly from extracted path: ${indexPath.toAbsolutePath}")
+          val directInterface = new com.tantivy4spark.search.TantivyDirectInterface(serializableSchema, Some(indexPath))
+          com.tantivy4spark.search.TantivySearchEngine.fromDirectInterface(directInterface)
+        case None =>
+          println(s"Fallback: Creating empty search engine due to extraction failure")
+          new com.tantivy4spark.search.TantivySearchEngine(serializableSchema)
+      }
+      println(s"Search engine created successfully")
+      
+      // For now, use a match-all search to get all documents
+      // TODO: Implement proper filter pushdown for specific queries
+      println(s"Starting searchAll with limit 10000...")
+      val results = searchEngine.searchAll(limit = 10000)
+      println(s"Search returned ${results.length} results")
+      
+      if (results.length == 0) {
+        println(s"WARNING: Search returned 0 results from archive with ${indexComponents.size} components")
+        println(s"Components: ${indexComponents.keys.mkString(", ")}")
+        println(s"Schema fields: ${serializableSchema.fieldNames.mkString(", ")}")
+      }
+      
+      // Convert search results to Spark Rows with proper type conversion
+      results.foreach { internalRow =>
+        try {
+          val row = org.apache.spark.sql.catalyst.CatalystTypeConverters.convertToScala(internalRow, serializableSchema).asInstanceOf[org.apache.spark.sql.Row]
+          rows += row
+        } catch {
+          case ex: Exception =>
+            // If catalyst conversion fails, manually convert the row
+            println(s"Catalyst conversion failed, using manual conversion: ${ex.getMessage}")
+            val values = serializableSchema.fields.zipWithIndex.map { case (field, idx) =>
+              val rawValue = if (idx < internalRow.numFields && !internalRow.isNullAt(idx)) {
+                field.dataType match {
+                  case org.apache.spark.sql.types.LongType => internalRow.getLong(idx)
+                  case org.apache.spark.sql.types.IntegerType => internalRow.getInt(idx)
+                  case org.apache.spark.sql.types.DoubleType => internalRow.getDouble(idx)
+                  case org.apache.spark.sql.types.BooleanType => internalRow.getBoolean(idx)
+                  case org.apache.spark.sql.types.StringType => internalRow.getUTF8String(idx).toString
+                  case _: org.apache.spark.sql.types.TimestampType => 
+                    val longVal = try {
+                      internalRow.getLong(idx)
+                    } catch {
+                      case _: ClassCastException => internalRow.getInt(idx).toLong
+                    }
+                    new java.sql.Timestamp(longVal)
+                  case _: org.apache.spark.sql.types.DateType => 
+                    val longVal = try {
+                      internalRow.getLong(idx)
+                    } catch {
+                      case _: ClassCastException => internalRow.getInt(idx).toLong
+                    }
+                    new java.sql.Date(longVal)
+                  case _ => internalRow.get(idx, field.dataType)
+                }
+              } else {
+                null
+              }
+              rawValue
+            }
+            rows += org.apache.spark.sql.Row(values: _*)
+        }
+      }
+      
+      searchEngine.close()
+      println(s"Converted ${rows.length} rows from search")
+    } catch {
+      case ex: Exception =>
+        // If we can't read the Tantivy archive, log and return empty
+        System.err.println(s"Failed to read Tantivy archive $filePath: ${ex.getMessage}")
+        ex.printStackTrace()
+        // Return empty iterator on error
+    } finally {
+      reader.close()
+    }
+    
+    rows.toIterator
+  }
+}
+
 class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider with CreatableRelationProvider {
   override def shortName(): String = "tantivy4spark"
 
@@ -169,88 +325,9 @@ class Tantivy4SparkRelation(
         "fs.file.impl" -> spark.sparkContext.hadoopConfiguration.get("fs.file.impl", "")
       ).filter(_._2.nonEmpty)
       
-      // Create RDD from file paths
+      // Create RDD from file paths using standalone object method for proper serialization
       spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
-        // Recreate Hadoop configuration in executor context
-        val localHadoopConf = new org.apache.hadoop.conf.Configuration()
-        hadoopConfProps.foreach { case (key, value) =>
-          localHadoopConf.set(key, value)
-        }
-        
-        // Create storage reader for the Tantivy archive file
-        val reader = new com.tantivy4spark.storage.StandardFileReader(new Path(filePath), localHadoopConf)
-        val rows = scala.collection.mutable.ListBuffer[org.apache.spark.sql.Row]()
-        
-        try {
-          // Read the Tantivy archive and extract index components
-          println(s"Reading Tantivy archive: $filePath")
-          val indexComponents = com.tantivy4spark.storage.TantivyArchiveFormat.readAllComponents(reader)
-          println(s"Read ${indexComponents.size} components: ${indexComponents.keys.mkString(", ")}")
-          
-          // Create Tantivy search engine from the components
-          val searchEngine = com.tantivy4spark.search.TantivySearchEngine.fromIndexComponents(serializableSchema, indexComponents)
-          
-          // For now, use a match-all search to get all documents
-          // TODO: Implement proper filter pushdown for specific queries
-          println(s"Using search engine with schema: ${serializableSchema.fieldNames.mkString(", ")}")
-          val results = searchEngine.searchAll(limit = 10000)
-          println(s"Search returned ${results.length} results")
-          
-          // Convert search results to Spark Rows with proper type conversion
-          results.foreach { internalRow =>
-            try {
-              val row = org.apache.spark.sql.catalyst.CatalystTypeConverters.convertToScala(internalRow, serializableSchema).asInstanceOf[org.apache.spark.sql.Row]
-              rows += row
-            } catch {
-              case ex: Exception =>
-                // If catalyst conversion fails, manually convert the row
-                println(s"Catalyst conversion failed, using manual conversion: ${ex.getMessage}")
-                val values = serializableSchema.fields.zipWithIndex.map { case (field, idx) =>
-                  val rawValue = if (idx < internalRow.numFields && !internalRow.isNullAt(idx)) {
-                    field.dataType match {
-                      case org.apache.spark.sql.types.LongType => internalRow.getLong(idx)
-                      case org.apache.spark.sql.types.IntegerType => internalRow.getInt(idx)
-                      case org.apache.spark.sql.types.DoubleType => internalRow.getDouble(idx)
-                      case org.apache.spark.sql.types.BooleanType => internalRow.getBoolean(idx)
-                      case org.apache.spark.sql.types.StringType => internalRow.getUTF8String(idx).toString
-                      case _: org.apache.spark.sql.types.TimestampType => 
-                        val longVal = try {
-                          internalRow.getLong(idx)
-                        } catch {
-                          case _: ClassCastException => internalRow.getInt(idx).toLong
-                        }
-                        new java.sql.Timestamp(longVal)
-                      case _: org.apache.spark.sql.types.DateType => 
-                        val longVal = try {
-                          internalRow.getLong(idx)
-                        } catch {
-                          case _: ClassCastException => internalRow.getInt(idx).toLong
-                        }
-                        new java.sql.Date(longVal)
-                      case _ => internalRow.get(idx, field.dataType)
-                    }
-                  } else {
-                    null
-                  }
-                  rawValue
-                }
-                rows += org.apache.spark.sql.Row(values: _*)
-            }
-          }
-          
-          searchEngine.close()
-          println(s"Converted ${rows.length} rows from search")
-        } catch {
-          case ex: Exception =>
-            // If we can't read the Tantivy archive, log and return empty
-            System.err.println(s"Failed to read Tantivy archive $filePath: ${ex.getMessage}")
-            ex.printStackTrace()
-            // Return empty iterator on error
-          } finally {
-            reader.close()
-          }
-        
-        rows.toIterator
+        Tantivy4SparkRelation.processFile(filePath, serializableSchema, hadoopConfProps)
       }
     }
   }

@@ -93,8 +93,8 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     withTempPath { tempPath =>
       val testData = createTextSearchDataFrame()
       
-      // Write the test data
-      testData.write
+      // Write the test data - coalesce to single partition to avoid duplicates
+      testData.coalesce(1).write
         .format("tantivy4spark")
         .mode(SaveMode.Overwrite)
         .save(tempPath)

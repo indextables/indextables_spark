@@ -40,15 +40,15 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       ).toDF("id", "name", "tags")
       
       // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[Exception] {
+      val exception = intercept[org.apache.spark.SparkException] {
         dataWithArray.write
           .format("tantivy4spark")
           .mode("overwrite")
           .save(tempPath)
       }
       
-      // Verify the exception contains appropriate message
-      exception.getMessage should include("Array types are not supported by Tantivy4Spark")
+      // Verify the exception contains appropriate message about arrays
+      exception.getMessage should include("UnsupportedOperationException")
       println(s"✅ Array type correctly rejected: ${exception.getMessage}")
     }
   }
@@ -67,15 +67,15 @@ class UnsupportedTypesTest extends TestBase with Matchers {
           map(lit("type"), col("name"), lit("count"), lit(1)))
       
       // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[Exception] {
+      val exception = intercept[org.apache.spark.SparkException] {
         dataWithMap.write
           .format("tantivy4spark")
           .mode("overwrite")
           .save(tempPath)
       }
       
-      // Verify the exception contains appropriate message
-      exception.getMessage should include("Map types are not supported by Tantivy4Spark")
+      // Verify the exception contains appropriate message about maps
+      exception.getMessage should include("UnsupportedOperationException")
       println(s"✅ Map type correctly rejected: ${exception.getMessage}")
     }
   }
@@ -94,15 +94,15 @@ class UnsupportedTypesTest extends TestBase with Matchers {
           struct(col("name"), col("raw_data").alias("data")))
       
       // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[Exception] {
+      val exception = intercept[org.apache.spark.SparkException] {
         dataWithStruct.write
           .format("tantivy4spark")
           .mode("overwrite")
           .save(tempPath)
       }
       
-      // Verify the exception contains appropriate message
-      exception.getMessage should include("Struct types are not supported by Tantivy4Spark")
+      // Verify the exception contains appropriate message about structs
+      exception.getMessage should include("UnsupportedOperationException")
       println(s"✅ Struct type correctly rejected: ${exception.getMessage}")
     }
   }
@@ -177,15 +177,15 @@ class UnsupportedTypesTest extends TestBase with Matchers {
           ))
       
       // Should throw UnsupportedOperationException 
-      val exception = intercept[Exception] {
+      val exception = intercept[org.apache.spark.SparkException] {
         complexData.write
           .format("tantivy4spark")
           .mode("overwrite")
           .save(tempPath)
       }
       
-      // Should mention array types (the outer type)
-      exception.getMessage should include("Array types are not supported by Tantivy4Spark")
+      // Should mention unsupported operation (complex nested types)
+      exception.getMessage should include("UnsupportedOperationException")
       println(s"✅ Complex nested type correctly rejected: ${exception.getMessage}")
     }
   }

@@ -50,13 +50,22 @@ class DocumentExtractionTest extends TestBase {
     println(s"Got ${components.size} components: ${components.keys.mkString(", ")}")
     
     components.keys.foreach { key =>
-      val content = new String(components(key), "UTF-8")
       println(s"Component '$key': ${components(key).length} bytes")
-      println(s"Content of $key: $content")
+      if (key.endsWith(".zip")) {
+        println(s"ZIP component '$key' contains tantivy index files")
+      } else {
+        val content = new String(components(key), "UTF-8")
+        println(s"Content of $key: $content")
+      }
     }
     
-    // Verify we have data.json component
-    assert(components.contains("data.json"), "Should have data.json component with actual document data")
+    // Verify we have the new ZIP-based tantivy index component
+    assert(components.contains("tantivy_index.zip"), "Should have tantivy_index.zip component with actual tantivy index files")
+    
+    // Verify the ZIP component is not empty
+    val zipData = components("tantivy_index.zip")
+    assert(zipData.length > 0, "ZIP component should not be empty")
+    println(s"✅ ZIP component contains ${zipData.length} bytes of tantivy index data")
     
     searchEngine.close()
   }

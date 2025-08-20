@@ -18,11 +18,12 @@
 package com.tantivy4spark.search
 
 import com.tantivy4java._
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import org.slf4j.LoggerFactory
+import java.nio.file.{Files, Paths, Path}
+import java.io.{File, FileInputStream, FileOutputStream, ByteArrayOutputStream}
+import java.util.zip.{ZipInputStream, ZipOutputStream, ZipEntry}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
-import org.slf4j.LoggerFactory
 import scala.util.{Try, Success, Failure}
 import scala.util.Using
 import scala.collection.mutable
@@ -37,6 +38,9 @@ object TantivyDirectInterface {
   @volatile private var initialized = false
   private val logger = LoggerFactory.getLogger(TantivyDirectInterface.getClass)
   
+  // Global lock to prevent concurrent schema creation and field ID conflicts
+  private val schemaCreationLock = new Object()
+  
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       initLock.synchronized {
@@ -48,94 +52,220 @@ object TantivyDirectInterface {
     }
   }
   
-  def fromIndexComponents(schema: StructType, components: Map[String, Array[Byte]]): TantivyDirectInterface = {
-    // For tantivy4java, we can't truly restore from components, so create a new instance
-    logger.info(s"Creating new TantivyDirectInterface from schema (components not restorable with tantivy4java)")
-    new TantivyDirectInterface(schema)
-  }
-}
-
-class TantivyDirectInterface(val schema: StructType) extends AutoCloseable {
-  private val logger = LoggerFactory.getLogger(classOf[TantivyDirectInterface])
-  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
-  
-  // Initialize tantivy4java library only once
-  TantivyDirectInterface.ensureInitialized()
-  
-  // Create schema directly
-  private val tantivySchema: Schema = createTantivySchema(schema)
-  
-  // Create in-memory index (each executor has its own)
-  private val index: Index = new Index(tantivySchema, "", true) // In-memory index
-  
-  // Writer is created lazily and managed per instance
-  private var indexWriter: Option[IndexWriter] = None
-  
-  private def createTantivySchema(sparkSchema: StructType): Schema = {
-    // Follow tantivy4java pattern: use try-with-resources and close SchemaBuilder immediately
-    Using(new SchemaBuilder()) { schemaBuilder =>
-      val addedFields = mutable.Set[String]()
+  // Thread-safe schema creation to prevent "Field already exists in schema id" race conditions
+  private def createSchemaThreadSafe(sparkSchema: StructType): (com.tantivy4java.Schema, SchemaBuilder) = {
+    schemaCreationLock.synchronized {
+      logger.debug(s"Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
+      
+      val builder = new SchemaBuilder()
       
       sparkSchema.fields.foreach { field =>
         val fieldName = field.name
         val fieldType = field.dataType
         
-        if (!addedFields.contains(fieldName)) {
-          addedFields.add(fieldName)
-          logger.info(s"Adding field: $fieldName of type: $fieldType")
-          
-          fieldType match {
-            case org.apache.spark.sql.types.StringType =>
-              schemaBuilder.addTextField(fieldName, true, false, "default", "position")
-            case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
-              schemaBuilder.addIntegerField(fieldName, true, true, true)
-            case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
-              schemaBuilder.addFloatField(fieldName, true, true, true)
-            case org.apache.spark.sql.types.BooleanType =>
-              schemaBuilder.addBooleanField(fieldName, true, true, false)
-            case org.apache.spark.sql.types.BinaryType =>
-              schemaBuilder.addBytesField(fieldName, true, true, false, "position")
-            case org.apache.spark.sql.types.TimestampType =>
-              schemaBuilder.addIntegerField(fieldName, true, true, true) // Store as epoch millis
-            case org.apache.spark.sql.types.DateType =>
-              schemaBuilder.addIntegerField(fieldName, true, true, true) // Store as days since epoch
-            case _ =>
-              logger.warn(s"Unsupported field type for field $fieldName: $fieldType, treating as text")
-              schemaBuilder.addTextField(fieldName, true, false, "default", "position")
-          }
-        } else {
-          logger.warn(s"Skipping duplicate field: $fieldName")
+        logger.debug(s"Adding field: $fieldName of type: $fieldType")
+        
+        fieldType match {
+          case org.apache.spark.sql.types.StringType =>
+            builder.addTextField(fieldName, true, false, "default", "position")
+          case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
+            builder.addIntegerField(fieldName, true, true, true)
+          case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
+            builder.addFloatField(fieldName, true, true, true)
+          case org.apache.spark.sql.types.BooleanType =>
+            builder.addBooleanField(fieldName, true, true, false)
+          case org.apache.spark.sql.types.BinaryType =>
+            builder.addBytesField(fieldName, true, true, false, "position")
+          case org.apache.spark.sql.types.TimestampType =>
+            builder.addIntegerField(fieldName, true, true, true) // Store as epoch millis
+          case org.apache.spark.sql.types.DateType =>
+            builder.addIntegerField(fieldName, true, true, true) // Store as days since epoch
+          case _ =>
+            throw new UnsupportedOperationException(s"Unsupported field type for field $fieldName: $fieldType. Tantivy4Spark does not support complex types like arrays, maps, or structs.")
         }
       }
       
-      schemaBuilder.build()
-    }.get
+      val tantivySchema = builder.build()
+      logger.debug(s"Successfully built schema with ${sparkSchema.fields.length} fields")
+      
+      (tantivySchema, builder)
+    }
   }
   
+  def fromIndexComponents(schema: StructType, components: Map[String, Array[Byte]]): TantivyDirectInterface = {
+    logger.info(s"Creating TantivyDirectInterface from ${components.size} archive components")
+    
+    // Look for the ZIP archive
+    components.get("tantivy_index.zip") match {
+      case Some(zipData) =>
+        try {
+          // Extract ZIP to temporary directory
+          val tempDir = Files.createTempDirectory("tantivy4spark_restore_")
+          extractZipArchive(zipData, tempDir)
+          
+          // Create instance that opens the extracted index
+          new TantivyDirectInterface(schema, Some(tempDir))
+          
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to restore from ZIP archive", ex)
+            // Fallback to new instance
+            new TantivyDirectInterface(schema)
+        }
+      
+      case None =>
+        logger.warn("No tantivy_index.zip found in components, creating new instance")
+        new TantivyDirectInterface(schema)
+    }
+  }
+  
+  private def extractZipArchive(zipData: Array[Byte], targetDir: Path): Unit = {
+    val bais = new java.io.ByteArrayInputStream(zipData)
+    val zis = new ZipInputStream(bais)
+    
+    try {
+      var entry: ZipEntry = zis.getNextEntry
+      while (entry != null) {
+        if (!entry.isDirectory) {
+          val filePath = targetDir.resolve(entry.getName)
+          val fos = new FileOutputStream(filePath.toFile)
+          
+          try {
+            val buffer = new Array[Byte](1024)
+            var len = zis.read(buffer)
+            while (len != -1) {
+              fos.write(buffer, 0, len)
+              len = zis.read(buffer)
+            }
+            logger.debug(s"Extracted from ZIP: ${entry.getName}")
+          } finally {
+            fos.close()
+          }
+        }
+        
+        zis.closeEntry()
+        entry = zis.getNextEntry
+      }
+      logger.info(s"Successfully extracted ZIP archive to: ${targetDir.toAbsolutePath}")
+      
+    } finally {
+      zis.close()
+      bais.close()
+    }
+  }
+}
+
+class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[Path] = None) extends AutoCloseable {
+  private val logger = LoggerFactory.getLogger(classOf[TantivyDirectInterface])
+  
+  // Initialize tantivy4java library only once
+  TantivyDirectInterface.ensureInitialized()
+  
+  // Keep schemaBuilder alive for the lifetime of this interface
+  private var schemaBuilder: Option[SchemaBuilder] = None
+  
+  // Create appropriate index and schema based on whether this is a restored index or new one
+  private val (index, tempIndexDir, needsCleanup, tantivySchema) = restoredIndexPath match {
+    case Some(existingPath) =>
+      // Open existing index from restored path following tantivy4java pattern
+      val indexPath = existingPath.toAbsolutePath.toString
+      logger.info(s"Opening existing tantivy index from: $indexPath")
+      
+      // Check if index exists first (following tantivy4java pattern)
+      if (!Index.exists(indexPath)) {
+        logger.error(s"Index does not exist at path: $indexPath")
+        throw new IllegalStateException(s"Index does not exist at path: $indexPath")
+      }
+      
+      val idx = Index.open(indexPath)
+      // CRITICAL: Use the schema that's already stored in the index files
+      // Do NOT create a new schema - this could cause field mismatches
+      val tantivySchema = idx.getSchema()
+      
+      // CRITICAL: Reload the index after opening from extracted files
+      // This ensures the index sees all committed documents
+      idx.reload()
+      logger.info(s"Successfully opened existing index, using stored schema, and reloaded")
+      
+      // Check documents are visible after reload
+      Using.resource(idx.searcher()) { searcher =>
+        val numDocs = searcher.getNumDocs()
+        logger.info(s"Restored index contains $numDocs documents after reload")
+        if (numDocs == 0) {
+          logger.error(s"CRITICAL: Restored index has 0 documents after reload - this indicates a restoration problem")
+        }
+      }
+      
+      (idx, existingPath, true, tantivySchema) // Clean up extracted directory
+    
+    case None =>
+      // Create new index in temporary directory following tantivy4java exact pattern
+      val tempDir = Files.createTempDirectory("tantivy4spark_idx_")
+      logger.info(s"Creating new tantivy index at: ${tempDir.toAbsolutePath}")
+      
+      // Synchronize schema creation to prevent race conditions in field ID generation
+      val (tantivySchema, builder) = TantivyDirectInterface.createSchemaThreadSafe(schema)
+      schemaBuilder = Some(builder)  // Store for cleanup later
+      
+      val idx = new Index(tantivySchema, tempDir.toAbsolutePath.toString, false)
+      (idx, tempDir, true, tantivySchema)
+  }
+  
+  // Use ThreadLocal to ensure each Spark task gets its own IndexWriter - no sharing between tasks
+  private val threadLocalWriter = new ThreadLocal[IndexWriter]()
+  
   private def getOrCreateWriter(): IndexWriter = {
-    indexWriter match {
+    Option(threadLocalWriter.get()) match {
       case Some(writer) => writer
       case None =>
         val writer = index.writer(50, 1) // Small memory arena like tantivy4java tests
-        indexWriter = Some(writer)
+        threadLocalWriter.set(writer)
+        logger.debug(s"Created new IndexWriter for Spark task thread ${Thread.currentThread().getName}")
         writer
     }
   }
   
   def addDocument(row: InternalRow): Unit = {
-    Using(new Document()) { document =>
-      // Convert InternalRow directly to Document without JSON
+    // Each Spark task gets its own IndexWriter via ThreadLocal - no sharing between tasks
+    val document = new Document()
+    
+    try {
+      // Convert InternalRow directly to Document without JSON - protect against field processing errors
+      logger.debug(s"Adding document with ${schema.fields.length} Spark schema fields")
       schema.fields.zipWithIndex.foreach { case (field, index) =>
-        val value = row.get(index, field.dataType)
-        if (value != null) {
-          addFieldToDocument(document, field.name, value, field.dataType)
+        try {
+          val value = row.get(index, field.dataType)
+          if (value != null) {
+            logger.debug(s"Adding field ${field.name} (type: ${field.dataType}) with value: $value")
+            addFieldToDocument(document, field.name, value, field.dataType)
+          } else {
+            logger.debug(s"Skipping null field ${field.name}")
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}")
+            logger.error(s"Document created from tantivy schema, Spark schema has ${schema.fields.length} fields")
+            logger.error(s"Available tantivy schema: ${tantivySchema}")
+            throw ex
         }
       }
       
       val writer = getOrCreateWriter()
       writer.addDocument(document)
-      logger.debug(s"Added document to index")
-    }.get
+      logger.debug(s"Added document to index using task-local writer")
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to add document: ${ex.getMessage}")
+        throw ex
+    } finally {
+      // Only close the document - keep writer alive for more documents in this task
+      try {
+        document.close()
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to close document: ${ex.getMessage}")
+      }
+    }
   }
   
   private def addFieldToDocument(document: Document, fieldName: String, value: Any, dataType: org.apache.spark.sql.types.DataType): Unit = {
@@ -172,62 +302,98 @@ class TantivyDirectInterface(val schema: StructType) extends AutoCloseable {
   }
   
   def commit(): Unit = {
-    indexWriter.foreach { writer =>
+    // Commit the ThreadLocal writer for this task
+    Option(threadLocalWriter.get()).foreach { writer =>
       writer.commit()
-      logger.info("IndexWriter committed successfully")
+      logger.info(s"Committed IndexWriter for task thread ${Thread.currentThread().getName}")
     }
     index.reload()
-    logger.info("Index reloaded after commit")
+    logger.info("Index reloaded after task writer commit")
   }
   
   def searchAll(limit: Int = 10000): Array[InternalRow] = {
-    Using(index.searcher()) { searcher =>
-      Using(Query.allQuery()) { query =>
-        Using(searcher.search(query, limit)) { searchResult =>
-          val hits = searchResult.getHits()
-          val results = mutable.ArrayBuffer[InternalRow]()
-          
-          for (i <- 0 until hits.size()) {
-            val hit = hits.get(i)
-            val docAddress = hit.getDocAddress()
+    // Handle edge case where limit is 0 or negative
+    if (limit <= 0) {
+      logger.warn(s"Invalid limit $limit, returning empty results")
+      return Array.empty[InternalRow]
+    }
+    
+    try {
+      Using.resource(index.searcher()) { searcher =>
+        val numDocs = searcher.getNumDocs()
+        logger.info(s"Searcher reports $numDocs documents in index")
+        
+        if (numDocs == 0) {
+          logger.warn("Index contains 0 documents - returning empty results")
+          return Array.empty[InternalRow]
+        }
+        
+        Using.resource(Query.allQuery()) { query =>
+          Using.resource(searcher.search(query, limit)) { searchResult =>
+            val hits = searchResult.getHits()
+            logger.info(s"Search found ${hits.size()} hits out of $numDocs total docs (limit=$limit)")
+            val results = mutable.ArrayBuffer[InternalRow]()
             
-            Using(searcher.doc(docAddress)) { document =>
-              val row = convertDocumentToInternalRow(document)
-              results += row
-            }.get // Get the result from the Using
+            for (i <- 0 until hits.size()) {
+              val hit = hits.get(i)
+              val docAddress = hit.getDocAddress()
+              
+              Using.resource(searcher.doc(docAddress)) { document =>
+                val row = convertDocumentToInternalRow(document)
+                results += row
+                logger.debug(s"Converted document $i to row")
+              }
+            }
+            
+            logger.info(s"Returning ${results.size} results from search (from $numDocs total docs)")
+            results.toArray
           }
-          
-          results.toArray
-        }.get
-      }.get
-    }.get
+        }
+      }
+    } catch {
+      case ex: Exception =>
+        logger.error("Search failed", ex)
+        Array.empty[InternalRow]
+    }
   }
   
   def search(queryString: String, limit: Int = 100): Array[InternalRow] = {
+    // Handle edge case where limit is 0 or negative
+    if (limit <= 0) {
+      logger.warn(s"Invalid limit $limit, returning empty results")
+      return Array.empty[InternalRow]
+    }
+    
     if (queryString.isEmpty || queryString == "*:*") {
       return searchAll(limit)
     }
     
-    Using(index.searcher()) { searcher =>
-      Using(Query.allQuery()) { query => // For now, use allQuery - proper query parsing can be added later
-        Using(searcher.search(query, limit)) { searchResult =>
-          val hits = searchResult.getHits()
-          val results = mutable.ArrayBuffer[InternalRow]()
-          
-          for (i <- 0 until hits.size()) {
-            val hit = hits.get(i)
-            val docAddress = hit.getDocAddress()
+    try {
+      Using.resource(index.searcher()) { searcher =>
+        Using.resource(Query.allQuery()) { query => // For now, use allQuery - proper query parsing can be added later
+          Using.resource(searcher.search(query, limit)) { searchResult =>
+            val hits = searchResult.getHits()
+            val results = mutable.ArrayBuffer[InternalRow]()
             
-            Using(searcher.doc(docAddress)) { document =>
-              val row = convertDocumentToInternalRow(document)
-              results += row
-            }.get
+            for (i <- 0 until hits.size()) {
+              val hit = hits.get(i)
+              val docAddress = hit.getDocAddress()
+              
+              Using.resource(searcher.doc(docAddress)) { document =>
+                val row = convertDocumentToInternalRow(document)
+                results += row
+              }
+            }
+            
+            results.toArray
           }
-          
-          results.toArray
-        }.get
-      }.get
-    }.get
+        }
+      }
+    } catch {
+      case ex: Exception =>
+        logger.error("Search failed", ex)
+        Array.empty[InternalRow]
+    }
   }
   
   private def convertDocumentToInternalRow(document: Document): InternalRow = {
@@ -273,34 +439,75 @@ class TantivyDirectInterface(val schema: StructType) extends AutoCloseable {
   }
   
   def getIndexComponents(): Map[String, Array[Byte]] = {
-    // For tantivy4java, we create minimal components for compatibility
-    val metaComponent = Map(
-      "committed" -> true,
-      "schema" -> SchemaConverter.sparkToTantivySchema(schema)
-    )
+    // Create a ZIP archive containing all tantivy index files
+    val zipData = createZipArchive(tempIndexDir)
     
-    val metaJson = mapper.writeValueAsString(metaComponent)
-    val metaBytes = metaJson.getBytes("UTF-8")
+    // Return the ZIP as a single component
+    Map("tantivy_index.zip" -> zipData)
+  }
+  
+  private def createZipArchive(indexDir: Path): Array[Byte] = {
+    val baos = new ByteArrayOutputStream()
+    val zos = new ZipOutputStream(baos)
     
-    // Create a simple data component
-    val dataComponent = Map(
-      "index_type" -> "tantivy4java",
-      "in_memory" -> true
-    )
-    
-    val dataJson = mapper.writeValueAsString(dataComponent)
-    val dataBytes = dataJson.getBytes("UTF-8")
-    
-    Map(
-      "meta.json" -> metaBytes,
-      "data.json" -> dataBytes
-    )
+    try {
+      val indexFiles = indexDir.toFile.listFiles()
+      if (indexFiles != null) {
+        indexFiles.foreach { file =>
+          if (file.isFile) {
+            val entry = new ZipEntry(file.getName)
+            zos.putNextEntry(entry)
+            
+            val fileData = Files.readAllBytes(file.toPath)
+            zos.write(fileData)
+            zos.closeEntry()
+            
+            logger.debug(s"Added to ZIP: ${file.getName} (${fileData.length} bytes)")
+          }
+        }
+      }
+      
+      zos.finish()
+      val zipData = baos.toByteArray
+      logger.info(s"Created ZIP archive with ${indexFiles.length} files (${zipData.length} bytes)")
+      zipData
+      
+    } finally {
+      zos.close()
+      baos.close()
+    }
   }
   
   override def close(): Unit = {
-    indexWriter.foreach(_.close())
-    indexWriter = None
+    // Close ThreadLocal writer for current task if it exists
+    Option(threadLocalWriter.get()).foreach { writer =>
+      writer.close()
+      logger.debug(s"Closed IndexWriter for task thread ${Thread.currentThread().getName}")
+    }
+    threadLocalWriter.remove()
+    
     index.close()
+    
+    // Close schemaBuilder if it exists
+    schemaBuilder.foreach(_.close())
+    schemaBuilder = None
+    
+    // Clean up temporary directory
+    if (needsCleanup && tempIndexDir != null) {
+      try {
+        deleteRecursively(tempIndexDir.toFile)
+        logger.debug(s"Cleaned up temporary index directory: ${tempIndexDir.toAbsolutePath}")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to clean up temporary directory: ${ex.getMessage}")
+      }
+    }
+  }
+  
+  private def deleteRecursively(file: File): Unit = {
+    if (file.isDirectory) {
+      file.listFiles().foreach(deleteRecursively)
+    }
+    file.delete()
   }
 }
-

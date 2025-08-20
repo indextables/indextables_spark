@@ -22,11 +22,11 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
 import org.slf4j.LoggerFactory
 
-class TantivySearchEngine(schema: StructType) extends AutoCloseable {
+class TantivySearchEngine private (private val directInterface: TantivyDirectInterface) extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivySearchEngine])
   
-  // Use the new direct interface instead of handles
-  private val directInterface = new TantivyDirectInterface(schema)
+  // Primary constructor for creating new search engines
+  def this(schema: StructType) = this(new TantivyDirectInterface(schema))
 
   def addDocument(row: InternalRow): Unit = {
     directInterface.addDocument(row)
@@ -62,12 +62,23 @@ object TantivySearchEngine {
   private val logger = LoggerFactory.getLogger(TantivySearchEngine.getClass)
   
   /**
-   * Creates a TantivySearchEngine from pre-existing index components.
-   * This is used when reading from .tnt4s archive files.
+   * Creates a TantivySearchEngine from pre-existing ZIP-based index components.
+   * Uses the new ZIP-based restoration that contains real tantivy index files.
    */
   def fromIndexComponents(schema: StructType, components: Map[String, Array[Byte]]): TantivySearchEngine = {
-    logger.info(s"Creating TantivySearchEngine from ${components.size} components")
-    // For tantivy4java, we can't restore from components, so create a new instance
-    new TantivySearchEngine(schema)
+    logger.info(s"Creating TantivySearchEngine from ${components.size} ZIP-based components")
+    
+    // Create a TantivyDirectInterface that restores from ZIP components
+    val restoredInterface = TantivyDirectInterface.fromIndexComponents(schema, components)
+    
+    // Use the private constructor to wrap the restored interface
+    new TantivySearchEngine(restoredInterface)
+  }
+  
+  /**
+   * Creates a TantivySearchEngine from a direct interface (for optimization).
+   */
+  def fromDirectInterface(directInterface: TantivyDirectInterface): TantivySearchEngine = {
+    new TantivySearchEngine(directInterface)
   }
 }
