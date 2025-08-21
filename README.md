@@ -1,33 +1,35 @@
 # Tantivy4Spark
 
-A high-performance file format for Apache Spark that provides fast search capabilities using the Tantivy search engine library directly via JNI.
+A high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) directly via tantivy4java. It runs embedded inside Apache Spark without requiring any server-side components.
 
 ## Features
 
-- **Fast Search**: Leverages Tantivy's full-text search capabilities directly within Spark
-- **No Server Dependencies**: Tantivy runs embedded inside Apache Spark executors
-- **Transaction Log**: Delta-like transaction log for ACID properties and metadata management
-- **S3 Optimized**: Predictive I/O and caching for cloud storage
-- **Spark DataSource V2**: Full integration with Spark SQL and DataFrames
-- **Schema Evolution**: Support for evolving table schemas over time
-- **Data Skipping**: Min/max statistics for efficient query planning
+- **Embedded Search**: Tantivy runs directly within Spark executors via tantivy4java
+- **Transaction Log**: Delta-like transaction log for metadata management  
+- **Smart File Skipping**: Min/max value tracking for efficient query pruning
+- **Bloom Filter Acceleration**: Splunk-style bloom filters for text search optimization
+- **S3-Optimized Storage**: Intelligent caching and compression for object storage
+- **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
+- **Schema Evolution**: Automatic schema inference and evolution support
+- **Thread-Safe Architecture**: ThreadLocal IndexWriter pattern eliminates race conditions
 
 ## Architecture
 
 ### Core Components
 
 - **Core Package** (`com.tantivy4spark.core`): Spark DataSource V2 integration
-- **Search Package** (`com.tantivy4spark.search`): Tantivy search engine wrapper
+- **Search Package** (`com.tantivy4spark.search`): Tantivy search engine wrapper via tantivy4java
 - **Storage Package** (`com.tantivy4spark.storage`): S3-optimized storage with predictive I/O
 - **Transaction Package** (`com.tantivy4spark.transaction`): Append-only transaction log
+- **Bloom Package** (`com.tantivy4spark.bloom`): Bloom filter text search acceleration
 
-### Native Integration
+### Integration Architecture
 
-This project integrates with Tantivy via JNI (Java Native Interface):
-- Rust codebase in `src/main/rust/` implements JNI bindings to Tantivy
-- Native library built with Cargo and embedded in JAR
-- Scala classes provide high-level API over native functions
-- Automatic schema mapping from Spark types to Tantivy field types
+This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
+- **No Native Dependencies**: Uses tantivy4java library for cross-platform compatibility
+- **Thread-Safe Design**: ThreadLocal IndexWriter pattern eliminates race conditions
+- **Automatic Schema Mapping**: Seamless conversion from Spark types to Tantivy field types
+- **ZIP-Based Archives**: Index files stored as compressed archives for efficient storage
 
 ## Quick Start
 
@@ -35,7 +37,7 @@ This project integrates with Tantivy via JNI (Java Native Interface):
 
 - Java 11 or later
 - Apache Spark 3.5.x
-- Rust toolchain (for building from source)
+- Maven 3.6+ (for building from source)
 
 ### Building
 
@@ -43,7 +45,7 @@ This project integrates with Tantivy via JNI (Java Native Interface):
 # Build the project
 mvn clean compile
 
-# Run tests
+# Run tests (116 tests, 100% pass rate)
 mvn test
 
 # Package
@@ -72,9 +74,21 @@ val df = spark.read
 
 // Query with filters (automatically converted to Tantivy queries)
 df.filter($"name".contains("John") && $"age" > 25).show()
+
+// Text search with bloom filter acceleration
+df.filter($"content".contains("machine learning")).show()
 ```
 
-### Storage Configuration
+### Configuration Options
+
+The system supports several configuration options for performance tuning:
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.tantivy4spark.bloom.filters.enabled` | `true` | Enable/disable bloom filter creation for text search acceleration |
+
+#### Storage Configuration
 
 The system automatically detects storage protocol and uses appropriate I/O strategy:
 
@@ -92,14 +106,35 @@ df.write.format("tantivy4spark").save("hdfs://namenode/path")
 df.write.format("tantivy4spark").save("file:///local/path")
 ```
 
+#### Bloom Filter Configuration
+
+Bloom filters provide Splunk-style text search acceleration but can be disabled to reduce write time and storage overhead:
+
+```scala
+// Disable bloom filters via DataFrame option
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.bloom.filters.enabled", "false")
+  .save("s3://bucket/path")
+
+// Disable bloom filters via Spark configuration (affects all writes)
+spark.conf.set("spark.tantivy4spark.bloom.filters.enabled", "false")
+df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// DataFrame option takes precedence over Spark configuration
+spark.conf.set("spark.tantivy4spark.bloom.filters.enabled", "false")
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.bloom.filters.enabled", "true")  // This overrides Spark config
+  .save("s3://bucket/path")
+```
+
 ## File Format
 
 ### Index Files
 
 Tantivy indexes are stored as `.tnt4s` files (Tantivy for Spark):
-- Single archive file containing all Tantivy components
-- Footer describes offset and size of each component
-- Optimized for efficient partial reads from cloud storage
+- **ZIP-based archives**: Compressed archives containing all Tantivy index files
+- **Direct file access**: Efficient extraction and opening from ZIP format
+- **S3-optimized**: Reduced storage costs and faster transfers via compression
 
 ### Transaction Log
 
@@ -108,6 +143,7 @@ Located in `_transaction_log/` directory:
 - `00000000000000000000.json` - Initial metadata and schema
 - `00000000000000000001.json` - First transaction (ADD/REMOVE operations)
 - Stores min/max values for data skipping
+- Bloom filters for text search acceleration (configurable)
 
 ## Development
 
@@ -116,35 +152,32 @@ Located in `_transaction_log/` directory:
 ```
 src/main/scala/com/tantivy4spark/
 ├── core/           # Spark DataSource V2 integration
-├── search/         # Tantivy search engine wrapper  
+├── search/         # Tantivy search engine wrapper via tantivy4java
 ├── storage/        # S3-optimized storage layer
-└── transaction/    # Transaction log system
+├── transaction/    # Transaction log system
+└── bloom/          # Bloom filter text search acceleration
 
-src/main/rust/      # JNI bindings to Tantivy
-├── src/
-│   ├── lib.rs         # Main JNI interface
-│   ├── index_manager.rs
-│   ├── schema_mapper.rs
-│   └── error.rs
-└── Cargo.toml
-
-src/test/scala/     # Comprehensive test suite
+src/test/scala/     # Comprehensive test suite (116 tests, 100% pass rate)
+├── core/           # Core functionality tests
+├── bloom/          # Bloom filter tests
+├── integration/    # End-to-end integration tests
+├── storage/        # Storage protocol tests
+└── transaction/    # Transaction log tests
 ```
 
 ### Running Tests
 
 ```bash
-# Unit tests
+# All tests (116 tests, 100% pass rate)
 mvn test
 
-# Integration tests
-mvn verify
+# Specific test suites
+mvn test -Dtest="BloomFilterConfigTest"           # Bloom filter configuration
+mvn test -Dtest="*IntegrationTest"                # Integration tests
+mvn test -Dtest="UnsupportedTypesTest"            # Type safety tests
 
-# Test coverage (requires 90%+ coverage)
+# Test coverage report
 mvn scoverage:report
-
-# Rust tests
-cd src/main/rust && cargo test
 ```
 
 ### Contributing

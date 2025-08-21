@@ -175,13 +175,23 @@ class Tantivy4SparkDataWriter(
   private val bloomFilterStorage = BloomFilterStorage.getInstance
   private var recordCount = 0L
   
-  // Track text values for bloom filter creation
-  private val textColumnData = scala.collection.mutable.Map[String, scala.collection.mutable.ArrayBuffer[String]]()
+  // Check if bloom filters are enabled (default: true)
+  // Support both DataFrame write option and Spark configuration property (passed through options)
+  private val bloomFiltersEnabled = options.getBoolean("spark.tantivy4spark.bloom.filters.enabled", true)
   
-  // Initialize text column tracking
-  writeSchema.fields.foreach { field =>
-    if (field.dataType.typeName == "string") {
-      textColumnData(field.name) = scala.collection.mutable.ArrayBuffer[String]()
+  // Track text values for bloom filter creation (only if enabled)
+  private val textColumnData = if (bloomFiltersEnabled) {
+    Some(scala.collection.mutable.Map[String, scala.collection.mutable.ArrayBuffer[String]]())
+  } else {
+    None
+  }
+  
+  // Initialize text column tracking (only if bloom filters enabled)
+  if (bloomFiltersEnabled) {
+    writeSchema.fields.foreach { field =>
+      if (field.dataType.typeName == "string") {
+        textColumnData.get(field.name) = scala.collection.mutable.ArrayBuffer[String]()
+      }
     }
   }
 
@@ -190,12 +200,14 @@ class Tantivy4SparkDataWriter(
     searchEngine.addDocument(record)
     statistics.updateRow(record)
     
-    // Collect text values for bloom filter creation
-    writeSchema.fields.zipWithIndex.foreach { case (field, index) =>
-      if (field.dataType.typeName == "string" && !record.isNullAt(index)) {
-        val value = record.getString(index)
-        if (value != null && value.nonEmpty) {
-          textColumnData(field.name) += value
+    // Collect text values for bloom filter creation (only if enabled)
+    if (bloomFiltersEnabled) {
+      writeSchema.fields.zipWithIndex.foreach { case (field, index) =>
+        if (field.dataType.typeName == "string" && !record.isNullAt(index)) {
+          val value = record.getString(index)
+          if (value != null && value.nonEmpty) {
+            textColumnData.get(field.name) += value
+          }
         }
       }
     }
@@ -229,12 +241,15 @@ class Tantivy4SparkDataWriter(
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
     
-    // Create bloom filters for text columns
-    logger.info(s"Creating bloom filters for ${textColumnData.size} text columns")
-    val bloomFilters = if (textColumnData.nonEmpty) {
-      val filters = bloomFilterManager.createBloomFilters(textColumnData.toMap)
+    // Create bloom filters for text columns (only if enabled)
+    val bloomFilters = if (bloomFiltersEnabled && textColumnData.isDefined && textColumnData.get.nonEmpty) {
+      logger.info(s"Creating bloom filters for ${textColumnData.get.size} text columns")
+      val filters = bloomFilterManager.createBloomFilters(textColumnData.get.toMap)
       Some(bloomFilterStorage.encodeBloomFilters(filters))
     } else {
+      if (!bloomFiltersEnabled) {
+        logger.info("Bloom filters disabled via spark.tantivy4spark.bloom.filters.enabled=false")
+      }
       None
     }
     

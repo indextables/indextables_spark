@@ -136,8 +136,34 @@ The system automatically detects storage protocols and applies appropriate I/O o
 | `hdfs://`, `file://`, local paths | StandardFileReader | Standard Hadoop file operations |
 
 ### Configuration Options
-- `spark.tantivy4spark.storage.force.standard = true`: Force standard Hadoop operations for all protocols
-- Useful for S3-compatible storage that works better with standard operations
+
+The system supports several configuration options for performance tuning:
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.tantivy4spark.bloom.filters.enabled` | `true` | Enable/disable bloom filter creation for text search acceleration |
+
+#### Bloom Filter Configuration
+
+Bloom filters can be disabled to reduce write time and storage overhead when text search acceleration is not needed:
+
+```scala
+// Disable bloom filters via DataFrame option
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.bloom.filters.enabled", "false")
+  .save("s3://bucket/path")
+
+// Disable bloom filters via Spark configuration (affects all writes)
+spark.conf.set("spark.tantivy4spark.bloom.filters.enabled", "false")
+df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// DataFrame option takes precedence over Spark configuration
+spark.conf.set("spark.tantivy4spark.bloom.filters.enabled", "false")
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.bloom.filters.enabled", "true")  // This overrides Spark config
+  .save("s3://bucket/path")
+```
 
 ### Usage Examples
 ```scala
@@ -147,6 +173,11 @@ df.write.format("tantivy4spark").save("s3://bucket/path")
 // Force standard operations  
 df.write.format("tantivy4spark")
   .option("spark.tantivy4spark.storage.force.standard", "true")
+  .save("s3://bucket/path")
+
+// Disable bloom filters for faster writes when text search not needed
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.bloom.filters.enabled", "false")
   .save("s3://bucket/path")
 
 // Standard operations (automatic)

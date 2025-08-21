@@ -236,6 +236,12 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val serializablePath = path
     val serializableSchema = data.schema
     
+    // Pass Spark configuration values that might be needed in executors
+    val sparkConfProps = Map(
+      "spark.tantivy4spark.bloom.filters.enabled" -> spark.conf.getOption("spark.tantivy4spark.bloom.filters.enabled").getOrElse("true")
+    )
+    val enrichedOptions = parameters ++ sparkConfProps.filter(_._2 != "true") // Only pass non-default values
+    
     // Extract essential Hadoop configuration properties as a Map
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val essentialConfProps = Map(
@@ -260,7 +266,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       val localWriterFactory = new com.tantivy4spark.core.Tantivy4SparkWriterFactory(
         new Path(serializablePath),
         serializableSchema,
-        new CaseInsensitiveStringMap(serializableOptions.asJava),
+        new CaseInsensitiveStringMap(enrichedOptions.asJava),
         localHadoopConf
       )
       val writer = localWriterFactory.createWriter(partitionId, 0L)
