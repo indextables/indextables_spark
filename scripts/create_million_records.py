@@ -17,7 +17,7 @@ import random
 
 from pyspark.sql import SparkSession
 from pyspark.sql.types import *
-from pyspark.sql.functions import *
+#from pyspark.sql.functions import *
 
 
 def find_tantivy_jar():
@@ -25,9 +25,6 @@ def find_tantivy_jar():
     # Look for JAR in common locations
     possible_paths = [
         "../target/tantivy4spark-1.0.0-SNAPSHOT-shaded.jar",
-        "target/tantivy4spark-1.0.0-SNAPSHOT-shaded.jar", 
-        "../target/tantivy4spark-1.0.0-SNAPSHOT.jar",
-        "target/tantivy4spark-1.0.0-SNAPSHOT.jar"
     ]
     
     script_dir = os.path.dirname(os.path.abspath(__file__))

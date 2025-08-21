@@ -277,6 +277,7 @@
                         <configuration>
                             <artifactSet>
                                 <includes>
+                                    <include>com.tantivy4java:tantivy4java</include>
                                     <include>com.google.guava:guava</include>
                                     <include>com.google.code.findbugs:jsr305</include>
                                     <include>com.google.errorprone:error_prone_annotations</include>
