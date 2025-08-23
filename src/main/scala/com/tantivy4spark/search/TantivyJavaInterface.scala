@@ -148,25 +148,7 @@ object TantivyJavaAdapter {
     }
   }
   
-  def getIndexComponents(indexHandle: Long): String = {
-    try {
-      Option(interfaces.get(indexHandle)) match {
-        case Some(interface) =>
-          val components = interface.getIndexComponents()
-          val componentsBase64 = components.map { case (name, data) =>
-            name -> java.util.Base64.getEncoder.encodeToString(data)
-          }
-          mapper.writeValueAsString(componentsBase64)
-        case None =>
-          logger.error(s"Index not found: $indexHandle")
-          "{}"
-      }
-    } catch {
-      case e: Exception =>
-        logger.error("Failed to get index components", e)
-        "{}"
-    }
-  }
+  // Note: getIndexComponents removed - using splits instead of archive components
 }
 
 // Compatibility object that maintains the same interface as the old TantivyNative
@@ -183,5 +165,5 @@ object TantivyNative {
   def searchAll(indexHandle: Long, limit: Int): String = 
     TantivyJavaAdapter.searchAll(indexHandle, limit)
   def closeIndex(indexHandle: Long): Boolean = TantivyJavaAdapter.closeIndex(indexHandle)
-  def getIndexComponents(indexHandle: Long): String = TantivyJavaAdapter.getIndexComponents(indexHandle)
+  // Note: getIndexComponents removed - using splits instead of archive components
 }

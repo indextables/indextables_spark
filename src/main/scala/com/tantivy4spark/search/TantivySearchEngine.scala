@@ -40,9 +40,28 @@ class TantivySearchEngine private (private val directInterface: TantivyDirectInt
     directInterface.commit()
   }
   
-  def commitAndGetComponents(): Map[String, Array[Byte]] = {
-    commit()
-    directInterface.getIndexComponents()
+  def commitAndCreateSplit(outputPath: String, partitionId: Long, nodeId: String): String = {
+    // Use commitAndClose to follow write-only pattern for production
+    directInterface.commitAndClose()
+    
+    try {
+      // Delay cleanup of temporary directory until after split creation
+      directInterface.delayCleanupForSplit()
+      
+      // Get temporary directory path from the direct interface
+      val tempIndexPath = directInterface.getIndexPath()
+      
+      // Use SplitManager to create split from the temporary index
+      import com.tantivy4spark.storage.SplitManager
+      val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId)
+      
+      // Return the split file path
+      outputPath
+      
+    } finally {
+      // Force cleanup now that split creation is complete
+      directInterface.forceCleanup()
+    }
   }
 
   def searchAll(limit: Int = 10000): Array[InternalRow] = {
@@ -62,21 +81,27 @@ object TantivySearchEngine {
   private val logger = LoggerFactory.getLogger(TantivySearchEngine.getClass)
   
   /**
-   * Creates a TantivySearchEngine from pre-existing ZIP-based index components.
-   * Uses the new ZIP-based restoration that contains real tantivy index files.
+   * Creates a TantivySearchEngine from a split file.
+   * This replaces the previous ZIP-based component system.
    */
-  def fromIndexComponents(schema: StructType, components: Map[String, Array[Byte]]): TantivySearchEngine = {
-    logger.info(s"Creating TantivySearchEngine from ${components.size} ZIP-based components")
+  def fromSplitFile(schema: StructType, splitPath: String): SplitSearchEngine = {
+    logger.info(s"Creating SplitSearchEngine from split file: $splitPath")
     
-    // Create a TantivyDirectInterface that restores from ZIP components
-    val restoredInterface = TantivyDirectInterface.fromIndexComponents(schema, components)
-    
-    // Use the private constructor to wrap the restored interface
-    new TantivySearchEngine(restoredInterface)
+    import com.tantivy4spark.storage.SplitCacheConfig
+    SplitSearchEngine.fromSplitFile(schema, splitPath, SplitCacheConfig())
   }
   
   /**
-   * Creates a TantivySearchEngine from a direct interface (for optimization).
+   * Creates a TantivySearchEngine from a split file with custom cache configuration.
+   */
+  def fromSplitFileWithCache(schema: StructType, splitPath: String, cacheConfig: com.tantivy4spark.storage.SplitCacheConfig): SplitSearchEngine = {
+    logger.info(s"Creating SplitSearchEngine from split file with cache: $splitPath")
+    
+    SplitSearchEngine.fromSplitFile(schema, splitPath, cacheConfig)
+  }
+  
+  /**
+   * Creates a TantivySearchEngine from a direct interface (for write operations).
    */
   def fromDirectInterface(directInterface: TantivyDirectInterface): TantivySearchEngine = {
     new TantivySearchEngine(directInterface)

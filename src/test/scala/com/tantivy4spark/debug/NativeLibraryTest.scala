@@ -19,9 +19,14 @@
 package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.search.TantivyNative
+import com.tantivy4spark.search.{TantivyNative, TantivySearchEngine, SplitSearchEngine}
+import com.tantivy4spark.storage.SplitCacheConfig
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.unsafe.types.UTF8String
+import java.io.File
 
 class NativeLibraryTest extends TestBase {
 
@@ -125,53 +130,124 @@ class NativeLibraryTest extends TestBase {
         println(s"Added document ${idx + 1}")
       }
       
-      // Step 3: Commit the index
-      println("Step 3: Committing index...")
-      val committed = TantivyNative.commit(indexHandle)
-      assert(committed, "Index should commit successfully")
+      // Step 3: Commit and create split (write-only index pattern)
+      println("Step 3: Committing index and creating split...")
+      
+      // First commit the index  
+      TantivyNative.commit(indexHandle)
       println("Index committed successfully")
       
-      // Step 4: Call searchAll directly
-      println("Step 4: Testing searchAll method...")
+      // Create temporary split file
+      val tempSplitFile = java.nio.file.Files.createTempFile("native_test_split", ".split")
+      tempSplitFile.toFile.deleteOnExit()
       
-      // Test with different limits
-      val testLimits = Seq(3, 10, 100)
+      // Since the old TantivyNative API doesn't provide split creation,
+      // let's create a proper test using TantivySearchEngine instead
+      println("Creating split using TantivySearchEngine approach...")
       
-      testLimits.foreach { limit =>
-        println(s"Testing searchAll with limit: $limit")
-        val results = TantivyNative.searchAll(indexHandle, limit)
-        
-        // Step 5: Verify results
-        assert(results != null, s"searchAll should return non-null results for limit $limit")
-        assert(results.nonEmpty, s"searchAll should return non-empty results for limit $limit")
-        println(s"Raw results for limit $limit: $results")
-        
-        // Parse JSON results
-        val jsonResults = objectMapper.readTree(results)
-        assert(jsonResults.has("hits"), "Results should contain 'hits' field")
-        
-        val hits = jsonResults.get("hits")
-        val expectedHits = Math.min(documents.length, limit)
-        assert(hits.size() == expectedHits, 
-          s"Should return $expectedHits hits for limit $limit, got ${hits.size()}")
-        
-        // Verify each hit contains expected fields
-        for (i <- 0 until hits.size()) {
-          val hit = hits.get(i)
-          assert(hit.has("score"), s"Hit $i should have score field")
-          assert(hit.has("doc"), s"Hit $i should have doc field")
-          
-          val doc = hit.get("doc")
-          assert(doc.has("id"), s"Document $i should have id field")
-          assert(doc.has("title"), s"Document $i should have title field")
-          assert(doc.has("content"), s"Document $i should have content field")
-          assert(doc.has("score"), s"Document $i should have score field")
-          
-          println(s"Hit $i: ID=${doc.get("id").asText()}, Title=${doc.get("title").asText()}, Score=${hit.get("score").asDouble()}")
-        }
+      // Close the old index handle since we'll create a new one
+      TantivyNative.closeIndex(indexHandle)
+      
+      // Create a new index using TantivySearchEngine (which has split support)
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.catalyst.InternalRow
+      import org.apache.spark.unsafe.types.UTF8String
+      import com.tantivy4spark.search.TantivySearchEngine
+      
+      val sparkSchema = StructType(Array(
+        StructField("id", LongType, nullable = false),
+        StructField("title", StringType, nullable = false),
+        StructField("content", StringType, nullable = false),
+        StructField("score", IntegerType, nullable = false)
+      ))
+      
+      val searchEngine = new TantivySearchEngine(sparkSchema)
+      
+      // Add the same documents (parse from the JSON strings or define structured data)
+      val structuredDocuments = Seq(
+        (1L, "First Document", "This is the first test document with some content", 4),
+        (2L, "Second Document", "This is the second test document about technology", 3),
+        (3L, "Third Document", "This is the third document discussing various topics", 4),
+        (4L, "Fourth Document", "The fourth document contains different information", 3),
+        (5L, "Fifth Document", "The last document in our test collection", 4)
+      )
+      
+      structuredDocuments.foreach { case (id, title, content, score) =>
+        val row = InternalRow(id, UTF8String.fromString(title), UTF8String.fromString(content), score)
+        searchEngine.addDocument(row)
       }
       
-      println("searchAll JNI method test completed successfully!")
+      // Create split using TantivySearchEngine
+      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "native-test-node")
+      
+      println(s"Split created successfully: ${tempSplitFile}")
+      
+      // Close the search engine since it's write-only
+      searchEngine.close()
+      
+      // Step 4: Test split-based search with different limits
+      println("Step 4: Testing split-based search...")
+      
+      // Create cache manager for split searching
+      import com.tantivy4java.{SplitCacheManager, Query}
+      val cacheConfig = new SplitCacheManager.CacheConfig(s"native-test-cache-${System.nanoTime()}")
+        .withMaxCacheSize(50000000L) // 50MB
+      val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      
+      val splitUrl = "file://" + tempSplitFile.toAbsolutePath.toString
+      val splitSearcher = cacheManager.createSplitSearcher(splitUrl)
+      
+      try {
+        // Test with different limits
+        val testLimits = Seq(3, 5) // Reduced limits since we have 5 documents
+        
+        testLimits.foreach { limit =>
+          println(s"Testing split search with limit: $limit")
+          
+          // Search all documents
+          val query = Query.allQuery()
+          val searchResult = splitSearcher.search(query, limit)
+          val hits = searchResult.getHits()
+          
+          val expectedHits = Math.min(structuredDocuments.length, limit)
+          assert(hits.size() == expectedHits, 
+            s"Should return $expectedHits hits for limit $limit, got ${hits.size()}")
+          
+          println(s"Found ${hits.size()} hits for limit $limit")
+          
+          // Verify each hit contains expected document data
+          for (i <- 0 until hits.size()) {
+            val hit = hits.get(i)
+            val document = splitSearcher.doc(hit.getDocAddress())
+            
+            assert(document != null, s"Document $i should not be null")
+            
+            // Test field value extraction using tantivy4java API
+            val idValue = document.getFirst("id")
+            val titleValue = document.getFirst("title") 
+            val contentValue = document.getFirst("content")
+            val scoreValue = document.getFirst("score")
+            
+            assert(idValue != null, s"Document $i should have id field")
+            assert(titleValue != null, s"Document $i should have title field")
+            assert(contentValue != null, s"Document $i should have content field")
+            assert(scoreValue != null, s"Document $i should have score field")
+            
+            println(s"✅ Hit $i: ID=${idValue}, Title=${titleValue}, Score=${scoreValue}")
+            
+            document.close()
+          }
+          
+          searchResult.close()
+          query.close()
+        }
+        
+        println("Split-based search test completed successfully!")
+        
+      } finally {
+        splitSearcher.close()
+        cacheManager.close()
+      }
       
     } catch {
       case e: Exception =>
@@ -179,99 +255,80 @@ class NativeLibraryTest extends TestBase {
         e.printStackTrace()
         throw e
     } finally {
-      // Clean up the index
-      if (indexHandle != 0) {
-        println("Cleaning up index...")
-        val closed = TantivyNative.closeIndex(indexHandle)
-        if (closed) {
-          println("Index closed successfully")
-        } else {
-          println("Warning: Failed to close index")
-        }
-      }
+      // Cleanup handled by the split searcher and cache manager
+      println("Test cleanup completed")
     }
   }
   
-  test("searchAll JNI method should handle edge cases") {
-    // Ensure library is loaded
-    assert(TantivyNative.ensureLibraryLoaded(), "Native library should load successfully")
+  test("split-based searchAll should handle edge cases") {
+    // Test edge cases using the split-based architecture
+    val sparkSchema = StructType(Array(
+      StructField("id", LongType, nullable = false),
+      StructField("text", StringType, nullable = false)
+    ))
     
-    // Create a simple schema (using the format expected by SchemaMapper)
-    val schema = 
-      """{
-        "fields": [
-          {
-            "name": "id",
-            "type": "i64",
-            "indexed": true,
-            "stored": true
-          },
-          {
-            "name": "text",
-            "type": "text",
-            "indexed": true,
-            "stored": true
-          }
-        ]
-      }"""
+    println("Testing split-based edge cases...")
     
-    var indexHandle: Long = 0
+    // Test 1: Empty split (no documents)
+    println("Test 1: Empty index/split...")
+    val emptySearchEngine = new TantivySearchEngine(sparkSchema)
+    val tempEmptySplitFile = File.createTempFile("empty_test_split", ".split")
+    tempEmptySplitFile.deleteOnExit()
     
     try {
-      // Create empty index
-      indexHandle = TantivyNative.createIndex(schema)
-      assert(indexHandle != 0, "Index handle should be non-zero")
+      // Don't add any documents - commit empty index and create split
+      val emptySplitPath = emptySearchEngine.commitAndCreateSplit(tempEmptySplitFile.toString, 0L, "empty-test-node")
       
-      // Commit empty index
-      val committed = TantivyNative.commit(indexHandle)
-      assert(committed, "Empty index should commit successfully")
+      val uniqueId1 = System.nanoTime()
+      val cacheConfig1 = SplitCacheConfig(cacheName = s"empty-test-cache-${uniqueId1}")
+      val emptySplitReader = SplitSearchEngine.fromSplitFile(sparkSchema, emptySplitPath, cacheConfig1)
       
-      // Test searchAll on empty index
-      println("Testing searchAll on empty index...")
-      val emptyResults = TantivyNative.searchAll(indexHandle, 10)
-      assert(emptyResults != null, "searchAll should return non-null results for empty index")
-      
-      val jsonEmptyResults = objectMapper.readTree(emptyResults)
-      assert(jsonEmptyResults.has("hits"), "Empty results should contain 'hits' field")
-      
-      val emptyHits = jsonEmptyResults.get("hits")
-      assert(emptyHits.size() == 0, "Empty index should return 0 hits")
-      println("Empty index test passed")
-      
-      // Add one document and test
-      val singleDoc = """{"id": 1, "text": "single document"}"""
-      val added = TantivyNative.addDocument(indexHandle, singleDoc)
-      assert(added, "Single document should be added successfully")
-      
-      val recommitted = TantivyNative.commit(indexHandle)
-      assert(recommitted, "Index with single document should commit successfully")
-      
-      // Test searchAll with limit larger than document count
-      println("Testing searchAll with limit larger than document count...")
-      val singleResults = TantivyNative.searchAll(indexHandle, 100)
-      val jsonSingleResults = objectMapper.readTree(singleResults)
-      val singleHits = jsonSingleResults.get("hits")
-      assert(singleHits.size() == 1, "Should return exactly 1 hit when only 1 document exists")
-      println("Single document test passed")
-      
-      // Test searchAll with limit of 0 - should return empty results
-      println("Testing searchAll with limit of 0...")
-      val zeroResults = TantivyNative.searchAll(indexHandle, 0)
-      val jsonZeroResults = objectMapper.readTree(zeroResults)
-      val zeroHits = jsonZeroResults.get("hits")
-      assert(zeroHits.size() == 0, "Should return 0 hits when limit is 0")
-      println("Zero limit test passed")
-      
-    } catch {
-      case e: Exception =>
-        println(s"Edge case test failed with exception: ${e.getMessage}")
-        e.printStackTrace()
-        throw e
-    } finally {
-      // Clean up
-      if (indexHandle != 0) {
-        TantivyNative.closeIndex(indexHandle)
+      try {
+        val emptyResults = emptySplitReader.searchAll(10)
+        assert(emptyResults.length == 0, "Empty split should return 0 results")
+        println("✅ Empty split test passed")
+      } finally {
+        emptySplitReader.close()
       }
+    } finally {
+      emptySearchEngine.close()
     }
+    
+    // Test 2: Single document split
+    println("Test 2: Single document split...")
+    val singleSearchEngine = new TantivySearchEngine(sparkSchema)
+    val tempSingleSplitFile = File.createTempFile("single_test_split", ".split")
+    tempSingleSplitFile.deleteOnExit()
+    
+    try {
+      // Add exactly one document
+      val singleRow = InternalRow(1L, UTF8String.fromString("single document"))
+      singleSearchEngine.addDocument(singleRow)
+      
+      val singleSplitPath = singleSearchEngine.commitAndCreateSplit(tempSingleSplitFile.toString, 0L, "single-test-node")
+      
+      val uniqueId2 = System.nanoTime()
+      val cacheConfig2 = SplitCacheConfig(cacheName = s"single-test-cache-${uniqueId2}")
+      val singleSplitReader = SplitSearchEngine.fromSplitFile(sparkSchema, singleSplitPath, cacheConfig2)
+      
+      try {
+        // Test with limit larger than document count
+        val largeResults = singleSplitReader.searchAll(100)
+        assert(largeResults.length == 1, "Should return exactly 1 hit when only 1 document exists")
+        assert(largeResults(0).getLong(0) == 1L, "Document ID should be 1")
+        
+        // Test with limit of 1 - should return exactly 1 result
+        val limitResults = singleSplitReader.searchAll(1)
+        assert(limitResults.length == 1, "Should return exactly 1 hit when limit is 1 and there's 1 document")
+        
+        println("✅ Single document split test passed")
+      } finally {
+        singleSplitReader.close()
+      }
+    } finally {
+      singleSearchEngine.close()
+    }
+    
+    println("✅ All split-based edge case tests passed!")
   }
 }

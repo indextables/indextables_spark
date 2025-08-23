@@ -26,11 +26,32 @@ object FiltersToQueryConverter {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   def convert(filters: Array[Filter]): String = {
+    convert(filters, None)
+  }
+
+  def convert(filters: Array[Filter], schemaFieldNames: Option[Set[String]]): String = {
     if (filters.isEmpty) {
       return ""
     }
 
-    val queryParts = filters.flatMap(convertFilter).filter(_.nonEmpty)
+    // Filter out filters that reference non-existent fields
+    val validFilters = schemaFieldNames match {
+      case Some(fieldNames) =>
+        logger.debug(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
+        val valid = filters.filter(filter => isFilterValidForSchema(filter, fieldNames))
+        logger.debug(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        valid
+      case None =>
+        logger.debug("No schema validation - using all filters")
+        filters // No schema validation if fieldNames not provided
+    }
+
+    if (validFilters.length < filters.length) {
+      val skippedCount = filters.length - validFilters.length
+      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
+    }
+
+    val queryParts = validFilters.flatMap(convertFilter).filter(_.nonEmpty)
     
     if (queryParts.isEmpty) {
       ""
@@ -39,6 +60,39 @@ object FiltersToQueryConverter {
     } else {
       queryParts.mkString("(", ") AND (", ")")
     }
+  }
+
+  private def isFilterValidForSchema(filter: Filter, fieldNames: Set[String]): Boolean = {
+    import org.apache.spark.sql.sources._
+    
+    def getFilterFieldNames(f: Filter): Set[String] = f match {
+      case EqualTo(attribute, _) => Set(attribute)
+      case EqualNullSafe(attribute, _) => Set(attribute)
+      case GreaterThan(attribute, _) => Set(attribute)
+      case GreaterThanOrEqual(attribute, _) => Set(attribute)
+      case LessThan(attribute, _) => Set(attribute)
+      case LessThanOrEqual(attribute, _) => Set(attribute)
+      case In(attribute, _) => Set(attribute)
+      case IsNull(attribute) => Set(attribute)
+      case IsNotNull(attribute) => Set(attribute)
+      case StringStartsWith(attribute, _) => Set(attribute)
+      case StringEndsWith(attribute, _) => Set(attribute)
+      case StringContains(attribute, _) => Set(attribute)
+      case And(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Or(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Not(child) => getFilterFieldNames(child)
+      case _ => Set.empty
+    }
+    
+    val filterFields = getFilterFieldNames(filter)
+    val isValid = filterFields.subsetOf(fieldNames)
+    
+    if (!isValid) {
+      val missingFields = filterFields -- fieldNames
+      logger.debug(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+    }
+    
+    isValid
   }
 
   private def convertFilter(filter: Filter): Option[String] = {

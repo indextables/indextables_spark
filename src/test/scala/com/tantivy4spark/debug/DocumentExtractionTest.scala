@@ -44,28 +44,33 @@ class DocumentExtractionTest extends TestBase {
     searchEngine.addDocument(row2)
     searchEngine.addDocument(row3)
     
-    println("Calling commitAndGetComponents...")
-    val components = searchEngine.commitAndGetComponents()
+    println("Creating split file...")
+    val splitPath = "/tmp/test_split.split"
+    val nodeId = java.net.InetAddress.getLocalHost.getHostName + "-test"
+    val createdSplitPath = searchEngine.commitAndCreateSplit(splitPath, 0L, nodeId)
     
-    println(s"Got ${components.size} components: ${components.keys.mkString(", ")}")
+    println(s"Created split file: $createdSplitPath")
     
-    components.keys.foreach { key =>
-      println(s"Component '$key': ${components(key).length} bytes")
-      if (key.endsWith(".zip")) {
-        println(s"ZIP component '$key' contains tantivy index files")
+    // Validate the split file
+    import com.tantivy4spark.storage.SplitManager
+    val isValid = SplitManager.validateSplit(createdSplitPath)
+    println(s"Split validation: $isValid")
+    
+    if (isValid) {
+        println("Split file is valid and contains tantivy index data")
+        
+        // Get split metadata
+        val metadata = SplitManager.readSplitMetadata(createdSplitPath)
+        metadata.foreach { meta =>
+          println(s"Split metadata - ID: ${meta.getSplitId()}, Documents: ${meta.getNumDocs()}")
+        }
       } else {
-        val content = new String(components(key), "UTF-8")
-        println(s"Content of $key: $content")
+        println("Split file validation failed")
       }
-    }
     
-    // Verify we have the new ZIP-based tantivy index component
-    assert(components.contains("tantivy_index.zip"), "Should have tantivy_index.zip component with actual tantivy index files")
-    
-    // Verify the ZIP component is not empty
-    val zipData = components("tantivy_index.zip")
-    assert(zipData.length > 0, "ZIP component should not be empty")
-    println(s"✅ ZIP component contains ${zipData.length} bytes of tantivy index data")
+    // Verify we have a valid split file
+    assert(isValid, "Should have created a valid split file")
+    println(s"✅ Split file created successfully")
     
     searchEngine.close()
   }

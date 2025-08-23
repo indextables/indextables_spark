@@ -21,7 +21,7 @@ import com.tantivy4java._
 import org.slf4j.LoggerFactory
 import java.nio.file.{Files, Paths, Path}
 import java.io.{File, FileInputStream, FileOutputStream, ByteArrayOutputStream}
-import java.util.zip.{ZipInputStream, ZipOutputStream, ZipEntry}
+// ZIP imports removed - using splits instead of archives
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
 import scala.util.{Try, Success, Failure}
@@ -92,67 +92,7 @@ object TantivyDirectInterface {
     }
   }
   
-  def fromIndexComponents(schema: StructType, components: Map[String, Array[Byte]]): TantivyDirectInterface = {
-    logger.info(s"Creating TantivyDirectInterface from ${components.size} archive components")
-    
-    // Look for the ZIP archive
-    components.get("tantivy_index.zip") match {
-      case Some(zipData) =>
-        try {
-          // Extract ZIP to temporary directory
-          val tempDir = Files.createTempDirectory("tantivy4spark_restore_")
-          extractZipArchive(zipData, tempDir)
-          
-          // Create instance that opens the extracted index
-          new TantivyDirectInterface(schema, Some(tempDir))
-          
-        } catch {
-          case ex: Exception =>
-            logger.error(s"Failed to restore from ZIP archive", ex)
-            // Fallback to new instance
-            new TantivyDirectInterface(schema)
-        }
-      
-      case None =>
-        logger.warn("No tantivy_index.zip found in components, creating new instance")
-        new TantivyDirectInterface(schema)
-    }
-  }
-  
-  private def extractZipArchive(zipData: Array[Byte], targetDir: Path): Unit = {
-    val bais = new java.io.ByteArrayInputStream(zipData)
-    val zis = new ZipInputStream(bais)
-    
-    try {
-      var entry: ZipEntry = zis.getNextEntry
-      while (entry != null) {
-        if (!entry.isDirectory) {
-          val filePath = targetDir.resolve(entry.getName)
-          val fos = new FileOutputStream(filePath.toFile)
-          
-          try {
-            val buffer = new Array[Byte](1024)
-            var len = zis.read(buffer)
-            while (len != -1) {
-              fos.write(buffer, 0, len)
-              len = zis.read(buffer)
-            }
-            logger.debug(s"Extracted from ZIP: ${entry.getName}")
-          } finally {
-            fos.close()
-          }
-        }
-        
-        zis.closeEntry()
-        entry = zis.getNextEntry
-      }
-      logger.info(s"Successfully extracted ZIP archive to: ${targetDir.toAbsolutePath}")
-      
-    } finally {
-      zis.close()
-      bais.close()
-    }
-  }
+  // Note: fromIndexComponents and extractZipArchive removed - using splits instead of ZIP archives
 }
 
 class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[Path] = None) extends AutoCloseable {
@@ -163,6 +103,9 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
   
   // Keep schemaBuilder alive for the lifetime of this interface
   private var schemaBuilder: Option[SchemaBuilder] = None
+  
+  // Flag to prevent cleanup until split is created
+  @volatile private var delayCleanup = false
   
   // Create appropriate index and schema based on whether this is a restored index or new one
   private val (index, tempIndexDir, needsCleanup, tantivySchema) = restoredIndexPath match {
@@ -302,98 +245,63 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
   }
   
   def commit(): Unit = {
-    // Commit the ThreadLocal writer for this task
+    // Commit and close the ThreadLocal writer for this task
     Option(threadLocalWriter.get()).foreach { writer =>
       writer.commit()
-      logger.info(s"Committed IndexWriter for task thread ${Thread.currentThread().getName}")
+      writer.close() // Close the writer after commit so files are fully flushed
+      logger.info(s"Committed and closed IndexWriter for task thread ${Thread.currentThread().getName}")
     }
+    threadLocalWriter.remove() // Remove from ThreadLocal since it's now closed
+    
+    // Reload the index to make committed documents visible
     index.reload()
-    logger.info("Index reloaded after task writer commit")
+    logger.info("Index reloaded after task writer commit and close")
+    
+    // Add a small delay to ensure all files are fully written to disk
+    // This matches the pattern used in tantivy4java tests
+    try {
+      Thread.sleep(100)
+      logger.debug("Waited 100ms for index files to be fully written to disk")
+    } catch {
+      case _: InterruptedException => // Ignore interruption
+    }
   }
   
+  /**
+   * Close the index after commit for production use (write-only pattern).
+   * This is called by TantivySearchEngine.commitAndCreateSplit() after split creation.
+   */
+  def commitAndClose(): Unit = {
+    commit()
+    // Close the index completely - we don't need it for reading since we use splits
+    index.close()
+    logger.info("Index closed after commit - all reading will be done from splits")
+  }
+  
+  /**
+   * Search operations are not supported on write-only indexes.
+   * Use SplitSearchEngine to read from split files instead.
+   */
+  @deprecated("Direct index search is not supported. Create splits and use SplitSearchEngine.", "split-migration")
   def searchAll(limit: Int = 10000): Array[InternalRow] = {
-    // Handle edge case where limit is 0 or negative
-    if (limit <= 0) {
-      logger.warn(s"Invalid limit $limit, returning empty results")
-      return Array.empty[InternalRow]
-    }
-    
-    try {
-      Using.resource(index.searcher()) { searcher =>
-        val numDocs = searcher.getNumDocs()
-        logger.info(s"Searcher reports $numDocs documents in index")
-        
-        if (numDocs == 0) {
-          logger.warn("Index contains 0 documents - returning empty results")
-          return Array.empty[InternalRow]
-        }
-        
-        Using.resource(Query.allQuery()) { query =>
-          Using.resource(searcher.search(query, limit)) { searchResult =>
-            val hits = searchResult.getHits()
-            logger.info(s"Search found ${hits.size()} hits out of $numDocs total docs (limit=$limit)")
-            val results = mutable.ArrayBuffer[InternalRow]()
-            
-            for (i <- 0 until hits.size()) {
-              val hit = hits.get(i)
-              val docAddress = hit.getDocAddress()
-              
-              Using.resource(searcher.doc(docAddress)) { document =>
-                val row = convertDocumentToInternalRow(document)
-                results += row
-                logger.debug(s"Converted document $i to row")
-              }
-            }
-            
-            logger.info(s"Returning ${results.size} results from search (from $numDocs total docs)")
-            results.toArray
-          }
-        }
-      }
-    } catch {
-      case ex: Exception =>
-        logger.error("Search failed", ex)
-        Array.empty[InternalRow]
-    }
+    throw new UnsupportedOperationException(
+      "Direct index search is not supported in write-only architecture. " +
+      "Use TantivySearchEngine.commitAndCreateSplit() to create a split, " +
+      "then use SplitSearchEngine.fromSplitFile() to read from the split."
+    )
   }
   
+  /**
+   * Search operations are not supported on write-only indexes.
+   * Use SplitSearchEngine to read from split files instead.
+   */
+  @deprecated("Direct index search is not supported. Create splits and use SplitSearchEngine.", "split-migration")
   def search(queryString: String, limit: Int = 100): Array[InternalRow] = {
-    // Handle edge case where limit is 0 or negative
-    if (limit <= 0) {
-      logger.warn(s"Invalid limit $limit, returning empty results")
-      return Array.empty[InternalRow]
-    }
-    
-    if (queryString.isEmpty || queryString == "*:*") {
-      return searchAll(limit)
-    }
-    
-    try {
-      Using.resource(index.searcher()) { searcher =>
-        Using.resource(Query.allQuery()) { query => // For now, use allQuery - proper query parsing can be added later
-          Using.resource(searcher.search(query, limit)) { searchResult =>
-            val hits = searchResult.getHits()
-            val results = mutable.ArrayBuffer[InternalRow]()
-            
-            for (i <- 0 until hits.size()) {
-              val hit = hits.get(i)
-              val docAddress = hit.getDocAddress()
-              
-              Using.resource(searcher.doc(docAddress)) { document =>
-                val row = convertDocumentToInternalRow(document)
-                results += row
-              }
-            }
-            
-            results.toArray
-          }
-        }
-      }
-    } catch {
-      case ex: Exception =>
-        logger.error("Search failed", ex)
-        Array.empty[InternalRow]
-    }
+    throw new UnsupportedOperationException(
+      "Direct index search is not supported in write-only architecture. " +
+      "Use TantivySearchEngine.commitAndCreateSplit() to create a split, " +
+      "then use SplitSearchEngine.fromSplitFile() to read from the split."
+    )
   }
   
   private def convertDocumentToInternalRow(document: Document): InternalRow = {
@@ -438,62 +346,71 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
     }
   }
   
-  def getIndexComponents(): Map[String, Array[Byte]] = {
-    // Create a ZIP archive containing all tantivy index files
-    val zipData = createZipArchive(tempIndexDir)
-    
-    // Return the ZIP as a single component
-    Map("tantivy_index.zip" -> zipData)
+  // Note: getIndexComponents and createZipArchive removed - using splits instead of ZIP archives
+  
+  /**
+   * Get the path to the index directory for split creation.
+   */
+  def getIndexPath(): String = {
+    tempIndexDir.toAbsolutePath.toString
   }
   
-  private def createZipArchive(indexDir: Path): Array[Byte] = {
-    val baos = new ByteArrayOutputStream()
-    val zos = new ZipOutputStream(baos)
-    
-    try {
-      val indexFiles = indexDir.toFile.listFiles()
-      if (indexFiles != null) {
-        indexFiles.foreach { file =>
-          if (file.isFile) {
-            val entry = new ZipEntry(file.getName)
-            zos.putNextEntry(entry)
-            
-            val fileData = Files.readAllBytes(file.toPath)
-            zos.write(fileData)
-            zos.closeEntry()
-            
-            logger.debug(s"Added to ZIP: ${file.getName} (${fileData.length} bytes)")
-          }
-        }
+  /**
+   * Delay cleanup to allow split creation from the index directory.
+   */
+  def delayCleanupForSplit(): Unit = {
+    delayCleanup = true
+  }
+  
+  /**
+   * Allow cleanup after split creation is complete.
+   */
+  def allowCleanup(): Unit = {
+    delayCleanup = false
+  }
+  
+  /**
+   * Force cleanup of temporary directory (for use after split creation).
+   */
+  def forceCleanup(): Unit = {
+    delayCleanup = false
+    if (needsCleanup && tempIndexDir != null) {
+      try {
+        deleteRecursively(tempIndexDir.toFile)
+        logger.debug(s"Force cleaned up temporary index directory: ${tempIndexDir.toAbsolutePath}")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to force clean up temporary directory: ${ex.getMessage}")
       }
-      
-      zos.finish()
-      val zipData = baos.toByteArray
-      logger.info(s"Created ZIP archive with ${indexFiles.length} files (${zipData.length} bytes)")
-      zipData
-      
-    } finally {
-      zos.close()
-      baos.close()
     }
   }
   
   override def close(): Unit = {
     // Close ThreadLocal writer for current task if it exists
     Option(threadLocalWriter.get()).foreach { writer =>
-      writer.close()
-      logger.debug(s"Closed IndexWriter for task thread ${Thread.currentThread().getName}")
+      try {
+        writer.close()
+        logger.debug(s"Closed IndexWriter for task thread ${Thread.currentThread().getName}")
+      } catch {
+        case _: Exception => // Writer may already be closed
+      }
     }
     threadLocalWriter.remove()
     
-    index.close()
+    // Close index if it hasn't been closed already
+    try {
+      index.close()
+      logger.debug("Closed index in cleanup")
+    } catch {
+      case _: Exception => // Index may already be closed from commit()
+    }
     
     // Close schemaBuilder if it exists
     schemaBuilder.foreach(_.close())
     schemaBuilder = None
     
-    // Clean up temporary directory
-    if (needsCleanup && tempIndexDir != null) {
+    // Clean up temporary directory (unless cleanup is delayed for split creation)
+    if (needsCleanup && tempIndexDir != null && !delayCleanup) {
       try {
         deleteRecursively(tempIndexDir.toFile)
         logger.debug(s"Cleaned up temporary index directory: ${tempIndexDir.toAbsolutePath}")
@@ -501,6 +418,8 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
         case ex: Exception =>
           logger.warn(s"Failed to clean up temporary directory: ${ex.getMessage}")
       }
+    } else if (delayCleanup) {
+      logger.debug(s"Delaying cleanup of temporary index directory for split creation: ${tempIndexDir.toAbsolutePath}")
     }
   }
   

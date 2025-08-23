@@ -18,10 +18,13 @@
 package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.search.TantivyDirectInterface
+import com.tantivy4spark.search.{TantivyDirectInterface, TantivySearchEngine, SplitSearchEngine}
+import com.tantivy4spark.storage.SplitCacheConfig
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.unsafe.types.UTF8String
+import java.io.File
+import java.nio.file.Files
 
 class DirectInterfaceTest extends TestBase {
 
@@ -32,28 +35,41 @@ class DirectInterfaceTest extends TestBase {
       StructField("user_name", StringType, nullable = false)
     ))
     
-    val interface = new TantivyDirectInterface(schema)
+    // Create unique split file to avoid cache collisions across test runs
+    val uniqueId = System.nanoTime()
+    val tempSplitFile = Files.createTempFile(s"test_split_minimal_${uniqueId}", ".split").toFile
+    tempSplitFile.deleteOnExit()
+    
+    val searchEngine = new TantivySearchEngine(schema)
     
     try {
       // Add a single document
       val row = InternalRow(1L, UTF8String.fromString("test"))
-      interface.addDocument(row)
+      searchEngine.addDocument(row)
       
-      // Commit
-      interface.commit()
+      // Commit and create split
+      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
-      // Search
-      val results = interface.searchAll(10)
+      // Read from split instead of index with unique cache configuration
+      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-minimal-${uniqueId}")
+      val splitReader = SplitSearchEngine.fromSplitFile(schema, splitPath, uniqueCacheConfig)
       
-      println(s"Found ${results.length} documents")
-      results.foreach { row =>
-        println(s"Row: user_id=${row.getLong(0)}, user_name=${row.getUTF8String(1)}")
+      try {
+        val results = splitReader.searchAll(10)
+        
+        println(s"Found ${results.length} documents")
+        results.foreach { row =>
+          println(s"Row: user_id=${row.getLong(0)}, user_name=${row.getUTF8String(1)}")
+        }
+        
+        assert(results.length == 1, s"Should find exactly 1 document, got ${results.length}")
+      } finally {
+        splitReader.close()
       }
       
-      assert(results.length > 0, "Should find at least 1 document")
-      
     } finally {
-      interface.close()
+      searchEngine.close()
+      tempSplitFile.delete()
     }
   }
   
@@ -64,7 +80,12 @@ class DirectInterfaceTest extends TestBase {
       StructField("person_name", StringType, nullable = false)
     ))
     
-    val interface = new TantivyDirectInterface(schema)
+    // Create unique split file to avoid cache collisions across test runs
+    val uniqueId = System.nanoTime()
+    val tempSplitFile = Files.createTempFile(s"test_split_multi_${uniqueId}", ".split").toFile
+    tempSplitFile.deleteOnExit()
+    
+    val searchEngine = new TantivySearchEngine(schema)
     
     try {
       // Add multiple documents
@@ -74,23 +95,31 @@ class DirectInterfaceTest extends TestBase {
         InternalRow(3L, UTF8String.fromString("Charlie"))
       )
       
-      rows.foreach(interface.addDocument)
+      rows.foreach(searchEngine.addDocument)
       
-      // Commit
-      interface.commit()
+      // Commit and create split
+      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
-      // Search
-      val results = interface.searchAll(10)
+      // Read from split instead of index with unique cache configuration
+      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-multi-${uniqueId}")
+      val splitReader = SplitSearchEngine.fromSplitFile(schema, splitPath, uniqueCacheConfig)
       
-      println(s"Found ${results.length} documents")
-      results.foreach { row =>
-        println(s"Row: person_id=${row.getLong(0)}, person_name=${row.getUTF8String(1)}")
+      try {
+        val results = splitReader.searchAll(10)
+        
+        println(s"Found ${results.length} documents")
+        results.foreach { row =>
+          println(s"Row: person_id=${row.getLong(0)}, person_name=${row.getUTF8String(1)}")
+        }
+        
+        assert(results.length == 3, s"Should find exactly 3 documents, got ${results.length}")
+      } finally {
+        splitReader.close()
       }
       
-      assert(results.length == 3, s"Should find 3 documents, got ${results.length}")
-      
     } finally {
-      interface.close()
+      searchEngine.close()
+      tempSplitFile.delete()
     }
   }
 }

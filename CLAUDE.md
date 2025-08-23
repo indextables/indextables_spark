@@ -17,11 +17,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 ### File Format
-- **Index files**: `*.tnt4s` files contain Tantivy indexes stored as single archive files
-- **Archive structure**: Footer describes offset and size of each component for efficient partial downloads
+- **Split files**: `*.split` files contain Tantivy indexes using tantivy4java's optimized Quickwit split format
+- **Split structure**: Self-contained immutable index files with native tantivy4java caching support
 - **Transaction log**: `_transaction_log/` directory (similar to Delta's `_delta_log/`) contains:
   - Schema metadata
-  - ADD entries for each index file created
+  - ADD entries for each split file created
   - Min/max values for query pruning
   - Partition key information and row counts
 
@@ -33,10 +33,12 @@ The system implements a custom Spark DataSource V2 provider modeled after [Delta
 - **File format integration**: Similar to [Delta's ParquetFileFormat](https://github.com/delta-io/delta/blob/51150999ee12f120d370b26b8273b6c293f39a43/spark/src/main/scala/org/apache/spark/sql/delta/DeltaParquetFileFormat.scala)
 
 ### Java Integration (via tantivy4java)
-- **Pure Java bindings**: Uses tantivy4java library for Tantivy integration
+- **Pure Java bindings**: Uses tantivy4java library for Tantivy integration with Quickwit split support
 - **No native compilation**: Eliminates Rust/Cargo build dependencies
 - **Schema mapping**: Automatic conversion between Spark and Tantivy data types
 - **Cross-platform**: Supports Linux, macOS, and Windows via tantivy4java native libraries
+- **Split format**: Uses tantivy4java's Quickwit split format for immutable, optimized index storage
+- **JVM-wide caching**: Shared SplitCacheManager instances for optimal memory utilization across executors
 
 
 ## Project Structure
@@ -49,14 +51,17 @@ src/main/scala/com/tantivy4spark/
 │   ├── FiltersToQueryConverter.scala      # Convert Spark filters to Tantivy queries
 │   └── ...
 ├── search/         # Tantivy search engine integration
-│   ├── TantivySearchEngine.scala          # Main search interface
+│   ├── TantivySearchEngine.scala          # Main search interface (for write operations)
+│   ├── SplitSearchEngine.scala            # Split-based search engine with caching
 │   ├── TantivyJavaInterface.scala         # tantivy4java integration adapter
 │   ├── SchemaConverter.scala              # Spark ↔ Tantivy schema mapping
 │   └── RowConverter.scala                 # Row data conversion
-├── storage/        # Storage abstraction layer
+├── storage/        # Storage abstraction and split management
 │   ├── StorageStrategy.scala              # Protocol detection and routing
 │   ├── S3OptimizedReader.scala            # S3-optimized I/O with caching
-│   └── StandardFileReader.scala           # Standard Hadoop operations
+│   ├── StandardFileReader.scala           # Standard Hadoop operations
+│   ├── SplitManager.scala                 # Split creation and validation
+│   └── GlobalSplitCacheManager.scala      # JVM-wide split cache management
 └── transaction/    # Transaction log implementation
     ├── TransactionLog.scala               # Main transaction log interface
     └── Actions.scala                      # Action types (ADD, REMOVE, METADATA)
@@ -106,20 +111,37 @@ The system supports several configuration options for performance tuning:
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.tantivy4spark.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
+| `spark.tantivy4spark.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
+| `spark.tantivy4spark.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
+| `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
+| `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
+| `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
+| `spark.tantivy4spark.aws.region` | - | AWS region for S3 split access |
+| `spark.tantivy4spark.aws.endpoint` | - | Custom AWS S3 endpoint |
+| `spark.tantivy4spark.azure.accountName` | - | Azure storage account name |
+| `spark.tantivy4spark.azure.accountKey` | - | Azure storage account key |
+| `spark.tantivy4spark.gcp.projectId` | - | GCP project ID for Cloud Storage |
+| `spark.tantivy4spark.gcp.credentialsFile` | - | Path to GCP service account credentials file |
 
 
 ### Usage Examples
 ```scala
-// S3-optimized I/O (automatic)
+// Write data as split files with automatic cloud storage optimization
 df.write.format("tantivy4spark").save("s3://bucket/path")
 
-// Force standard operations  
+// Configure split cache settings
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.storage.force.standard", "true")
+  .option("spark.tantivy4spark.cache.maxSize", "500000000") // 500MB cache
   .save("s3://bucket/path")
 
+// AWS-specific configuration for split access
+spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
+spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+df.write.format("tantivy4spark").save("s3://bucket/path")
 
-// Standard operations (automatic)
+// Standard operations for local/HDFS
 df.write.format("tantivy4spark").save("hdfs://namenode/path")
 df.write.format("tantivy4spark").save("file:///local/path")
 

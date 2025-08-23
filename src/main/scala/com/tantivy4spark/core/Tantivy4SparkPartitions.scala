@@ -25,8 +25,8 @@ import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.AddAction
-import com.tantivy4spark.search.TantivySearchEngine
-import com.tantivy4spark.storage.{S3OptimizedReader, StandardFileReader, TantivyArchiveFormat}
+import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
+import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager}
 import com.tantivy4spark.util.StatisticsCalculator
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
@@ -73,50 +73,88 @@ class Tantivy4SparkPartitionReader(
   private val hadoopConf = spark.sparkContext.hadoopConfiguration
   
   private val filePath = new Path(addAction.path)
-  private val reader = createStorageReader()
   
-  private var searchEngine: TantivySearchEngine = _
+  private var splitSearchEngine: SplitSearchEngine = _
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized = false
 
-  private def createStorageReader() = {
-    val protocol = filePath.toUri.getScheme
-    val forceStandard = options.getBoolean("spark.tantivy4spark.storage.force.standard", false)
-    
-    if (!forceStandard && (protocol == "s3" || protocol == "s3a" || protocol == "s3n")) {
-      logger.info(s"Using S3OptimizedReader for path: ${addAction.path}")
-      new S3OptimizedReader(filePath, hadoopConf)
-    } else {
-      logger.info(s"Using StandardFileReader for path: ${addAction.path}")
-      new StandardFileReader(filePath, hadoopConf)
-    }
+  
+  private def createCacheConfig(): SplitCacheConfig = {
+    SplitCacheConfig(
+      cacheName = options.get("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
+      maxCacheSize = options.getLong("spark.tantivy4spark.cache.maxSize", 200000000L),
+      maxConcurrentLoads = options.getInt("spark.tantivy4spark.cache.maxConcurrentLoads", 8),
+      enableQueryCache = options.getBoolean("spark.tantivy4spark.cache.queryCache", true),
+      // AWS configuration
+      awsAccessKey = Option(options.get("spark.tantivy4spark.aws.accessKey")),
+      awsSecretKey = Option(options.get("spark.tantivy4spark.aws.secretKey")),
+      awsRegion = Option(options.get("spark.tantivy4spark.aws.region")),
+      awsEndpoint = Option(options.get("spark.tantivy4spark.aws.endpoint")),
+      // Azure configuration
+      azureAccountName = Option(options.get("spark.tantivy4spark.azure.accountName")),
+      azureAccountKey = Option(options.get("spark.tantivy4spark.azure.accountKey")),
+      azureConnectionString = Option(options.get("spark.tantivy4spark.azure.connectionString")),
+      azureEndpoint = Option(options.get("spark.tantivy4spark.azure.endpoint")),
+      // GCP configuration
+      gcpProjectId = Option(options.get("spark.tantivy4spark.gcp.projectId")),
+      gcpServiceAccountKey = Option(options.get("spark.tantivy4spark.gcp.serviceAccountKey")),
+      gcpCredentialsFile = Option(options.get("spark.tantivy4spark.gcp.credentialsFile")),
+      gcpEndpoint = Option(options.get("spark.tantivy4spark.gcp.endpoint"))
+    )
   }
 
   private def initialize(): Unit = {
     if (!initialized) {
       try {
-        // Read and parse the Tantivy archive
-        new com.tantivy4spark.storage.TantivyArchiveReader(reader)
-        val indexComponents = TantivyArchiveFormat.readAllComponents(reader)
+        logger.info(s"Reading Tantivy split: ${addAction.path}")
         
-        logger.info(s"Read Tantivy archive with ${indexComponents.size} components: ${indexComponents.keys.mkString(", ")}")
+        // Create cache configuration from Spark options
+        val cacheConfig = createCacheConfig()
         
-        // Create search engine from the archived index components
-        searchEngine = TantivySearchEngine.fromIndexComponents(readSchema, indexComponents)
+        // Create split search engine using the split file directly
+        splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, addAction.path, cacheConfig)
         
-        // Convert filters to Tantivy query
-        val query = FiltersToQueryConverter.convert(filters)
+        // Get the schema from the split to validate filters
+        val splitSchema = splitSearchEngine.getSchema()
+        val splitFieldNames = try {
+          import scala.jdk.CollectionConverters._
+          val fieldNames = splitSchema.getFieldNames().asScala.toSet
+          logger.info(s"Split schema contains fields: ${fieldNames.mkString(", ")}")
+          fieldNames
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
+            Set.empty[String]
+        }
+        
+        // Log the filters before conversion
+        if (filters.nonEmpty) {
+          logger.info(s"Applying ${filters.length} filters: ${filters.mkString(", ")}")
+        }
+        
+        // Convert filters to Tantivy query with schema validation
+        val query = if (splitFieldNames.nonEmpty) {
+          val validatedQuery = FiltersToQueryConverter.convert(filters, Some(splitFieldNames))
+          logger.info(s"Generated query after schema validation: '$validatedQuery'")
+          validatedQuery
+        } else {
+          // Fall back to no schema validation if we can't get field names
+          val fallbackQuery = FiltersToQueryConverter.convert(filters)
+          logger.info(s"Generated query without schema validation: '$fallbackQuery'")
+          fallbackQuery
+        }
         
         if (query.nonEmpty) {
-          val results = searchEngine.search(query, limit = 10000)
+          val results = splitSearchEngine.search(query, limit = 10000)
           resultIterator = results.iterator
         } else {
-          // No filters, return all documents (this would need special handling in real implementation)
-          resultIterator = Iterator.empty
+          // No filters, return all documents
+          val results = splitSearchEngine.searchAll(limit = 10000)
+          resultIterator = results.iterator
         }
         
         initialized = true
-        logger.info(s"Initialized reader for ${addAction.path} with query: $query")
+        logger.info(s"Initialized split reader for ${addAction.path} with query: $query")
         
       } catch {
         case ex: Exception =>
@@ -136,10 +174,9 @@ class Tantivy4SparkPartitionReader(
   }
 
   override def close(): Unit = {
-    if (searchEngine != null) {
-      searchEngine.close()
+    if (splitSearchEngine != null) {
+      splitSearchEngine.close()
     }
-    reader.close()
   }
 }
 
@@ -180,35 +217,34 @@ class Tantivy4SparkDataWriter(
   }
 
   override def commit(): WriterCommitMessage = {
-    println(s"Committing Tantivy index with $recordCount documents")
-    // Commit the search engine and get index components
-    val indexComponents = searchEngine.commitAndGetComponents()
-    println(s"Got ${indexComponents.size} index components: ${indexComponents.keys.mkString(", ")}")
+    logger.info(s"Committing Tantivy index with $recordCount documents")
     
-    val fileName = f"part-$partitionId%05d-$taskId.tnt4s"
+    // Create split file name - change extension from .tnt4s to .split
+    val fileName = f"part-$partitionId%05d-$taskId.split"
     val filePath = new Path(tablePath, fileName)
+    val outputPath = filePath.toString
     
-    // Create the Tantivy archive with all index components
-    val archiveData = createTantivyArchive(indexComponents)
+    // Generate node ID for the split (hostname + executor ID)
+    val nodeId = java.net.InetAddress.getLocalHost.getHostName + "-" + 
+                 Option(System.getProperty("spark.executor.id")).getOrElse("driver")
     
-    // Write archive to storage
+    // Create split from the index using the search engine
+    val splitPath = searchEngine.commitAndCreateSplit(outputPath, partitionId.toLong, nodeId)
+    
+    // Get split file size
     val fileSystem = filePath.getFileSystem(hadoopConf)
-    val outputStream = fileSystem.create(filePath)
+    val splitFileStatus = fileSystem.getFileStatus(filePath)
+    val splitSize = splitFileStatus.getLen
     
-    try {
-      outputStream.write(archiveData)
-      logger.info(s"Written Tantivy archive $fileName with ${archiveData.length} bytes, $recordCount records")
-    } finally {
-      outputStream.close()
-    }
+    logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
     
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
     
     val addAction = AddAction(
-      path = filePath.toString,
+      path = splitPath,
       partitionValues = Map.empty,
-      size = archiveData.length.toLong,
+      size = splitSize,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
       numRecords = Some(recordCount),
@@ -218,12 +254,6 @@ class Tantivy4SparkDataWriter(
     
     logger.info(s"Committed writer for partition $partitionId with $recordCount records")
     Tantivy4SparkCommitMessage(addAction)
-  }
-  
-  private def createTantivyArchive(components: Map[String, Array[Byte]]): Array[Byte] = {
-    val outputStream = new ByteArrayOutputStream()
-    TantivyArchiveFormat.createArchive(components, outputStream)
-    outputStream.toByteArray
   }
 
   override def abort(): Unit = {

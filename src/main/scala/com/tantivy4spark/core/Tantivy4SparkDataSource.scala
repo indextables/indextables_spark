@@ -79,56 +79,27 @@ object Tantivy4SparkRelation {
       localHadoopConf.set(key, value)
     }
     
-    // Create storage reader for the Tantivy archive file
-    val reader = new com.tantivy4spark.storage.StandardFileReader(new Path(filePath), localHadoopConf)
+    // Use SplitSearchEngine to read split files directly
     val rows = scala.collection.mutable.ListBuffer[org.apache.spark.sql.Row]()
     
     try {
-      // Read the Tantivy archive and extract directly to temp directory
-      println(s"Reading Tantivy archive: $filePath")
-      val indexComponents = com.tantivy4spark.storage.TantivyArchiveFormat.readAllComponents(reader)
-      println(s"Read ${indexComponents.size} components: ${indexComponents.keys.mkString(", ")}")
+      println(s"Reading Tantivy split file: $filePath")
       
-      // Extract ZIP directly to temp directory and open index from path (more efficient)
-      println(s"Extracting archive and opening index directly from directory")
-      val tempDir = java.nio.file.Files.createTempDirectory("tantivy4spark_read_")
-      val extractedIndexPath = try {
-        indexComponents.get("tantivy_index.zip") match {
-          case Some(zipData) =>
-            // Extract ZIP to temp directory
-            Tantivy4SparkRelation.extractZipToDirectory(zipData, tempDir)
-            Some(tempDir)
-          case None =>
-            println(s"WARNING: No tantivy_index.zip found in archive")
-            None
-        }
-      } catch {
-        case ex: Exception =>
-          println(s"WARNING: Failed to extract ZIP archive: ${ex.getMessage}")
-          None
-      }
+      // Use SplitSearchEngine to read from split
+      val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFile(
+        serializableSchema, 
+        filePath,
+        com.tantivy4spark.storage.SplitCacheConfig()
+      )
+      println(s"Split search engine created successfully")
       
-      // Create search engine directly from extracted directory (no components needed)
-      val searchEngine = extractedIndexPath match {
-        case Some(indexPath) =>
-          println(s"Creating search engine directly from extracted path: ${indexPath.toAbsolutePath}")
-          val directInterface = new com.tantivy4spark.search.TantivyDirectInterface(serializableSchema, Some(indexPath))
-          com.tantivy4spark.search.TantivySearchEngine.fromDirectInterface(directInterface)
-        case None =>
-          println(s"Fallback: Creating empty search engine due to extraction failure")
-          new com.tantivy4spark.search.TantivySearchEngine(serializableSchema)
-      }
-      println(s"Search engine created successfully")
-      
-      // For now, use a match-all search to get all documents
-      // TODO: Implement proper filter pushdown for specific queries
+      // Use searchAll to get all documents from the split
       println(s"Starting searchAll with limit 10000...")
-      val results = searchEngine.searchAll(limit = 10000)
+      val results = splitSearchEngine.searchAll(limit = 10000)
       println(s"Search returned ${results.length} results")
       
       if (results.length == 0) {
-        println(s"WARNING: Search returned 0 results from archive with ${indexComponents.size} components")
-        println(s"Components: ${indexComponents.keys.mkString(", ")}")
+        println(s"WARNING: Search returned 0 results from split file")
         println(s"Schema fields: ${serializableSchema.fieldNames.mkString(", ")}")
       }
       
@@ -174,16 +145,14 @@ object Tantivy4SparkRelation {
         }
       }
       
-      searchEngine.close()
+      splitSearchEngine.close()
       println(s"Converted ${rows.length} rows from search")
     } catch {
       case ex: Exception =>
-        // If we can't read the Tantivy archive, log and return empty
-        System.err.println(s"Failed to read Tantivy archive $filePath: ${ex.getMessage}")
+        // If we can't read the Tantivy split file, log and return empty
+        System.err.println(s"Failed to read Tantivy split file $filePath: ${ex.getMessage}")
         ex.printStackTrace()
         // Return empty iterator on error
-    } finally {
-      reader.close()
     }
     
     rows.toIterator
