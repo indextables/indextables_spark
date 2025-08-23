@@ -4,24 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Tantivy4Spark** is a high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) directly via JNI. It runs embedded inside Apache Spark without requiring any server-side components.
+**Tantivy4Spark** is a high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) via [tantivy4java](https://github.com/quickwit-oss/tantivy-java). It runs embedded inside Apache Spark without requiring any server-side components.
 
 ### Key Features
-- **Embedded search**: Tantivy runs directly within Spark executors via JNI
-- **Transaction log**: Delta-like transaction log for metadata management  
+- **Embedded search**: Tantivy runs directly within Spark executors via tantivy4java
+- **Split-based architecture**: Write-only indexes with split-based reading using QuickwitSplit format
+- **Transaction log**: Delta Lake-style transaction log with batched operations for metadata management  
 - **Smart file skipping**: Min/max value tracking for efficient query pruning
+- **Schema-aware filter pushdown**: Field validation prevents native crashes during query execution
 - **S3-optimized storage**: Intelligent caching and compression for object storage
 - **Flexible storage**: Support for local, HDFS, and S3 storage protocols
 - **Schema evolution**: Automatic schema inference and evolution support
+- **JVM-wide caching**: Shared SplitCacheManager reduces memory usage across executors
 
 ## Architecture
 
 ### File Format
-- **Split files**: `*.split` files contain Tantivy indexes using tantivy4java's optimized Quickwit split format
+- **Split files**: `*.split` files contain Tantivy indexes using tantivy4java's optimized QuickwitSplit format
 - **Split structure**: Self-contained immutable index files with native tantivy4java caching support
-- **Transaction log**: `_transaction_log/` directory (similar to Delta's `_delta_log/`) contains:
+- **Write-only pattern**: Create index → add documents → commit → create split → close index
+- **Transaction log**: `_transaction_log/` directory (Delta Lake compatible) contains:
   - Schema metadata
-  - ADD entries for each split file created
+  - **Batched ADD operations**: Multiple ADD entries per transaction file (like Delta Lake)
   - Min/max values for query pruning
   - Partition key information and row counts
 
@@ -194,17 +198,21 @@ df.filter($"description".contains("Apache") && $"tags".contains("spark"))
 ### Read Behavior  
 - Schema always read from transaction log for consistency
 - Supports schema evolution through transaction log versioning
-- **Search Integration**: Uses Tantivy's AllQuery for comprehensive document retrieval
+- **Split-based reading**: Uses SplitSearchEngine with document field extraction via document.getFirst()
+- **JVM-wide caching**: Shared SplitCacheManager optimizes memory usage across executors
 - **Type Conversion**: Automatic handling of type mismatches (Integer ↔ Long, Integer ↔ Boolean)
 - **Error Recovery**: Fallback to manual row conversion when Catalyst conversion fails
+- **Schema-aware filtering**: Field validation prevents native crashes during query execution
 
 ## Test Coverage
 
-The project maintains comprehensive test coverage with **105 tests** achieving **100% pass rate**:
+The project maintains comprehensive test coverage with **90 tests** achieving **100% pass rate**:
 - **Unit tests**: 90%+ coverage for all core classes
 - **Integration tests**: End-to-end workflow validation with comprehensive test data
+- **Split-based architecture tests**: Comprehensive validation of write-only indexes and split reading
+- **Transaction log batch tests**: Testing of Delta Lake-compatible batched operations
+- **Schema-aware filter tests**: Validation of field existence checking to prevent native crashes
 - **Type safety tests**: Comprehensive validation of supported/unsupported data type handling
-- **Mock framework**: Testing with graceful degradation when native JNI library unavailable
 - **Performance tests**: Large-scale operation validation with 1000+ document datasets
 - **Query Testing**: Full coverage of text search, numeric ranges, boolean logic, null handling
 - **Schema Evolution**: Testing of schema changes and backward compatibility
@@ -225,13 +233,16 @@ src/test/scala/com/tantivy4spark/
 │   └── TantivyArchiveFormatTest.scala     # Archive format tests
 ├── transaction/
 │   ├── TransactionLogTest.scala           # Transaction log tests
+│   ├── BatchTransactionLogTest.scala     # Delta Lake-style batched operations
 │   └── TransactionLogStatisticsTest.scala # Statistics collection validation
 ├── integration/
 │   ├── Tantivy4SparkFullIntegrationTest.scala # End-to-end integration tests
 │   └── DataSkippingVerificationTest.scala # File skipping validation
 └── debug/                                 # Debug and diagnostic tests
     ├── DocumentExtractionTest.scala       # Document handling tests
-    └── NativeLibraryTest.scala            # JNI library loading tests
+    ├── FieldExtractionDebugTest.scala     # Split-based field extraction debugging
+    ├── MinimalDirectTest.scala            # Split-based architecture tests
+    └── NativeLibraryTest.scala            # Split-based edge case tests
 ```
 
 ## Development Notes
@@ -255,15 +266,18 @@ The project is registered as a Spark data source via:
 
 ### Key Implementation Details
 - **DataSource V2 API**: Full implementation of modern Spark connector interface
-- **Filter pushdown**: Converts Spark filters to Tantivy query syntax
+- **Schema-aware filter pushdown**: Field validation prevents FieldNotFound panics at native level
+- **Split-based architecture**: Write-only indexes with immutable split files for reading
 - **Partition pruning**: Leverages min/max statistics for efficient query execution
-- **Transaction isolation**: ACID properties through transaction log
+- **Transaction isolation**: ACID properties through Delta Lake-compatible transaction log
+- **Batched transactions**: Multiple ADD entries per transaction file (Delta Lake pattern)
 - **Type safety**: Explicit rejection of unsupported data types with clear error messages
 - **Error handling**: Graceful degradation when native library unavailable
 - **tantivy4java Integration**: Pure Java bindings via tantivy4java library
-- **Search Engine**: Uses Tantivy's AllQuery for comprehensive document retrieval
+- **Search Engine**: Uses SplitSearchEngine with document field extraction via document.getFirst()
 - **Type Conversion**: Robust handling of Spark ↔ Tantivy type mappings (Integer/Long/Boolean)
-- **Archive Format**: Custom `.tnt4s` format with footer-based component indexing
+- **Split format**: QuickwitSplit (.split) format with JVM-wide caching support
+- **Shaded Dependencies**: Google Guava repackaged to avoid conflicts (`tantivy4spark.com.google.common`)
 
 ### Build Integration
 - **Maven Dependencies**: Uses tantivy4java as a standard Maven dependency

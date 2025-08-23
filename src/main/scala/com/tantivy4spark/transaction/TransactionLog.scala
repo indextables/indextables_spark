@@ -58,6 +58,20 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
     version
   }
 
+  /**
+   * Add multiple files in a single transaction (like Delta Lake).
+   * This creates one JSON file with multiple ADD entries.
+   */
+  def addFiles(addActions: Seq[AddAction]): Long = {
+    if (addActions.isEmpty) {
+      return getLatestVersion()
+    }
+    
+    val version = getLatestVersion() + 1
+    writeActions(version, addActions)
+    version
+  }
+
   def listFiles(): Seq[AddAction] = {
     val files = ListBuffer[AddAction]()
     val versions = getVersions()
@@ -103,25 +117,30 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
   }
 
   private def writeAction(version: Long, action: Action): Unit = {
+    writeActions(version, Seq(action))
+  }
+
+  private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
-    
-    // Wrap actions in the appropriate delta log format
-    val wrappedAction = action match {
-      case metadata: MetadataAction => Map("metaData" -> metadata)
-      case add: AddAction => Map("add" -> add)
-      case remove: RemoveAction => Map("remove" -> remove)
-    }
-    
-    val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
     
     val output = fs.create(versionFile)
     try {
-      output.writeBytes(actionJson + "\n")
+      actions.foreach { action =>
+        // Wrap actions in the appropriate delta log format
+        val wrappedAction = action match {
+          case metadata: MetadataAction => Map("metaData" -> metadata)
+          case add: AddAction => Map("add" -> add)
+          case remove: RemoveAction => Map("remove" -> remove)
+        }
+        
+        val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
+        output.writeBytes(actionJson + "\n")
+      }
     } finally {
       output.close()
     }
     
-    logger.info(s"Written action to version $version: ${action.getClass.getSimpleName}")
+    logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
   }
 
   private def readVersion(version: Long): Seq[Action] = {

@@ -50,10 +50,9 @@ class Tantivy4SparkBatchWrite(
       case msg: Tantivy4SparkCommitMessage => msg.addAction
     }
 
-    addActions.foreach { addAction =>
-      val version = transactionLog.addFile(addAction)
-      logger.info(s"Added file ${addAction.path} at version $version")
-    }
+    // Add all files in a single transaction (like Delta Lake)
+    val version = transactionLog.addFiles(addActions)
+    logger.info(s"Added ${addActions.length} files in transaction version $version")
     
     logger.info(s"Successfully committed ${addActions.length} files")
   }

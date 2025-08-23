@@ -1,12 +1,14 @@
 # Tantivy4Spark
 
-A high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) directly via tantivy4java. It runs embedded inside Apache Spark without requiring any server-side components.
+A high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) via [tantivy4java](https://github.com/quickwit-oss/tantivy-java). It runs embedded inside Apache Spark without requiring any server-side components.
 
 ## Features
 
 - **Embedded Search**: Tantivy runs directly within Spark executors via tantivy4java
-- **Transaction Log**: Delta-like transaction log for metadata management  
+- **Split-Based Architecture**: Write-only indexes with split-based reading for optimal performance
+- **Transaction Log**: Delta Lake-style transaction log with batched operations for metadata management  
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
+- **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
 - **Schema Evolution**: Automatic schema inference and evolution support
@@ -25,9 +27,11 @@ A high-performance file format for Apache Spark that implements fast full-text s
 
 This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 - **No Native Dependencies**: Uses tantivy4java library for cross-platform compatibility
+- **Split-Based Storage**: Uses QuickwitSplit format (.split files) with JVM-wide caching
+- **Write-Only Indexes**: Create → add documents → commit → create split → close pattern
 - **Thread-Safe Design**: ThreadLocal IndexWriter pattern eliminates race conditions
 - **Automatic Schema Mapping**: Seamless conversion from Spark types to Tantivy field types
-- **ZIP-Based Archives**: Index files stored as compressed archives for efficient storage
+- **Schema-Aware Filtering**: Field validation prevents native crashes during query execution
 
 ## Quick Start
 
@@ -43,7 +47,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 # Build the project
 mvn clean compile
 
-# Run tests (116 tests, 100% pass rate)
+# Run tests (90 tests, 100% pass rate)
 mvn test
 
 # Package
@@ -106,20 +110,22 @@ df.write.format("tantivy4spark").save("file:///local/path")
 
 ## File Format
 
-### Index Files
+### Split Files
 
-Tantivy indexes are stored as `.tnt4s` files (Tantivy for Spark):
-- **ZIP-based archives**: Compressed archives containing all Tantivy index files
-- **Direct file access**: Efficient extraction and opening from ZIP format
-- **S3-optimized**: Reduced storage costs and faster transfers via compression
+Tantivy indexes are stored as `.split` files (QuickwitSplit format):
+- **Split-based storage**: Optimized binary format for fast loading and caching
+- **JVM-wide caching**: Shared `SplitCacheManager` reduces memory usage across executors
+- **Native compatibility**: Direct integration with tantivy4java library
+- **S3-optimized**: Efficient partial loading and caching for object storage
 
 ### Transaction Log
 
-Located in `_transaction_log/` directory:
-- JSON-based transaction log similar to Delta Lake
+Located in `_transaction_log/` directory (Delta Lake compatible):
+- **Batched operations**: Single JSON file per transaction with multiple ADD entries
 - `00000000000000000000.json` - Initial metadata and schema
-- `00000000000000000001.json` - First transaction (ADD/REMOVE operations)
-- Stores min/max values for data skipping
+- `00000000000000000001.json` - First transaction (multiple ADD operations)
+- `00000000000000000002.json` - Second transaction (additional files)
+- Stores min/max values for data skipping and query optimization
 
 ## Development
 
@@ -132,22 +138,25 @@ src/main/scala/com/tantivy4spark/
 ├── storage/        # S3-optimized storage layer
 └── transaction/    # Transaction log system
 
-src/test/scala/     # Comprehensive test suite (116 tests, 100% pass rate)
+src/test/scala/     # Comprehensive test suite (90 tests, 100% pass rate)
 ├── core/           # Core functionality tests
-├── integration/    # End-to-end integration tests
+├── integration/    # End-to-end integration tests  
 ├── storage/        # Storage protocol tests
-└── transaction/    # Transaction log tests
+├── transaction/    # Transaction log tests
+└── debug/          # Debug and diagnostic tests
 ```
 
 ### Running Tests
 
 ```bash
-# All tests (116 tests, 100% pass rate)
+# All tests (90 tests, 100% pass rate)
 mvn test
 
 # Specific test suites
 mvn test -Dtest="*IntegrationTest"                # Integration tests
 mvn test -Dtest="UnsupportedTypesTest"            # Type safety tests
+mvn test -Dtest="BatchTransactionLogTest"         # Transaction log batch operations
+mvn test -Dtest="*DebugTest"                      # Debug and diagnostic tests
 
 # Test coverage report
 mvn scoverage:report
