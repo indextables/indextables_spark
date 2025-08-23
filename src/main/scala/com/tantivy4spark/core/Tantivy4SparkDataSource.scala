@@ -237,10 +237,8 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val serializableSchema = data.schema
     
     // Pass Spark configuration values that might be needed in executors
-    val sparkConfProps = Map(
-      "spark.tantivy4spark.bloom.filters.enabled" -> spark.conf.getOption("spark.tantivy4spark.bloom.filters.enabled").getOrElse("true")
-    )
-    val enrichedOptions = parameters ++ sparkConfProps.filter(_._2 != "true") // Only pass non-default values
+    val sparkConfProps = Map.empty[String, String]
+    val enrichedOptions = parameters ++ sparkConfProps
     
     // Extract essential Hadoop configuration properties as a Map
     val hadoopConf = spark.sparkContext.hadoopConfiguration

@@ -28,7 +28,6 @@ import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.search.TantivySearchEngine
 import com.tantivy4spark.storage.{S3OptimizedReader, StandardFileReader, TantivyArchiveFormat}
 import com.tantivy4spark.util.StatisticsCalculator
-import com.tantivy4spark.bloom.{BloomFilterManager, BloomFilterStorage}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
@@ -171,47 +170,12 @@ class Tantivy4SparkDataWriter(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
   private val searchEngine = new TantivySearchEngine(writeSchema)
   private val statistics = new StatisticsCalculator.DatasetStatistics(writeSchema)
-  private val bloomFilterManager = new BloomFilterManager()
-  private val bloomFilterStorage = BloomFilterStorage.getInstance
   private var recordCount = 0L
-  
-  // Check if bloom filters are enabled (default: true)
-  // Support both DataFrame write option and Spark configuration property (passed through options)
-  private val bloomFiltersEnabled = options.getBoolean("spark.tantivy4spark.bloom.filters.enabled", true)
-  
-  // Track text values for bloom filter creation (only if enabled)
-  private val textColumnData = if (bloomFiltersEnabled) {
-    Some(scala.collection.mutable.Map[String, scala.collection.mutable.ArrayBuffer[String]]())
-  } else {
-    None
-  }
-  
-  // Initialize text column tracking (only if bloom filters enabled)
-  if (bloomFiltersEnabled) {
-    writeSchema.fields.foreach { field =>
-      if (field.dataType.typeName == "string") {
-        textColumnData.get(field.name) = scala.collection.mutable.ArrayBuffer[String]()
-      }
-    }
-  }
 
   override def write(record: InternalRow): Unit = {
     //println(s"Adding document $recordCount to Tantivy index")
     searchEngine.addDocument(record)
     statistics.updateRow(record)
-    
-    // Collect text values for bloom filter creation (only if enabled)
-    if (bloomFiltersEnabled) {
-      writeSchema.fields.zipWithIndex.foreach { case (field, index) =>
-        if (field.dataType.typeName == "string" && !record.isNullAt(index)) {
-          val value = record.getString(index)
-          if (value != null && value.nonEmpty) {
-            textColumnData.get(field.name) += value
-          }
-        }
-      }
-    }
-    
     recordCount += 1
   }
 
@@ -241,18 +205,6 @@ class Tantivy4SparkDataWriter(
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
     
-    // Create bloom filters for text columns (only if enabled)
-    val bloomFilters = if (bloomFiltersEnabled && textColumnData.isDefined && textColumnData.get.nonEmpty) {
-      logger.info(s"Creating bloom filters for ${textColumnData.get.size} text columns")
-      val filters = bloomFilterManager.createBloomFilters(textColumnData.get.toMap)
-      Some(bloomFilterStorage.encodeBloomFilters(filters))
-    } else {
-      if (!bloomFiltersEnabled) {
-        logger.info("Bloom filters disabled via spark.tantivy4spark.bloom.filters.enabled=false")
-      }
-      None
-    }
-    
     val addAction = AddAction(
       path = filePath.toString,
       partitionValues = Map.empty,
@@ -261,8 +213,7 @@ class Tantivy4SparkDataWriter(
       dataChange = true,
       numRecords = Some(recordCount),
       minValues = if (minValues.nonEmpty) Some(minValues) else None,
-      maxValues = if (maxValues.nonEmpty) Some(maxValues) else None,
-      bloomFilters = bloomFilters
+      maxValues = if (maxValues.nonEmpty) Some(maxValues) else None
     )
     
     logger.info(s"Committed writer for partition $partitionId with $recordCount records")
