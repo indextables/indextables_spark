@@ -26,7 +26,7 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
-import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager}
+import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry}
 import com.tantivy4spark.util.StatisticsCalculator
 import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
@@ -43,7 +43,22 @@ class Tantivy4SparkInputPartition(
     val options: CaseInsensitiveStringMap,
     val partitionId: Int,
     val limit: Option[Int] = None
-) extends InputPartition
+) extends InputPartition {
+  
+  /**
+   * Provide preferred locations for this partition based on split cache locality.
+   * Spark will try to schedule tasks on these hosts to take advantage of cached splits.
+   */
+  override def preferredLocations(): Array[String] = {
+    val preferredHosts = SplitLocationRegistry.getPreferredHosts(addAction.path)
+    if (preferredHosts.nonEmpty) {
+      preferredHosts
+    } else {
+      // No cache history available, let Spark decide
+      Array.empty[String]
+    }
+  }
+}
 
 class Tantivy4SparkReaderFactory(
     readSchema: StructType,
@@ -134,6 +149,11 @@ class Tantivy4SparkPartitionReader(
     if (!initialized) {
       try {
         logger.info(s"Reading Tantivy split: ${addAction.path}")
+        
+        // Record that this host has accessed this split for future scheduling locality
+        val currentHostname = SplitLocationRegistry.getCurrentHostname
+        SplitLocationRegistry.recordSplitAccess(addAction.path, currentHostname)
+        logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
         
         // Create cache configuration from Spark options
         val cacheConfig = createCacheConfig()

@@ -23,6 +23,7 @@ import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.storage.SplitLocationRegistry
 import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -48,9 +49,21 @@ class Tantivy4SparkScan(
     
     logger.info(s"Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
-    filteredActions.zipWithIndex.map { case (addAction, index) =>
-      new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, options, index, limit)
-    }.toArray
+    val partitions = filteredActions.zipWithIndex.map { case (addAction, index) =>
+      val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, options, index, limit)
+      val preferredHosts = partition.preferredLocations()
+      if (preferredHosts.nonEmpty) {
+        logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
+      } else {
+        logger.debug(s"Partition $index (${addAction.path}) has no cache locality information")
+      }
+      partition
+    }
+    
+    val totalPreferred = partitions.count(_.preferredLocations().nonEmpty)
+    logger.info(s"Split cache locality: $totalPreferred of ${partitions.length} partitions have preferred host assignments")
+    
+    partitions.toArray[InputPartition]
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {

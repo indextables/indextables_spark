@@ -45,6 +45,7 @@ The system implements a custom Spark DataSource V2 provider modeled after [Delta
 - **Split format**: Uses tantivy4java's Quickwit split format for immutable, optimized index storage
 - **JVM-wide caching**: Shared SplitCacheManager instances for optimal memory utilization across executors
 - **AWS session token support**: Full support for temporary credentials via AWS STS session tokens
+- **Smart cache locality**: Host-based split location tracking with Spark's preferredLocations API for optimal task scheduling
 
 
 ## Project Structure
@@ -68,7 +69,7 @@ src/main/scala/com/tantivy4spark/
 │   ├── StorageStrategy.scala              # Protocol detection and routing
 │   ├── S3OptimizedReader.scala            # S3-optimized I/O with caching
 │   ├── StandardFileReader.scala           # Standard Hadoop operations
-│   ├── SplitManager.scala                 # Split creation and validation
+│   ├── SplitManager.scala                 # Split creation, validation, and location tracking
 │   └── GlobalSplitCacheManager.scala      # JVM-wide split cache management
 ├── config/         # Configuration system
 │   ├── Tantivy4SparkSQLConf.scala         # Spark SQL configuration constants
@@ -314,6 +315,7 @@ The project is registered as a Spark data source via:
 - **Caching Strategy**: Chunk-based caching with ConcurrentHashMap
 - **Parallel Processing**: Multi-threaded document processing in executors
 - **Memory Efficiency**: Streaming document conversion without buffering entire datasets
+- **Smart Cache Locality**: Split location registry tracks which hosts have cached which splits, enabling Spark's scheduler to prefer those hosts for better data locality
 
 ### Key Implementation Details
 - **DataSource V2 API**: Full implementation of modern Spark connector interface
@@ -343,6 +345,11 @@ The project is registered as a Spark data source via:
 - **Type Conversion**: Robust handling of Spark ↔ Tantivy type mappings (Integer/Long/Boolean)
 - **Split format**: QuickwitSplit (.split) format with JVM-wide caching support
 - **Shaded Dependencies**: Google Guava repackaged to avoid conflicts (`tantivy4spark.com.google.common`)
+- **Split Location Tracking**: SplitLocationRegistry tracks host-to-split cache mappings for optimal task scheduling
+  - **Automatic Host Recording**: Records which hosts access which splits during partition reader initialization
+  - **PreferredLocations Integration**: Implements Spark's InputPartition.preferredLocations() API
+  - **Locality-Aware Scheduling**: Spark scheduler uses preferred locations to assign tasks to hosts with cached splits
+  - **Performance Benefits**: Reduces network I/O and improves query performance through better data locality
 
 ### Build Integration
 - **Maven Dependencies**: Uses tantivy4java as a standard Maven dependency

@@ -288,6 +288,60 @@ case class SplitCacheConfig(
 }
 
 /**
+ * Registry for tracking which hosts have cached which splits.
+ * This enables Spark to use preferredLocations for better data locality.
+ */
+object SplitLocationRegistry {
+  private val logger = LoggerFactory.getLogger(getClass)
+  
+  // Map from splitPath to Set of hostnames that have cached it
+  @volatile private var splitLocations: Map[String, Set[String]] = Map.empty
+  private val lock = new Object
+  
+  /**
+   * Record that a split has been accessed/cached on a particular host.
+   */
+  def recordSplitAccess(splitPath: String, hostname: String): Unit = {
+    lock.synchronized {
+      val currentHosts = splitLocations.getOrElse(splitPath, Set.empty)
+      val updatedHosts = currentHosts + hostname
+      splitLocations = splitLocations + (splitPath -> updatedHosts)
+      logger.debug(s"Recorded split access: $splitPath on host $hostname (total hosts: ${updatedHosts.size})")
+    }
+  }
+  
+  /**
+   * Get the list of hosts that have likely cached this split.
+   */
+  def getPreferredHosts(splitPath: String): Array[String] = {
+    splitLocations.getOrElse(splitPath, Set.empty).toArray
+  }
+  
+  /**
+   * Clear location tracking for a specific split (e.g., when it's no longer relevant).
+   */
+  def clearSplitLocations(splitPath: String): Unit = {
+    lock.synchronized {
+      splitLocations = splitLocations - splitPath
+      logger.debug(s"Cleared location tracking for split: $splitPath")
+    }
+  }
+  
+  /**
+   * Get current hostname for this JVM.
+   */
+  def getCurrentHostname: String = {
+    try {
+      java.net.InetAddress.getLocalHost.getHostName
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
+        "unknown"
+    }
+  }
+}
+
+/**
  * Global manager for split cache instances.
  * 
  * Maintains JVM-wide split cache managers that are shared across all Tantivy4Spark operations
