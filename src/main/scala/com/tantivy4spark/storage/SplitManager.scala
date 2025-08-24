@@ -226,31 +226,38 @@ case class SplitCacheConfig(
     logger.info(s"  - awsSessionToken: ${awsSessionToken.map(_ => "***").getOrElse("None")}")
     logger.info(s"  - awsEndpoint: ${awsEndpoint.getOrElse("None")}")
     
-    (awsAccessKey, awsSecretKey, awsRegion) match {
-      case (Some(key), Some(secret), Some(region)) =>
-        logger.info(s"✅ All required AWS credentials present - configuring tantivy4java")
-        // Pass session token if available, otherwise use 3-parameter version
+    // Configure AWS credentials (access key and secret key with optional session token)
+    (awsAccessKey, awsSecretKey) match {
+      case (Some(key), Some(secret)) =>
+        logger.info(s"✅ AWS credentials present - configuring tantivy4java")
         config = awsSessionToken match {
           case Some(token) => 
-            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, region=$region, sessionToken=***)")
-            val result = config.withAwsCredentials(key, secret, region, token)
+            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, sessionToken=***)")
+            val result = config.withAwsCredentials(key, secret, token)
             logger.info(s"🔧 withAwsCredentials returned: $result")
             result
           case None => 
-            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, region=$region)")
-            val result = config.withAwsCredentials(key, secret, region)
+            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***)")
+            val result = config.withAwsCredentials(key, secret)
             logger.info(s"🔧 withAwsCredentials returned: $result")
             result
         }
-      case (Some(key), Some(secret), None) =>
-        logger.warn(s"⚠️  AWS credentials provided but REGION is missing! accessKey=${key.take(4)}..., secretKey=***, region=None")
-        logger.warn(s"⚠️  This will cause 'A region must be set when sending requests to S3' error in tantivy4java")
-      case (Some(key), None, _) =>
+      case (Some(key), None) =>
         logger.warn(s"⚠️  AWS access key provided but SECRET KEY is missing! accessKey=${key.take(4)}..., secretKey=None")
-      case (None, Some(_), _) =>
+      case (None, Some(_)) =>
         logger.warn(s"⚠️  AWS secret key provided but ACCESS KEY is missing! accessKey=None, secretKey=***")
       case _ => // No AWS credentials provided
         logger.debug("🔧 SplitCacheConfig: No AWS credentials provided - using default credentials chain")
+    }
+    
+    // Configure AWS region separately
+    awsRegion match {
+      case Some(region) =>
+        logger.info(s"🔧 Calling config.withAwsRegion(region=$region)")
+        config = config.withAwsRegion(region)
+        logger.info(s"🔧 withAwsRegion returned: $config")
+      case None =>
+        logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
     }
     
     awsEndpoint.foreach(endpoint => config = config.withAwsEndpoint(endpoint))
