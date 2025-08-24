@@ -97,8 +97,68 @@ object TantivySearchEngine {
   def fromSplitFile(schema: StructType, splitPath: String): SplitSearchEngine = {
     logger.info(s"Creating SplitSearchEngine from split file: $splitPath")
     
-    import com.tantivy4spark.storage.SplitCacheConfig
-    SplitSearchEngine.fromSplitFile(schema, splitPath, SplitCacheConfig())
+    // Try to extract configuration from active Spark session
+    val cacheConfig = extractCacheConfigFromSparkSession()
+    SplitSearchEngine.fromSplitFile(schema, splitPath, cacheConfig)
+  }
+  
+  /**
+   * Extract SplitCacheConfig from active Spark session when available.
+   * Falls back to default config if no session is available.
+   */
+  private def extractCacheConfigFromSparkSession(): com.tantivy4spark.storage.SplitCacheConfig = {
+    try {
+      import org.apache.spark.sql.SparkSession
+      val spark = SparkSession.getActiveSession
+      
+      spark match {
+        case Some(session) =>
+          val sparkConf = session.conf
+          val hadoopConf = session.sparkContext.hadoopConfiguration
+          
+          // Helper function to get config with Hadoop fallback (same pattern as CloudStorageProviderFactory)
+          def getConfigWithFallback(sparkKey: String): Option[String] = {
+            val sparkValue = sparkConf.getOption(sparkKey)
+            val hadoopValue = Option(hadoopConf.get(sparkKey))
+            val result = sparkValue.orElse(hadoopValue)
+            
+            logger.info(s"🔍 Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
+            result
+          }
+          
+          logger.debug(s"🔍 Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})")
+          
+          com.tantivy4spark.storage.SplitCacheConfig(
+            cacheName = sparkConf.get("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
+            maxCacheSize = sparkConf.get("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
+            maxConcurrentLoads = sparkConf.get("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
+            enableQueryCache = sparkConf.get("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+            // AWS configuration with session token support - use Hadoop fallback for executor context
+            awsAccessKey = getConfigWithFallback("spark.tantivy4spark.aws.accessKey"),
+            awsSecretKey = getConfigWithFallback("spark.tantivy4spark.aws.secretKey"), 
+            awsSessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken"),
+            awsRegion = getConfigWithFallback("spark.tantivy4spark.aws.region"),
+            awsEndpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint"),
+            // Azure configuration
+            azureAccountName = getConfigWithFallback("spark.tantivy4spark.azure.accountName"),
+            azureAccountKey = getConfigWithFallback("spark.tantivy4spark.azure.accountKey"),
+            azureConnectionString = getConfigWithFallback("spark.tantivy4spark.azure.connectionString"),
+            azureEndpoint = getConfigWithFallback("spark.tantivy4spark.azure.endpoint"),
+            // GCP configuration
+            gcpProjectId = getConfigWithFallback("spark.tantivy4spark.gcp.projectId"),
+            gcpServiceAccountKey = getConfigWithFallback("spark.tantivy4spark.gcp.serviceAccountKey"),
+            gcpCredentialsFile = getConfigWithFallback("spark.tantivy4spark.gcp.credentialsFile"),
+            gcpEndpoint = getConfigWithFallback("spark.tantivy4spark.gcp.endpoint")
+          )
+        case None =>
+          logger.debug("No active Spark session found, using default SplitCacheConfig")
+          com.tantivy4spark.storage.SplitCacheConfig()
+      }
+    } catch {
+      case ex: Exception =>
+        logger.warn("Failed to extract cache config from Spark session, using defaults", ex)
+        com.tantivy4spark.storage.SplitCacheConfig()
+    }
   }
   
   /**

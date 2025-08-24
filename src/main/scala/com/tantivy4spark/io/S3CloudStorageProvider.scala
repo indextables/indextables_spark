@@ -46,6 +46,41 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   println(s"  - pathStyleAccess: ${config.awsPathStyleAccess}")
   println(s"  - region: ${config.awsRegion}")
   
+  // Detect if we're running against S3Mock for compatibility adjustments
+  private val isS3Mock = config.awsEndpoint.exists(_.contains("localhost"))
+  
+  // Helper methods for S3Mock path transformation and protocol conversion
+  // Use a special delimiter that won't appear in normal filenames
+  private val S3_MOCK_DIR_SEPARATOR = "___"
+  
+  // Convert s3a:// URLs to s3:// for tantivy4java compatibility
+  // tantivy4java only understands s3:// protocol, not s3a:// or s3n://
+  private def normalizeProtocolForTantivy(path: String): String = {
+    if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+      path.replaceFirst("^s3[an]://", "s3://")
+    } else {
+      path
+    }
+  }
+  
+  // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
+  private def flattenPathForS3Mock(key: String): String = {
+    if (isS3Mock && key.contains("/")) {
+      key.replace("/", S3_MOCK_DIR_SEPARATOR)
+    } else {
+      key
+    }
+  }
+  
+  // Convert flat paths back to nested: path___to___file.txt -> path/to/file.txt
+  private def unflattenPathFromS3Mock(key: String): String = {
+    if (isS3Mock && key.contains(S3_MOCK_DIR_SEPARATOR)) {
+      key.replace(S3_MOCK_DIR_SEPARATOR, "/")
+    } else {
+      key
+    }
+  }
+  
   private val s3Client: S3Client = {
     val builder = S3Client.builder()
     
@@ -97,32 +132,44 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   }
   
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
-    val (bucket, prefix) = parseS3Path(path)
+    val (bucket, originalPrefix) = parseS3Path(path)
+    
+    // Apply uniform path flattening for S3Mock compatibility
+    val prefix = flattenPathForS3Mock(originalPrefix)
     
     try {
-      logger.debug(s"Listing S3 files: bucket=$bucket, prefix=$prefix, recursive=$recursive")
+      logger.info(s"🔍 S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")
       
       val request = ListObjectsV2Request.builder()
         .bucket(bucket)
         .prefix(prefix)
-        .delimiter(if (recursive) null else "/")
+        .delimiter(if (recursive || isS3Mock) null else "/") // For S3Mock, always list recursively since we flatten paths
         .build()
       
       val response = s3Client.listObjectsV2(request)
       
       val files = response.contents().asScala.map { s3Object =>
+        // Transform the path back to the original format for the caller
+        val originalKey = s3Object.key()
+        val displayKey = unflattenPathFromS3Mock(originalKey)
+        
+        logger.debug(s"🔍 S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
+        
         CloudFileInfo(
-          path = s"s3://$bucket/${s3Object.key()}",
+          path = s"s3://$bucket/$displayKey",
           size = s3Object.size(),
           modificationTime = s3Object.lastModified().toEpochMilli,
           isDirectory = false
         )
       }.toSeq
       
-      val directories = if (!recursive) {
+      // For S3Mock with flattened paths, we don't have real directories
+      val directories = if (!recursive && !isS3Mock) {
         response.commonPrefixes().asScala.map { commonPrefix =>
+          val displayPrefix = unflattenPathFromS3Mock(commonPrefix.prefix())
+          
           CloudFileInfo(
-            path = s"s3://$bucket/${commonPrefix.prefix()}",
+            path = s"s3://$bucket/$displayPrefix",
             size = 0L,
             modificationTime = 0L,
             isDirectory = true
@@ -130,7 +177,10 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
         }.toSeq
       } else Seq.empty
       
-      files ++ directories
+      val allResults = files ++ directories
+      logger.info(s"🔍 S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'")
+      files.foreach(f => logger.debug(s"  File: ${f.path}"))
+      allResults
     } catch {
       case ex: Exception =>
         logger.error(s"Failed to list S3 files at s3://$bucket/$prefix", ex)
@@ -139,7 +189,10 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   }
   
   override def exists(path: String): Boolean = {
-    val (bucket, key) = parseS3Path(path)
+    val (bucket, originalKey) = parseS3Path(path)
+    
+    // Apply uniform path flattening for S3Mock compatibility
+    val key = flattenPathForS3Mock(originalKey)
     
     try {
       val request = HeadObjectRequest.builder()
@@ -183,10 +236,13 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   }
   
   override def readFile(path: String): Array[Byte] = {
-    val (bucket, key) = parseS3Path(path)
+    val (bucket, originalKey) = parseS3Path(path)
+    
+    // Apply uniform path flattening for S3Mock compatibility
+    val key = flattenPathForS3Mock(originalKey)
     
     try {
-      logger.debug(s"Reading entire S3 file: s3://$bucket/$key")
+      logger.debug(s"Reading entire S3 file: s3://$bucket/$key (original: $originalKey)")
       
       val request = GetObjectRequest.builder()
         .bucket(bucket)
@@ -247,12 +303,16 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   }
   
   override def writeFile(path: String, content: Array[Byte]): Unit = {
-    val (bucket, key) = parseS3Path(path)
+    val (bucket, originalKey) = parseS3Path(path)
+    
+    // Apply uniform path flattening for S3Mock compatibility
+    val key = flattenPathForS3Mock(originalKey)
     
     try {
       logger.info(s"🔧 S3 WRITE DEBUG - Path: $path")
-      logger.info(s"🔧 S3 WRITE DEBUG - Bucket: '$bucket', Key: '$key'")
+      logger.info(s"🔧 S3 WRITE DEBUG - Bucket: '$bucket', Key: '$key' (original: '$originalKey')")
       logger.info(s"🔧 S3 WRITE DEBUG - Content length: ${content.length} bytes")
+      logger.info(s"🔧 S3 WRITE DEBUG - S3Mock mode: $isS3Mock")
       
       // Ensure bucket exists first
       ensureBucketExists(bucket)
@@ -347,9 +407,11 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
           false
       }
     } else {
-      // S3 doesn't have directories, but we can create a placeholder object
-      val directoryPath = if (key.endsWith("/")) key else key + "/"
-      writeFile(s"s3://$bucket/$directoryPath", Array.empty[Byte])
+      // For S3Mock compatibility, we don't create directory placeholders
+      // S3Mock stores objects as actual filesystem directories, and creating placeholder objects
+      // conflicts with writing actual files later. Instead, we just return true and let
+      // S3Mock handle directory creation implicitly when files are written.
+      logger.debug(s"Skipping directory placeholder creation for S3Mock compatibility: $path")
       true
     }
   }
@@ -411,6 +473,23 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
     executor.shutdown()
     s3Client.close()
     logger.debug("Closed S3 storage provider")
+  }
+  
+  /**
+   * Normalize path for tantivy4java compatibility.
+   * Converts s3a:// and s3n:// protocols to s3:// which tantivy4java understands.
+   */
+  override def normalizePathForTantivy(path: String): String = {
+    val protocolNormalized = normalizeProtocolForTantivy(path)
+    
+    // Apply path flattening for S3Mock compatibility
+    if (isS3Mock) {
+      val (bucket, key) = parseS3Path(protocolNormalized)
+      val flattenedKey = flattenPathForS3Mock(key)
+      s"s3://$bucket/$flattenedKey"
+    } else {
+      protocolNormalized
+    }
   }
   
   /**

@@ -178,6 +178,21 @@ spark.conf.set("spark.tantivy4spark.aws.sessionToken", "your-session-token")
 spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
 df.write.format("tantivy4spark").save("s3://bucket/path")
 
+// Alternative: Pass credentials via DataFrame write options (automatically propagated)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.accessKey", "your-access-key")
+  .option("spark.tantivy4spark.aws.secretKey", "your-secret-key") 
+  .option("spark.tantivy4spark.aws.sessionToken", "your-session-token")
+  .option("spark.tantivy4spark.aws.region", "us-west-2")
+  .option("spark.tantivy4spark.aws.endpoint", "https://s3.custom-provider.com")
+  .save("s3://bucket/path")
+
+// Split cache configuration with AWS session tokens
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.cache.maxSize", "500000000") // 500MB cache
+  .option("spark.tantivy4spark.aws.sessionToken", "your-session-token") // Session token for cache
+  .save("s3://bucket/path")
+
 // Standard operations for local/HDFS
 df.write.format("tantivy4spark").save("hdfs://namenode/path")
 df.write.format("tantivy4spark").save("file:///local/path")
@@ -302,11 +317,20 @@ The project is registered as a Spark data source via:
 
 ### Key Implementation Details
 - **DataSource V2 API**: Full implementation of modern Spark connector interface
+- **Unified I/O Architecture**: Replaced direct Hadoop filesystem usage with CloudStorageProvider abstraction
+  - **CloudStorageProviderFactory**: Centralized provider creation with protocol detection
+  - **S3CloudStorageProvider**: AWS SDK v2 with session token support, path-style access, custom endpoints
+  - **HadoopCloudStorageProvider**: Wrapper for Hadoop-based operations (local, HDFS)
+  - **Configuration Propagation**: DataFrame write options → Spark config → Hadoop config → executors
 - **Optimized Write Architecture**: Delta Lake-style automatic split sizing with adaptive shuffle
   - **Configuration Hierarchy**: Write options → Spark session config → table properties → defaults
   - **Adaptive Partitioning**: Calculates optimal partition count using ceiling function: `ceil(totalRecords / targetRecords)`
   - **Shuffle Strategies**: HashPartitioning for partitioned tables, RoundRobinPartitioning for non-partitioned
   - **Metrics Integration**: SQL metrics for monitoring split count and record distribution
+- **Enhanced AWS Integration**: Complete session token support throughout the system
+  - **Session Token Flow**: DataFrame options → TransactionLog → S3CloudStorageProvider → tantivy4java CacheConfig
+  - **Multi-context Support**: Works in driver, executor, and serialized contexts
+  - **Configuration Extraction**: From Spark session, Hadoop config, and write options
 - **Schema-aware filter pushdown**: Field validation prevents FieldNotFound panics at native level
 - **Split-based architecture**: Write-only indexes with immutable split files for reading
 - **Partition pruning**: Leverages min/max statistics for efficient query execution
@@ -331,6 +355,50 @@ The project is registered as a Spark data source via:
 - **Memory Management**: tantivy4java manages native handles and resources
 - **Logging Integration**: SLF4J logging for Scala components and tantivy4java integration
 - **Error Propagation**: Structured error handling from tantivy4java to Spark
+
+### AWS Configuration Distribution (Fixed Issue)
+
+**Problem Solved**: AWS credentials and region configuration was not properly propagating from Spark driver to executors, causing "A region must be set when sending requests to S3" errors during split reading operations.
+
+**Root Cause**: Multiple code paths with different configuration propagation mechanisms:
+1. **V2 DataSource API Path**: Uses scan builder → scan → reader factory → partition reader
+2. **V1 DataSource API Path**: Uses buildScan → processFile standalone method
+
+**Solutions Implemented**:
+
+#### V2 DataSource API Fix (Broadcast Variables)
+- **Driver Side** (`Tantivy4SparkTable.newScanBuilder()`): Creates broadcast variable containing all `spark.tantivy4spark.*` configurations
+- **Executor Side** (`Tantivy4SparkPartitionReader.createCacheConfig()`): Accesses broadcast configuration with fallback pattern: `options → broadcast → default`
+- **Flow**: `newScanBuilder()` → `Tantivy4SparkScanBuilder` → `Tantivy4SparkScan` → `Tantivy4SparkReaderFactory` → `Tantivy4SparkPartitionReader`
+
+#### V1 DataSource API Fix (Enhanced buildScan)
+- **Driver Side** (`Tantivy4SparkRelation.buildScan()`): Extracts all `spark.tantivy4spark.*` configurations from Hadoop configuration and includes them in `hadoopConfProps`
+- **Executor Side** (`processFile()` method): Uses `hadoopConfProps` to create `SplitCacheConfig` with proper AWS credentials
+- **Flow**: `buildScan()` → `processFile()` → `SplitSearchEngine.fromSplitFile()`
+
+#### Key Implementation Details
+```scala
+// V2 API: Broadcast variables approach
+val tantivyConfigs = hadoopConf.iterator().asScala
+  .filter(_.getKey.startsWith("spark.tantivy4spark."))
+  .map(entry => entry.getKey -> entry.getValue)
+  .toMap
+val broadcastConfig = spark.sparkContext.broadcast(tantivyConfigs)
+
+// V1 API: Enhanced hadoopConfProps
+val tantivyProps = hadoopConf.iterator().asScala
+  .filter(_.getKey.startsWith("spark.tantivy4spark."))
+  .map(entry => entry.getKey -> entry.getValue)
+  .toMap
+val hadoopConfProps = baseHadoopProps ++ tantivyProps
+```
+
+**Verification**: Both paths now successfully create `SplitCacheConfig` with proper AWS values:
+- ✅ `awsRegion=us-east-1` (instead of `awsRegion=None`)
+- ✅ `awsEndpoint=http://localhost:port` (instead of `awsEndpoint=None`)
+- ✅ AWS credentials properly propagate to tantivy4java's `SplitCacheManager`
+
+**Remaining Issue**: Custom S3 endpoints with tantivy4java may still have compatibility issues at the native library level, but configuration propagation is now working correctly.
 
 ---
 

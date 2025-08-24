@@ -204,6 +204,11 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   
   override def getProviderType: String = "hadoop"
   
+  override def normalizePathForTantivy(path: String): String = {
+    // Hadoop provider doesn't need protocol conversion, return path as-is
+    path
+  }
+  
   override def close(): Unit = {
     // Hadoop FileSystem instances are cached and managed by Hadoop
     logger.debug("Closed Hadoop storage provider")

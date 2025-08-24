@@ -96,6 +96,13 @@ trait CloudStorageProvider extends Closeable {
    * Get provider type for logging/metrics
    */
   def getProviderType: String
+  
+  /**
+   * Normalize path for tantivy4java compatibility.
+   * For S3 providers, converts s3a:// and s3n:// protocols to s3://.
+   * Other providers can return the path unchanged.
+   */
+  def normalizePathForTantivy(path: String): String = path // Default implementation returns unchanged
 }
 
 /**
@@ -332,10 +339,8 @@ object CloudStorageProviderFactory {
         .orElse(Some("us-east-1")),
         
       // Support multiple ways to specify S3 service endpoint override (for S3Mock, MinIO, etc.)
-      awsEndpoint = Option(options.get("spark.tantivy4spark.aws.endpoint"))
-        .orElse(Option(options.get("spark.tantivy4spark.s3.endpoint")))
+      awsEndpoint = Option(options.get("spark.tantivy4spark.s3.endpoint"))
         .orElse(Option(options.get("spark.tantivy4spark.s3.serviceUrl")))
-        .orElse(Option(hadoopConf.get("spark.tantivy4spark.aws.endpoint")))
         .orElse(Option(hadoopConf.get("spark.tantivy4spark.s3.endpoint")))
         .orElse(Option(hadoopConf.get("spark.hadoop.fs.s3a.endpoint")))
         .orElse(Option(hadoopConf.get("fs.s3a.endpoint"))),
@@ -380,8 +385,7 @@ object CloudStorageProviderFactory {
         println(s"  - From s3a path.style.access: $pathStyleFromHadoop3")
         
         // Check if we have a localhost endpoint - if so, force path-style access for S3Mock
-        val endpointValue = Option(options.get("spark.tantivy4spark.aws.endpoint"))
-          .orElse(Option(options.get("spark.tantivy4spark.s3.endpoint")))
+        val endpointValue = Option(options.get("spark.tantivy4spark.s3.endpoint"))
           .orElse(Option(hadoopConf.get("spark.tantivy4spark.s3.endpoint")))
         
         val isLocalHostEndpoint = endpointValue.exists(_.contains("localhost"))

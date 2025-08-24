@@ -42,7 +42,7 @@ object Tantivy4SparkSQLConf {
   val TANTIVY4SPARK_AWS_SECRET_KEY = "spark.tantivy4spark.aws.secretKey"
   val TANTIVY4SPARK_AWS_SESSION_TOKEN = "spark.tantivy4spark.aws.sessionToken"
   val TANTIVY4SPARK_AWS_REGION = "spark.tantivy4spark.aws.region"
-  val TANTIVY4SPARK_AWS_ENDPOINT = "spark.tantivy4spark.aws.endpoint"
+  val TANTIVY4SPARK_S3_ENDPOINT = "spark.tantivy4spark.s3.endpoint"
 
   /////////////////////
   // General Configuration

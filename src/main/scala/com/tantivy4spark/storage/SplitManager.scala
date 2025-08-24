@@ -218,20 +218,39 @@ case class SplitCacheConfig(
       .withMaxConcurrentLoads(maxConcurrentLoads)
       .withQueryCache(enableQueryCache)
     
-    // AWS configuration
+    // AWS configuration with detailed verification
+    logger.info(s"🔍 SplitCacheConfig AWS Verification:")
+    logger.info(s"  - awsAccessKey: ${awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
+    logger.info(s"  - awsSecretKey: ${awsSecretKey.map(_ => "***").getOrElse("None")}")
+    logger.info(s"  - awsRegion: ${awsRegion.getOrElse("None")}")
+    logger.info(s"  - awsSessionToken: ${awsSessionToken.map(_ => "***").getOrElse("None")}")
+    logger.info(s"  - awsEndpoint: ${awsEndpoint.getOrElse("None")}")
+    
     (awsAccessKey, awsSecretKey, awsRegion) match {
       case (Some(key), Some(secret), Some(region)) =>
+        logger.info(s"✅ All required AWS credentials present - configuring tantivy4java")
         // Pass session token if available, otherwise use 3-parameter version
         config = awsSessionToken match {
           case Some(token) => 
-            logger.info(s"🔧 SplitCacheConfig: Passing AWS credentials WITH session token to tantivy4java")
-            config.withAwsCredentials(key, secret, region, token)
+            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, region=$region, sessionToken=***)")
+            val result = config.withAwsCredentials(key, secret, region, token)
+            logger.info(s"🔧 withAwsCredentials returned: $result")
+            result
           case None => 
-            logger.info(s"🔧 SplitCacheConfig: Passing AWS credentials WITHOUT session token to tantivy4java")
-            config.withAwsCredentials(key, secret, region)
+            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, region=$region)")
+            val result = config.withAwsCredentials(key, secret, region)
+            logger.info(s"🔧 withAwsCredentials returned: $result")
+            result
         }
+      case (Some(key), Some(secret), None) =>
+        logger.warn(s"⚠️  AWS credentials provided but REGION is missing! accessKey=${key.take(4)}..., secretKey=***, region=None")
+        logger.warn(s"⚠️  This will cause 'A region must be set when sending requests to S3' error in tantivy4java")
+      case (Some(key), None, _) =>
+        logger.warn(s"⚠️  AWS access key provided but SECRET KEY is missing! accessKey=${key.take(4)}..., secretKey=None")
+      case (None, Some(_), _) =>
+        logger.warn(s"⚠️  AWS secret key provided but ACCESS KEY is missing! accessKey=None, secretKey=***")
       case _ => // No AWS credentials provided
-        logger.debug("🔧 SplitCacheConfig: No AWS credentials provided")
+        logger.debug("🔧 SplitCacheConfig: No AWS credentials provided - using default credentials chain")
     }
     
     awsEndpoint.foreach(endpoint => config = config.withAwsEndpoint(endpoint))
@@ -256,6 +275,7 @@ case class SplitCacheConfig(
     
     gcpEndpoint.foreach(endpoint => config = config.withGcpEndpoint(endpoint))
     
+    logger.info(s"🔧 Final tantivy4java CacheConfig before returning: $config")
     config
   }
 }
@@ -277,9 +297,14 @@ object GlobalSplitCacheManager {
    * Get or create a global split cache manager.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
+    println(s"🔍 GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
+    println(s"🔍 Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
+    println(s"🔍 Existing cache managers: ${cacheManagers.keySet.mkString(", ")}")
+    
     cacheManagers.get(config.cacheName) match {
       case Some(manager) => 
-        logger.debug(s"Reusing existing cache manager: ${config.cacheName}")
+        logger.warn(s"⚠️  REUSING existing cache manager: ${config.cacheName} - this may have old configuration!")
+        logger.warn(s"⚠️  If you see region errors, this is likely why - the cached manager has old config")
         manager
       case None =>
         lock.synchronized {

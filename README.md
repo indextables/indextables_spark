@@ -99,7 +99,19 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.optimizeWrite.enabled` | `true` | Enable/disable optimized writes with automatic split sizing |
 | `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit` | `1000000` | Target number of records per split file for optimized writes |
 | `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.tantivy4spark.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
+| `spark.tantivy4spark.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
+| `spark.tantivy4spark.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
+| `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
+| `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
+| `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
+| `spark.tantivy4spark.aws.region` | - | AWS region for S3 split access |
+| `spark.tantivy4spark.aws.endpoint` | - | Custom AWS S3 endpoint |
+| `spark.tantivy4spark.azure.accountName` | - | Azure storage account name |
+| `spark.tantivy4spark.azure.accountKey` | - | Azure storage account key |
+| `spark.tantivy4spark.gcp.projectId` | - | GCP project ID for Cloud Storage |
+| `spark.tantivy4spark.gcp.credentialsFile` | - | Path to GCP service account credentials file |
 
 #### Optimized Writes Configuration
 
@@ -160,10 +172,52 @@ spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-temporary-secret-key")
 spark.conf.set("spark.tantivy4spark.aws.sessionToken", "your-session-token")
 spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
 
-// Custom S3 endpoint (for S3-compatible services)
+// Custom S3 endpoint (for S3-compatible services like MinIO, LocalStack)
 spark.conf.set("spark.tantivy4spark.aws.endpoint", "https://s3.custom-provider.com")
 
 df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// Alternative: Pass credentials via write options (automatically propagated to executors)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.accessKey", "your-access-key")
+  .option("spark.tantivy4spark.aws.secretKey", "your-secret-key")
+  .option("spark.tantivy4spark.aws.sessionToken", "your-session-token")
+  .option("spark.tantivy4spark.aws.region", "us-west-2")
+  .save("s3://bucket/path")
+```
+
+#### Split Cache Configuration
+
+Configure the JVM-wide split cache for optimal performance:
+
+```scala
+// Configure split cache settings
+spark.conf.set("spark.tantivy4spark.cache.maxSize", "500000000") // 500MB cache
+spark.conf.set("spark.tantivy4spark.cache.maxConcurrentLoads", "16") // More concurrent loads
+spark.conf.set("spark.tantivy4spark.cache.queryCache", "true") // Enable query caching
+
+// Configure per DataFrame write (overrides session config)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.cache.maxSize", "1000000000") // 1GB cache for this operation
+  .save("s3://bucket/path")
+```
+
+#### Multi-Cloud Support
+
+The system supports multiple cloud storage providers:
+
+```scala
+// Azure Blob Storage
+spark.conf.set("spark.tantivy4spark.azure.accountName", "yourstorageaccount")
+spark.conf.set("spark.tantivy4spark.azure.accountKey", "your-account-key")
+
+// Google Cloud Storage
+spark.conf.set("spark.tantivy4spark.gcp.projectId", "your-project-id")
+spark.conf.set("spark.tantivy4spark.gcp.credentialsFile", "/path/to/service-account.json")
+
+// Write to different cloud providers
+df.write.format("tantivy4spark").save("abfss://container@account.dfs.core.windows.net/path")
+df.write.format("tantivy4spark").save("gs://bucket/path")
 ```
 
 
@@ -246,6 +300,76 @@ mvn scoverage:report
 3. Leverage data skipping with min/max statistics
 4. Partition large datasets by common query dimensions
 
+## Known Issues and Solutions
+
+### AWS Configuration in Distributed Mode
+
+**Issue**: When running on distributed Spark clusters, AWS credentials and region information may not properly propagate from the driver to executors, causing "A region must be set when sending requests to S3" errors.
+
+**Solution**: The system includes automatic broadcast mechanisms to distribute configuration:
+
+1. **V2 DataSource API**: Uses Spark broadcast variables to distribute configuration to executors
+2. **V1 DataSource API**: Automatically copies `spark.tantivy4spark.*` configurations from driver to executor Hadoop configuration
+
+**Best Practices**:
+```scala
+// Set configuration in Spark session (automatically broadcast to executors)
+spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
+spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+
+// Or set via DataFrame options (automatically propagated)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.region", "us-west-2")
+  .save("s3://bucket/path")
+```
+
+### Custom S3 Endpoints
+
+**Issue**: Using custom S3 endpoints (MinIO, LocalStack, S3Mock) with tantivy4java may cause region resolution errors.
+
+**Workaround**: Use standard AWS regions even with custom endpoints:
+```scala
+spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")  // Standard region
+spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://localhost:9000")  // Custom endpoint
+```
+
+### Schema Evolution Limitations
+
+**Issue**: Limited support for schema changes after initial creation.
+
+**Guidelines**:
+- ✅ Adding new fields is supported
+- ❌ Removing fields may cause read errors
+- ❌ Changing field types is not recommended
+- ✅ Renaming fields works if old data is not accessed
+
+## Troubleshooting
+
+### Debug Mode
+
+Enable detailed logging for troubleshooting:
+```scala
+spark.conf.set("spark.sql.adaptive.enabled", "false")  // Disable AQE for clearer logs
+// Set log level to DEBUG in log4j configuration
+```
+
+### Common Error Messages
+
+1. **"A region must be set when sending requests to S3"**
+   - Ensure AWS region is set in configuration
+   - Check that configuration is propagating to executors
+   - Verify AWS credentials are valid
+
+2. **"UnsupportedOperationException: Array types not supported"**
+   - Tantivy doesn't support complex types (arrays, maps, structs)
+   - Use supported types: String, Long, Int, Double, Float, Boolean, Timestamp, Date
+
+3. **"Failed to read split file"**
+   - Verify S3 permissions and credentials
+   - Check that split files exist and are accessible
+   - Ensure proper region configuration
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
@@ -253,5 +377,5 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 ## Support
 
 - GitHub Issues: Report bugs and request features
-- Documentation: See the [Wiki](https://github.com/your-org/tantivy4spark/wiki) for detailed guides
-- Community: Join discussions in GitHub Discussions
+- Documentation: Comprehensive test suite with 103+ tests demonstrating usage patterns
+- Community: Check the test files in `src/test/scala/` for detailed usage examples

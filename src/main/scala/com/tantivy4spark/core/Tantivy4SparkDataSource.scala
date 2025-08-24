@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory
 
 import java.util
 import scala.collection.JavaConverters._
+import org.apache.spark.broadcast.Broadcast
 
 object Tantivy4SparkRelation {
   def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {
@@ -80,17 +81,57 @@ object Tantivy4SparkRelation {
       localHadoopConf.set(key, value)
     }
     
+    // DEBUG: Print all tantivy4spark configurations received in executor
+    println(s"🔍 processFile received ${hadoopConfProps.size} total config properties")
+    val tantivyConfigs = hadoopConfProps.filter(_._1.startsWith("spark.tantivy4spark."))
+    println(s"🔍 processFile found ${tantivyConfigs.size} tantivy4spark configs:")
+    tantivyConfigs.foreach { case (key, value) =>
+      val displayValue = if (key.contains("secret") || key.contains("session")) "***" else value
+      println(s"   $key = $displayValue")
+    }
+    
+    // Extract cache configuration with session token support from Hadoop props
+    val cacheConfig = com.tantivy4spark.storage.SplitCacheConfig(
+      cacheName = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
+      maxCacheSize = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
+      maxConcurrentLoads = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
+      enableQueryCache = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+      // AWS configuration with session token support (handle both camelCase and lowercase keys)
+      awsAccessKey = hadoopConfProps.get("spark.tantivy4spark.aws.accessKey").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.accesskey")),
+      awsSecretKey = hadoopConfProps.get("spark.tantivy4spark.aws.secretKey").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.secretkey")),
+      awsSessionToken = hadoopConfProps.get("spark.tantivy4spark.aws.sessionToken").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.sessiontoken")),
+      awsRegion = hadoopConfProps.get("spark.tantivy4spark.aws.region"),
+      awsEndpoint = hadoopConfProps.get("spark.tantivy4spark.s3.endpoint"),
+      // Azure configuration
+      azureAccountName = hadoopConfProps.get("spark.tantivy4spark.azure.accountName"),
+      azureAccountKey = hadoopConfProps.get("spark.tantivy4spark.azure.accountKey"),
+      azureConnectionString = hadoopConfProps.get("spark.tantivy4spark.azure.connectionString"),
+      azureEndpoint = hadoopConfProps.get("spark.tantivy4spark.azure.endpoint"),
+      // GCP configuration
+      gcpProjectId = hadoopConfProps.get("spark.tantivy4spark.gcp.projectId"),
+      gcpServiceAccountKey = hadoopConfProps.get("spark.tantivy4spark.gcp.serviceAccountKey"),
+      gcpCredentialsFile = hadoopConfProps.get("spark.tantivy4spark.gcp.credentialsFile"),
+      gcpEndpoint = hadoopConfProps.get("spark.tantivy4spark.gcp.endpoint")
+    )
+    
     // Use SplitSearchEngine to read split files directly
     val rows = scala.collection.mutable.ListBuffer[org.apache.spark.sql.Row]()
     
     try {
       println(s"Reading Tantivy split file: $filePath")
       
-      // Use SplitSearchEngine to read from split
+      // Normalize path for tantivy4java compatibility (s3a:// -> s3://)
+      val normalizedPath = if (filePath.startsWith("s3a://") || filePath.startsWith("s3n://")) {
+        filePath.replaceFirst("^s3[an]://", "s3://")
+      } else {
+        filePath
+      }
+      
+      // Use SplitSearchEngine to read from split with proper cache configuration
       val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFile(
         serializableSchema, 
-        filePath,
-        com.tantivy4spark.storage.SplitCacheConfig()
+        normalizedPath,
+        cacheConfig
       )
       println(s"Split search engine created successfully")
       
@@ -183,9 +224,31 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     // For writes, delegate to the V2 TableProvider approach
     val path = parameters.getOrElse("path", throw new IllegalArgumentException("Path is required"))
     
-    // Use the V2 API by creating the table and executing the write
+    // For V1 DataSource API, the DataFrame write options (.option() calls) are not directly accessible
+    // Instead, they should have been set in the Spark configuration or passed via parameters
+    // Let's check both Spark configuration and parameters for the options
     val spark = sqlContext.sparkSession
-    val options = new CaseInsensitiveStringMap(parameters.asJava)
+    val sparkConf = spark.conf
+    
+    // Extract all tantivy4spark options from Spark configuration
+    val sparkConfigOptions = try {
+      sparkConf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    } catch {
+      case _: Exception => Map.empty[String, String]
+    }
+    
+    // Copy all tantivy4spark options into Hadoop configuration so they're available in executors
+    val currentHadoopConf = spark.sparkContext.hadoopConfiguration
+    (parameters ++ sparkConfigOptions).foreach { case (key, value) =>
+      if (key.startsWith("spark.tantivy4spark.")) {
+        currentHadoopConf.set(key, value)
+        println(s"🔧 Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
+      }
+    }
+    
+    // Combine all available options (parameters take priority over Spark config)
+    val allOptions = sparkConfigOptions ++ parameters
+    val options = new CaseInsensitiveStringMap(allOptions.asJava)
     val tableProvider = new Tantivy4SparkTableProvider()
     
     // Get or create the table
@@ -350,17 +413,30 @@ class Tantivy4SparkRelation(
       val serializableFiles = files.map(_.path)
       val serializableSchema = schema
       
-      // Get Hadoop configuration from driver context
-      val hadoopConfProps = Map(
-        "fs.defaultFS" -> spark.sparkContext.hadoopConfiguration.get("fs.defaultFS", ""),
-        "fs.s3a.access.key" -> spark.sparkContext.hadoopConfiguration.get("fs.s3a.access.key", ""),
-        "fs.s3a.secret.key" -> spark.sparkContext.hadoopConfiguration.get("fs.s3a.secret.key", ""),
-        "fs.s3a.endpoint" -> spark.sparkContext.hadoopConfiguration.get("fs.s3a.endpoint", ""),
-        "fs.s3a.path.style.access" -> spark.sparkContext.hadoopConfiguration.get("fs.s3a.path.style.access", ""),
-        "fs.s3a.impl" -> spark.sparkContext.hadoopConfiguration.get("fs.s3a.impl", ""),
-        "fs.hdfs.impl" -> spark.sparkContext.hadoopConfiguration.get("fs.hdfs.impl", ""),
-        "fs.file.impl" -> spark.sparkContext.hadoopConfiguration.get("fs.file.impl", "")
+      // Get Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
+      val hadoopConf = spark.sparkContext.hadoopConfiguration
+      val baseHadoopProps = Map(
+        "fs.defaultFS" -> hadoopConf.get("fs.defaultFS", ""),
+        "fs.s3a.access.key" -> hadoopConf.get("fs.s3a.access.key", ""),
+        "fs.s3a.secret.key" -> hadoopConf.get("fs.s3a.secret.key", ""),
+        "fs.s3a.endpoint" -> hadoopConf.get("fs.s3a.endpoint", ""),
+        "fs.s3a.path.style.access" -> hadoopConf.get("fs.s3a.path.style.access", ""),
+        "fs.s3a.impl" -> hadoopConf.get("fs.s3a.impl", ""),
+        "fs.hdfs.impl" -> hadoopConf.get("fs.hdfs.impl", ""),
+        "fs.file.impl" -> hadoopConf.get("fs.file.impl", "")
       ).filter(_._2.nonEmpty)
+      
+      // Extract all tantivy4spark-specific configurations from Hadoop config
+      val tantivyProps = {
+        import scala.jdk.CollectionConverters._
+        hadoopConf.iterator().asScala
+          .filter(_.getKey.startsWith("spark.tantivy4spark."))
+          .map(entry => entry.getKey -> entry.getValue)
+          .toMap
+      }
+      
+      val hadoopConfProps = baseHadoopProps ++ tantivyProps
+      println(s"🔧 V1 buildScan passing ${hadoopConfProps.size} config properties to executors, including ${tantivyProps.size} tantivy4spark configs")
       
       // Create RDD from file paths using standalone object method for proper serialization
       spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
@@ -376,6 +452,7 @@ class Tantivy4SparkTable(
     options: CaseInsensitiveStringMap
 ) extends SupportsRead with SupportsWrite {
 
+  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkTable])
   private val spark = SparkSession.active
   private val tablePath = new Path(path)
   private val transactionLog = new TransactionLog(tablePath, spark, options)
@@ -396,7 +473,17 @@ class Tantivy4SparkTable(
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    new Tantivy4SparkScanBuilder(transactionLog, schema(), options)
+    // Create broadcast variable for Hadoop configuration containing all Tantivy4Spark configurations
+    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val tantivyConfigs = hadoopConf.iterator().asScala
+      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .map(entry => entry.getKey -> entry.getValue)
+      .toMap
+    
+    logger.info(s"🔧 Broadcasting ${tantivyConfigs.size} Tantivy4Spark configurations to executors: ${tantivyConfigs.keys.mkString(", ")}")
+    val broadcastConfig = spark.sparkContext.broadcast(tantivyConfigs)
+    
+    new Tantivy4SparkScanBuilder(transactionLog, schema(), options, broadcastConfig)
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {

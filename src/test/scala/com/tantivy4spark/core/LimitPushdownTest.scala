@@ -166,7 +166,8 @@ class LimitPushdownTest extends TestBase {
       val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
       
       // Test ScanBuilder limit pushdown methods
-      val scanBuilder = new Tantivy4SparkScanBuilder(transactionLog, schema, options)
+      val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
+      val scanBuilder = new Tantivy4SparkScanBuilder(transactionLog, schema, options, emptyBroadcastConfig)
       
       // Push a limit - should return true indicating support
       val limitPushed = scanBuilder.pushLimit(10)

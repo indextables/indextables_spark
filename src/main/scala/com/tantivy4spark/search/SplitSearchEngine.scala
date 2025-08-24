@@ -38,11 +38,32 @@ class SplitSearchEngine(
   
   private val logger = LoggerFactory.getLogger(classOf[SplitSearchEngine])
   
+  // DEBUG: Show what's in the cacheConfig before calling getInstance
+  println(s"🔍 SplitSearchEngine creating cache manager with config:")
+  println(s"  - cacheName: ${cacheConfig.cacheName}")
+  println(s"  - awsAccessKey: ${cacheConfig.awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
+  println(s"  - awsSecretKey: ${cacheConfig.awsSecretKey.map(_ => "***").getOrElse("None")}")
+  println(s"  - awsRegion: ${cacheConfig.awsRegion.getOrElse("None")}")
+  println(s"  - awsSessionToken: ${cacheConfig.awsSessionToken.map(_ => "***").getOrElse("None")}")
+  println(s"  - awsEndpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
+  
   // Get the global cache manager for this configuration
   private val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
   
   // Create the split searcher using the shared cache
-  protected val splitSearcher = cacheManager.createSplitSearcher(splitPath)
+  logger.info(s"🔧 About to call cacheManager.createSplitSearcher() for path: $splitPath")
+  protected val splitSearcher = try {
+    cacheManager.createSplitSearcher(splitPath)
+  } catch {
+    case ex: RuntimeException if ex.getMessage.contains("region must be set") =>
+      logger.error(s"❌ CONFIRMED: tantivy4java region error when creating SplitSearcher for $splitPath")
+      logger.error(s"❌ This proves the AWS region is not being passed to tantivy4java properly!")
+      logger.error(s"❌ cacheConfig had: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
+      throw ex
+    case ex: Exception =>
+      logger.error(s"❌ Failed to create SplitSearcher for $splitPath: ${ex.getMessage}")
+      throw ex
+  }
   
   // Row converter for converting search results to Spark InternalRows
   // TODO: Implement RowConverter for SplitSearchEngine

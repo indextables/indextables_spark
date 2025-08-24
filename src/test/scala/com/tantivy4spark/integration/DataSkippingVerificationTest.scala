@@ -235,11 +235,14 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     
     val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
     
+    val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
     new Tantivy4SparkScan(
       transactionLog,
       schema,
       filters,
-      options
+      options,
+      None,
+      emptyBroadcastConfig
     )
   }
 }

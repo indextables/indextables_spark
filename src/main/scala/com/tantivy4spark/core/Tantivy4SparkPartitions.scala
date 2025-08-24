@@ -31,6 +31,7 @@ import com.tantivy4spark.util.StatisticsCalculator
 import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 import java.io.{IOException, ByteArrayOutputStream}
 import scala.jdk.CollectionConverters._
@@ -47,7 +48,8 @@ class Tantivy4SparkInputPartition(
 class Tantivy4SparkReaderFactory(
     readSchema: StructType,
     options: CaseInsensitiveStringMap,
-    limit: Option[Int] = None
+    limit: Option[Int] = None,
+    broadcastConfig: Broadcast[Map[String, String]]
 ) extends PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkReaderFactory])
@@ -61,7 +63,8 @@ class Tantivy4SparkReaderFactory(
       readSchema,
       tantivyPartition.filters,
       options,
-      tantivyPartition.limit.orElse(limit)
+      tantivyPartition.limit.orElse(limit),
+      broadcastConfig
     )
   }
 }
@@ -71,7 +74,8 @@ class Tantivy4SparkPartitionReader(
     readSchema: StructType,
     filters: Array[Filter],
     options: CaseInsensitiveStringMap,
-    limit: Option[Int] = None
+    limit: Option[Int] = None,
+    broadcastConfig: Broadcast[Map[String, String]]
 ) extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
@@ -89,27 +93,40 @@ class Tantivy4SparkPartitionReader(
 
   
   private def createCacheConfig(): SplitCacheConfig = {
+    // Access the broadcast configuration in executor
+    val broadcasted = broadcastConfig.value
+    
+    // Helper function to get config with broadcast fallback
+    def getConfigWithBroadcast(configKey: String): Option[String] = {
+      val optionsValue = Option(options.get(configKey))
+      val broadcastValue = broadcasted.get(configKey)
+      val result = optionsValue.orElse(broadcastValue)
+      
+      logger.info(s"🔍 PartitionReader broadcast config for $configKey: options=${optionsValue.getOrElse("None")}, broadcast=${broadcastValue.getOrElse("None")}, final=${result.getOrElse("None")}")
+      result
+    }
+    
     SplitCacheConfig(
       cacheName = options.get("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
       maxCacheSize = options.getLong("spark.tantivy4spark.cache.maxSize", 200000000L),
       maxConcurrentLoads = options.getInt("spark.tantivy4spark.cache.maxConcurrentLoads", 8),
       enableQueryCache = options.getBoolean("spark.tantivy4spark.cache.queryCache", true),
-      // AWS configuration
-      awsAccessKey = Option(options.get("spark.tantivy4spark.aws.accessKey")),
-      awsSecretKey = Option(options.get("spark.tantivy4spark.aws.secretKey")),
-      awsSessionToken = Option(options.get("spark.tantivy4spark.aws.sessionToken")),
-      awsRegion = Option(options.get("spark.tantivy4spark.aws.region")),
-      awsEndpoint = Option(options.get("spark.tantivy4spark.aws.endpoint")),
-      // Azure configuration
-      azureAccountName = Option(options.get("spark.tantivy4spark.azure.accountName")),
-      azureAccountKey = Option(options.get("spark.tantivy4spark.azure.accountKey")),
-      azureConnectionString = Option(options.get("spark.tantivy4spark.azure.connectionString")),
-      azureEndpoint = Option(options.get("spark.tantivy4spark.azure.endpoint")),
-      // GCP configuration
-      gcpProjectId = Option(options.get("spark.tantivy4spark.gcp.projectId")),
-      gcpServiceAccountKey = Option(options.get("spark.tantivy4spark.gcp.serviceAccountKey")),
-      gcpCredentialsFile = Option(options.get("spark.tantivy4spark.gcp.credentialsFile")),
-      gcpEndpoint = Option(options.get("spark.tantivy4spark.gcp.endpoint"))
+      // AWS configuration with broadcast fallback
+      awsAccessKey = getConfigWithBroadcast("spark.tantivy4spark.aws.accessKey"),
+      awsSecretKey = getConfigWithBroadcast("spark.tantivy4spark.aws.secretKey"),
+      awsSessionToken = getConfigWithBroadcast("spark.tantivy4spark.aws.sessionToken"),
+      awsRegion = getConfigWithBroadcast("spark.tantivy4spark.aws.region"),
+      awsEndpoint = getConfigWithBroadcast("spark.tantivy4spark.s3.endpoint"),
+      // Azure configuration with broadcast fallback
+      azureAccountName = getConfigWithBroadcast("spark.tantivy4spark.azure.accountName"),
+      azureAccountKey = getConfigWithBroadcast("spark.tantivy4spark.azure.accountKey"),
+      azureConnectionString = getConfigWithBroadcast("spark.tantivy4spark.azure.connectionString"),
+      azureEndpoint = getConfigWithBroadcast("spark.tantivy4spark.azure.endpoint"),
+      // GCP configuration with broadcast fallback
+      gcpProjectId = getConfigWithBroadcast("spark.tantivy4spark.gcp.projectId"),
+      gcpServiceAccountKey = getConfigWithBroadcast("spark.tantivy4spark.gcp.serviceAccountKey"),
+      gcpCredentialsFile = getConfigWithBroadcast("spark.tantivy4spark.gcp.credentialsFile"),
+      gcpEndpoint = getConfigWithBroadcast("spark.tantivy4spark.gcp.endpoint")
     )
   }
 
@@ -122,7 +139,13 @@ class Tantivy4SparkPartitionReader(
         val cacheConfig = createCacheConfig()
         
         // Create split search engine using the split file directly
-        splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, addAction.path, cacheConfig)
+        // Normalize path for tantivy4java compatibility (s3a:// -> s3://)
+        val normalizedPath = if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
+          addAction.path.replaceFirst("^s3[an]://", "s3://")
+        } else {
+          addAction.path
+        }
+        splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, normalizedPath, cacheConfig)
         
         // Get the schema from the split to validate filters
         val splitSchema = splitSearchEngine.getSchema()
@@ -268,13 +291,23 @@ class Tantivy4SparkDataWriter(
       }
     }
     
+    // Normalize the splitPath for tantivy4java compatibility (convert s3a:// to s3://)
+    val normalizedSplitPath = {
+      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
+      try {
+        cloudProvider.normalizePathForTantivy(splitPath)
+      } finally {
+        cloudProvider.close()
+      }
+    }
+    
     logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
     
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
     
     val addAction = AddAction(
-      path = splitPath,
+      path = normalizedSplitPath,
       partitionValues = Map.empty,
       size = splitSize,
       modificationTime = System.currentTimeMillis(),
@@ -283,6 +316,8 @@ class Tantivy4SparkDataWriter(
       minValues = if (minValues.nonEmpty) Some(minValues) else None,
       maxValues = if (maxValues.nonEmpty) Some(maxValues) else None
     )
+    
+    logger.info(s"📝 AddAction created with path: ${addAction.path}")
     
     logger.info(s"Committed writer for partition $partitionId with $recordCount records")
     Tantivy4SparkCommitMessage(addAction)

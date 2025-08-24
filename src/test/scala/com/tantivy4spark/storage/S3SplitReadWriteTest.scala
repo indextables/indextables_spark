@@ -34,7 +34,7 @@ import scala.util.Using
  * 
  * Uses S3Mock to provide a real S3-compatible server for testing.
  */
-class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll {
+class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private val TEST_BUCKET = "test-tantivy-bucket"
   private val ACCESS_KEY = "test-access-key" 
@@ -52,6 +52,28 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll {
     // Start S3Mock server
     s3Mock = S3Mock(port = s3MockPort, dir = "/tmp/s3")
     s3Mock.start
+    
+    // Create the test bucket using AWS SDK
+    val s3Client = software.amazon.awssdk.services.s3.S3Client.builder()
+      .endpointOverride(java.net.URI.create(s"http://localhost:$s3MockPort"))
+      .credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.create(
+        software.amazon.awssdk.auth.credentials.AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+      ))
+      .region(software.amazon.awssdk.regions.Region.US_EAST_1)
+      .forcePathStyle(true)
+      .build()
+    
+    try {
+      s3Client.createBucket(software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+        .bucket(TEST_BUCKET)
+        .build())
+      println(s"✅ Created S3 bucket: $TEST_BUCKET")
+    } catch {
+      case ex: Exception =>
+        println(s"⚠️  Failed to create bucket $TEST_BUCKET: ${ex.getMessage}")
+    } finally {
+      s3Client.close()
+    }
     
     // Remove system properties approach - we'll use proper Spark configuration distribution
     // System.setProperty("aws.accessKeyId", ACCESS_KEY)
@@ -88,6 +110,47 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll {
       s3Mock.stop
     }
     super.afterAll()
+  }
+  
+  override def afterEach(): Unit = {
+    // Clean up bucket contents between tests to avoid interference
+    // XXX SJS
+    if(true) {
+       None
+    } else {
+    try {
+      val s3Client = software.amazon.awssdk.services.s3.S3Client.builder()
+        .endpointOverride(java.net.URI.create(s"http://localhost:$s3MockPort"))
+        .credentialsProvider(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.create(
+          software.amazon.awssdk.auth.credentials.AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+        ))
+        .region(software.amazon.awssdk.regions.Region.US_EAST_1)
+        .forcePathStyle(true)
+        .build()
+        
+      try {
+        // List and delete all objects in the bucket
+        val listResponse = s3Client.listObjectsV2(software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+          .bucket(TEST_BUCKET)
+          .build())
+          
+        import scala.jdk.CollectionConverters._
+        listResponse.contents().asScala.foreach { obj =>
+          s3Client.deleteObject(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.builder()
+            .bucket(TEST_BUCKET)
+            .key(obj.key())
+            .build())
+        }
+        println(s"🧹 Cleaned up ${listResponse.contents().size()} objects from bucket $TEST_BUCKET")
+      } finally {
+        s3Client.close()
+      }
+    } catch {
+      case ex: Exception =>
+        println(s"⚠️  Failed to clean up bucket: ${ex.getMessage}")
+    }
+    }
+    super.afterEach()
   }
 
   private def findAvailablePort(): Int = {

@@ -23,6 +23,7 @@ import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -31,7 +32,8 @@ class Tantivy4SparkScan(
     readSchema: StructType,
     pushedFilters: Array[Filter],
     options: CaseInsensitiveStringMap,
-    limit: Option[Int] = None
+    limit: Option[Int] = None,
+    broadcastConfig: Broadcast[Map[String, String]]
 ) extends Scan with Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScan])
@@ -52,7 +54,7 @@ class Tantivy4SparkScan(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    new Tantivy4SparkReaderFactory(readSchema, options, limit)
+    new Tantivy4SparkReaderFactory(readSchema, options, limit, broadcastConfig)
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
