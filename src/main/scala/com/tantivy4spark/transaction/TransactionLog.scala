@@ -30,7 +30,7 @@ import scala.util.{Try, Success, Failure}
 import java.io.ByteArrayInputStream
 import scala.jdk.CollectionConverters._
 
-class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) {
+class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) extends AutoCloseable {
   
   private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
   
@@ -45,6 +45,10 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private val cloudProvider = CloudStorageProviderFactory.createProvider(tablePath.toString, options, spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
   private val transactionLogPathStr = transactionLogPath.toString
+
+  override def close(): Unit = {
+    cloudProvider.close()
+  }
 
   def initialize(schema: StructType): Unit = {
         if (!cloudProvider.exists(transactionLogPathStr)) {

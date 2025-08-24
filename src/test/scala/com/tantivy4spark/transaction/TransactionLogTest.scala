@@ -19,7 +19,9 @@
 package com.tantivy4spark.transaction
 
 import com.tantivy4spark.TestBase
+import com.tantivy4spark.io.CloudStorageProviderFactory
 import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 class TransactionLogTest extends TestBase {
 
@@ -29,17 +31,29 @@ class TransactionLogTest extends TestBase {
       val transactionLog = new TransactionLog(tablePath, spark)
       val testSchema = getTestSchema()
 
-      transactionLog.initialize(testSchema)
+      try {
+        transactionLog.initialize(testSchema)
 
-      val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
-      val transactionLogPath = new Path(tablePath, "_transaction_log")
-      
-      fs.exists(transactionLogPath) shouldBe true
-      fs.exists(new Path(transactionLogPath, "00000000000000000000.json")) shouldBe true
+        val cloudProvider = CloudStorageProviderFactory.createProvider(
+          tablePath.toString, 
+          new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+          spark.sparkContext.hadoopConfiguration
+        )
+        try {
+          val transactionLogPath = new Path(tablePath, "_transaction_log")
+          
+          cloudProvider.exists(transactionLogPath.toString) shouldBe true
+          cloudProvider.exists(new Path(transactionLogPath, "00000000000000000000.json").toString) shouldBe true
 
-      val retrievedSchema = transactionLog.getSchema()
-      retrievedSchema shouldBe defined
-      retrievedSchema.get shouldBe testSchema
+          val retrievedSchema = transactionLog.getSchema()
+          retrievedSchema shouldBe defined
+          retrievedSchema.get shouldBe testSchema
+        } finally {
+          cloudProvider.close()
+        }
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -48,7 +62,8 @@ class TransactionLogTest extends TestBase {
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
       
-      transactionLog.initialize(getTestSchema())
+      try {
+        transactionLog.initialize(getTestSchema())
 
       val addAction1 = AddAction(
         path = "file1.tnt4s",
@@ -78,6 +93,9 @@ class TransactionLogTest extends TestBase {
       files should have length 2
       files should contain (addAction1)
       files should contain (addAction2)
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -86,7 +104,8 @@ class TransactionLogTest extends TestBase {
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
       
-      transactionLog.initialize(getTestSchema())
+      try {
+        transactionLog.initialize(getTestSchema())
 
       val addAction = AddAction(
         path = "file1.tnt4s",
@@ -106,6 +125,9 @@ class TransactionLogTest extends TestBase {
 
       val filesAfterRemoval = transactionLog.listFiles()
       filesAfterRemoval should be (empty)
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -114,7 +136,8 @@ class TransactionLogTest extends TestBase {
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
       
-      transactionLog.initialize(getTestSchema())
+      try {
+        transactionLog.initialize(getTestSchema())
 
       val actions = (1 to 5).map { i =>
         AddAction(
@@ -134,6 +157,9 @@ class TransactionLogTest extends TestBase {
       val files = transactionLog.listFiles()
       files should have length 5
       files.map(_.path) should contain theSameElementsAs actions.map(_.path)
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -142,11 +168,15 @@ class TransactionLogTest extends TestBase {
       val nonExistentPath = new Path(tempPath, "nonexistent")
       val transactionLog = new TransactionLog(nonExistentPath, spark)
 
-      val schema = transactionLog.getSchema()
-      schema shouldBe None
+      try {
+        val schema = transactionLog.getSchema()
+        schema shouldBe None
 
-      val files = transactionLog.listFiles()
-      files should be (empty)
+        val files = transactionLog.listFiles()
+        files should be (empty)
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 }

@@ -18,8 +18,10 @@
 package com.tantivy4spark.transaction
 
 import com.tantivy4spark.TestBase
+import com.tantivy4spark.io.CloudStorageProviderFactory
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.scalatest.matchers.should.Matchers._
 
 class BatchTransactionLogTest extends TestBase {
@@ -28,6 +30,8 @@ class BatchTransactionLogTest extends TestBase {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
+
+      try {
 
       val schema = StructType(Array(
         StructField("id", LongType, nullable = false),
@@ -88,23 +92,35 @@ class BatchTransactionLogTest extends TestBase {
 
       // Verify the transaction log structure
       val transactionLogPath = new Path(tablePath, "_transaction_log")
-      val fs = transactionLogPath.getFileSystem(spark.sparkContext.hadoopConfiguration)
-      val versionFiles = fs.listStatus(transactionLogPath)
-        .filter(_.isFile)
-        .map(_.getPath.getName)
-        .filter(_.endsWith(".json"))
-        .sorted
+      val cloudProvider = CloudStorageProviderFactory.createProvider(
+        tablePath.toString,
+        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+      val (versionFiles, content) = try {
+        val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+        val versionFiles = files
+          .filter(!_.isDirectory)
+          .map { fileInfo =>
+            val path = new Path(fileInfo.path)
+            path.getName
+          }
+          .filter(_.endsWith(".json"))
+          .sorted
 
-      // Should have exactly 2 files: 00000000000000000000.json (metadata) and 00000000000000000001.json (batch ADD)
-      versionFiles should have length 2
-      versionFiles should contain("00000000000000000000.json") // metadata
-      versionFiles should contain("00000000000000000001.json") // batch transaction
+        // Should have exactly 2 files: 00000000000000000000.json (metadata) and 00000000000000000001.json (batch ADD)
+        versionFiles should have length 2
+        versionFiles should contain("00000000000000000000.json") // metadata
+        versionFiles should contain("00000000000000000001.json") // batch transaction
 
-      // Read the batch transaction file and verify it contains multiple ADD entries
-      val batchTransactionFile = new Path(transactionLogPath, "00000000000000000001.json")
-      val input = fs.open(batchTransactionFile)
-      val content = scala.io.Source.fromInputStream(input).getLines().toList
-      input.close()
+        // Read the batch transaction file and verify it contains multiple ADD entries
+        val batchTransactionFile = new Path(transactionLogPath, "00000000000000000001.json")
+        val content = new String(cloudProvider.readFile(batchTransactionFile.toString), "UTF-8").split("\n").toList.filter(_.nonEmpty)
+        
+        (versionFiles, content)
+      } finally {
+        cloudProvider.close()
+      }
 
       // Should have exactly 3 lines (one ADD entry per line)
       content should have length 3
@@ -119,6 +135,9 @@ class BatchTransactionLogTest extends TestBase {
       println(s"   - Created single transaction version $transactionVersion with ${addActions.length} files")
       println(s"   - Transaction log contains ${versionFiles.length} files (metadata + batch transaction)")
       println(s"   - Batch transaction file contains ${content.length} ADD entries")
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -126,6 +145,8 @@ class BatchTransactionLogTest extends TestBase {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
+
+      try {
 
       val schema = StructType(Array(
         StructField("id", LongType, nullable = false)
@@ -142,6 +163,9 @@ class BatchTransactionLogTest extends TestBase {
       // Should still have only the metadata file
       val listedFiles = transactionLog.listFiles()
       listedFiles should have length 0
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 
@@ -149,6 +173,8 @@ class BatchTransactionLogTest extends TestBase {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
       val transactionLog = new TransactionLog(tablePath, spark)
+
+      try {
 
       val schema = StructType(Array(
         StructField("id", LongType, nullable = false)
@@ -211,6 +237,9 @@ class BatchTransactionLogTest extends TestBase {
       println(s"   - Individual add created version $version1")
       println(s"   - Batch add created version $version2")
       println(s"   - Total files: ${listedFiles.length}")
+      } finally {
+        transactionLog.close()
+      }
     }
   }
 }
