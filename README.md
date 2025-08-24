@@ -11,6 +11,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
 - **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage
+- **AWS Session Token Support**: Full support for temporary credentials via AWS STS
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
 - **Schema Evolution**: Automatic schema inference and evolution support
 - **Thread-Safe Architecture**: ThreadLocal IndexWriter pattern eliminates race conditions
@@ -33,6 +34,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 - **Thread-Safe Design**: ThreadLocal IndexWriter pattern eliminates race conditions
 - **Automatic Schema Mapping**: Seamless conversion from Spark types to Tantivy field types
 - **Schema-Aware Filtering**: Field validation prevents native crashes during query execution
+- **AWS Session Token Support**: Complete support for temporary credentials via STS
 
 ## Quick Start
 
@@ -97,6 +99,7 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.optimizeWrite.enabled` | `true` | Enable/disable optimized writes with automatic split sizing |
 | `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit` | `1000000` | Target number of records per split file for optimized writes |
 | `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
 
 #### Optimized Writes Configuration
 
@@ -139,6 +142,28 @@ df.write.format("tantivy4spark")
 // Standard operations (automatic for other protocols)
 df.write.format("tantivy4spark").save("hdfs://namenode/path")
 df.write.format("tantivy4spark").save("file:///local/path")
+```
+
+#### AWS Configuration
+
+Configure AWS credentials for S3 operations:
+
+```scala
+// Standard AWS credentials
+spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
+spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+
+// AWS credentials with session token (temporary credentials from STS)
+spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-temporary-access-key")
+spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-temporary-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.sessionToken", "your-session-token")
+spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+
+// Custom S3 endpoint (for S3-compatible services)
+spark.conf.set("spark.tantivy4spark.aws.endpoint", "https://s3.custom-provider.com")
+
+df.write.format("tantivy4spark").save("s3://bucket/path")
 ```
 
 

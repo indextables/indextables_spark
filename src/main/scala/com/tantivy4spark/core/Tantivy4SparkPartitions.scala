@@ -28,10 +28,12 @@ import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager}
 import com.tantivy4spark.util.StatisticsCalculator
+import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
 import java.io.{IOException, ByteArrayOutputStream}
+import scala.jdk.CollectionConverters._
 
 class Tantivy4SparkInputPartition(
     val addAction: AddAction,
@@ -95,6 +97,7 @@ class Tantivy4SparkPartitionReader(
       // AWS configuration
       awsAccessKey = Option(options.get("spark.tantivy4spark.aws.accessKey")),
       awsSecretKey = Option(options.get("spark.tantivy4spark.aws.secretKey")),
+      awsSessionToken = Option(options.get("spark.tantivy4spark.aws.sessionToken")),
       awsRegion = Option(options.get("spark.tantivy4spark.aws.region")),
       awsEndpoint = Option(options.get("spark.tantivy4spark.aws.endpoint")),
       // Azure configuration
@@ -212,7 +215,20 @@ class Tantivy4SparkDataWriter(
 ) extends DataWriter[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
-  private val searchEngine = new TantivySearchEngine(writeSchema)
+  
+  // Debug: Log options and hadoop config available in executor
+  println(s"🔧 Tantivy4SparkDataWriter executor options:")
+  options.entrySet().asScala.foreach { entry =>
+    val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
+    println(s"  ${entry.getKey} = $value")
+  }
+  println(s"🔧 Tantivy4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
+  hadoopConf.iterator().asScala.filter(_.getKey.contains("tantivy4spark")).foreach { entry =>
+    val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
+    println(s"  ${entry.getKey} = $value")
+  }
+  
+  private val searchEngine = new TantivySearchEngine(writeSchema, options, hadoopConf)
   private val statistics = new StatisticsCalculator.DatasetStatistics(writeSchema)
   private var recordCount = 0L
 
@@ -238,10 +254,26 @@ class Tantivy4SparkDataWriter(
     // Create split from the index using the search engine
     val splitPath = searchEngine.commitAndCreateSplit(outputPath, partitionId.toLong, nodeId)
     
-    // Get split file size
-    val fileSystem = filePath.getFileSystem(hadoopConf)
-    val splitFileStatus = fileSystem.getFileStatus(filePath)
-    val splitSize = splitFileStatus.getLen
+    // Get split file size - use cloud storage provider for S3, Hadoop for others
+    val splitSize = if (ProtocolBasedIOFactory.determineProtocol(outputPath) == ProtocolBasedIOFactory.S3Protocol) {
+      // Use cloud storage provider for S3
+      val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
+      try {
+        val fileInfo = cloudProvider.getFileInfo(outputPath)
+        fileInfo.map(_.size).getOrElse {
+          logger.warn(s"Could not get file info for $outputPath using cloud provider, falling back to Hadoop")
+          val fileSystem = filePath.getFileSystem(hadoopConf)
+          fileSystem.getFileStatus(filePath).getLen
+        }
+      } finally {
+        cloudProvider.close()
+      }
+    } else {
+      // Use Hadoop filesystem for non-S3 paths
+      val fileSystem = filePath.getFileSystem(hadoopConf)
+      val splitFileStatus = fileSystem.getFileStatus(filePath)
+      splitFileStatus.getLen
+    }
     
     logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
     

@@ -18,12 +18,18 @@
 package com.tantivy4spark.storage
 
 import com.tantivy4java.{QuickwitSplit, SplitCacheManager}
+import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
+import org.apache.hadoop.conf.Configuration
 import org.apache.spark.sql.types.StructType
+import org.slf4j.LoggerFactory
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
 import scala.util.Try
 import java.util.UUID
 import java.time.Instant
+import java.io.File
+import java.nio.file.{Files, Paths}
 
 /**
  * Manager for Tantivy4Spark split operations using tantivy4java's QuickwitSplit functionality.
@@ -41,9 +47,18 @@ object SplitManager {
    * @param outputPath Path where the split file should be written (must end with .split)
    * @param partitionId Partition identifier for this split
    * @param nodeId Node identifier (typically hostname or Spark executor ID)
+   * @param options Optional Spark options for cloud configuration
+   * @param hadoopConf Optional Hadoop configuration for cloud storage
    * @return Metadata about the created split
    */
-  def createSplit(indexPath: String, outputPath: String, partitionId: Long, nodeId: String): QuickwitSplit.SplitMetadata = {
+  def createSplit(
+    indexPath: String, 
+    outputPath: String, 
+    partitionId: Long, 
+    nodeId: String,
+    options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+    hadoopConf: Configuration = new Configuration()
+  ): QuickwitSplit.SplitMetadata = {
     logger.info(s"Creating split from index: $indexPath -> $outputPath")
     
     // Check if the index directory exists and validate it
@@ -83,14 +98,50 @@ object SplitManager {
     val config = new QuickwitSplit.SplitConfig(indexUid, sourceId, nodeId, docMappingUid,
       partitionId, Instant.now(), Instant.now(), null, null)
     
-    try {
-      val metadata = QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
-      logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
-      metadata
-    } catch {
-      case e: Exception =>
-        logger.error(s"Failed to create split from $indexPath to $outputPath", e)
-        throw e
+    // Determine if we need to use cloud storage
+    val protocol = ProtocolBasedIOFactory.determineProtocol(outputPath)
+    
+    if (protocol == ProtocolBasedIOFactory.S3Protocol) {
+      // For S3, create the split locally first, then upload
+      val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
+      
+      try {
+        // Create split file locally
+        val metadata = QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
+        logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
+        
+        // Upload to S3 using cloud storage provider
+        val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
+        try {
+          val splitContent = Files.readAllBytes(Paths.get(tempSplitPath))
+          cloudProvider.writeFile(outputPath, splitContent)
+          logger.info(s"Split uploaded to S3: $outputPath (${splitContent.length} bytes)")
+        } finally {
+          cloudProvider.close()
+        }
+        
+        // Clean up temporary file
+        Files.deleteIfExists(Paths.get(tempSplitPath))
+        
+        metadata
+      } catch {
+        case e: Exception =>
+          // Clean up temporary file on error
+          Files.deleteIfExists(Paths.get(tempSplitPath))
+          logger.error(s"Failed to create and upload split from $indexPath to $outputPath", e)
+          throw e
+      }
+    } else {
+      // For non-S3 paths, create directly
+      try {
+        val metadata = QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
+        logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
+        metadata
+      } catch {
+        case e: Exception =>
+          logger.error(s"Failed to create split from $indexPath to $outputPath", e)
+          throw e
+      }
     }
   }
   
@@ -143,6 +194,7 @@ case class SplitCacheConfig(
   enableQueryCache: Boolean = true,
   awsAccessKey: Option[String] = None,
   awsSecretKey: Option[String] = None,
+  awsSessionToken: Option[String] = None,
   awsRegion: Option[String] = None,
   awsEndpoint: Option[String] = None,
   azureAccountName: Option[String] = None,
@@ -154,6 +206,8 @@ case class SplitCacheConfig(
   gcpCredentialsFile: Option[String] = None,
   gcpEndpoint: Option[String] = None
 ) {
+  
+  private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
   
   /**
    * Convert to tantivy4java CacheConfig.
@@ -167,8 +221,17 @@ case class SplitCacheConfig(
     // AWS configuration
     (awsAccessKey, awsSecretKey, awsRegion) match {
       case (Some(key), Some(secret), Some(region)) =>
-        config = config.withAwsCredentials(key, secret, region)
+        // Pass session token if available, otherwise use 3-parameter version
+        config = awsSessionToken match {
+          case Some(token) => 
+            logger.info(s"🔧 SplitCacheConfig: Passing AWS credentials WITH session token to tantivy4java")
+            config.withAwsCredentials(key, secret, region, token)
+          case None => 
+            logger.info(s"🔧 SplitCacheConfig: Passing AWS credentials WITHOUT session token to tantivy4java")
+            config.withAwsCredentials(key, secret, region)
+        }
       case _ => // No AWS credentials provided
+        logger.debug("🔧 SplitCacheConfig: No AWS credentials provided")
     }
     
     awsEndpoint.foreach(endpoint => config = config.withAwsEndpoint(endpoint))

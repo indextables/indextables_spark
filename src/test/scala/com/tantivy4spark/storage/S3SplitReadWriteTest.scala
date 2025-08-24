@@ -1,0 +1,241 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.tantivy4spark.storage
+
+import com.tantivy4spark.TestBase
+import org.apache.spark.sql.functions._
+import org.scalatest.matchers.should.Matchers._
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import io.findify.s3mock.S3Mock
+import java.net.ServerSocket
+import scala.util.Using
+
+/**
+ * Test for S3 split read/write operations using S3Mock.
+ * 
+ * This test demonstrates the actual S3 API usage:
+ * - df.write.format("tantivy4spark").save("s3://bucket/path")  
+ * - spark.read.format("tantivy4spark").load("s3://bucket/path")
+ * 
+ * Uses S3Mock to provide a real S3-compatible server for testing.
+ */
+class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll {
+
+  private val TEST_BUCKET = "test-tantivy-bucket"
+  private val ACCESS_KEY = "test-access-key" 
+  private val SECRET_KEY = "test-secret-key"
+  private val SESSION_TOKEN = "test-session-token"
+  private var s3MockPort: Int = _
+  private var s3Mock: S3Mock = _
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    
+    // Find available port
+    s3MockPort = findAvailablePort()
+    
+    // Start S3Mock server
+    s3Mock = S3Mock(port = s3MockPort, dir = "/tmp/s3")
+    s3Mock.start
+    
+    // Remove system properties approach - we'll use proper Spark configuration distribution
+    // System.setProperty("aws.accessKeyId", ACCESS_KEY)
+    // System.setProperty("aws.secretAccessKey", SECRET_KEY) 
+    // System.setProperty("aws.region", "us-east-1")
+    
+    // Configure Spark to use mock S3 - using cloud-aware configuration with all 3 credentials
+    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    
+    // Set Hadoop config for components that still use Hadoop filesystem
+    spark.conf.set("spark.hadoop.fs.s3a.access.key", ACCESS_KEY)
+    spark.conf.set("spark.hadoop.fs.s3a.secret.key", SECRET_KEY)
+    spark.conf.set("spark.hadoop.fs.s3a.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.hadoop.fs.s3a.path.style.access", "true")
+    spark.conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+    
+    // Disable SSL for local testing with S3Mock
+    spark.conf.set("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+    
+    // Set AWS credential provider chain to use SimpleAWSCredentialsProvider
+    spark.conf.set("spark.hadoop.fs.s3a.aws.credentials.provider", 
+      "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+    
+    println(s"✅ S3Mock server started on port $s3MockPort")
+  }
+
+  override def afterAll(): Unit = {
+    if (s3Mock != null) {
+      s3Mock.stop
+    }
+    super.afterAll()
+  }
+
+  private def findAvailablePort(): Int = {
+    Using.resource(new ServerSocket(0)) { socket =>
+      socket.getLocalPort
+    }
+  }
+
+  test("should write DataFrame to S3 and read it back") {
+    // Create test data
+    val data = spark.range(50).select(
+      col("id"),
+      concat(lit("Document "), col("id")).as("title"), 
+      concat(lit("Content for document "), col("id")).as("content"),
+      (col("id") % 5).cast("string").as("category")
+    )
+    
+    // S3 path for testing
+    val s3Path = s"s3a://$TEST_BUCKET/tantivy4spark-test-data"
+    
+    // Write DataFrame to S3 using Tantivy4Spark - pass all 3 credentials as options for executor distribution
+    data.write
+      .format("tantivy4spark")
+      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .mode("overwrite")
+      .save(s3Path)
+    
+    println(s"✅ Successfully wrote data to S3: $s3Path")
+    
+    // Read DataFrame back from S3
+    val result = spark.read
+      .format("tantivy4spark")
+      .load(s3Path)
+    
+    val count = result.count()
+    count shouldBe 50
+    
+    // Test query functionality
+    val filtered = result.filter(col("category") === "0").count()
+    filtered should be >= 1L
+    
+    // Test complex query
+    val complexQuery = result
+      .filter(col("title").contains("Document"))
+      .filter(col("id") > 10)
+      .count()
+    
+    complexQuery should be >= 1L
+    
+    println(s"✅ Successfully read data from S3: $s3Path")
+    println(s"✅ Total records: $count")
+    println(s"✅ Filtered records (category=0): $filtered")
+    println(s"✅ Complex query results: $complexQuery")
+  }
+  
+  test("should handle S3 write with different data types") {
+    // Create test data with various data types
+    import java.sql.{Date, Timestamp}
+    import java.time.LocalDate
+    
+    val data = spark.range(25).select(
+      col("id"),
+      concat(lit("Item "), col("id")).as("name"),
+      (col("id") * 2.5).as("price"),
+      (col("id") % 2 === 0).as("active"),
+      lit(Date.valueOf(LocalDate.now())).as("created_date")
+    )
+    
+    val s3Path = s"s3a://$TEST_BUCKET/tantivy4spark-datatypes-test"
+    
+    // Write to S3 - pass all 3 credentials as options for executor distribution
+    data.write
+      .format("tantivy4spark")
+      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort") 
+      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .mode("overwrite")
+      .save(s3Path)
+      
+    println(s"✅ Successfully wrote mixed data types to S3: $s3Path")
+    
+    // Read back and verify
+    val result = spark.read
+      .format("tantivy4spark")
+      .load(s3Path)
+      
+    val count = result.count()
+    count shouldBe 25
+    
+    // Test data type queries
+    val activeItems = result.filter(col("active") === true).count()
+    val highPriceItems = result.filter(col("price") > 50.0).count()
+    
+    activeItems should be >= 1L
+    highPriceItems should be >= 1L
+    
+    println(s"✅ Mixed data types test successful")
+    println(s"✅ Total records: $count") 
+    println(s"✅ Active items: $activeItems")
+    println(s"✅ High price items: $highPriceItems")
+  }
+  
+  test("should handle multiple S3 write/read operations") {
+    // Test multiple datasets
+    val datasets = (1 to 3).map { i =>
+      val data = spark.range(20).select(
+        col("id"),
+        lit(s"dataset_$i").as("dataset_name"),
+        concat(lit(s"Record from dataset $i - "), col("id")).as("description")
+      )
+      val path = s"s3a://$TEST_BUCKET/dataset-$i"
+      (data, path)
+    }
+    
+    // Write all datasets to S3 - pass all 3 credentials as options for executor distribution 
+    datasets.foreach { case (data, path) =>
+      data.write
+        .format("tantivy4spark")
+        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+        .option("spark.tantivy4spark.aws.region", "us-east-1")
+        .mode("overwrite") 
+        .save(path)
+      println(s"✅ Wrote dataset to: $path")
+    }
+    
+    // Read all datasets back and verify
+    val totalRecords = datasets.map { case (_, path) =>
+      val df = spark.read.format("tantivy4spark").load(path)
+      val count = df.count()
+      count shouldBe 20
+      count
+    }.sum
+    
+    totalRecords shouldBe 60 // 3 datasets * 20 records each
+    
+    println(s"✅ Multiple S3 operations successful")
+    println(s"✅ Total records across all datasets: $totalRecords")
+  }
+}

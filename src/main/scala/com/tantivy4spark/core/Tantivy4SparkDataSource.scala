@@ -222,8 +222,22 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       "fs.s3a.path.style.access" -> hadoopConf.get("fs.s3a.path.style.access", ""),
       "fs.s3a.impl" -> hadoopConf.get("fs.s3a.impl", ""),
       "fs.hdfs.impl" -> hadoopConf.get("fs.hdfs.impl", ""),
-      "fs.file.impl" -> hadoopConf.get("fs.file.impl", "")
+      "fs.file.impl" -> hadoopConf.get("fs.file.impl", ""),
+      // Add Tantivy4Spark-specific configurations for executor distribution
+      "spark.tantivy4spark.aws.accessKey" -> hadoopConf.get("spark.tantivy4spark.aws.accessKey", ""),
+      "spark.tantivy4spark.aws.secretKey" -> hadoopConf.get("spark.tantivy4spark.aws.secretKey", ""),
+      "spark.tantivy4spark.aws.sessionToken" -> hadoopConf.get("spark.tantivy4spark.aws.sessionToken", ""),
+      "spark.tantivy4spark.aws.region" -> hadoopConf.get("spark.tantivy4spark.aws.region", ""),
+      "spark.tantivy4spark.s3.endpoint" -> hadoopConf.get("spark.tantivy4spark.s3.endpoint", ""),
+      "spark.tantivy4spark.s3.pathStyleAccess" -> hadoopConf.get("spark.tantivy4spark.s3.pathStyleAccess", "")
     ).filter(_._2.nonEmpty)
+    
+    // Debug: Log what configurations are being distributed to executors
+    logger.info(s"Distributing ${essentialConfProps.size} configuration properties to executors:")
+    essentialConfProps.foreach { case (key, value) =>
+      val maskedValue = if (key.contains("secretKey") || key.contains("secret.key")) "***" else value
+      logger.info(s"  $key = $maskedValue")
+    }
     
     // Check if optimized write is enabled and apply repartitioning if needed
     val finalData = if (enrichedOptions.getOrElse("optimizeWrite", "true").toBoolean) {
@@ -314,7 +328,8 @@ class Tantivy4SparkRelation(
   override def schema: StructType = {
     // Get schema from transaction log
     val spark = sqlContext.sparkSession
-    val transactionLog = new TransactionLog(new Path(path), spark)
+    val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    val transactionLog = new TransactionLog(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
       throw new IllegalArgumentException(s"Unable to infer schema from path: $path")
     }
@@ -363,7 +378,7 @@ class Tantivy4SparkTable(
 
   private val spark = SparkSession.active
   private val tablePath = new Path(path)
-  private val transactionLog = new TransactionLog(tablePath, spark)
+  private val transactionLog = new TransactionLog(tablePath, spark, options)
 
   override def name(): String = s"tantivy4spark.`$path`"
 

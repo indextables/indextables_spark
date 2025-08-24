@@ -21,41 +21,71 @@ package com.tantivy4spark.transaction
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{DataType, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.util.JsonUtil
+import com.tantivy4spark.io.ProtocolBasedIOFactory
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
 
-class TransactionLog(tablePath: Path, spark: SparkSession) {
+class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) {
   
   private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
+  
+  // Determine if we should use cloud-optimized transaction log
+  private val protocol = ProtocolBasedIOFactory.determineProtocol(tablePath.toString)
+  private val useCloudOptimized = protocol match {
+    case ProtocolBasedIOFactory.S3Protocol => !options.getBoolean("spark.tantivy4spark.transaction.force.hadoop", false)
+    case _ => false
+  }
+  
+  // Delegate to cloud-optimized implementation for S3, fall back to Hadoop for others
+  private val cloudTransactionLog = if (useCloudOptimized) {
+    logger.info(s"Using cloud-optimized transaction log for ${ProtocolBasedIOFactory.protocolName(protocol)} protocol")
+    Some(new CloudTransactionLog(tablePath.toString, spark, options))
+  } else {
+    logger.info(s"Using Hadoop-based transaction log for ${ProtocolBasedIOFactory.protocolName(protocol)} protocol")
+    None
+  }
+  
+  // Legacy Hadoop implementation for backward compatibility
   private val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
 
   def initialize(schema: StructType): Unit = {
-    if (!fs.exists(transactionLogPath)) {
-      fs.mkdirs(transactionLogPath)
-      
-      // Write initial metadata file
-      val metadataAction = MetadataAction(
-        id = java.util.UUID.randomUUID().toString,
-        name = None,
-        description = None,
-        format = FileFormat("tantivy4spark", Map.empty),
-        schemaString = schema.json,
-        partitionColumns = Seq.empty,
-        configuration = Map.empty,
-        createdTime = Some(System.currentTimeMillis())
-      )
-      
-      writeAction(0, metadataAction)
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.initialize(schema)
+      case None => 
+        // Legacy Hadoop implementation
+        if (!fs.exists(transactionLogPath)) {
+          fs.mkdirs(transactionLogPath)
+          
+          // Write initial metadata file
+          val metadataAction = MetadataAction(
+            id = java.util.UUID.randomUUID().toString,
+            name = None,
+            description = None,
+            format = FileFormat("tantivy4spark", Map.empty),
+            schemaString = schema.json,
+            partitionColumns = Seq.empty,
+            configuration = Map.empty,
+            createdTime = Some(System.currentTimeMillis())
+          )
+          
+          writeAction(0, metadataAction)
+        }
     }
   }
 
   def addFile(addAction: AddAction): Long = {
-    val version = getLatestVersion() + 1
-    writeAction(version, addAction)
-    version
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.addFile(addAction)
+      case None =>
+        // Legacy Hadoop implementation
+        val version = getLatestVersion() + 1
+        writeAction(version, addAction)
+        version
+    }
   }
 
   /**
@@ -63,57 +93,77 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
    * This creates one JSON file with multiple ADD entries.
    */
   def addFiles(addActions: Seq[AddAction]): Long = {
-    if (addActions.isEmpty) {
-      return getLatestVersion()
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.addFiles(addActions)
+      case None =>
+        // Legacy Hadoop implementation
+        if (addActions.isEmpty) {
+          return getLatestVersion()
+        }
+        
+        val version = getLatestVersion() + 1
+        writeActions(version, addActions)
+        version
     }
-    
-    val version = getLatestVersion() + 1
-    writeActions(version, addActions)
-    version
   }
 
   def listFiles(): Seq[AddAction] = {
-    val files = ListBuffer[AddAction]()
-    val versions = getVersions()
-    
-    for (version <- versions) {
-      val actions = readVersion(version)
-      actions.foreach {
-        case add: AddAction => files += add
-        case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-        case _ => // Ignore other actions for file listing
-      }
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.listFiles()
+      case None =>
+        // Legacy Hadoop implementation
+        val files = ListBuffer[AddAction]()
+        val versions = getVersions()
+        
+        for (version <- versions) {
+          val actions = readVersion(version)
+          actions.foreach {
+            case add: AddAction => files += add
+            case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+            case _ => // Ignore other actions for file listing
+          }
+        }
+        
+        files.toSeq
     }
-    
-    files.toSeq
   }
 
   def getSchema(): Option[StructType] = {
-    Try {
-      val versions = getVersions()
-      if (versions.nonEmpty) {
-        val actions = readVersion(versions.head)
-        actions.collectFirst {
-          case metadata: MetadataAction => DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
-        }
-      } else {
-        None
-      }
-    }.getOrElse(None)
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.getSchema()
+      case None =>
+        // Legacy Hadoop implementation
+        Try {
+          val versions = getVersions()
+          if (versions.nonEmpty) {
+            val actions = readVersion(versions.head)
+            actions.collectFirst {
+              case metadata: MetadataAction => DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+            }
+          } else {
+            None
+          }
+        }.getOrElse(None)
+    }
   }
 
   def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
-    val version = getLatestVersion() + 1
-    val removeAction = RemoveAction(
-      path = path,
-      deletionTimestamp = Some(deletionTimestamp),
-      dataChange = true,
-      extendedFileMetadata = None,
-      partitionValues = None,
-      size = None
-    )
-    writeAction(version, removeAction)
-    version
+    cloudTransactionLog match {
+      case Some(cloudLog) => cloudLog.removeFile(path, deletionTimestamp)
+      case None =>
+        // Legacy Hadoop implementation
+        val version = getLatestVersion() + 1
+        val removeAction = RemoveAction(
+          path = path,
+          deletionTimestamp = Some(deletionTimestamp),
+          dataChange = true,
+          extendedFileMetadata = None,
+          partitionValues = None,
+          size = None
+        )
+        writeAction(version, removeAction)
+        version
+    }
   }
 
   private def writeAction(version: Long, action: Action): Unit = {

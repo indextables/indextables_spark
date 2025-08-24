@@ -44,6 +44,7 @@ The system implements a custom Spark DataSource V2 provider modeled after [Delta
 - **Cross-platform**: Supports Linux, macOS, and Windows via tantivy4java native libraries
 - **Split format**: Uses tantivy4java's Quickwit split format for immutable, optimized index storage
 - **JVM-wide caching**: Shared SplitCacheManager instances for optimal memory utilization across executors
+- **AWS session token support**: Full support for temporary credentials via AWS STS session tokens
 
 
 ## Project Structure
@@ -131,6 +132,7 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
 | `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
+| `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
 | `spark.tantivy4spark.aws.region` | - | AWS region for S3 split access |
 | `spark.tantivy4spark.aws.endpoint` | - | Custom AWS S3 endpoint |
 | `spark.tantivy4spark.azure.accountName` | - | Azure storage account name |
@@ -166,6 +168,13 @@ df.write.format("tantivy4spark")
 // AWS-specific configuration for split access
 spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
 spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// AWS configuration with temporary credentials (STS session token)
+spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-temporary-access-key")
+spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-temporary-secret-key")
+spark.conf.set("spark.tantivy4spark.aws.sessionToken", "your-session-token")
 spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
 df.write.format("tantivy4spark").save("s3://bucket/path")
 

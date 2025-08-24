@@ -37,7 +37,22 @@ class Tantivy4SparkBatchWrite(
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
-    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, hadoopConf)
+    
+    // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
+    val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
+    
+    // Copy all tantivy4spark options to hadoop config to ensure they reach executors
+    import scala.jdk.CollectionConverters._
+    options.entrySet().asScala.foreach { entry =>
+      val key = entry.getKey
+      val value = entry.getValue
+      if (key.startsWith("spark.tantivy4spark.")) {
+        enrichedHadoopConf.set(key, value)
+        logger.info(s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
+      }
+    }
+    
+    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, enrichedHadoopConf)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {

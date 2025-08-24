@@ -111,6 +111,14 @@
             <version>${aws.sdk.version}</version>
         </dependency>
 
+        <!-- S3A filesystem for S3 operations -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- JSON processing -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -163,6 +171,13 @@
             <artifactId>spark-core_${scala.compat.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
+        <!-- S3Mock for testing S3 functionality -->
+        <dependency>
+            <groupId>io.findify</groupId>
+            <artifactId>s3mock_2.12</artifactId>
+            <version>0.2.6</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

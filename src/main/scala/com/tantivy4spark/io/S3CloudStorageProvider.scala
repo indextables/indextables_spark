@@ -1,0 +1,459 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.tantivy4spark.io
+
+import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, AwsSessionCredentials, StaticCredentialsProvider, DefaultCredentialsProvider}
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model._
+import software.amazon.awssdk.core.ResponseInputStream
+import software.amazon.awssdk.core.sync.RequestBody
+import org.slf4j.LoggerFactory
+import java.io.{InputStream, OutputStream, ByteArrayInputStream, ByteArrayOutputStream}
+import java.net.URI
+import java.util.concurrent.{CompletableFuture, Executors}
+import scala.jdk.CollectionConverters._
+import scala.util.{Try, Success, Failure}
+
+/**
+ * High-performance S3 storage provider using AWS SDK directly.
+ * Bypasses Hadoop filesystem for better performance and reliability.
+ */
+class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStorageProvider {
+  
+  private val logger = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
+  private val executor = Executors.newCachedThreadPool()
+  
+  println(s"🔧 S3CloudStorageProvider CONFIG:")
+  println(s"  - accessKey: ${config.awsAccessKey.map(_.take(4) + "...")}")
+  println(s"  - secretKey: ${config.awsSecretKey.map(_ => "***")}")
+  println(s"  - endpoint: ${config.awsEndpoint}")
+  println(s"  - pathStyleAccess: ${config.awsPathStyleAccess}")
+  println(s"  - region: ${config.awsRegion}")
+  
+  private val s3Client: S3Client = {
+    val builder = S3Client.builder()
+    
+    // Configure region
+    config.awsRegion.foreach { region =>
+      builder.region(Region.of(region))
+    }
+    
+    // Configure endpoint (for testing with S3Mock, MinIO, etc.)
+    config.awsEndpoint.foreach { endpoint =>
+      try {
+        // Ensure the endpoint has a proper scheme (http:// or https://)
+        val endpointUri = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+          URI.create(endpoint)
+        } else {
+          // Default to https if no scheme specified
+          URI.create(s"https://$endpoint")
+        }
+        
+        logger.info(s"Configuring S3 client with endpoint: $endpointUri")
+        builder.endpointOverride(endpointUri)
+        
+        if (config.awsPathStyleAccess) {
+          builder.forcePathStyle(true)
+        }
+      } catch {
+        case ex: Exception =>
+          logger.error(s"Failed to parse S3 endpoint: $endpoint", ex)
+          throw new IllegalArgumentException(s"Invalid S3 endpoint: $endpoint", ex)
+      }
+    }
+    
+    // Configure credentials - only use DefaultCredentialsProvider if no credentials are configured
+    val credentialsProvider = (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
+      case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
+        logger.info(s"Using AWS session credentials with access key: ${accessKey.take(4)}...")
+        val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+        StaticCredentialsProvider.create(credentials)
+      case (Some(accessKey), Some(secretKey), None) =>
+        logger.info(s"Using AWS basic credentials with access key: ${accessKey.take(4)}...")
+        val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+        StaticCredentialsProvider.create(credentials)
+      case _ =>
+        logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
+        DefaultCredentialsProvider.create()
+    }
+    
+    builder.credentialsProvider(credentialsProvider).build()
+  }
+  
+  override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
+    val (bucket, prefix) = parseS3Path(path)
+    
+    try {
+      logger.debug(s"Listing S3 files: bucket=$bucket, prefix=$prefix, recursive=$recursive")
+      
+      val request = ListObjectsV2Request.builder()
+        .bucket(bucket)
+        .prefix(prefix)
+        .delimiter(if (recursive) null else "/")
+        .build()
+      
+      val response = s3Client.listObjectsV2(request)
+      
+      val files = response.contents().asScala.map { s3Object =>
+        CloudFileInfo(
+          path = s"s3://$bucket/${s3Object.key()}",
+          size = s3Object.size(),
+          modificationTime = s3Object.lastModified().toEpochMilli,
+          isDirectory = false
+        )
+      }.toSeq
+      
+      val directories = if (!recursive) {
+        response.commonPrefixes().asScala.map { commonPrefix =>
+          CloudFileInfo(
+            path = s"s3://$bucket/${commonPrefix.prefix()}",
+            size = 0L,
+            modificationTime = 0L,
+            isDirectory = true
+          )
+        }.toSeq
+      } else Seq.empty
+      
+      files ++ directories
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to list S3 files at s3://$bucket/$prefix", ex)
+        throw new RuntimeException(s"Failed to list S3 files: ${ex.getMessage}", ex)
+    }
+  }
+  
+  override def exists(path: String): Boolean = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      val request = HeadObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+      
+      s3Client.headObject(request)
+      true
+    } catch {
+      case _: NoSuchKeyException => false
+      case ex: Exception =>
+        logger.error(s"Failed to check if S3 file exists: s3://$bucket/$key", ex)
+        false
+    }
+  }
+  
+  override def getFileInfo(path: String): Option[CloudFileInfo] = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      val request = HeadObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+      
+      val response = s3Client.headObject(request)
+      
+      Some(CloudFileInfo(
+        path = path,
+        size = response.contentLength(),
+        modificationTime = response.lastModified().toEpochMilli,
+        isDirectory = false
+      ))
+    } catch {
+      case _: NoSuchKeyException => None
+      case ex: Exception =>
+        logger.error(s"Failed to get S3 file info: s3://$bucket/$key", ex)
+        None
+    }
+  }
+  
+  override def readFile(path: String): Array[Byte] = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      logger.debug(s"Reading entire S3 file: s3://$bucket/$key")
+      
+      val request = GetObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+      
+      val response = s3Client.getObject(request)
+      response.readAllBytes()
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to read S3 file: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Failed to read S3 file: ${ex.getMessage}", ex)
+    }
+  }
+  
+  override def readRange(path: String, offset: Long, length: Long): Array[Byte] = {
+    val (bucket, key) = parseS3Path(path)
+    val rangeHeader = s"bytes=$offset-${offset + length - 1}"
+    
+    try {
+      logger.debug(s"Reading S3 range: s3://$bucket/$key, range=$rangeHeader")
+      
+      val request = GetObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .range(rangeHeader)
+        .build()
+      
+      val response = s3Client.getObject(request)
+      response.readAllBytes()
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to read S3 range: s3://$bucket/$key, range=$rangeHeader", ex)
+        throw new RuntimeException(s"Failed to read S3 range: ${ex.getMessage}", ex)
+    }
+  }
+  
+  override def openInputStream(path: String): InputStream = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      val request = GetObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+      
+      s3Client.getObject(request)
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to open S3 input stream: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Failed to open S3 input stream: ${ex.getMessage}", ex)
+    }
+  }
+  
+  override def createOutputStream(path: String): OutputStream = {
+    // For S3, we need to buffer the output and upload when the stream is closed
+    new S3OutputStream(path)
+  }
+  
+  override def writeFile(path: String, content: Array[Byte]): Unit = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      logger.info(s"🔧 S3 WRITE DEBUG - Path: $path")
+      logger.info(s"🔧 S3 WRITE DEBUG - Bucket: '$bucket', Key: '$key'")
+      logger.info(s"🔧 S3 WRITE DEBUG - Content length: ${content.length} bytes")
+      
+      // Ensure bucket exists first
+      ensureBucketExists(bucket)
+      
+      val request = PutObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .contentLength(content.length.toLong)
+        .build()
+      
+      val requestBody = RequestBody.fromBytes(content)
+      s3Client.putObject(request, requestBody)
+      
+      logger.info(s"✅ Successfully wrote S3 file: s3://$bucket/$key")
+    } catch {
+      case ex: Exception =>
+        logger.error(s"❌ Failed to write S3 file: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Failed to write S3 file: ${ex.getMessage}", ex)
+    }
+  }
+  
+  /**
+   * Ensure bucket exists before writing files
+   */
+  private def ensureBucketExists(bucket: String): Unit = {
+    try {
+      val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest.builder()
+        .bucket(bucket)
+        .build()
+      
+      s3Client.headBucket(bucketExistsRequest)
+      logger.debug(s"✅ Bucket exists: $bucket")
+    } catch {
+      case _: software.amazon.awssdk.services.s3.model.NoSuchBucketException =>
+        logger.info(s"🔧 Creating missing bucket: $bucket")
+        val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+          .bucket(bucket)
+          .build()
+        s3Client.createBucket(createBucketRequest)
+        logger.info(s"✅ Created S3 bucket: $bucket")
+      case ex: Exception =>
+        logger.warn(s"⚠️  Could not verify bucket existence for $bucket: ${ex.getMessage}")
+        // Continue anyway - the putObject call will fail if bucket really doesn't exist
+    }
+  }
+  
+  override def deleteFile(path: String): Boolean = {
+    val (bucket, key) = parseS3Path(path)
+    
+    try {
+      val request = DeleteObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+      
+      s3Client.deleteObject(request)
+      true
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to delete S3 file: s3://$bucket/$key", ex)
+        false
+    }
+  }
+  
+  override def createDirectory(path: String): Boolean = {
+    val (bucket, key) = parseS3Path(path)
+    
+    // If the key is empty or just "/", create the bucket
+    if (key.isEmpty || key == "/") {
+      try {
+        // Check if bucket exists
+        val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest.builder()
+          .bucket(bucket)
+          .build()
+        
+        try {
+          s3Client.headBucket(bucketExistsRequest)
+          logger.debug(s"Bucket already exists: $bucket")
+        } catch {
+          case _: software.amazon.awssdk.services.s3.model.NoSuchBucketException =>
+            // Create bucket
+            val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+              .bucket(bucket)
+              .build()
+            s3Client.createBucket(createBucketRequest)
+            logger.info(s"Created S3 bucket: $bucket")
+        }
+        true
+      } catch {
+        case ex: Exception =>
+          logger.error(s"Failed to create bucket: $bucket", ex)
+          false
+      }
+    } else {
+      // S3 doesn't have directories, but we can create a placeholder object
+      val directoryPath = if (key.endsWith("/")) key else key + "/"
+      writeFile(s"s3://$bucket/$directoryPath", Array.empty[Byte])
+      true
+    }
+  }
+  
+  override def readFilesParallel(paths: Seq[String]): Map[String, Array[Byte]] = {
+    if (paths.isEmpty) return Map.empty
+    
+    logger.info(s"Reading ${paths.size} files in parallel from S3")
+    
+    val futures = paths.map { path =>
+      CompletableFuture.supplyAsync(() => {
+        try {
+          path -> Some(readFile(path))
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to read S3 file in parallel: $path", ex)
+            path -> None
+        }
+      }, executor)
+    }
+    
+    try {
+      val results = futures.map(_.get()).collect {
+        case (path, Some(content)) => path -> content
+      }.toMap
+      
+      logger.info(s"Successfully read ${results.size} of ${paths.size} files in parallel")
+      results
+    } catch {
+      case ex: Exception =>
+        logger.error("Failed to complete parallel S3 file reads", ex)
+        Map.empty
+    }
+  }
+  
+  override def existsParallel(paths: Seq[String]): Map[String, Boolean] = {
+    if (paths.isEmpty) return Map.empty
+    
+    logger.debug(s"Checking existence of ${paths.size} files in parallel")
+    
+    val futures = paths.map { path =>
+      CompletableFuture.supplyAsync(() => {
+        path -> exists(path)
+      }, executor)
+    }
+    
+    try {
+      futures.map(_.get()).toMap
+    } catch {
+      case ex: Exception =>
+        logger.error("Failed to complete parallel S3 existence checks", ex)
+        paths.map(_ -> false).toMap
+    }
+  }
+  
+  override def getProviderType: String = "s3"
+  
+  override def close(): Unit = {
+    executor.shutdown()
+    s3Client.close()
+    logger.debug("Closed S3 storage provider")
+  }
+  
+  /**
+   * Parse S3 path into bucket and key components
+   */
+  private def parseS3Path(path: String): (String, String) = {
+    val uri = URI.create(path)
+    val bucket = uri.getHost
+    val key = uri.getPath.stripPrefix("/")
+    (bucket, key)
+  }
+  
+  /**
+   * Custom OutputStream for S3 that buffers content and uploads on close
+   */
+  private class S3OutputStream(path: String) extends OutputStream {
+    private val buffer = new ByteArrayOutputStream()
+    private var closed = false
+    
+    override def write(b: Int): Unit = {
+      if (closed) throw new IllegalStateException("Stream is closed")
+      buffer.write(b)
+    }
+    
+    override def write(b: Array[Byte]): Unit = {
+      if (closed) throw new IllegalStateException("Stream is closed")
+      buffer.write(b)
+    }
+    
+    override def write(b: Array[Byte], off: Int, len: Int): Unit = {
+      if (closed) throw new IllegalStateException("Stream is closed")
+      buffer.write(b, off, len)
+    }
+    
+    override def close(): Unit = {
+      if (!closed) {
+        try {
+          writeFile(path, buffer.toByteArray)
+        } finally {
+          buffer.close()
+          closed = true
+        }
+      }
+    }
+  }
+}

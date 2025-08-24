@@ -20,13 +20,23 @@ package com.tantivy4spark.search
 
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.hadoop.conf.Configuration
 import org.slf4j.LoggerFactory
 
-class TantivySearchEngine private (private val directInterface: TantivyDirectInterface) extends AutoCloseable {
+class TantivySearchEngine private (
+  private val directInterface: TantivyDirectInterface,
+  private val options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+  private val hadoopConf: Configuration = new Configuration()
+) extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivySearchEngine])
   
   // Primary constructor for creating new search engines
   def this(schema: StructType) = this(new TantivyDirectInterface(schema))
+  
+  // Constructor with cloud storage support
+  def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) = 
+    this(new TantivyDirectInterface(schema), options, hadoopConf)
 
   def addDocument(row: InternalRow): Unit = {
     directInterface.addDocument(row)
@@ -51,9 +61,9 @@ class TantivySearchEngine private (private val directInterface: TantivyDirectInt
       // Get temporary directory path from the direct interface
       val tempIndexPath = directInterface.getIndexPath()
       
-      // Use SplitManager to create split from the temporary index
+      // Use SplitManager to create split from the temporary index with cloud storage support
       import com.tantivy4spark.storage.SplitManager
-      val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId)
+      val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId, options, hadoopConf)
       
       // Return the split file path
       outputPath
