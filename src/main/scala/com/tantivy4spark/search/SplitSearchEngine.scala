@@ -38,14 +38,13 @@ class SplitSearchEngine(
   
   private val logger = LoggerFactory.getLogger(classOf[SplitSearchEngine])
   
-  // DEBUG: Show what's in the cacheConfig before calling getInstance
-  println(s"🔍 SplitSearchEngine creating cache manager with config:")
-  println(s"  - cacheName: ${cacheConfig.cacheName}")
-  println(s"  - awsAccessKey: ${cacheConfig.awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
-  println(s"  - awsSecretKey: ${cacheConfig.awsSecretKey.map(_ => "***").getOrElse("None")}")
-  println(s"  - awsRegion: ${cacheConfig.awsRegion.getOrElse("None")}")
-  println(s"  - awsSessionToken: ${cacheConfig.awsSessionToken.map(_ => "***").getOrElse("None")}")
-  println(s"  - awsEndpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
+  logger.debug(s"SplitSearchEngine creating cache manager with config:")
+  logger.debug(s"  - cacheName: ${cacheConfig.cacheName}")
+  logger.debug(s"  - awsAccessKey: ${cacheConfig.awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
+  logger.debug(s"  - awsSecretKey: ${cacheConfig.awsSecretKey.map(_ => "***").getOrElse("None")}")
+  logger.debug(s"  - awsRegion: ${cacheConfig.awsRegion.getOrElse("None")}")
+  logger.debug(s"  - awsSessionToken: ${cacheConfig.awsSessionToken.map(_ => "***").getOrElse("None")}")
+  logger.debug(s"  - awsEndpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
   
   // Get the global cache manager for this configuration
   private val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)

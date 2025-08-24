@@ -237,18 +237,20 @@ class Tantivy4SparkDataWriter(
     hadoopConf: org.apache.hadoop.conf.Configuration
 ) extends DataWriter[InternalRow] {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
   
   // Debug: Log options and hadoop config available in executor
-  println(s"🔧 Tantivy4SparkDataWriter executor options:")
-  options.entrySet().asScala.foreach { entry =>
-    val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
-    println(s"  ${entry.getKey} = $value")
-  }
-  println(s"🔧 Tantivy4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
-  hadoopConf.iterator().asScala.filter(_.getKey.contains("tantivy4spark")).foreach { entry =>
-    val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
-    println(s"  ${entry.getKey} = $value")
+  if (logger.isDebugEnabled) {
+    logger.debug("Tantivy4SparkDataWriter executor options:")
+    options.entrySet().asScala.foreach { entry =>
+      val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
+      logger.debug(s"  ${entry.getKey} = $value")
+    }
+    logger.debug("Tantivy4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
+    hadoopConf.iterator().asScala.filter(_.getKey.contains("tantivy4spark")).foreach { entry =>
+      val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
+      logger.debug(s"  ${entry.getKey} = $value")
+    }
   }
   
   private val searchEngine = new TantivySearchEngine(writeSchema, options, hadoopConf)
@@ -256,7 +258,6 @@ class Tantivy4SparkDataWriter(
   private var recordCount = 0L
 
   override def write(record: InternalRow): Unit = {
-    //println(s"Adding document $recordCount to Tantivy index")
     searchEngine.addDocument(record)
     statistics.updateRow(record)
     recordCount += 1

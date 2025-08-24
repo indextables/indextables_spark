@@ -37,6 +37,7 @@ import scala.collection.JavaConverters._
 import org.apache.spark.broadcast.Broadcast
 
 object Tantivy4SparkRelation {
+  @transient private lazy val logger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
   def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {
     val bais = new java.io.ByteArrayInputStream(zipData)
     val zis = new java.util.zip.ZipInputStream(bais)
@@ -75,6 +76,9 @@ object Tantivy4SparkRelation {
       serializableSchema: StructType, 
       hadoopConfProps: Map[String, String]
   ): Iterator[org.apache.spark.sql.Row] = {
+    // Create local logger for executor to avoid serialization issues
+    val executorLogger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
+    
     // Recreate Hadoop configuration in executor context
     val localHadoopConf = new org.apache.hadoop.conf.Configuration()
     hadoopConfProps.foreach { case (key, value) =>
@@ -82,12 +86,14 @@ object Tantivy4SparkRelation {
     }
     
     // DEBUG: Print all tantivy4spark configurations received in executor
-    println(s"🔍 processFile received ${hadoopConfProps.size} total config properties")
     val tantivyConfigs = hadoopConfProps.filter(_._1.startsWith("spark.tantivy4spark."))
-    println(s"🔍 processFile found ${tantivyConfigs.size} tantivy4spark configs:")
-    tantivyConfigs.foreach { case (key, value) =>
-      val displayValue = if (key.contains("secret") || key.contains("session")) "***" else value
-      println(s"   $key = $displayValue")
+    if (executorLogger.isDebugEnabled) {
+      executorLogger.debug(s"processFile received ${hadoopConfProps.size} total config properties")
+      executorLogger.debug(s"processFile found ${tantivyConfigs.size} tantivy4spark configs:")
+      tantivyConfigs.foreach { case (key, value) =>
+        val displayValue = if (key.contains("secret") || key.contains("session")) "***" else value
+        executorLogger.debug(s"   $key = $displayValue")
+      }
     }
     
     // Extract cache configuration with session token support from Hadoop props
@@ -118,7 +124,7 @@ object Tantivy4SparkRelation {
     val rows = scala.collection.mutable.ListBuffer[org.apache.spark.sql.Row]()
     
     try {
-      println(s"Reading Tantivy split file: $filePath")
+      executorLogger.info(s"Reading Tantivy split file: $filePath")
       
       // Normalize path for tantivy4java compatibility (s3a:// -> s3://)
       val normalizedPath = if (filePath.startsWith("s3a://") || filePath.startsWith("s3n://")) {
@@ -133,16 +139,18 @@ object Tantivy4SparkRelation {
         normalizedPath,
         cacheConfig
       )
-      println(s"Split search engine created successfully")
+      executorLogger.debug("Split search engine created successfully")
       
       // Use searchAll to get all documents from the split
-      println(s"Starting searchAll with limit Int.MaxValue...")
+      executorLogger.debug("Starting searchAll with limit Int.MaxValue...")
       val results = splitSearchEngine.searchAll(limit = Int.MaxValue)
-      println(s"Search returned ${results.length} results")
+      executorLogger.debug(s"Search returned ${results.length} results")
       
       if (results.length == 0) {
-        println(s"WARNING: Search returned 0 results from split file")
-        println(s"Schema fields: ${serializableSchema.fieldNames.mkString(", ")}")
+        executorLogger.warn(s"Search returned 0 results from split file")
+        if (executorLogger.isDebugEnabled) {
+          executorLogger.debug(s"Schema fields: ${serializableSchema.fieldNames.mkString(", ")}")
+        }
       }
       
       // Convert search results to Spark Rows with proper type conversion
@@ -153,7 +161,7 @@ object Tantivy4SparkRelation {
         } catch {
           case ex: Exception =>
             // If catalyst conversion fails, manually convert the row
-            println(s"Catalyst conversion failed, using manual conversion: ${ex.getMessage}")
+            executorLogger.debug(s"Catalyst conversion failed, using manual conversion: ${ex.getMessage}")
             val values = serializableSchema.fields.zipWithIndex.map { case (field, idx) =>
               val rawValue = if (idx < internalRow.numFields && !internalRow.isNullAt(idx)) {
                 field.dataType match {
@@ -188,11 +196,11 @@ object Tantivy4SparkRelation {
       }
       
       splitSearchEngine.close()
-      println(s"Converted ${rows.length} rows from search")
+      executorLogger.debug(s"Converted ${rows.length} rows from search")
     } catch {
       case ex: Exception =>
         // If we can't read the Tantivy split file, log and return empty
-        System.err.println(s"Failed to read Tantivy split file $filePath: ${ex.getMessage}")
+        executorLogger.error(s"Failed to read Tantivy split file $filePath: ${ex.getMessage}")
         ex.printStackTrace()
         // Return empty iterator on error
     }
@@ -202,7 +210,7 @@ object Tantivy4SparkRelation {
 }
 
 class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider with CreatableRelationProvider {
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
   
   override def shortName(): String = "tantivy4spark"
 
@@ -246,7 +254,9 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     allOptions.foreach { case (key, value) =>
       if (key.startsWith("spark.tantivy4spark.")) {
         currentHadoopConf.set(key, value)
-        println(s"🔧 Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
+        if (logger.isDebugEnabled) {
+          logger.debug(s"Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
+        }
       }
     }
     val writeOptions = new CaseInsensitiveStringMap(allOptions.asJava)
@@ -351,6 +361,9 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
 
     // Execute write using Spark's mapPartitionsWithIndex
     val commitMessages = finalData.queryExecution.toRdd.mapPartitionsWithIndex { (partitionId, iterator) =>
+      // Create a local logger inside the closure to avoid serialization issues
+      val executorLogger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
+      
       // Recreate Hadoop configuration with essential properties in the executor
       val localHadoopConf = new org.apache.hadoop.conf.Configuration()
       essentialConfProps.foreach { case (key, value) =>
@@ -358,12 +371,21 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       }
       
       // Also add write options to Hadoop config to ensure they override any existing values
-      println(s"🔧 Executor: Adding write options to Hadoop config")
-      enrichedOptions.foreach { case (key, value) =>
-        if (key.startsWith("spark.tantivy4spark.")) {
-          localHadoopConf.set(key, value)
-          val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
-          println(s"  Setting in executor: $key = $displayValue")
+      if (executorLogger.isDebugEnabled) {
+        executorLogger.debug("Executor: Adding write options to Hadoop config")
+        enrichedOptions.foreach { case (key, value) =>
+          if (key.startsWith("spark.tantivy4spark.")) {
+            localHadoopConf.set(key, value)
+            val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
+            executorLogger.debug(s"  Setting in executor: $key = $displayValue")
+          }
+        }
+      } else {
+        // Still need to set the config even when debug is disabled
+        enrichedOptions.foreach { case (key, value) =>
+          if (key.startsWith("spark.tantivy4spark.")) {
+            localHadoopConf.set(key, value)
+          }
         }
       }
       
@@ -399,6 +421,8 @@ class Tantivy4SparkRelation(
     val sqlContext: SQLContext,
     readOptions: Map[String, String] = Map.empty
 ) extends BaseRelation with TableScan {
+  
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkRelation])
   
   override def schema: StructType = {
     // Get schema from transaction log
@@ -464,8 +488,10 @@ class Tantivy4SparkRelation(
       val tantivyProps = hadoopTantivyProps ++ sparkTantivyProps ++ readTantivyProps
       
       val hadoopConfProps = baseHadoopProps ++ tantivyProps
-      println(s"🔧 V1 buildScan passing ${hadoopConfProps.size} config properties to executors")
-      println(s"🔧 Sources: Hadoop(${hadoopTantivyProps.size}), Spark(${sparkTantivyProps.size}), Options(${readTantivyProps.size})")
+      if (logger.isDebugEnabled) {
+        logger.debug(s"V1 buildScan passing ${hadoopConfProps.size} config properties to executors")
+        logger.debug(s"Sources: Hadoop(${hadoopTantivyProps.size}), Spark(${sparkTantivyProps.size}), Options(${readTantivyProps.size})")
+      }
       
       // Create RDD from file paths using standalone object method for proper serialization
       spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>

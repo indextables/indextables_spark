@@ -22,6 +22,7 @@ import org.apache.spark.sql.execution.datasources.{FileIndex, PartitionDirectory
 import org.apache.spark.sql.types.StructType
 import org.apache.hadoop.fs.{FileStatus, Path}
 import scala.collection.mutable
+import org.slf4j.LoggerFactory
 
 /**
  * Custom FileIndex implementation that uses transaction log for file discovery
@@ -41,6 +42,8 @@ class TantivyFileIndex(
     fileStatuses: Seq[FileStatus],
     userSpecifiedSchema: StructType
 ) extends FileIndex {
+  
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[TantivyFileIndex])
 
   // Convert FileStatus to serializable form to avoid Hadoop Configuration serialization issues
   private val _fileInfos = fileStatuses.map { fs =>
@@ -56,7 +59,7 @@ class TantivyFileIndex(
       partitionFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression],
       dataFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression]): Seq[PartitionDirectory] = {
     
-    println(s"[DEBUG] TantivyFileIndex.listFiles called with ${_fileInfos.length} files")
+    logger.debug(s"TantivyFileIndex.listFiles called with ${_fileInfos.length} files")
     
     // Convert SerializableFileInfo back to FileStatus for Spark
     val fileStatuses = _fileInfos.map { info =>
@@ -102,7 +105,7 @@ class TantivyFileIndex(
 
   override def refresh(): Unit = {
     // Transaction log-based, no need to refresh from filesystem
-    println("[DEBUG] TantivyFileIndex.refresh called (no-op for transaction log)")
+    logger.debug("TantivyFileIndex.refresh called (no-op for transaction log)")
   }
 
   override def sizeInBytes: Long = {

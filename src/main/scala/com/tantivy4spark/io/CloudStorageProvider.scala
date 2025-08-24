@@ -162,13 +162,15 @@ object CloudStorageProviderFactory {
   def createProvider(path: String, options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageProvider = {
     val protocol = ProtocolBasedIOFactory.determineProtocol(path)
     
-    println(s"🔍 CloudStorageProviderFactory.createProvider called for path: $path")
-    println(s"🔍 Options passed (${options.size()} total):")
+    logger.debug(s"CloudStorageProviderFactory.createProvider called for path: $path")
+    logger.debug(s"Options passed (${options.size()} total tantivy4spark options)")
     import scala.jdk.CollectionConverters._
-    options.entrySet().asScala.foreach { entry =>
-      if (entry.getKey.startsWith("spark.tantivy4spark.")) {
-        val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("session")) "***" else entry.getValue
-        println(s"   ${entry.getKey} = $displayValue")
+    if (logger.isDebugEnabled) {
+      options.entrySet().asScala.foreach { entry =>
+        if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+          val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("session")) "***" else entry.getValue
+          logger.debug(s"   ${entry.getKey} = $displayValue")
+        }
       }
     }
     
@@ -226,7 +228,7 @@ object CloudStorageProviderFactory {
               val value = sparkConf.get(key, defaultValue)
               if (value != defaultValue) {
                 enriched.set(key, value)
-                println(s"✅ Copied string Spark config to Hadoop conf: $key = $value")
+                logger.debug(s"Copied string Spark config to Hadoop conf: $key = $value")
                 logger.info(s"✅ Copied string Spark config to Hadoop conf: $key = $value")
               } else {
                 // Configuration doesn't exist - this is normal for optional configs like sessionToken
@@ -234,7 +236,7 @@ object CloudStorageProviderFactory {
               }
             } catch {
               case ex: Exception => 
-                println(s"❌ Failed to copy string Spark config key $key: ${ex.getMessage}")
+                logger.warn(s"Failed to copy string Spark config key $key: ${ex.getMessage}")
                 logger.info(s"❌ Failed to copy string Spark config key $key: ${ex.getMessage}")
             }
           }
@@ -247,7 +249,7 @@ object CloudStorageProviderFactory {
               val value = sparkConf.get(key, defaultValue)
               if (value != defaultValue) {
                 enriched.setBoolean(key, value.toBoolean)
-                println(s"✅ Copied boolean Spark config to Hadoop conf: $key = $value")
+                logger.debug(s"Copied boolean Spark config to Hadoop conf: $key = $value")
                 logger.info(s"✅ Copied boolean Spark config to Hadoop conf: $key = $value")
               } else {
                 // Configuration doesn't exist - this is normal for optional configs
@@ -255,7 +257,7 @@ object CloudStorageProviderFactory {
               }
             } catch {
               case ex: Exception => 
-                println(s"❌ Failed to copy boolean Spark config key $key: ${ex.getMessage}")
+                logger.warn(s"Failed to copy boolean Spark config key $key: ${ex.getMessage}")
                 logger.info(s"❌ Failed to copy boolean Spark config key $key: ${ex.getMessage}")
             }
           }
@@ -324,16 +326,20 @@ object CloudStorageProviderFactory {
       .orElse(sessionTokenFromS3a)
     
     logger.info(s"Final credentials: accessKey=${finalAccessKey.map(_.take(4) + "...")}, secretKey=${finalSecretKey.map(_ => "***")}, sessionToken=${finalSessionToken.map(_ => "***")}")
-    println(s"🔍 CREDENTIAL EXTRACTION DEBUG:")
-    println(s"  Final accessKey: ${finalAccessKey.map(_.take(4) + "...")}")
-    println(s"  Final secretKey: ${finalSecretKey.map(_ => "***")}")
-    println(s"  Final sessionToken: ${finalSessionToken.map(_ => "***")}")
+    if (logger.isDebugEnabled) {
+      logger.debug(s"CREDENTIAL EXTRACTION DEBUG:")
+      logger.debug(s"  Final accessKey: ${finalAccessKey.map(_.take(4) + "...")}, secretKey present: ${finalSecretKey.isDefined}, sessionToken present: ${finalSessionToken.isDefined}")
+    }
     
     // If credentials are still missing and we're in an executor context, log a warning
     if (finalAccessKey.isEmpty || finalSecretKey.isEmpty) {
       logger.warn("AWS credentials not found in configuration. S3CloudStorageProvider will fall back to DefaultCredentialsProvider.")
       logger.warn("This usually happens in Spark executor context where SparkSession is not available.")
-      println(s"⚠️  AWS credentials missing - falling back to DefaultCredentialsProvider")
+      // Keep the important warnings visible
+      // AWS credentials are missing which could cause issues
+      if (logger.isWarnEnabled) {
+        logger.warn("AWS credentials missing - falling back to DefaultCredentialsProvider")
+      }
     }
     
     CloudStorageConfig(
@@ -365,20 +371,20 @@ object CloudStorageProviderFactory {
             case Some(session) => 
               try {
                 val value = session.conf.get("spark.tantivy4spark.s3.pathStyleAccess", "false")
-                println(s"🔧 Found pathStyleAccess directly from SparkSession: $value")
+                logger.debug(s"Found pathStyleAccess directly from SparkSession: $value")
                 value.toBoolean
               } catch {
                 case ex: Exception =>
-                  println(s"🔧 Failed to get pathStyleAccess from SparkSession: ${ex.getMessage}")
+                  logger.debug(s"Failed to get pathStyleAccess from SparkSession: ${ex.getMessage}")
                   false
               }
             case None => 
-              println(s"🔧 No active SparkSession found")
+              logger.debug("No active SparkSession found")
               false
           }
         } catch {
           case ex: Exception =>
-            println(s"🔧 Exception getting SparkSession: ${ex.getMessage}")
+            logger.debug(s"Exception getting SparkSession: ${ex.getMessage}")
             false
         }
         
@@ -386,13 +392,11 @@ object CloudStorageProviderFactory {
         val pathStyleFromHadoop2 = hadoopConf.getBoolean("spark.hadoop.fs.s3a.path.style.access", false)
         val pathStyleFromHadoop3 = hadoopConf.getBoolean("fs.s3a.path.style.access", false)
         
-        println(s"🔄 PATH STYLE ACCESS EXTRACTION:")
-        println(s"  - From options aws.pathStyleAccess: $pathStyleFromOptions1")
-        println(s"  - From options s3.pathStyleAccess: $pathStyleFromOptions2")
-        println(s"  - From spark session directly: $pathStyleFromSparkSession")
-        println(s"  - From hadoop tantivy s3.pathStyleAccess: $pathStyleFromHadoop1")
-        println(s"  - From hadoop s3a path.style.access: $pathStyleFromHadoop2")
-        println(s"  - From s3a path.style.access: $pathStyleFromHadoop3")
+        if (logger.isDebugEnabled) {
+          logger.debug("PATH STYLE ACCESS EXTRACTION:")
+          logger.debug(s"  Options: aws=$pathStyleFromOptions1, s3=$pathStyleFromOptions2")
+          logger.debug(s"  Spark: $pathStyleFromSparkSession, Hadoop: $pathStyleFromHadoop1/$pathStyleFromHadoop2/$pathStyleFromHadoop3")
+        }
         
         // Check if we have a localhost endpoint - if so, force path-style access for S3Mock
         val endpointValue = Option(options.get("spark.tantivy4spark.s3.endpoint"))
@@ -402,8 +406,9 @@ object CloudStorageProviderFactory {
         
         val finalPathStyle = pathStyleFromOptions1 || pathStyleFromOptions2 || pathStyleFromSparkSession || pathStyleFromHadoop1 || pathStyleFromHadoop2 || pathStyleFromHadoop3 || isLocalHostEndpoint
         
-        println(s"  - Localhost endpoint detected: $isLocalHostEndpoint")  
-        println(s"  - Final pathStyleAccess: $finalPathStyle")
+        if (logger.isDebugEnabled) {
+          logger.debug(s"  Localhost endpoint detected: $isLocalHostEndpoint, Final pathStyleAccess: $finalPathStyle")
+        }
         
         finalPathStyle
       },

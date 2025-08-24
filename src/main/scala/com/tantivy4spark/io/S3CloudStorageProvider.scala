@@ -39,12 +39,12 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   private val logger = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
   private val executor = Executors.newCachedThreadPool()
   
-  println(s"🔧 S3CloudStorageProvider CONFIG:")
-  println(s"  - accessKey: ${config.awsAccessKey.map(_.take(4) + "...")}")
-  println(s"  - secretKey: ${config.awsSecretKey.map(_ => "***")}")
-  println(s"  - endpoint: ${config.awsEndpoint}")
-  println(s"  - pathStyleAccess: ${config.awsPathStyleAccess}")
-  println(s"  - region: ${config.awsRegion}")
+  logger.debug(s"S3CloudStorageProvider CONFIG:")
+  logger.debug(s"  - accessKey: ${config.awsAccessKey.map(_.take(4) + "...")}")
+  logger.debug(s"  - secretKey: ${config.awsSecretKey.map(_ => "***")}")
+  logger.debug(s"  - endpoint: ${config.awsEndpoint}")
+  logger.debug(s"  - pathStyleAccess: ${config.awsPathStyleAccess}")
+  logger.debug(s"  - region: ${config.awsRegion}")
   
   // Detect if we're running against S3Mock for compatibility adjustments
   private val isS3Mock = config.awsEndpoint.exists(_.contains("localhost"))

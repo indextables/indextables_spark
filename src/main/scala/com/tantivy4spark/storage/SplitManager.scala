@@ -328,10 +328,10 @@ object GlobalSplitCacheManager {
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
     val cacheKey = generateCacheKey(config)
     
-    println(s"🔍 GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
-    println(s"🔍 Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
-    println(s"🔍 Generated cache key: $cacheKey")
-    println(s"🔍 Existing cache managers: ${cacheManagers.keySet.size} entries")
+    logger.debug(s"GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
+    logger.debug(s"Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
+    logger.debug(s"Generated cache key: $cacheKey")
+    logger.debug(s"Existing cache managers: ${cacheManagers.keySet.size} entries")
    
     cacheManagers.get(cacheKey) match {
       case Some(manager) => 
