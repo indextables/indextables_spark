@@ -289,33 +289,65 @@ case class SplitCacheConfig(
 object GlobalSplitCacheManager {
   private val logger = LoggerFactory.getLogger(getClass)
   
-  // JVM-wide cache managers indexed by cache name
+  // JVM-wide cache managers indexed by cache key (includes all config elements including session tokens)
   @volatile private var cacheManagers: Map[String, SplitCacheManager] = Map.empty
   private val lock = new Object
   
   /**
+   * Generate a cache key that includes all configuration elements including session tokens.
+   * This ensures cache managers are not shared between different credential configurations.
+   */
+  private def generateCacheKey(config: SplitCacheConfig): String = {
+    val keyElements = Seq(
+      s"name=${config.cacheName}",
+      s"maxSize=${config.maxCacheSize}",
+      s"maxConcurrent=${config.maxConcurrentLoads}",
+      s"queryCache=${config.enableQueryCache}",
+      s"awsKey=${config.awsAccessKey.getOrElse("none")}",
+      s"awsSecret=${config.awsSecretKey.map(_ => "***").getOrElse("none")}",
+      s"awsToken=${config.awsSessionToken.map(_ => "***").getOrElse("none")}",
+      s"awsRegion=${config.awsRegion.getOrElse("none")}",
+      s"awsEndpoint=${config.awsEndpoint.getOrElse("none")}",
+      s"azureName=${config.azureAccountName.getOrElse("none")}",
+      s"azureKey=${config.azureAccountKey.map(_ => "***").getOrElse("none")}",
+      s"azureConn=${config.azureConnectionString.map(_ => "***").getOrElse("none")}",
+      s"azureEndpoint=${config.azureEndpoint.getOrElse("none")}",
+      s"gcpProject=${config.gcpProjectId.getOrElse("none")}",
+      s"gcpKey=${config.gcpServiceAccountKey.map(_ => "***").getOrElse("none")}",
+      s"gcpFile=${config.gcpCredentialsFile.getOrElse("none")}",
+      s"gcpEndpoint=${config.gcpEndpoint.getOrElse("none")}"
+    )
+    keyElements.mkString("|")
+  }
+  
+  /**
    * Get or create a global split cache manager.
+   * Cache managers are now keyed by all config elements (including session tokens) to prevent
+   * configuration mismatches when reusing cache instances.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
+    val cacheKey = generateCacheKey(config)
+    
     println(s"🔍 GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
     println(s"🔍 Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
-    println(s"🔍 Existing cache managers: ${cacheManagers.keySet.mkString(", ")}")
-    
-    cacheManagers.get(config.cacheName) match {
+    println(s"🔍 Generated cache key: $cacheKey")
+    println(s"🔍 Existing cache managers: ${cacheManagers.keySet.size} entries")
+   
+    cacheManagers.get(cacheKey) match {
       case Some(manager) => 
-        logger.warn(s"⚠️  REUSING existing cache manager: ${config.cacheName} - this may have old configuration!")
-        logger.warn(s"⚠️  If you see region errors, this is likely why - the cached manager has old config")
+        logger.debug(s"Reusing existing cache manager with matching configuration: ${config.cacheName}")
         manager
       case None =>
         lock.synchronized {
           // Double-check pattern
-          cacheManagers.get(config.cacheName) match {
+          cacheManagers.get(cacheKey) match {
             case Some(manager) => manager
             case None =>
               logger.info(s"Creating new global split cache manager: ${config.cacheName}, max size: ${config.maxCacheSize}")
+              logger.info(s"Cache key: $cacheKey")
               val javaConfig = config.toJavaCacheConfig()
               val manager = SplitCacheManager.getInstance(javaConfig)
-              cacheManagers = cacheManagers + (config.cacheName -> manager)
+              cacheManagers = cacheManagers + (cacheKey -> manager)
               manager
           }
         }
@@ -344,8 +376,30 @@ object GlobalSplitCacheManager {
    * Get statistics for all active cache managers.
    */
   def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] = {
-    cacheManagers.map { case (name, manager) =>
-      name -> manager.getGlobalCacheStats()
+    cacheManagers.map { case (cacheKey, manager) =>
+      cacheKey -> manager.getGlobalCacheStats()
+    }
+  }
+  
+  /**
+   * Get the number of active cache managers.
+   */
+  def getCacheManagerCount(): Int = cacheManagers.size
+  
+  /**
+   * Clear all cache managers (for testing purposes).
+   */
+  def clearAll(): Unit = {
+    lock.synchronized {
+      cacheManagers.values.foreach { manager =>
+        try {
+          manager.close()
+        } catch {
+          case e: Exception =>
+            logger.warn("Error closing cache manager during clear", e)
+        }
+      }
+      cacheManagers = Map.empty
     }
   }
 }

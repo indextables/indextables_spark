@@ -42,6 +42,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
   private val SESSION_TOKEN = "test-session-token"
   private var s3MockPort: Int = _
   private var s3Mock: S3Mock = _
+  private var s3MockDir: String = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -49,8 +50,9 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // Find available port
     s3MockPort = findAvailablePort()
     
-    // Start S3Mock server
-    s3Mock = S3Mock(port = s3MockPort, dir = "/tmp/s3")
+    // Start S3Mock server with unique directory to prevent file locking
+    s3MockDir = s"/tmp/s3-${System.currentTimeMillis()}"
+    s3Mock = S3Mock(port = s3MockPort, dir = s3MockDir)
     s3Mock.start
     
     // Create the test bucket using AWS SDK
@@ -64,13 +66,40 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
       .build()
     
     try {
-      s3Client.createBucket(software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
-        .bucket(TEST_BUCKET)
-        .build())
-      println(s"✅ Created S3 bucket: $TEST_BUCKET")
-    } catch {
-      case ex: Exception =>
-        println(s"⚠️  Failed to create bucket $TEST_BUCKET: ${ex.getMessage}")
+      // First, try to delete any existing objects in the bucket from previous runs
+      try {
+        val listResponse = s3Client.listObjectsV2(software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+          .bucket(TEST_BUCKET)
+          .build())
+        
+        import scala.jdk.CollectionConverters._
+        val existingObjects = listResponse.contents().asScala
+        if (existingObjects.nonEmpty) {
+          println(s"🧹 Cleaning up ${existingObjects.size} existing objects from bucket $TEST_BUCKET before test")
+          existingObjects.foreach { obj =>
+            s3Client.deleteObject(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.builder()
+              .bucket(TEST_BUCKET)
+              .key(obj.key())
+              .build())
+          }
+        }
+      } catch {
+        case _: Exception =>
+          // Bucket might not exist yet, that's fine
+      }
+      
+      // Now create the bucket (or ensure it exists)
+      try {
+        s3Client.createBucket(software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+          .bucket(TEST_BUCKET)
+          .build())
+        println(s"✅ Created S3 bucket: $TEST_BUCKET")
+      } catch {
+        case ex: software.amazon.awssdk.services.s3.model.BucketAlreadyExistsException =>
+          println(s"ℹ️  Bucket $TEST_BUCKET already exists, reusing it")
+        case ex: Exception =>
+          println(s"⚠️  Failed to create bucket $TEST_BUCKET: ${ex.getMessage}")
+      }
     } finally {
       s3Client.close()
     }
@@ -106,16 +135,9 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
   }
 
   override def afterAll(): Unit = {
-    if (s3Mock != null) {
-      s3Mock.stop
-    }
-    super.afterAll()
-  }
-  
-  override def afterEach(): Unit = {
     // Clean up bucket contents between tests to avoid interference
     // XXX SJS
-    if(true) {
+    if(false) {
        None
     } else {
     try {
@@ -150,7 +172,29 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
         println(s"⚠️  Failed to clean up bucket: ${ex.getMessage}")
     }
     }
-    super.afterEach()
+    if (s3Mock != null) {
+      s3Mock.stop
+    }
+    
+    // Clean up S3Mock directory to prevent file locking issues
+    if (s3MockDir != null) {
+      try {
+        import java.io.File
+        def deleteDirectory(file: File): Unit = {
+          if (file.isDirectory) {
+            file.listFiles().foreach(deleteDirectory)
+          }
+          file.delete()
+        }
+        deleteDirectory(new File(s3MockDir))
+        println(s"✅ Cleaned up S3Mock directory: $s3MockDir")
+      } catch {
+        case e: Exception =>
+          println(s"⚠️  Failed to clean up S3Mock directory $s3MockDir: ${e.getMessage}")
+      }
+    }
+    
+    super.afterAll()
   }
 
   private def findAvailablePort(): Int = {
@@ -179,15 +223,21 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
       .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
       .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
       .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.tantivy4spark.aws.region", "us-east-2")
       .mode("overwrite")
       .save(s3Path)
     
     println(s"✅ Successfully wrote data to S3: $s3Path")
     
-    // Read DataFrame back from S3
+    // Read DataFrame back from S3 - pass same credentials as write for consistency
     val result = spark.read
       .format("tantivy4spark")
+      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      .option("spark.tantivy4spark.aws.region", "us-east-2")
       .load(s3Path)
     
     val count = result.count()
@@ -234,15 +284,21 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
       .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
       .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort") 
       .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.tantivy4spark.aws.region", "us-east-2")
       .mode("overwrite")
       .save(s3Path)
       
     println(s"✅ Successfully wrote mixed data types to S3: $s3Path")
     
-    // Read back and verify
+    // Read back and verify - pass same credentials as write for consistency
     val result = spark.read
       .format("tantivy4spark")
+      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      .option("spark.tantivy4spark.aws.region", "us-east-2")
       .load(s3Path)
       
     val count = result.count()
@@ -282,15 +338,23 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
         .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
         .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
         .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-        .option("spark.tantivy4spark.aws.region", "us-east-1")
+        .option("spark.tantivy4spark.aws.region", "us-east-2")
         .mode("overwrite") 
         .save(path)
       println(s"✅ Wrote dataset to: $path")
     }
     
-    // Read all datasets back and verify
+    // Read all datasets back and verify - pass same credentials as write for consistency
     val totalRecords = datasets.map { case (_, path) =>
-      val df = spark.read.format("tantivy4spark").load(path)
+      val df = spark.read
+        .format("tantivy4spark")
+        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
+        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
+        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+        .option("spark.tantivy4spark.aws.region", "us-east-2")
+        .load(path)
       val count = df.count()
       count shouldBe 20
       count

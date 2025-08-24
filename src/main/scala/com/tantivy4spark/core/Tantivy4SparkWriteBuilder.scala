@@ -36,6 +36,8 @@ class Tantivy4SparkWriteBuilder(
 
   override def build(): org.apache.spark.sql.connector.write.Write = {
     logger.info(s"Building optimized write for table at: $tablePath")
-    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, options, hadoopConf)
+    // Use write options from info (DataFrame .option() calls), not table-level options
+    // This ensures write-specific options override table/session configuration
+    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, info.options(), hadoopConf)
   }
 }

@@ -173,7 +173,7 @@
             <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
-        <!-- S3Mock for testing S3 functionality -->
+        <!-- Findify S3Mock for testing S3 functionality - stable, no logging conflicts -->
         <dependency>
             <groupId>io.findify</groupId>
             <artifactId>s3mock_2.12</artifactId>

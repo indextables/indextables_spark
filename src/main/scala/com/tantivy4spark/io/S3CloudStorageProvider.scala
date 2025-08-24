@@ -85,8 +85,12 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
     val builder = S3Client.builder()
     
     // Configure region
-    config.awsRegion.foreach { region =>
-      builder.region(Region.of(region))
+    config.awsRegion match {
+      case Some(region) =>
+        logger.info(s"🔧 S3Client: Setting region to $region")
+        builder.region(Region.of(region))
+      case None =>
+        logger.warn(s"⚠️ S3Client: No region configured, this will cause errors!")
     }
     
     // Configure endpoint (for testing with S3Mock, MinIO, etc.)

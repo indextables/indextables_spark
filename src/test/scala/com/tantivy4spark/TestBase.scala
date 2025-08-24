@@ -38,6 +38,15 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
       .master("local[2]")
       .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.driver.host", "127.0.0.1")
+      .config("spark.driver.bindAddress", "127.0.0.1")
+      // Set default AWS parameters to non-null values for all tests
+      .config("spark.tantivy4spark.aws.accessKey", "test-default-access-key")
+      .config("spark.tantivy4spark.aws.secretKey", "test-default-secret-key")
+      .config("spark.tantivy4spark.aws.sessionToken", "test-default-session-token")
+      .config("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      .config("spark.tantivy4spark.aws.region", "us-east-1")
+      .config("spark.tantivy4spark.s3.endpoint", "http://localhost:10101")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

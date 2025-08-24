@@ -212,7 +212,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
   ): BaseRelation = {
     // For reads, create a relation that can handle queries
     val path = parameters.getOrElse("path", throw new IllegalArgumentException("Path is required"))
-    new Tantivy4SparkRelation(path, sqlContext)
+    new Tantivy4SparkRelation(path, sqlContext, parameters)
   }
 
   override def createRelation(
@@ -237,28 +237,29 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       case _: Exception => Map.empty[String, String]
     }
     
+    // Combine all available options with proper precedence: write options > Spark config > defaults
+    // DataFrame write options (parameters) take highest precedence over Spark session config
+    val allOptions = sparkConfigOptions ++ parameters
+    
     // Copy all tantivy4spark options into Hadoop configuration so they're available in executors
     val currentHadoopConf = spark.sparkContext.hadoopConfiguration
-    (parameters ++ sparkConfigOptions).foreach { case (key, value) =>
+    allOptions.foreach { case (key, value) =>
       if (key.startsWith("spark.tantivy4spark.")) {
         currentHadoopConf.set(key, value)
         println(s"🔧 Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
       }
     }
-    
-    // Combine all available options (parameters take priority over Spark config)
-    val allOptions = sparkConfigOptions ++ parameters
-    val options = new CaseInsensitiveStringMap(allOptions.asJava)
+    val writeOptions = new CaseInsensitiveStringMap(allOptions.asJava)
     val tableProvider = new Tantivy4SparkTableProvider()
     
     // Get or create the table
-    val table = tableProvider.getTable(data.schema, Array.empty, options)
+    val table = tableProvider.getTable(data.schema, Array.empty, writeOptions)
     
     // Create write info
     val writeInfo = new LogicalWriteInfo {
       override def queryId(): String = java.util.UUID.randomUUID().toString
       override def schema(): StructType = data.schema
-      override def options(): CaseInsensitiveStringMap = options
+      override def options(): CaseInsensitiveStringMap = writeOptions
     }
     
     // Get the write builder and execute the write
@@ -271,9 +272,9 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val serializablePath = path
     val serializableSchema = data.schema
     
-    // Pass Spark configuration values that might be needed in executors
-    val sparkConfProps = Map.empty[String, String]
-    val enrichedOptions = parameters ++ sparkConfProps
+    // Pass all merged options (write options + Spark config) to executors
+    // Use allOptions which already has the proper precedence: sparkConfigOptions ++ parameters
+    val enrichedOptions = allOptions
     
     // Extract essential Hadoop configuration properties as a Map
     val hadoopConf = spark.sparkContext.hadoopConfiguration
@@ -356,6 +357,16 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
         localHadoopConf.set(key, value)
       }
       
+      // Also add write options to Hadoop config to ensure they override any existing values
+      println(s"🔧 Executor: Adding write options to Hadoop config")
+      enrichedOptions.foreach { case (key, value) =>
+        if (key.startsWith("spark.tantivy4spark.")) {
+          localHadoopConf.set(key, value)
+          val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
+          println(s"  Setting in executor: $key = $displayValue")
+        }
+      }
+      
       val localWriterFactory = new com.tantivy4spark.core.Tantivy4SparkWriterFactory(
         new Path(serializablePath),
         serializableSchema,
@@ -385,7 +396,8 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
 
 class Tantivy4SparkRelation(
     path: String,
-    val sqlContext: SQLContext
+    val sqlContext: SQLContext,
+    readOptions: Map[String, String] = Map.empty
 ) extends BaseRelation with TableScan {
   
   override def schema: StructType = {
@@ -426,8 +438,11 @@ class Tantivy4SparkRelation(
         "fs.file.impl" -> hadoopConf.get("fs.file.impl", "")
       ).filter(_._2.nonEmpty)
       
-      // Extract all tantivy4spark-specific configurations from Hadoop config
-      val tantivyProps = {
+      // Extract tantivy4spark configurations with proper precedence
+      // Precedence: read options > Spark config > Hadoop config
+      
+      // Extract from Hadoop config (lowest precedence)
+      val hadoopTantivyProps = {
         import scala.jdk.CollectionConverters._
         hadoopConf.iterator().asScala
           .filter(_.getKey.startsWith("spark.tantivy4spark."))
@@ -435,8 +450,22 @@ class Tantivy4SparkRelation(
           .toMap
       }
       
+      // Extract from Spark session config (middle precedence)
+      val sparkTantivyProps = try {
+        spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+      } catch {
+        case _: Exception => Map.empty[String, String]
+      }
+      
+      // Extract from read options (highest precedence)
+      val readTantivyProps = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+      
+      // Merge with proper precedence: Hadoop < Spark config < read options
+      val tantivyProps = hadoopTantivyProps ++ sparkTantivyProps ++ readTantivyProps
+      
       val hadoopConfProps = baseHadoopProps ++ tantivyProps
-      println(s"🔧 V1 buildScan passing ${hadoopConfProps.size} config properties to executors, including ${tantivyProps.size} tantivy4spark configs")
+      println(s"🔧 V1 buildScan passing ${hadoopConfProps.size} config properties to executors")
+      println(s"🔧 Sources: Hadoop(${hadoopTantivyProps.size}), Spark(${sparkTantivyProps.size}), Options(${readTantivyProps.size})")
       
       // Create RDD from file paths using standalone object method for proper serialization
       spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
@@ -473,14 +502,32 @@ class Tantivy4SparkTable(
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    // Create broadcast variable for Hadoop configuration containing all Tantivy4Spark configurations
+    // Create broadcast variable with proper precedence: read options > Spark config > Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    val tantivyConfigs = hadoopConf.iterator().asScala
+    
+    // Extract configurations from Hadoop config (lowest precedence)
+    val hadoopTantivyConfigs = hadoopConf.iterator().asScala
       .filter(_.getKey.startsWith("spark.tantivy4spark."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    logger.info(s"🔧 Broadcasting ${tantivyConfigs.size} Tantivy4Spark configurations to executors: ${tantivyConfigs.keys.mkString(", ")}")
+    // Extract configurations from Spark session config (middle precedence)
+    val sparkTantivyConfigs = try {
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    } catch {
+      case _: Exception => Map.empty[String, String]
+    }
+    
+    // Extract configurations from read options (highest precedence)
+    val readTantivyConfigs = options.asScala
+      .filter(_._1.startsWith("spark.tantivy4spark."))
+      .toMap
+    
+    // Merge with proper precedence: Hadoop < Spark config < read options
+    val tantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
+    
+    logger.info(s"🔧 Broadcasting ${tantivyConfigs.size} Tantivy4Spark configurations to executors")
+    logger.info(s"🔧 Sources: Hadoop(${hadoopTantivyConfigs.size}), Spark(${sparkTantivyConfigs.size}), Options(${readTantivyConfigs.size})")
     val broadcastConfig = spark.sparkContext.broadcast(tantivyConfigs)
     
     new Tantivy4SparkScanBuilder(transactionLog, schema(), options, broadcastConfig)
@@ -488,6 +535,20 @@ class Tantivy4SparkTable(
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
+    
+    // Copy write options to Hadoop configuration so they're available in executors
+    // Write options from info.options() should override any existing configuration
+    import scala.jdk.CollectionConverters._
+    val writeOptions = info.options()
+    writeOptions.entrySet().asScala.foreach { entry =>
+      val key = entry.getKey
+      val value = entry.getValue
+      if (key.startsWith("spark.tantivy4spark.")) {
+        hadoopConf.set(key, value)
+        logger.debug(s"🔧 V2 Write: Setting Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
+      }
+    }
+    
     new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, options, hadoopConf)
   }
 }

@@ -162,6 +162,16 @@ object CloudStorageProviderFactory {
   def createProvider(path: String, options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageProvider = {
     val protocol = ProtocolBasedIOFactory.determineProtocol(path)
     
+    println(s"🔍 CloudStorageProviderFactory.createProvider called for path: $path")
+    println(s"🔍 Options passed (${options.size()} total):")
+    import scala.jdk.CollectionConverters._
+    options.entrySet().asScala.foreach { entry =>
+      if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+        val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("session")) "***" else entry.getValue
+        println(s"   ${entry.getKey} = $displayValue")
+      }
+    }
+    
     // For cloud storage, extract configuration from both options and Hadoop/Spark config
     // Also try to get configuration from Spark session if available
     val enrichedHadoopConf = enrichHadoopConfWithSparkConf(hadoopConf)
