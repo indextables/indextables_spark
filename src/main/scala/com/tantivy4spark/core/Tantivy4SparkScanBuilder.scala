@@ -18,7 +18,7 @@
 
 package com.tantivy4spark.core
 
-import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns}
+import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns, SupportsPushDownLimit}
 // Removed unused import
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
@@ -32,15 +32,17 @@ class Tantivy4SparkScanBuilder(
     options: CaseInsensitiveStringMap
 ) extends ScanBuilder 
     with SupportsPushDownFilters 
-    with SupportsPushDownRequiredColumns {
+    with SupportsPushDownRequiredColumns
+    with SupportsPushDownLimit {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
   // TODO: do we push-down?
   private var _pushedFilters = Array.empty[Filter]
   private var requiredSchema = schema
+  private var _limit: Option[Int] = None
 
   override def build(): Scan = {
-    new Tantivy4SparkScan(transactionLog, requiredSchema, _pushedFilters, options)
+    new Tantivy4SparkScan(transactionLog, requiredSchema, _pushedFilters, options, _limit)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
@@ -55,6 +57,12 @@ class Tantivy4SparkScanBuilder(
   override def pruneColumns(requiredSchema: StructType): Unit = {
     this.requiredSchema = requiredSchema
     logger.info(s"Pruned columns to: ${requiredSchema.fieldNames.mkString(", ")}")
+  }
+
+  override def pushLimit(limit: Int): Boolean = {
+    _limit = Some(limit)
+    logger.info(s"Pushed limit: $limit")
+    true // We support limit pushdown
   }
 
   private def isSupportedFilter(filter: Filter): Boolean = {

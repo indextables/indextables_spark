@@ -283,7 +283,7 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
    * Use SplitSearchEngine to read from split files instead.
    */
   @deprecated("Direct index search is not supported. Create splits and use SplitSearchEngine.", "split-migration")
-  def searchAll(limit: Int = 10000): Array[InternalRow] = {
+  def searchAll(limit: Int = Int.MaxValue): Array[InternalRow] = {
     throw new UnsupportedOperationException(
       "Direct index search is not supported in write-only architecture. " +
       "Use TantivySearchEngine.commitAndCreateSplit() to create a split, " +

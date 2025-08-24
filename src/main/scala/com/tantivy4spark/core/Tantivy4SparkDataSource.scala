@@ -95,8 +95,8 @@ object Tantivy4SparkRelation {
       println(s"Split search engine created successfully")
       
       // Use searchAll to get all documents from the split
-      println(s"Starting searchAll with limit 10000...")
-      val results = splitSearchEngine.searchAll(limit = 10000)
+      println(s"Starting searchAll with limit Int.MaxValue...")
+      val results = splitSearchEngine.searchAll(limit = Int.MaxValue)
       println(s"Search returned ${results.length} results")
       
       if (results.length == 0) {

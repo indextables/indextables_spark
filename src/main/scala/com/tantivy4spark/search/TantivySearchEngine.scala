@@ -64,7 +64,7 @@ class TantivySearchEngine private (private val directInterface: TantivyDirectInt
     }
   }
 
-  def searchAll(limit: Int = 10000): Array[InternalRow] = {
+  def searchAll(limit: Int = Int.MaxValue): Array[InternalRow] = {
     directInterface.searchAll(limit)
   }
 

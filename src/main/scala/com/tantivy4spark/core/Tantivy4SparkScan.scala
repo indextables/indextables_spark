@@ -30,7 +30,8 @@ class Tantivy4SparkScan(
     transactionLog: TransactionLog,
     readSchema: StructType,
     pushedFilters: Array[Filter],
-    options: CaseInsensitiveStringMap
+    options: CaseInsensitiveStringMap,
+    limit: Option[Int] = None
 ) extends Scan with Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScan])
@@ -46,12 +47,12 @@ class Tantivy4SparkScan(
     logger.info(s"Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
     filteredActions.zipWithIndex.map { case (addAction, index) =>
-      new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, options, index)
+      new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, options, index, limit)
     }.toArray
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    new Tantivy4SparkReaderFactory(readSchema, options)
+    new Tantivy4SparkReaderFactory(readSchema, options, limit)
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {

@@ -38,12 +38,14 @@ class Tantivy4SparkInputPartition(
     val readSchema: StructType,
     val filters: Array[Filter],
     val options: CaseInsensitiveStringMap,
-    val partitionId: Int
+    val partitionId: Int,
+    val limit: Option[Int] = None
 ) extends InputPartition
 
 class Tantivy4SparkReaderFactory(
     readSchema: StructType,
-    options: CaseInsensitiveStringMap
+    options: CaseInsensitiveStringMap,
+    limit: Option[Int] = None
 ) extends PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkReaderFactory])
@@ -56,7 +58,8 @@ class Tantivy4SparkReaderFactory(
       tantivyPartition.addAction,
       readSchema,
       tantivyPartition.filters,
-      options
+      options,
+      tantivyPartition.limit.orElse(limit)
     )
   }
 }
@@ -65,10 +68,14 @@ class Tantivy4SparkPartitionReader(
     addAction: AddAction,
     readSchema: StructType,
     filters: Array[Filter],
-    options: CaseInsensitiveStringMap
+    options: CaseInsensitiveStringMap,
+    limit: Option[Int] = None
 ) extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
+  
+  // Calculate effective limit: use pushed limit or fall back to Int.MaxValue
+  private val effectiveLimit: Int = limit.getOrElse(Int.MaxValue)
   private val spark = SparkSession.active
   private val hadoopConf = spark.sparkContext.hadoopConfiguration
   
@@ -145,16 +152,16 @@ class Tantivy4SparkPartitionReader(
         }
         
         if (query.nonEmpty) {
-          val results = splitSearchEngine.search(query, limit = 10000)
+          val results = splitSearchEngine.search(query, limit = effectiveLimit)
           resultIterator = results.iterator
         } else {
           // No filters, return all documents
-          val results = splitSearchEngine.searchAll(limit = 10000)
+          val results = splitSearchEngine.searchAll(limit = effectiveLimit)
           resultIterator = results.iterator
         }
         
         initialized = true
-        logger.info(s"Initialized split reader for ${addAction.path} with query: $query")
+        logger.info(s"Initialized split reader for ${addAction.path} with query: $query, limit: $effectiveLimit")
         
       } catch {
         case ex: Exception =>
