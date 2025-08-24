@@ -143,6 +143,26 @@ class TransactionLog(tablePath: Path, spark: SparkSession) {
     logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
   }
 
+  /**
+   * Get the current metadata action from the transaction log.
+   */
+  def getMetadata(): MetadataAction = {
+    val latestVersion = getLatestVersion()
+    
+    // Look for metadata in reverse chronological order
+    for (version <- latestVersion to 0L by -1) {
+      val actions = readVersion(version)
+      actions.collectFirst {
+        case metadata: MetadataAction => metadata
+      } match {
+        case Some(metadata) => return metadata
+        case None => // Continue searching
+      }
+    }
+    
+    throw new RuntimeException("No metadata found in transaction log")
+  }
+
   private def readVersion(version: Long): Seq[Action] = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
     

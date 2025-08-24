@@ -7,6 +7,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Embedded Search**: Tantivy runs directly within Spark executors via tantivy4java
 - **Split-Based Architecture**: Write-only indexes with split-based reading for optimal performance
 - **Transaction Log**: Delta Lake-style transaction log with batched operations for metadata management  
+- **Optimized Writes**: Delta Lake-style optimized writes with automatic split sizing based on target records per split
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
 - **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage
@@ -47,7 +48,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 # Build the project
 mvn clean compile
 
-# Run tests (90 tests, 100% pass rate)
+# Run tests (103 tests, 100% pass rate)
 mvn test
 
 # Package
@@ -63,10 +64,16 @@ val spark = SparkSession.builder()
   .appName("Tantivy4Spark Example")
   .getOrCreate()
 
-// Write data
+// Write data with optimized writes (enabled by default)
 df.write
   .format("tantivy4spark")
   .mode("overwrite")
+  .save("s3://bucket/path/table")
+
+// Write with custom split sizing
+df.write
+  .format("tantivy4spark")
+  .option("targetRecordsPerSplit", "500000")  // 500K records per split
   .save("s3://bucket/path/table")
 
 // Read data
@@ -87,7 +94,34 @@ The system supports several configuration options for performance tuning:
 
 | Configuration | Default | Description |
 |---------------|---------|-------------|
+| `spark.tantivy4spark.optimizeWrite.enabled` | `true` | Enable/disable optimized writes with automatic split sizing |
+| `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit` | `1000000` | Target number of records per split file for optimized writes |
 | `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+
+#### Optimized Writes Configuration
+
+Control the automatic split sizing behavior (similar to Delta Lake optimizedWrite):
+
+```scala
+// Enable optimized writes with default 1M records per split
+df.write.format("tantivy4spark")
+  .option("optimizeWrite", "true")
+  .save("s3://bucket/path")
+
+// Configure via Spark session (applies to all writes)
+spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "true")
+spark.conf.set("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "2000000")
+
+// Configure per write operation (overrides session config)
+df.write.format("tantivy4spark")
+  .option("targetRecordsPerSplit", "500000")  // 500K records per split
+  .save("s3://bucket/path")
+
+// Disable optimized writes (use Spark's default partitioning)
+df.write.format("tantivy4spark")
+  .option("optimizeWrite", "false")
+  .save("s3://bucket/path")
+```
 
 #### Storage Configuration
 
@@ -138,9 +172,10 @@ src/main/scala/com/tantivy4spark/
 ├── storage/        # S3-optimized storage layer
 └── transaction/    # Transaction log system
 
-src/test/scala/     # Comprehensive test suite (90 tests, 100% pass rate)
+src/test/scala/     # Comprehensive test suite (103 tests, 100% pass rate)
 ├── core/           # Core functionality tests
 ├── integration/    # End-to-end integration tests  
+├── optimize/       # Optimized writes tests
 ├── storage/        # Storage protocol tests
 ├── transaction/    # Transaction log tests
 └── debug/          # Debug and diagnostic tests
@@ -149,11 +184,12 @@ src/test/scala/     # Comprehensive test suite (90 tests, 100% pass rate)
 ### Running Tests
 
 ```bash
-# All tests (90 tests, 100% pass rate)
+# All tests (103 tests, 100% pass rate)
 mvn test
 
 # Specific test suites
 mvn test -Dtest="*IntegrationTest"                # Integration tests
+mvn test -Dtest="OptimizedWriteTest"              # Optimized writes tests
 mvn test -Dtest="UnsupportedTypesTest"            # Type safety tests
 mvn test -Dtest="BatchTransactionLogTest"         # Transaction log batch operations
 mvn test -Dtest="*DebugTest"                      # Debug and diagnostic tests

@@ -35,7 +35,7 @@ class Tantivy4SparkWriteBuilder(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkWriteBuilder])
 
   override def build(): org.apache.spark.sql.connector.write.Write = {
-    logger.info(s"Building write for table at: $tablePath")
-    new Tantivy4SparkBatchWrite(transactionLog, tablePath, info, options, hadoopConf)
+    logger.info(s"Building optimized write for table at: $tablePath")
+    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, options, hadoopConf)
   }
 }

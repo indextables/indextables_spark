@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Key Features
 - **Embedded search**: Tantivy runs directly within Spark executors via tantivy4java
 - **Split-based architecture**: Write-only indexes with split-based reading using QuickwitSplit format
+- **Optimized writes**: Delta Lake-style automatic split sizing with adaptive shuffle for optimal performance
 - **Transaction log**: Delta Lake-style transaction log with batched operations for metadata management  
 - **Smart file skipping**: Min/max value tracking for efficient query pruning
 - **Schema-aware filter pushdown**: Field validation prevents native crashes during query execution
@@ -52,6 +53,8 @@ src/main/scala/com/tantivy4spark/
 ├── core/           # Core Spark DataSource V2 integration
 │   ├── Tantivy4SparkDataSource.scala      # Main data source implementation
 │   ├── Tantivy4SparkScanBuilder.scala     # Query planning and filter pushdown
+│   ├── Tantivy4SparkOptions.scala         # Configuration options utility
+│   ├── Tantivy4SparkOptimizedWrite.scala  # Optimized write implementation
 │   ├── FiltersToQueryConverter.scala      # Convert Spark filters to Tantivy queries
 │   └── ...
 ├── search/         # Tantivy search engine integration
@@ -66,6 +69,11 @@ src/main/scala/com/tantivy4spark/
 │   ├── StandardFileReader.scala           # Standard Hadoop operations
 │   ├── SplitManager.scala                 # Split creation and validation
 │   └── GlobalSplitCacheManager.scala      # JVM-wide split cache management
+├── config/         # Configuration system
+│   ├── Tantivy4SparkSQLConf.scala         # Spark SQL configuration constants
+│   └── Tantivy4SparkConfig.scala          # Table property configuration
+├── optimize/       # Optimized write functionality
+│   └── Tantivy4SparkOptimizedWriterExec.scala # Delta Lake-style adaptive shuffle execution
 └── transaction/    # Transaction log implementation
     ├── TransactionLog.scala               # Main transaction log interface
     └── Actions.scala                      # Action types (ADD, REMOVE, METADATA)
@@ -114,6 +122,8 @@ The system supports several configuration options for performance tuning:
 
 | Configuration | Default | Description |
 |---------------|---------|-------------|
+| `spark.tantivy4spark.optimizeWrite.enabled` | `true` | Enable/disable optimized writes with automatic split sizing |
+| `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit` | `1000000` | Target number of records per split file for optimized writes |
 | `spark.tantivy4spark.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
 | `spark.tantivy4spark.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
 | `spark.tantivy4spark.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
@@ -131,8 +141,22 @@ The system supports several configuration options for performance tuning:
 
 ### Usage Examples
 ```scala
-// Write data as split files with automatic cloud storage optimization
+// Write data with optimized writes (enabled by default)
 df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// Write with custom split sizing
+df.write.format("tantivy4spark")
+  .option("targetRecordsPerSplit", "500000")  // 500K records per split
+  .save("s3://bucket/path")
+
+// Configure optimized writes via Spark session (applies to all writes)
+spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "true")
+spark.conf.set("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "2000000")
+
+// Disable optimized writes (use Spark's default partitioning)
+df.write.format("tantivy4spark")
+  .option("optimizeWrite", "false")
+  .save("s3://bucket/path")
 
 // Configure split cache settings
 df.write.format("tantivy4spark")
@@ -206,9 +230,10 @@ df.filter($"description".contains("Apache") && $"tags".contains("spark"))
 
 ## Test Coverage
 
-The project maintains comprehensive test coverage with **90 tests** achieving **100% pass rate**:
+The project maintains comprehensive test coverage with **103 tests** achieving **100% pass rate**:
 - **Unit tests**: 90%+ coverage for all core classes
 - **Integration tests**: End-to-end workflow validation with comprehensive test data
+- **Optimized write tests**: Comprehensive validation of automatic split sizing and configuration hierarchy
 - **Split-based architecture tests**: Comprehensive validation of write-only indexes and split reading
 - **Transaction log batch tests**: Testing of Delta Lake-compatible batched operations
 - **Schema-aware filter tests**: Validation of field existence checking to prevent native crashes
@@ -231,6 +256,8 @@ src/test/scala/com/tantivy4spark/
 ├── storage/
 │   ├── StorageStrategyTest.scala          # Storage protocol tests
 │   └── TantivyArchiveFormatTest.scala     # Archive format tests
+├── optimize/                              # Optimized write tests
+│   └── OptimizedWriteTest.scala           # Delta Lake-style optimized write functionality
 ├── transaction/
 │   ├── TransactionLogTest.scala           # Transaction log tests
 │   ├── BatchTransactionLogTest.scala     # Delta Lake-style batched operations
@@ -266,6 +293,11 @@ The project is registered as a Spark data source via:
 
 ### Key Implementation Details
 - **DataSource V2 API**: Full implementation of modern Spark connector interface
+- **Optimized Write Architecture**: Delta Lake-style automatic split sizing with adaptive shuffle
+  - **Configuration Hierarchy**: Write options → Spark session config → table properties → defaults
+  - **Adaptive Partitioning**: Calculates optimal partition count using ceiling function: `ceil(totalRecords / targetRecords)`
+  - **Shuffle Strategies**: HashPartitioning for partitioned tables, RoundRobinPartitioning for non-partitioned
+  - **Metrics Integration**: SQL metrics for monitoring split count and record distribution
 - **Schema-aware filter pushdown**: Field validation prevents FieldNotFound panics at native level
 - **Split-based architecture**: Write-only indexes with immutable split files for reading
 - **Partition pruning**: Leverages min/max statistics for efficient query execution

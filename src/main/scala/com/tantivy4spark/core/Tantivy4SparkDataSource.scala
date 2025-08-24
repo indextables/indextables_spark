@@ -30,6 +30,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.TransactionLog
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
+import org.slf4j.LoggerFactory
 
 import java.util
 import scala.collection.JavaConverters._
@@ -160,6 +161,8 @@ object Tantivy4SparkRelation {
 }
 
 class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider with CreatableRelationProvider {
+  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
+  
   override def shortName(): String = "tantivy4spark"
 
   override def createRelation(
@@ -198,7 +201,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     // Get the write builder and execute the write
     val writeBuilder = table.asInstanceOf[Tantivy4SparkTable].newWriteBuilder(writeInfo)
     val write = writeBuilder.build()
-    val batchWrite = write.asInstanceOf[com.tantivy4spark.core.Tantivy4SparkBatchWrite]
+    val batchWrite = write.toBatch
     
     // Extract serializable parameters before the closure
     val serializableOptions = parameters
@@ -222,8 +225,54 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       "fs.file.impl" -> hadoopConf.get("fs.file.impl", "")
     ).filter(_._2.nonEmpty)
     
+    // Check if optimized write is enabled and apply repartitioning if needed
+    val finalData = if (enrichedOptions.getOrElse("optimizeWrite", "true").toBoolean) {
+      // Use Tantivy4SparkOptions for proper validation
+      import scala.jdk.CollectionConverters._
+      val optionsMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(enrichedOptions.asJava)
+      val tantivyOptions = Tantivy4SparkOptions(optionsMap)
+      val targetRecords = tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+      
+      // Estimate total records to determine optimal partitions
+      val totalRecords = try {
+        data.count()
+      } catch {
+        case _: Exception => 
+          // Fallback if count fails: use current partitions * estimate
+          data.rdd.getNumPartitions * 50000L // Assume 50k records per partition
+      }
+      
+      val optimalPartitions = Math.max(1, Math.ceil(totalRecords.toDouble / targetRecords.toDouble).toInt)
+      val currentPartitions = data.rdd.getNumPartitions
+      
+      logger.info(s"OptimizedWrite: total records ~$totalRecords, target $targetRecords per split")
+      logger.info(s"OptimizedWrite: current partitions $currentPartitions, optimal partitions $optimalPartitions")
+      
+      // Only repartition if the optimal partitions are different from current
+      // Allow any difference for proper split file count control
+      if (optimalPartitions != currentPartitions) {
+        logger.info(s"OptimizedWrite: repartitioning from $currentPartitions to $optimalPartitions partitions")
+        if (optimalPartitions < currentPartitions) {
+          // Use coalesce to reduce partitions (no shuffle)
+          logger.info("OptimizedWrite: using coalesce (no shuffle) to reduce partitions")
+          data.coalesce(optimalPartitions)
+        } else {
+          // Use repartition to increase partitions (requires shuffle) - but limit to avoid memory issues
+          val safeOptimalPartitions = Math.min(optimalPartitions, 20) // Limit to 20 partitions max for safety
+          logger.info(s"OptimizedWrite: using repartition (with shuffle) to increase partitions to $safeOptimalPartitions (limited from $optimalPartitions)")
+          data.repartition(safeOptimalPartitions)
+        }
+      } else {
+        logger.info("OptimizedWrite: current partitioning already optimal")
+        data
+      }
+    } else {
+      logger.info("OptimizedWrite: disabled, using original DataFrame")
+      data
+    }
+
     // Execute write using Spark's mapPartitionsWithIndex
-    val commitMessages = data.queryExecution.toRdd.mapPartitionsWithIndex { (partitionId, iterator) =>
+    val commitMessages = finalData.queryExecution.toRdd.mapPartitionsWithIndex { (partitionId, iterator) =>
       // Recreate Hadoop configuration with essential properties in the executor
       val localHadoopConf = new org.apache.hadoop.conf.Configuration()
       essentialConfProps.foreach { case (key, value) =>

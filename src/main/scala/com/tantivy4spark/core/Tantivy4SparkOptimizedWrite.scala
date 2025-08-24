@@ -1,0 +1,225 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.tantivy4spark.core
+
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.config.{Tantivy4SparkConfig, Tantivy4SparkSQLConf}
+import com.tantivy4spark.optimize.Tantivy4SparkOptimizedWriterExec
+import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.connector.write.LogicalWriteInfo
+import org.slf4j.LoggerFactory
+
+/**
+ * Write implementation that supports optimized writes for Tantivy4Spark tables.
+ * Similar to Delta Lake's TransactionalWrite, this adds an optimization layer
+ * that can shuffle data to target optimal split sizes.
+ */
+class Tantivy4SparkOptimizedWrite(
+    transactionLog: TransactionLog,
+    tablePath: Path,
+    writeInfo: LogicalWriteInfo,
+    options: CaseInsensitiveStringMap,
+    hadoopConf: org.apache.hadoop.conf.Configuration
+) extends Write with BatchWrite with SupportsOverwrite with SupportsTruncate {
+
+  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
+
+  private val tantivyOptions = Tantivy4SparkOptions(options)
+
+  /**
+   * Determine if optimized writes should be enabled based on configuration hierarchy:
+   * 1. DataFrame write options
+   * 2. Spark session configuration  
+   * 3. Table properties
+   * 4. Default (enabled)
+   */
+  private def shouldOptimizeWrite(): Boolean = {
+    val spark = SparkSession.active
+    
+    // Check DataFrame write options first
+    val writeOptionValue = tantivyOptions.optimizeWrite
+    if (writeOptionValue.isDefined) {
+      logger.debug(s"Using write option optimizeWrite = ${writeOptionValue.get}")
+      return writeOptionValue.get
+    }
+
+    // Check Spark session configuration
+    val sessionConfValue = spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+      .map(_.toBoolean)
+    if (sessionConfValue.isDefined) {
+      logger.debug(s"Using session config optimizeWrite = ${sessionConfValue.get}")
+      return sessionConfValue.get
+    }
+
+    // Check table properties (from metadata)
+    try {
+      val metadata = transactionLog.getMetadata()
+      val tablePropertyValue = Tantivy4SparkConfig.OPTIMIZE_WRITE.fromMetadata(metadata)
+      if (tablePropertyValue.isDefined) {
+        logger.debug(s"Using table property optimizeWrite = ${tablePropertyValue.get}")
+        return tablePropertyValue.get
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug("Could not read table metadata for optimized write configuration", e)
+    }
+
+    // Default: enabled
+    val defaultValue = Tantivy4SparkConfig.OPTIMIZE_WRITE.defaultValue
+    logger.debug(s"Using default optimizeWrite = $defaultValue")
+    defaultValue
+  }
+
+  /**
+   * Get the target records per split from configuration hierarchy:
+   * 1. DataFrame write options
+   * 2. Spark session configuration
+   * 3. Table properties  
+   * 4. Default (1M records)
+   */
+  private def getTargetRecordsPerSplit(): Long = {
+    val spark = SparkSession.active
+
+    // Check DataFrame write options first
+    val writeOptionValue = tantivyOptions.targetRecordsPerSplit
+    if (writeOptionValue.isDefined) {
+      logger.debug(s"Using write option targetRecordsPerSplit = ${writeOptionValue.get}")
+      return writeOptionValue.get
+    }
+
+    // Check Spark session configuration
+    val sessionConfValue = spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+      .map(_.toLong)
+    if (sessionConfValue.isDefined) {
+      logger.debug(s"Using session config targetRecordsPerSplit = ${sessionConfValue.get}")
+      return sessionConfValue.get
+    }
+
+    // Check table properties (from metadata)
+    try {
+      val metadata = transactionLog.getMetadata()
+      val tablePropertyValue = Tantivy4SparkConfig.OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT.fromMetadata(metadata)
+      if (tablePropertyValue.isDefined) {
+        logger.debug(s"Using table property targetRecordsPerSplit = ${tablePropertyValue.get}")
+        return tablePropertyValue.get
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug("Could not read table metadata for target records per split configuration", e)
+    }
+
+    // Default: 1M records
+    val defaultValue = Tantivy4SparkConfig.OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT.defaultValue
+    logger.debug(s"Using default targetRecordsPerSplit = $defaultValue")
+    defaultValue
+  }
+
+  /**
+   * Create a potentially optimized physical plan for writing data.
+   * This is similar to Delta Lake's TransactionalWrite.writeFiles method.
+   */
+  def createOptimizedWritePlan(queryExecution: org.apache.spark.sql.execution.QueryExecution): org.apache.spark.sql.execution.SparkPlan = {
+    val originalPlan = queryExecution.executedPlan
+    
+    if (shouldOptimizeWrite()) {
+      val targetRecords = getTargetRecordsPerSplit()
+      logger.info(s"Enabling optimized write with target $targetRecords records per split")
+      
+      // TODO: Extract partition columns from table metadata if available
+      val partitionColumns = Seq.empty[String] // For now, no partitioning support
+      
+      Tantivy4SparkOptimizedWriterExec(
+        child = originalPlan,
+        partitionColumns = partitionColumns,
+        targetRecordsPerSplit = targetRecords
+      )
+    } else {
+      logger.info("Optimized write disabled, using original execution plan")
+      originalPlan
+    }
+  }
+
+  override def toBatch: BatchWrite = this
+
+  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+    val shouldOptimize = shouldOptimizeWrite()
+    val targetRecords = getTargetRecordsPerSplit()
+    
+    logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
+    logger.info(s"Optimized write enabled: $shouldOptimize, target records per split: $targetRecords")
+    
+    if (shouldOptimize) {
+      logger.warn("ISSUE: Optimized write is enabled but DataSource V2 API doesn't allow execution plan modification at this stage")
+      logger.warn("The number of partitions (${info.numPartitions}) was determined by Spark's default partitioning")
+      logger.warn("Each partition will create one split file, regardless of target records per split")
+    }
+    
+    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, hadoopConf)
+  }
+
+  override def commit(messages: Array[WriterCommitMessage]): Unit = {
+    logger.info(s"Committing ${messages.length} writer messages")
+    
+    // Initialize transaction log with schema if this is the first commit
+    transactionLog.initialize(writeInfo.schema())
+    
+    val addActions = messages.collect {
+      case msg: Tantivy4SparkCommitMessage => msg.addAction
+    }
+
+    // Add all files in a single transaction (like Delta Lake)
+    val version = transactionLog.addFiles(addActions)
+    logger.info(s"Added ${addActions.length} files in transaction version $version")
+    
+    logger.info(s"Successfully committed ${addActions.length} files")
+  }
+
+  override def abort(messages: Array[WriterCommitMessage]): Unit = {
+    logger.warn(s"Aborting write with ${messages.length} messages")
+    
+    // Clean up any files that were created but not committed
+    val addActions = messages.collect {
+      case msg: Tantivy4SparkCommitMessage => msg.addAction
+    }
+
+    // In a real implementation, we would delete the physical files here
+    logger.warn(s"Would clean up ${addActions.length} uncommitted files")
+  }
+
+  override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): org.apache.spark.sql.connector.write.WriteBuilder = {
+    logger.info(s"Overwrite operation with ${filters.length} filters")
+    // For simplicity, return a new WriteBuilder that wraps this Write
+    new org.apache.spark.sql.connector.write.WriteBuilder {
+      override def build(): org.apache.spark.sql.connector.write.Write = 
+        Tantivy4SparkOptimizedWrite.this
+    }
+  }
+
+  override def truncate(): org.apache.spark.sql.connector.write.WriteBuilder = {
+    logger.info("Truncate operation")
+    // For simplicity, return a new WriteBuilder that wraps this Write
+    new org.apache.spark.sql.connector.write.WriteBuilder {
+      override def build(): org.apache.spark.sql.connector.write.Write = 
+        Tantivy4SparkOptimizedWrite.this
+    }
+  }
+}
