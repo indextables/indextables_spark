@@ -23,10 +23,12 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.util.JsonUtil
-import com.tantivy4spark.io.ProtocolBasedIOFactory
+import com.tantivy4spark.io.{ProtocolBasedIOFactory, CloudStorageProviderFactory}
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
+import java.io.ByteArrayInputStream
+import scala.jdk.CollectionConverters._
 
 class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) {
   
@@ -39,13 +41,14 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     case _ => false
   }
   
-  // Legacy Hadoop implementation for backward compatibility
-  private val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
+  // Use cloud storage provider instead of direct Hadoop filesystem
+  private val cloudProvider = CloudStorageProviderFactory.createProvider(tablePath.toString, options, spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
+  private val transactionLogPathStr = transactionLogPath.toString
 
   def initialize(schema: StructType): Unit = {
-        if (!fs.exists(transactionLogPath)) {
-          fs.mkdirs(transactionLogPath)
+        if (!cloudProvider.exists(transactionLogPathStr)) {
+          cloudProvider.createDirectory(transactionLogPathStr)
           
           // Write initial metadata file
           val metadataAction = MetadataAction(
@@ -138,23 +141,22 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFilePath = versionFile.toString
     
-    val output = fs.create(versionFile)
-    try {
-      actions.foreach { action =>
-        // Wrap actions in the appropriate delta log format
-        val wrappedAction = action match {
-          case metadata: MetadataAction => Map("metaData" -> metadata)
-          case add: AddAction => Map("add" -> add)
-          case remove: RemoveAction => Map("remove" -> remove)
-        }
-        
-        val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
-        output.writeBytes(actionJson + "\n")
+    val content = new StringBuilder()
+    actions.foreach { action =>
+      // Wrap actions in the appropriate delta log format
+      val wrappedAction = action match {
+        case metadata: MetadataAction => Map("metaData" -> metadata)
+        case add: AddAction => Map("add" -> add)
+        case remove: RemoveAction => Map("remove" -> remove)
       }
-    } finally {
-      output.close()
+      
+      val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
+      content.append(actionJson).append("\n")
     }
+    
+    cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
     
     logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
   }
@@ -181,16 +183,15 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   private def readVersion(version: Long): Seq[Action] = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFilePath = versionFile.toString
     
-    if (!fs.exists(versionFile)) {
+    if (!cloudProvider.exists(versionFilePath)) {
       return Seq.empty
     }
 
     Try {
-      val input = fs.open(versionFile)
-      try {
-        val content = scala.io.Source.fromInputStream(input).getLines().mkString("\n")
-        val lines = content.split("\n").filter(_.nonEmpty)
+      val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
+      val lines = content.split("\n").filter(_.nonEmpty)
         
         lines.map { line =>
           val jsonNode = JsonUtil.mapper.readTree(line)
@@ -208,9 +209,6 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
             throw new IllegalArgumentException(s"Unknown action type in line: $line")
           }
         }.toSeq
-      } finally {
-        input.close()
-      }
     } match {
       case Success(actions) => actions
       case Failure(ex) =>
@@ -221,13 +219,16 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   private def getVersions(): Seq[Long] = {
     Try {
-      val status = fs.listStatus(transactionLogPath)
-      val result: Seq[Long] = status
-        .filter(_.isFile)
-        .map(_.getPath.getName)
+      val files = cloudProvider.listFiles(transactionLogPathStr, recursive = false)
+      val result: Seq[Long] = files
+        .filter(!_.isDirectory)
+        .map { fileInfo =>
+          val path = new Path(fileInfo.path)
+          path.getName
+        }
         .filter(_.endsWith(".json"))
         .map(_.replace(".json", "").toLong)
-        .sorted.toSeq
+        .sorted
       result
     }.getOrElse(Seq.empty[Long])
   }

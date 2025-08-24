@@ -254,25 +254,18 @@ class Tantivy4SparkDataWriter(
     // Create split from the index using the search engine
     val splitPath = searchEngine.commitAndCreateSplit(outputPath, partitionId.toLong, nodeId)
     
-    // Get split file size - use cloud storage provider for S3, Hadoop for others
-    val splitSize = if (ProtocolBasedIOFactory.determineProtocol(outputPath) == ProtocolBasedIOFactory.S3Protocol) {
-      // Use cloud storage provider for S3
+    // Get split file size using cloud storage provider
+    val splitSize = {
       val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
       try {
         val fileInfo = cloudProvider.getFileInfo(outputPath)
         fileInfo.map(_.size).getOrElse {
-          logger.warn(s"Could not get file info for $outputPath using cloud provider, falling back to Hadoop")
-          val fileSystem = filePath.getFileSystem(hadoopConf)
-          fileSystem.getFileStatus(filePath).getLen
+          logger.warn(s"Could not get file info for $outputPath using cloud provider")
+          0L
         }
       } finally {
         cloudProvider.close()
       }
-    } else {
-      // Use Hadoop filesystem for non-S3 paths
-      val fileSystem = filePath.getFileSystem(hadoopConf)
-      val splitFileStatus = fileSystem.getFileStatus(filePath)
-      splitFileStatus.getLen
     }
     
     logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
