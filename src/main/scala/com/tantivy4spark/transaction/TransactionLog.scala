@@ -39,24 +39,11 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     case _ => false
   }
   
-  // Delegate to cloud-optimized implementation for S3, fall back to Hadoop for others
-  private val cloudTransactionLog = if (useCloudOptimized) {
-    logger.info(s"Using cloud-optimized transaction log for ${ProtocolBasedIOFactory.protocolName(protocol)} protocol")
-    Some(new CloudTransactionLog(tablePath.toString, spark, options))
-  } else {
-    logger.info(s"Using Hadoop-based transaction log for ${ProtocolBasedIOFactory.protocolName(protocol)} protocol")
-    None
-  }
-  
   // Legacy Hadoop implementation for backward compatibility
   private val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
 
   def initialize(schema: StructType): Unit = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.initialize(schema)
-      case None => 
-        // Legacy Hadoop implementation
         if (!fs.exists(transactionLogPath)) {
           fs.mkdirs(transactionLogPath)
           
@@ -74,18 +61,13 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
           
           writeAction(0, metadataAction)
         }
-    }
   }
 
   def addFile(addAction: AddAction): Long = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.addFile(addAction)
-      case None =>
         // Legacy Hadoop implementation
         val version = getLatestVersion() + 1
         writeAction(version, addAction)
         version
-    }
   }
 
   /**
@@ -93,9 +75,6 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
    * This creates one JSON file with multiple ADD entries.
    */
   def addFiles(addActions: Seq[AddAction]): Long = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.addFiles(addActions)
-      case None =>
         // Legacy Hadoop implementation
         if (addActions.isEmpty) {
           return getLatestVersion()
@@ -104,13 +83,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         val version = getLatestVersion() + 1
         writeActions(version, addActions)
         version
-    }
   }
 
   def listFiles(): Seq[AddAction] = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.listFiles()
-      case None =>
         // Legacy Hadoop implementation
         val files = ListBuffer[AddAction]()
         val versions = getVersions()
@@ -125,13 +100,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         }
         
         files.toSeq
-    }
   }
 
   def getSchema(): Option[StructType] = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.getSchema()
-      case None =>
         // Legacy Hadoop implementation
         Try {
           val versions = getVersions()
@@ -144,13 +115,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
             None
           }
         }.getOrElse(None)
-    }
   }
 
   def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
-    cloudTransactionLog match {
-      case Some(cloudLog) => cloudLog.removeFile(path, deletionTimestamp)
-      case None =>
         // Legacy Hadoop implementation
         val version = getLatestVersion() + 1
         val removeAction = RemoveAction(
@@ -163,7 +130,6 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         )
         writeAction(version, removeAction)
         version
-    }
   }
 
   private def writeAction(version: Long, action: Action): Unit = {

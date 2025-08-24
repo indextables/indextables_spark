@@ -35,6 +35,16 @@ object Tantivy4SparkSQLConf {
   val TANTIVY4SPARK_OPTIMIZE_WRITE_MIN_SHUFFLE_PARTITIONS = "spark.tantivy4spark.optimizeWrite.minShufflePartitions"
 
   /////////////////////
+  // AWS Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_AWS_ACCESS_KEY = "spark.tantivy4spark.aws.accessKey"
+  val TANTIVY4SPARK_AWS_SECRET_KEY = "spark.tantivy4spark.aws.secretKey"
+  val TANTIVY4SPARK_AWS_SESSION_TOKEN = "spark.tantivy4spark.aws.sessionToken"
+  val TANTIVY4SPARK_AWS_REGION = "spark.tantivy4spark.aws.region"
+  val TANTIVY4SPARK_AWS_ENDPOINT = "spark.tantivy4spark.aws.endpoint"
+
+  /////////////////////
   // General Configuration
   /////////////////////
 
