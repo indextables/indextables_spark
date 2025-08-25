@@ -112,20 +112,21 @@ object FiltersToQueryConverter {
     try {
       filter match {
         case EqualTo(attribute, value) =>
-          logger.warn(s"Creating EqualTo query: $attribute = $value")
+          logger.debug(s"Creating EqualTo query: $attribute = $value")
           val fieldType = getFieldType(schema, attribute)
           val query = if (fieldType == FieldType.TEXT) {
             // For TEXT fields, use phrase query for exact matching
-            logger.warn(s"Field '$attribute' is TEXT, using phraseQuery for exact match")
+            logger.debug(s"Field '$attribute' is TEXT, using phraseQuery for exact match")
             import scala.jdk.CollectionConverters._
             val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
             Query.phraseQuery(schema, attribute, words)
           } else {
-            // For non-TEXT fields, use term query
-            logger.warn(s"Field '$attribute' is $fieldType, using termQuery")
-            Query.termQuery(schema, attribute, value)
+            // For non-TEXT fields, use term query with converted value
+            logger.debug(s"Field '$attribute' is $fieldType, using termQuery")
+            val convertedValue = convertSparkValueToTantivy(value, fieldType)
+            Query.termQuery(schema, attribute, convertedValue)
           }
-          logger.warn(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
+          logger.debug(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
           query
         
         case EqualNullSafe(attribute, value) =>
@@ -136,35 +137,41 @@ object FiltersToQueryConverter {
             Query.allQuery() // TODO: Implement proper null handling
           } else {
             logger.debug(s"Creating EqualNullSafe query: $attribute = $value")
-            Query.termQuery(schema, attribute, value)
+            val fieldType = getFieldType(schema, attribute)
+            val convertedValue = convertSparkValueToTantivy(value, fieldType)
+            Query.termQuery(schema, attribute, convertedValue)
           }
         
         case GreaterThan(attribute, value) =>
           logger.debug(s"Creating GreaterThan query: $attribute > $value")
           val fieldType = getFieldType(schema, attribute)
-          Query.rangeQuery(schema, attribute, fieldType, value, null, false, true)
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, false, true)
         
         case GreaterThanOrEqual(attribute, value) =>
           logger.debug(s"Creating GreaterThanOrEqual query: $attribute >= $value")
           val fieldType = getFieldType(schema, attribute)
-          Query.rangeQuery(schema, attribute, fieldType, value, null, true, true)
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, true, true)
         
         case LessThan(attribute, value) =>
           logger.debug(s"Creating LessThan query: $attribute < $value")
           val fieldType = getFieldType(schema, attribute)
-          Query.rangeQuery(schema, attribute, fieldType, null, value, true, false)
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, false)
         
         case LessThanOrEqual(attribute, value) =>
           logger.debug(s"Creating LessThanOrEqual query: $attribute <= $value")
           val fieldType = getFieldType(schema, attribute)
-          Query.rangeQuery(schema, attribute, fieldType, null, value, true, true)
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, true)
         
         case In(attribute, values) =>
           logger.debug(s"Creating In query: $attribute IN [${values.mkString(", ")}]")
           val fieldType = getFieldType(schema, attribute)
           if (fieldType == FieldType.TEXT) {
             // For TEXT fields, create OR query with phrase queries for each value
-            logger.warn(s"Field '$attribute' is TEXT, using OR of phraseQueries for IN query")
+            logger.debug(s"Field '$attribute' is TEXT, using OR of phraseQueries for IN query")
             import scala.jdk.CollectionConverters._
             val phraseQueries = values.map { value =>
               val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
@@ -173,9 +180,10 @@ object FiltersToQueryConverter {
             val occurQueries = phraseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
           } else {
-            // For non-TEXT fields, use term set query
-            logger.warn(s"Field '$attribute' is $fieldType, using termSetQuery")
-            val valuesList = values.toList.asJava.asInstanceOf[java.util.List[Object]]
+            // For non-TEXT fields, use term set query with converted values
+            logger.debug(s"Field '$attribute' is $fieldType, using termSetQuery")
+            val convertedValues = values.map(value => convertSparkValueToTantivy(value, fieldType))
+            val valuesList = convertedValues.toList.asJava.asInstanceOf[java.util.List[Object]]
             Query.termSetQuery(schema, attribute, valuesList)
           }
         
@@ -264,6 +272,35 @@ object FiltersToQueryConverter {
       case e: Exception =>
         logger.warn(s"Could not determine field type for '$fieldName', defaulting to TEXT: ${e.getMessage}")
         FieldType.TEXT
+    }
+  }
+  
+  /**
+   * Convert Spark values to tantivy4java compatible values for filtering
+   */
+  private def convertSparkValueToTantivy(value: Any, fieldType: FieldType): Any = {
+    if (value == null) return null
+    
+    fieldType match {
+      case FieldType.DATE =>
+        value match {
+          case ts: java.sql.Timestamp => ts.getTime // Convert to milliseconds
+          case date: java.sql.Date => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch
+          case l: java.lang.Long => l
+          case i: java.lang.Integer => i.longValue()
+          case other => other
+        }
+      case FieldType.INTEGER =>
+        value match {
+          case ts: java.sql.Timestamp => ts.getTime // Convert to milliseconds
+          case date: java.sql.Date => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch
+          case l: java.lang.Long => l
+          case i: java.lang.Integer => i.longValue()
+          case other => other
+        }
+      case _ =>
+        // For other types (TEXT, FLOAT, BOOLEAN, BYTES), pass through as-is
+        value
     }
   }
 }

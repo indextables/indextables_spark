@@ -290,7 +290,7 @@ class Tantivy4SparkDataWriter(
 
   override def write(record: InternalRow): Unit = {
     if (recordCount < 5) { // Log first 5 records for debugging
-      logger.warn(s"Writing record ${recordCount + 1}: ${record}")
+      logger.debug(s"Writing record ${recordCount + 1}: ${record}")
     }
     searchEngine.addDocument(record)
     statistics.updateRow(record)
@@ -298,7 +298,7 @@ class Tantivy4SparkDataWriter(
   }
 
   override def commit(): WriterCommitMessage = {
-    logger.warn(s"Committing Tantivy index with $recordCount documents")
+    logger.debug(s"Committing Tantivy index with $recordCount documents")
     
     // Create split file name - change extension from .tnt4s to .split
     val fileName = f"part-$partitionId%05d-$taskId.split"

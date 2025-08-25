@@ -154,17 +154,17 @@ object SchemaMapping {
      * @return Array of values converted to Spark types
      */
     def convertDocument(splitDocument: com.tantivy4java.Document, splitSchema: Schema, sparkSchema: StructType): Array[Any] = {
-      logger.warn(s"SchemaMapping.convertDocument DEBUG:")
-      logger.warn(s"  Spark schema fields: ${sparkSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
-      logger.warn(s"  Split schema fields: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
+      logger.debug(s"SchemaMapping.convertDocument DEBUG:")
+      logger.debug(s"  Spark schema fields: ${sparkSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
+      logger.debug(s"  Split schema fields: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
       
       val result = sparkSchema.fields.map { sparkField =>
         val convertedValue = convertField(splitDocument, sparkField, splitSchema)
-        logger.warn(s"  Field '${sparkField.name}' -> $convertedValue (${if (convertedValue != null) convertedValue.getClass.getSimpleName else "null"})")
+        logger.debug(s"  Field '${sparkField.name}' -> $convertedValue (${if (convertedValue != null) convertedValue.getClass.getSimpleName else "null"})")
         convertedValue
       }
       
-      logger.warn(s"  Final result array: [${result.zipWithIndex.map { case (v, i) => s"$i:$v" }.mkString(", ")}]")
+      logger.debug(s"  Final result array: [${result.zipWithIndex.map { case (v, i) => s"$i:$v" }.mkString(", ")}]")
       result
     }
     
@@ -225,6 +225,24 @@ object SchemaMapping {
             case l: java.lang.Long => l.longValue()
             case s: String => s.toLong
             case other => throw new IllegalArgumentException(s"Cannot convert $other to Long")
+          }
+          
+        // INTEGER -> DateType (stored as days since epoch)
+        case (FieldType.INTEGER, DateType) =>
+          rawValue match {
+            case l: java.lang.Long => l.intValue() // Days since epoch
+            case i: java.lang.Integer => i.intValue()
+            case s: String => s.toInt
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Date")
+          }
+          
+        // INTEGER -> TimestampType (stored as milliseconds since epoch)
+        case (FieldType.INTEGER, TimestampType) =>
+          rawValue match {
+            case l: java.lang.Long => l.longValue() // Already in microseconds from Spark
+            case i: java.lang.Integer => i.longValue() 
+            case s: String => s.toLong
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
           
         // FLOAT -> DoubleType

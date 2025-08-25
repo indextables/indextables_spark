@@ -221,12 +221,14 @@ object Tantivy4SparkRelation {
                   // Handle temporal types specially since they're stored as i64 in Tantivy
                   val rawValue = field.dataType match {
                     case TimestampType =>
-                      // Timestamp is stored as Long (epoch millis) in tantivy4java
-                      val longValue = internalRow.get(fieldIndex, LongType).asInstanceOf[Long]
+                      // Timestamp is stored as epoch millis, but can be Integer or Long
+                      val value = internalRow.get(fieldIndex, field.dataType)
+                      val longValue = if (value != null) value.asInstanceOf[Number].longValue() else 0L
                       new java.sql.Timestamp(longValue)
                     case DateType =>
-                      // Date is stored as Long (days since epoch) in tantivy4java
-                      val longValue = internalRow.get(fieldIndex, LongType).asInstanceOf[Long]
+                      // Date is stored as days since epoch, but can be Integer or Long
+                      val value = internalRow.get(fieldIndex, field.dataType)
+                      val longValue = if (value != null) value.asInstanceOf[Number].longValue() else 0L
                       new java.sql.Date(longValue * 24 * 60 * 60 * 1000L) // Convert days to millis
                     case _ =>
                       // For non-temporal types, convert to proper external Row types
@@ -239,22 +241,22 @@ object Tantivy4SparkRelation {
                             case other => if (other != null) other.toString else null
                           }
                         case DoubleType =>
-                          executorLogger.warn(s"SALARY DEBUG: Processing DoubleType field ${field.name}, raw value: $value (type: ${if (value == null) "null" else value.getClass.getSimpleName})")
+                          executorLogger.debug(s"SALARY DEBUG: Processing DoubleType field ${field.name}, raw value: $value (type: ${if (value == null) "null" else value.getClass.getSimpleName})")
                           val result = value match {
                             case d: java.lang.Double => 
-                              executorLogger.warn(s"SALARY DEBUG: Found java.lang.Double: $d")
+                              executorLogger.debug(s"SALARY DEBUG: Found java.lang.Double: $d")
                               d
                             case f: java.lang.Float => 
-                              executorLogger.warn(s"SALARY DEBUG: Converting Float $f to Double")
+                              executorLogger.debug(s"SALARY DEBUG: Converting Float $f to Double")
                               f.doubleValue()
                             case s: String => 
-                              executorLogger.warn(s"SALARY DEBUG: Converting String '$s' to Double")
+                              executorLogger.debug(s"SALARY DEBUG: Converting String '$s' to Double")
                               try { s.toDouble } catch { case _: Exception => 0.0 }
                             case other => 
-                              executorLogger.warn(s"SALARY DEBUG: Converting other type ${if (other == null) "null" else other.getClass.getSimpleName} $other to Double")
+                              executorLogger.debug(s"SALARY DEBUG: Converting other type ${if (other == null) "null" else other.getClass.getSimpleName} $other to Double")
                               if (other != null) other.asInstanceOf[Number].doubleValue() else null
                           }
-                          executorLogger.warn(s"SALARY DEBUG: Final result for ${field.name}: $result (type: ${if (result == null) "null" else result.getClass.getSimpleName})")
+                          executorLogger.debug(s"SALARY DEBUG: Final result for ${field.name}: $result (type: ${if (result == null) "null" else result.getClass.getSimpleName})")
                           result
                         case FloatType =>
                           value match {

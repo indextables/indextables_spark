@@ -84,10 +84,10 @@ class SplitSearchEngine(
    */
   def search(query: Query, limit: Int = 10): Array[InternalRow] = {
     try {
-      logger.warn(s"Searching split with Query object: ${query.getClass.getSimpleName}, limit: $limit")
+      logger.debug(s"Searching split with Query object: ${query.getClass.getSimpleName}, limit: $limit")
       
       val tantivySchema = splitSearcher.getSchema()
-      logger.warn(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
+      logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
       
       // Execute the search directly with the Query object
       val searchResult = splitSearcher.search(query, limit)
@@ -98,7 +98,7 @@ class SplitSearchEngine(
       // Close the search result to free resources
       searchResult.close()
       
-      logger.warn(s"Search completed: ${results.length} results returned")
+      logger.debug(s"Search completed: ${results.length} results returned")
       results
       
     } catch {
@@ -195,13 +195,13 @@ class SplitSearchEngine(
       import scala.jdk.CollectionConverters._
       val hits = searchResult.getHits().asScala.toArray
       
-      logger.warn(s"Converting ${hits.length} search hits to InternalRows using SchemaMapping")
-      logger.warn(s"Split file path: $splitPath")
+      logger.debug(s"Converting ${hits.length} search hits to InternalRows using SchemaMapping")
+      logger.debug(s"Split file path: $splitPath")
       
       // Get the split schema once
       val splitSchema = splitSearcher.getSchema()
-      logger.warn(s"Split schema from file: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
-      logger.warn(s"Expected Spark schema: ${sparkSchema.fields.map(_.name).mkString(", ")}")
+      logger.debug(s"Split schema from file: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
+      logger.debug(s"Expected Spark schema: ${sparkSchema.fields.map(_.name).mkString(", ")}")
       
       // Convert each hit using the new schema mapping
       val rows = hits.zipWithIndex.map { case (hit, index) =>

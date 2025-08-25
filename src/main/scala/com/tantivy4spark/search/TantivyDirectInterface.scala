@@ -68,7 +68,7 @@ object TantivyDirectInterface {
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
             // Try "raw" tokenizer which preserves the text as-is without complex processing
-            logger.warn(s"Adding text field '$fieldName' with raw tokenizer for better searchability")
+            logger.debug(s"Adding text field '$fieldName' with raw tokenizer for better searchability")
             builder.addTextField(fieldName, true, false, "raw", "position")
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
             builder.addIntegerField(fieldName, true, true, true)
@@ -218,7 +218,7 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
       case org.apache.spark.sql.types.StringType =>
         val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
         if (fieldName == "title") { // Debug logging for title field
-          logger.warn(s"Adding title field: '$str'")
+          logger.debug(s"Adding title field: '$str'")
         }
         document.addText(fieldName, str)
       case org.apache.spark.sql.types.LongType =>
