@@ -6,6 +6,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 
 - **Embedded Search**: Tantivy runs directly within Spark executors via tantivy4java
 - **Split-Based Architecture**: Write-only indexes with split-based reading for optimal performance
+- **Wildcard Query Support**: Full support for `*` and `?` wildcards with advanced multi-token patterns
 - **Transaction Log**: Delta Lake-style transaction log with batched operations for metadata management  
 - **Optimized Writes**: Delta Lake-style optimized writes with automatic split sizing based on target records per split
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
@@ -90,6 +91,12 @@ df.filter($"name".contains("John") && $"age" > 25).show()
 
 // Text search
 df.filter($"content".contains("machine learning")).show()
+
+// Wildcard queries
+df.filter($"title".contains("Spark*")).show()         // Prefix search
+df.filter($"name".contains("*smith")).show()          // Suffix search
+df.filter($"description".contains("*data*")).show()   // Contains search
+df.filter($"code".contains("test?")).show()           // Single char wildcard
 ```
 
 ### Configuration Options
@@ -203,6 +210,36 @@ df.write.format("tantivy4spark")
   .option("spark.tantivy4spark.cache.maxSize", "1000000000") // 1GB cache for this operation
   .save("s3://bucket/path")
 ```
+
+#### Wildcard Query Support
+
+Tantivy4Spark includes comprehensive wildcard query support through tantivy4java:
+
+```scala
+// Basic wildcard patterns
+df.filter($"title".contains("Spark*"))        // Prefix: matches "Spark", "Sparkling", "Sparkle"
+df.filter($"name".contains("*smith"))         // Suffix: matches "blacksmith", "goldsmith"
+df.filter($"content".contains("*data*"))      // Contains: matches "metadata", "database"
+df.filter($"code".contains("test?"))          // Single char: matches "test1", "tests"
+
+// Complex wildcard patterns
+df.filter($"path".contains("/usr/*/bin"))     // Path patterns
+df.filter($"desc".contains("pro*ing"))        // Middle wildcards
+df.filter($"tags".contains("v?.?.?"))         // Version patterns like "v1.2.3"
+
+// Escaped wildcards (literal matching)
+df.filter($"text".contains("\\*important\\*")) // Matches literal "*important*"
+df.filter($"note".contains("\\?"))            // Matches literal "?"
+
+// Multi-token patterns (advanced)
+df.filter($"bio".contains("machine* *learning")) // Matches terms with both patterns
+```
+
+**Performance Tips**:
+- Patterns starting with literals (`prefix*`) are faster than suffix patterns (`*suffix`)
+- Avoid starting patterns with wildcards when possible for better performance
+- Wildcard queries work at the term level after tokenization
+- Case sensitivity follows the tokenizer configuration (default is case-insensitive)
 
 #### Multi-Cloud Support
 

@@ -67,7 +67,9 @@ object TantivyDirectInterface {
         
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            builder.addTextField(fieldName, true, false, "default", "position")
+            // Try "raw" tokenizer which preserves the text as-is without complex processing
+            logger.warn(s"Adding text field '$fieldName' with raw tokenizer for better searchability")
+            builder.addTextField(fieldName, true, false, "raw", "position")
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
             builder.addIntegerField(fieldName, true, true, true)
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
@@ -215,6 +217,9 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
     dataType match {
       case org.apache.spark.sql.types.StringType =>
         val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+        if (fieldName == "title") { // Debug logging for title field
+          logger.warn(s"Adding title field: '$str'")
+        }
         document.addText(fieldName, str)
       case org.apache.spark.sql.types.LongType =>
         document.addInteger(fieldName, value.asInstanceOf[Long])
@@ -321,28 +326,97 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
   }
   
   private def convertValueToSpark(value: Any, dataType: org.apache.spark.sql.types.DataType): Any = {
-    dataType match {
-      case org.apache.spark.sql.types.StringType =>
-        org.apache.spark.unsafe.types.UTF8String.fromString(value.toString)
-      case org.apache.spark.sql.types.LongType =>
-        value.asInstanceOf[Long]
-      case org.apache.spark.sql.types.IntegerType =>
-        value.asInstanceOf[Long].toInt
-      case org.apache.spark.sql.types.DoubleType =>
-        value.asInstanceOf[Double]
-      case org.apache.spark.sql.types.FloatType =>
-        value.asInstanceOf[Double].toFloat
-      case org.apache.spark.sql.types.BooleanType =>
-        value.asInstanceOf[Boolean]
-      case org.apache.spark.sql.types.BinaryType =>
-        value.asInstanceOf[Array[Byte]]
-      case org.apache.spark.sql.types.TimestampType =>
-        // Convert milliseconds to microseconds
-        value.asInstanceOf[Long] * 1000
-      case org.apache.spark.sql.types.DateType =>
-        value.asInstanceOf[Long].toInt
-      case _ =>
-        value
+    if (value == null) {
+      return null
+    }
+    
+    try {
+      dataType match {
+        case org.apache.spark.sql.types.StringType => 
+          org.apache.spark.unsafe.types.UTF8String.fromString(value.toString)
+        case org.apache.spark.sql.types.IntegerType => 
+          value match {
+            case i: java.lang.Integer => i.intValue()
+            case l: java.lang.Long => l.intValue()
+            case s: String => 
+              try { s.toInt } catch { case _: NumberFormatException => 0 }
+            case _ => 0
+          }
+        case org.apache.spark.sql.types.LongType => 
+          value match {
+            case l: java.lang.Long => l.longValue()
+            case i: java.lang.Integer => i.longValue()
+            case s: String => 
+              try { s.toLong } catch { case _: NumberFormatException => 0L }
+            case _ => 0L
+          }
+        case org.apache.spark.sql.types.DoubleType => 
+          value match {
+            case d: java.lang.Double => d.doubleValue()
+            case f: java.lang.Float => f.doubleValue()
+            case s: String => 
+              try { s.toDouble } catch { case _: NumberFormatException => 0.0 }
+            case i: java.lang.Integer => i.doubleValue()
+            case l: java.lang.Long => l.doubleValue()
+            case _ => 0.0
+          }
+        case org.apache.spark.sql.types.FloatType => 
+          value match {
+            case f: java.lang.Float => f.floatValue()
+            case d: java.lang.Double => d.floatValue()
+            case s: String => 
+              try { s.toFloat } catch { case _: NumberFormatException => 0.0f }
+            case i: java.lang.Integer => i.floatValue()
+            case l: java.lang.Long => l.floatValue()
+            case _ => 0.0f
+          }
+        case org.apache.spark.sql.types.BooleanType => 
+          value match {
+            case b: java.lang.Boolean => b.booleanValue()
+            case i: java.lang.Integer => i != 0
+            case l: java.lang.Long => l != 0
+            case s: String => s.toLowerCase == "true" || s == "1"
+            case _ => false
+          }
+        case org.apache.spark.sql.types.TimestampType => 
+          value match {
+            case l: java.lang.Long => l.longValue() * 1000L // Convert millis to microseconds for Spark InternalRow
+            case i: java.lang.Integer => i.longValue() * 1000L
+            case s: String => 
+              try { s.toLong * 1000L } catch { case _: NumberFormatException => 0L }
+            case _ => 0L
+          }
+        case org.apache.spark.sql.types.DateType => 
+          value match {
+            case i: java.lang.Integer => i.intValue() // Days since epoch - already correct for Spark
+            case l: java.lang.Long => l.intValue()
+            case s: String => 
+              try { s.toInt } catch { case _: NumberFormatException => 0 }
+            case _ => 0
+          }
+        case org.apache.spark.sql.types.BinaryType =>
+          value match {
+            case bytes: Array[Byte] => bytes
+            case _ => Array.empty[Byte]
+          }
+        case _ => value
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to convert value $value (${value.getClass.getSimpleName}) to $dataType, using default: ${e.getMessage}")
+        // Return appropriate default value for the type
+        dataType match {
+          case org.apache.spark.sql.types.StringType => org.apache.spark.unsafe.types.UTF8String.fromString("")
+          case org.apache.spark.sql.types.IntegerType => 0
+          case org.apache.spark.sql.types.LongType => 0L
+          case org.apache.spark.sql.types.DoubleType => 0.0
+          case org.apache.spark.sql.types.FloatType => 0.0f
+          case org.apache.spark.sql.types.BooleanType => false
+          case org.apache.spark.sql.types.TimestampType => 0L
+          case org.apache.spark.sql.types.DateType => 0
+          case org.apache.spark.sql.types.BinaryType => Array.empty[Byte]
+          case _ => null
+        }
     }
   }
   

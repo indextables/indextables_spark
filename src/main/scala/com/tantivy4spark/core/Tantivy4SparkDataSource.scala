@@ -22,10 +22,10 @@ import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, Tabl
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
-import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, RelationProvider, TableScan}
+import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, RelationProvider, TableScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StructType, TimestampType, DateType, LongType, StringType, DoubleType, FloatType, IntegerType, BooleanType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.TransactionLog
 import org.apache.hadoop.fs.Path
@@ -74,7 +74,9 @@ object Tantivy4SparkRelation {
   def processFile(
       filePath: String, 
       serializableSchema: StructType, 
-      hadoopConfProps: Map[String, String]
+      hadoopConfProps: Map[String, String],
+      filters: Array[Filter] = Array.empty,
+      limit: Option[Int] = None
   ): Iterator[org.apache.spark.sql.Row] = {
     // Create local logger for executor to avoid serialization issues
     val executorLogger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
@@ -141,9 +143,45 @@ object Tantivy4SparkRelation {
       )
       executorLogger.debug("Split search engine created successfully")
       
-      // Use searchAll to get all documents from the split
-      executorLogger.debug("Starting searchAll with limit Int.MaxValue...")
-      val results = splitSearchEngine.searchAll(limit = Int.MaxValue)
+      // Get field names for schema validation
+      val splitFieldNames = try {
+        import scala.jdk.CollectionConverters._
+        splitSearchEngine.getSchema().getFieldNames().asScala.toSet
+      } catch {
+        case e: Exception =>
+          executorLogger.warn(s"Could not retrieve field names: ${e.getMessage}")
+          Set.empty[String]
+      }
+      
+      // Convert filters to Tantivy Query object
+      val query = if (filters.nonEmpty) {
+        val tantivySchema = splitSearchEngine.getSchema()
+        val queryObj = if (splitFieldNames.nonEmpty) {
+          val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, tantivySchema, Some(splitFieldNames))
+          executorLogger.info(s"V1 API: Created query with schema validation: ${validatedQuery.getClass.getSimpleName}")
+          validatedQuery
+        } else {
+          val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, tantivySchema)
+          executorLogger.info(s"V1 API: Created query without validation: ${fallbackQuery.getClass.getSimpleName}")
+          fallbackQuery
+        }
+        queryObj
+      } else {
+        null // Use null to indicate no filters
+      }
+      
+      // Calculate effective limit
+      val effectiveLimit = limit.getOrElse(Int.MaxValue)
+      executorLogger.info(s"V1 API: Pushing down limit: $effectiveLimit")
+      
+      // Execute search with pushed down query and limit
+      val results = if (query != null) {
+        executorLogger.info(s"Executing search with Query object and limit: $effectiveLimit")
+        splitSearchEngine.search(query, limit = effectiveLimit)
+      } else {
+        executorLogger.info(s"No filters, executing searchAll with limit: $effectiveLimit")
+        splitSearchEngine.searchAll(limit = effectiveLimit)
+      }
       executorLogger.debug(s"Search returned ${results.length} results")
       
       if (results.length == 0) {
@@ -153,45 +191,122 @@ object Tantivy4SparkRelation {
         }
       }
       
-      // Convert search results to Spark Rows with proper type conversion
+      // Convert search results to Spark Rows with enhanced error handling
       results.foreach { internalRow =>
         try {
-          val row = org.apache.spark.sql.catalyst.CatalystTypeConverters.convertToScala(internalRow, serializableSchema).asInstanceOf[org.apache.spark.sql.Row]
-          rows += row
+          // Always use manual conversion to avoid Catalyst type conversion issues
+          val values = serializableSchema.fields.map { field =>
+            executorLogger.debug(s"Processing field ${field.name} with expected type ${field.dataType}")
+            
+            try {
+              // Access field by name, not by index position
+              val fieldIndex = try {
+                // Find the field index in the InternalRow by field name
+                // This is a simple approach - could be optimized with a field map
+                val sparkSchema = org.apache.spark.sql.types.StructType(serializableSchema.fields)
+                
+                
+                sparkSchema.fieldIndex(field.name)
+              } catch {
+                case _: Exception =>
+                  executorLogger.warn(s"Could not find field ${field.name} in InternalRow schema")
+                  -1
+              }
+              
+              if (fieldIndex == -1 || fieldIndex >= internalRow.numFields || internalRow.isNullAt(fieldIndex)) {
+                executorLogger.debug(s"Field ${field.name} is null or not found (row has ${internalRow.numFields} fields)")
+                null
+              } else {
+                try {
+                  // Handle temporal types specially since they're stored as i64 in Tantivy
+                  val rawValue = field.dataType match {
+                    case TimestampType =>
+                      // Timestamp is stored as Long (epoch millis) in tantivy4java
+                      val longValue = internalRow.get(fieldIndex, LongType).asInstanceOf[Long]
+                      new java.sql.Timestamp(longValue)
+                    case DateType =>
+                      // Date is stored as Long (days since epoch) in tantivy4java
+                      val longValue = internalRow.get(fieldIndex, LongType).asInstanceOf[Long]
+                      new java.sql.Date(longValue * 24 * 60 * 60 * 1000L) // Convert days to millis
+                    case _ =>
+                      // For non-temporal types, convert to proper external Row types
+                      val value = internalRow.get(fieldIndex, field.dataType)
+                      field.dataType match {
+                        case StringType =>
+                          value match {
+                            case utf8: org.apache.spark.unsafe.types.UTF8String => utf8.toString
+                            case s: String => s
+                            case other => if (other != null) other.toString else null
+                          }
+                        case DoubleType =>
+                          executorLogger.warn(s"SALARY DEBUG: Processing DoubleType field ${field.name}, raw value: $value (type: ${if (value == null) "null" else value.getClass.getSimpleName})")
+                          val result = value match {
+                            case d: java.lang.Double => 
+                              executorLogger.warn(s"SALARY DEBUG: Found java.lang.Double: $d")
+                              d
+                            case f: java.lang.Float => 
+                              executorLogger.warn(s"SALARY DEBUG: Converting Float $f to Double")
+                              f.doubleValue()
+                            case s: String => 
+                              executorLogger.warn(s"SALARY DEBUG: Converting String '$s' to Double")
+                              try { s.toDouble } catch { case _: Exception => 0.0 }
+                            case other => 
+                              executorLogger.warn(s"SALARY DEBUG: Converting other type ${if (other == null) "null" else other.getClass.getSimpleName} $other to Double")
+                              if (other != null) other.asInstanceOf[Number].doubleValue() else null
+                          }
+                          executorLogger.warn(s"SALARY DEBUG: Final result for ${field.name}: $result (type: ${if (result == null) "null" else result.getClass.getSimpleName})")
+                          result
+                        case FloatType =>
+                          value match {
+                            case f: java.lang.Float => f
+                            case d: java.lang.Double => d.floatValue()
+                            case s: String => try { s.toFloat } catch { case _: Exception => 0.0f }
+                            case other => if (other != null) other.asInstanceOf[Number].floatValue() else null
+                          }
+                        case IntegerType =>
+                          value match {
+                            case i: java.lang.Integer => i
+                            case l: java.lang.Long => l.intValue()
+                            case s: String => try { s.toInt } catch { case _: Exception => 0 }
+                            case other => if (other != null) other.asInstanceOf[Number].intValue() else null
+                          }
+                        case LongType =>
+                          value match {
+                            case l: java.lang.Long => l
+                            case i: java.lang.Integer => i.longValue()
+                            case s: String => try { s.toLong } catch { case _: Exception => 0L }
+                            case other => if (other != null) other.asInstanceOf[Number].longValue() else null
+                          }
+                        case BooleanType =>
+                          value match {
+                            case b: java.lang.Boolean => b
+                            case i: java.lang.Integer => i != 0
+                            case l: java.lang.Long => l != 0
+                            case s: String => s.toLowerCase == "true" || s == "1"
+                            case other => if (other != null) other.toString.toLowerCase == "true" else false
+                          }
+                        case _ =>
+                          value
+                      }
+                  }
+                  rawValue
+                } catch {
+                  case e: Exception =>
+                    executorLogger.warn(s"Failed to get field ${field.name} at index $fieldIndex: ${e.getMessage}")
+                    null
+                }
+              }
+            } catch {
+              case e: Exception =>
+                executorLogger.warn(s"Could not process field ${field.name}: ${e.getMessage}")
+                null
+            }
+          }
+          rows += org.apache.spark.sql.Row(values: _*)
         } catch {
           case ex: Exception =>
-            // If catalyst conversion fails, manually convert the row
-            executorLogger.debug(s"Catalyst conversion failed, using manual conversion: ${ex.getMessage}")
-            val values = serializableSchema.fields.zipWithIndex.map { case (field, idx) =>
-              val rawValue = if (idx < internalRow.numFields && !internalRow.isNullAt(idx)) {
-                field.dataType match {
-                  case org.apache.spark.sql.types.LongType => internalRow.getLong(idx)
-                  case org.apache.spark.sql.types.IntegerType => internalRow.getInt(idx)
-                  case org.apache.spark.sql.types.DoubleType => internalRow.getDouble(idx)
-                  case org.apache.spark.sql.types.BooleanType => internalRow.getBoolean(idx)
-                  case org.apache.spark.sql.types.StringType => internalRow.getUTF8String(idx).toString
-                  case _: org.apache.spark.sql.types.TimestampType => 
-                    val longVal = try {
-                      internalRow.getLong(idx)
-                    } catch {
-                      case _: ClassCastException => internalRow.getInt(idx).toLong
-                    }
-                    new java.sql.Timestamp(longVal)
-                  case _: org.apache.spark.sql.types.DateType => 
-                    val longVal = try {
-                      internalRow.getLong(idx)
-                    } catch {
-                      case _: ClassCastException => internalRow.getInt(idx).toLong
-                    }
-                    new java.sql.Date(longVal)
-                  case _ => internalRow.get(idx, field.dataType)
-                }
-              } else {
-                null
-              }
-              rawValue
-            }
-            rows += org.apache.spark.sql.Row(values: _*)
+            executorLogger.error(s"Failed to convert search result to Row: ${ex.getMessage}")
+            // Continue with next row instead of failing completely
         }
       }
       
@@ -420,7 +535,7 @@ class Tantivy4SparkRelation(
     path: String,
     val sqlContext: SQLContext,
     readOptions: Map[String, String] = Map.empty
-) extends BaseRelation with TableScan {
+) extends BaseRelation with TableScan with PrunedFilteredScan {
   
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkRelation])
   
@@ -435,6 +550,11 @@ class Tantivy4SparkRelation(
   }
   
   override def buildScan(): RDD[org.apache.spark.sql.Row] = {
+    // Default buildScan without filters/column pruning
+    buildScan(schema.fieldNames, Array.empty)
+  }
+  
+  override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[org.apache.spark.sql.Row] = {
     val spark = sqlContext.sparkSession
     val transactionLog = new TransactionLog(new Path(path), spark)
     
@@ -447,7 +567,22 @@ class Tantivy4SparkRelation(
     } else {
       // Extract serializable data
       val serializableFiles = files.map(_.path)
-      val serializableSchema = schema
+      val fullSchema = schema
+     
+      // Apply column pruning if required columns are specified
+      // IMPORTANT: Preserve the order specified by requiredColumns for proper type alignment
+      val serializableSchema = if (requiredColumns.nonEmpty && !requiredColumns.sameElements(fullSchema.fieldNames)) {
+        val fieldMap = fullSchema.fields.map(field => field.name -> field).toMap
+        val orderedFields = requiredColumns.flatMap(fieldName => fieldMap.get(fieldName))
+        StructType(orderedFields)
+      } else {
+        fullSchema
+      }
+      
+      if (requiredColumns.nonEmpty) {
+        logger.info(s"V1 API: Column pruning - using ${serializableSchema.fields.length}/${fullSchema.fields.length} columns")
+        logger.info(s"V1 API: Required columns: ${requiredColumns.mkString(", ")}")
+      }
       
       // Get Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
       val hadoopConf = spark.sparkContext.hadoopConfiguration
@@ -493,9 +628,15 @@ class Tantivy4SparkRelation(
         logger.debug(s"Sources: Hadoop(${hadoopTantivyProps.size}), Spark(${sparkTantivyProps.size}), Options(${readTantivyProps.size})")
       }
       
+      // Log filter pushdown for V1 API
+      if (filters.nonEmpty) {
+        logger.info(s"V1 API: Pushing down ${filters.length} filters: ${filters.mkString(", ")}")
+      }
+      
       // Create RDD from file paths using standalone object method for proper serialization
+      // Now with proper filter pushdown support via PrunedFilteredScan
       spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
-        Tantivy4SparkRelation.processFile(filePath, serializableSchema, hadoopConfProps)
+        Tantivy4SparkRelation.processFile(filePath, serializableSchema, hadoopConfProps, filters, None)
       }
     }
   }

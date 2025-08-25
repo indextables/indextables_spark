@@ -91,7 +91,24 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
     
     withTempPath { tempPath =>
+      // Ensure clean state by explicitly clearing any cached splits
+      try {
+        // Clear global split cache to avoid schema pollution between tests
+        import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+        GlobalSplitCacheManager.flushAllCaches()
+        SplitLocationRegistry.clearAllLocations()
+      } catch {
+        case _: Exception => // Ignore if cache clearing fails
+      }
+      
       val testData = createTextSearchDataFrame()
+      
+      // Ensure the temp path is completely clean
+      val tempDir = new java.io.File(tempPath)
+      if (tempDir.exists()) {
+        deleteRecursively(tempDir)
+      }
+      tempDir.mkdirs()
       
       // Write the test data - coalesce to single partition to avoid duplicates
       testData.coalesce(1).write

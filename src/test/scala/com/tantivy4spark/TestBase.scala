@@ -126,6 +126,14 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
   protected def withTempPath(f: String => Unit): Unit = {
     val path = Files.createTempDirectory("tantivy4spark").toString
     try {
+      // Clear global split cache before each test to avoid schema pollution
+      try {
+        import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+        GlobalSplitCacheManager.flushAllCaches()
+        SplitLocationRegistry.clearAllLocations()
+      } catch {
+        case _: Exception => // Ignore if cache clearing fails
+      }
       f(path)
     } finally {
       deleteRecursively(new File(path))

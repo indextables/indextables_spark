@@ -407,6 +407,49 @@ val hadoopConfProps = baseHadoopProps ++ tantivyProps
 
 **Remaining Issue**: Custom S3 endpoints with tantivy4java may still have compatibility issues at the native library level, but configuration propagation is now working correctly.
 
+## Wildcard Query Support
+
+### Overview
+Tantivy4Spark now fully supports wildcard queries through integration with tantivy4java's comprehensive wildcard implementation. This feature enables powerful pattern-matching searches across text fields.
+
+### Supported Wildcard Patterns
+- `*` - Matches any sequence of characters (including empty)
+- `?` - Matches exactly one character
+- `\*` - Literal asterisk (escaped)
+- `\?` - Literal question mark (escaped)
+
+### Query Examples
+```scala
+// Basic wildcard patterns
+df.filter($"title".contains("Spark*"))       // Prefix search
+df.filter($"name".contains("*smith"))        // Suffix search
+df.filter($"content".contains("*data*"))     // Contains search
+df.filter($"code".contains("test?"))         // Single character wildcard
+
+// Complex patterns
+df.filter($"description".contains("pro*ing")) // Middle wildcard
+df.filter($"path".contains("/usr/*/bin"))    // Path pattern matching
+```
+
+### Implementation Details
+- **Native Support**: Uses tantivy4java's `Query.wildcardQuery()` method for optimal performance
+- **Automatic Conversion**: Spark filter predicates with wildcards are automatically converted to Tantivy wildcard queries
+- **Lenient Mode**: Missing fields are handled gracefully without errors
+- **Fallback Strategy**: If wildcard query fails, automatically falls back to regex query
+- **Multi-token Support**: Advanced patterns with spaces are tokenized and combined with boolean AND logic
+- **Case Sensitivity**: Respects the tokenizer's case handling (default is case-insensitive)
+
+### Performance Considerations
+- **Efficient**: Patterns starting with literals (`prefix*`) are faster than suffix patterns (`*suffix`)
+- **Optimized**: Uses native Tantivy index structures for pattern matching
+- **Cached**: Results are cached in the JVM-wide SplitCacheManager
+
+### Technical Notes
+- Wildcard queries operate at the **term level** after tokenization
+- Pattern `"Hello*World"` won't match "Hello World" (two separate terms)
+- Use `"Hello* *World"` for multi-term patterns (requires both terms present)
+- See `/Users/schenksj/tmp/x/tantivy4java_pyport/WILDCARD_IMPLEMENTATION_GUIDE.md` for complete implementation details
+
 ---
 
 ## Important Instructions

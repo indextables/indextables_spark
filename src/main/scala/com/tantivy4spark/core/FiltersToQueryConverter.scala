@@ -19,19 +19,27 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.sources._
+import com.tantivy4java.{Query, Schema, Occur, FieldType}
 import org.slf4j.LoggerFactory
+import scala.jdk.CollectionConverters._
 
 object FiltersToQueryConverter {
   
   private val logger = LoggerFactory.getLogger(this.getClass)
 
-  def convert(filters: Array[Filter]): String = {
-    convert(filters, None)
+  /**
+   * Convert Spark filters to a tantivy4java Query object.
+   */
+  def convertToQuery(filters: Array[Filter], schema: Schema): Query = {
+    convertToQuery(filters, schema, None)
   }
 
-  def convert(filters: Array[Filter], schemaFieldNames: Option[Set[String]]): String = {
+  /**
+   * Convert Spark filters to a tantivy4java Query object with schema field validation.
+   */
+  def convertToQuery(filters: Array[Filter], schema: Schema, schemaFieldNames: Option[Set[String]]): Query = {
     if (filters.isEmpty) {
-      return ""
+      return Query.allQuery()
     }
 
     // Filter out filters that reference non-existent fields
@@ -51,14 +59,16 @@ object FiltersToQueryConverter {
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
-    val queryParts = validFilters.flatMap(convertFilter).filter(_.nonEmpty)
+    val queries = validFilters.flatMap(filter => Option(convertFilterToQuery(filter, schema))).filter(_ != null)
     
-    if (queryParts.isEmpty) {
-      ""
-    } else if (queryParts.length == 1) {
-      queryParts.head
+    if (queries.isEmpty) {
+      Query.allQuery()
+    } else if (queries.length == 1) {
+      queries.head
     } else {
-      queryParts.mkString("(", ") AND (", ")")
+      // Combine multiple queries with AND logic
+      val occurQueries = queries.map(query => new Query.OccurQuery(Occur.MUST, query)).toList
+      Query.booleanQuery(occurQueries.asJava)
     }
   }
 
@@ -95,82 +105,165 @@ object FiltersToQueryConverter {
     isValid
   }
 
-  private def convertFilter(filter: Filter): Option[String] = {
-    val query = filter match {
-      case EqualTo(attribute, value) =>
-        s"""$attribute:"${escapeValue(value)}""""
-      
-      case EqualNullSafe(attribute, value) =>
-        if (value == null) {
-          s"NOT _exists_:$attribute"
-        } else {
-          s"""$attribute:"${escapeValue(value)}""""
-        }
-      
-      case GreaterThan(attribute, value) =>
-        s"$attribute:{${escapeValue(value)} TO *}"
-      
-      case GreaterThanOrEqual(attribute, value) =>
-        s"$attribute:[${escapeValue(value)} TO *]"
-      
-      case LessThan(attribute, value) =>
-        s"$attribute:{* TO ${escapeValue(value)}}"
-      
-      case LessThanOrEqual(attribute, value) =>
-        s"$attribute:[* TO ${escapeValue(value)}]"
-      
-      case In(attribute, values) =>
-        val valueStrs = values.map(v => s""""${escapeValue(v)}"""").mkString(" OR ")
-        s"$attribute:($valueStrs)"
-      
-      case IsNull(attribute) =>
-        s"NOT _exists_:$attribute"
-      
-      case IsNotNull(attribute) =>
-        s"_exists_:$attribute"
-      
-      case And(left, right) =>
-        (convertFilter(left), convertFilter(right)) match {
-          case (Some(l), Some(r)) => s"($l) AND ($r)"
-          case (Some(l), None) => l
-          case (None, Some(r)) => r
-          case (None, None) => ""
-        }
-      
-      case Or(left, right) =>
-        (convertFilter(left), convertFilter(right)) match {
-          case (Some(l), Some(r)) => s"($l) OR ($r)"
-          case (Some(l), None) => l
-          case (None, Some(r)) => r
-          case (None, None) => ""
-        }
-      
-      case Not(child) =>
-        convertFilter(child) match {
-          case Some(childQuery) => s"NOT ($childQuery)"
-          case None => ""
-        }
-      
-      case StringStartsWith(attribute, value) =>
-        s"$attribute:${escapeValue(value)}*"
-      
-      case StringEndsWith(attribute, value) =>
-        s"$attribute:*${escapeValue(value)}"
-      
-      case StringContains(attribute, value) =>
-        s"$attribute:*${escapeValue(value)}*"
-      
-      case _ =>
-        logger.warn(s"Unsupported filter: $filter")
-        ""
+  /**
+   * Convert a single Spark Filter to a tantivy4java Query.
+   */
+  private def convertFilterToQuery(filter: Filter, schema: Schema): Query = {
+    try {
+      filter match {
+        case EqualTo(attribute, value) =>
+          logger.warn(s"Creating EqualTo query: $attribute = $value")
+          val fieldType = getFieldType(schema, attribute)
+          val query = if (fieldType == FieldType.TEXT) {
+            // For TEXT fields, use phrase query for exact matching
+            logger.warn(s"Field '$attribute' is TEXT, using phraseQuery for exact match")
+            import scala.jdk.CollectionConverters._
+            val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
+            Query.phraseQuery(schema, attribute, words)
+          } else {
+            // For non-TEXT fields, use term query
+            logger.warn(s"Field '$attribute' is $fieldType, using termQuery")
+            Query.termQuery(schema, attribute, value)
+          }
+          logger.warn(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
+          query
+        
+        case EqualNullSafe(attribute, value) =>
+          if (value == null) {
+            logger.debug(s"Creating EqualNullSafe query for null: $attribute IS NULL")
+            // For null values, we could return a query that matches no documents
+            // or handle this differently based on requirements
+            Query.allQuery() // TODO: Implement proper null handling
+          } else {
+            logger.debug(s"Creating EqualNullSafe query: $attribute = $value")
+            Query.termQuery(schema, attribute, value)
+          }
+        
+        case GreaterThan(attribute, value) =>
+          logger.debug(s"Creating GreaterThan query: $attribute > $value")
+          val fieldType = getFieldType(schema, attribute)
+          Query.rangeQuery(schema, attribute, fieldType, value, null, false, true)
+        
+        case GreaterThanOrEqual(attribute, value) =>
+          logger.debug(s"Creating GreaterThanOrEqual query: $attribute >= $value")
+          val fieldType = getFieldType(schema, attribute)
+          Query.rangeQuery(schema, attribute, fieldType, value, null, true, true)
+        
+        case LessThan(attribute, value) =>
+          logger.debug(s"Creating LessThan query: $attribute < $value")
+          val fieldType = getFieldType(schema, attribute)
+          Query.rangeQuery(schema, attribute, fieldType, null, value, true, false)
+        
+        case LessThanOrEqual(attribute, value) =>
+          logger.debug(s"Creating LessThanOrEqual query: $attribute <= $value")
+          val fieldType = getFieldType(schema, attribute)
+          Query.rangeQuery(schema, attribute, fieldType, null, value, true, true)
+        
+        case In(attribute, values) =>
+          logger.debug(s"Creating In query: $attribute IN [${values.mkString(", ")}]")
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.TEXT) {
+            // For TEXT fields, create OR query with phrase queries for each value
+            logger.warn(s"Field '$attribute' is TEXT, using OR of phraseQueries for IN query")
+            import scala.jdk.CollectionConverters._
+            val phraseQueries = values.map { value =>
+              val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
+              Query.phraseQuery(schema, attribute, words)
+            }
+            val occurQueries = phraseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
+            Query.booleanQuery(occurQueries.asJava)
+          } else {
+            // For non-TEXT fields, use term set query
+            logger.warn(s"Field '$attribute' is $fieldType, using termSetQuery")
+            val valuesList = values.toList.asJava.asInstanceOf[java.util.List[Object]]
+            Query.termSetQuery(schema, attribute, valuesList)
+          }
+        
+        case IsNull(attribute) =>
+          logger.debug(s"Creating IsNull query: $attribute IS NULL")
+          // For IsNull, we could return a query that matches no documents
+          // TODO: Implement proper null handling if needed
+          Query.allQuery()
+        
+        case IsNotNull(attribute) =>
+          logger.debug(s"Creating IsNotNull query: $attribute IS NOT NULL")
+          // For IsNotNull, we could use a wildcard query to match any value
+          try {
+            Query.wildcardQuery(schema, attribute, "*", true)
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to create IsNotNull wildcard query for $attribute: ${e.getMessage}")
+              Query.allQuery()
+          }
+        
+        case And(left, right) =>
+          logger.debug(s"Creating And query: $left AND $right")
+          val leftQuery = convertFilterToQuery(left, schema)
+          val rightQuery = convertFilterToQuery(right, schema)
+          val occurQueries = List(
+            new Query.OccurQuery(Occur.MUST, leftQuery),
+            new Query.OccurQuery(Occur.MUST, rightQuery)
+          )
+          Query.booleanQuery(occurQueries.asJava)
+        
+        case Or(left, right) =>
+          logger.debug(s"Creating Or query: $left OR $right")
+          val leftQuery = convertFilterToQuery(left, schema)
+          val rightQuery = convertFilterToQuery(right, schema)
+          val occurQueries = List(
+            new Query.OccurQuery(Occur.SHOULD, leftQuery),
+            new Query.OccurQuery(Occur.SHOULD, rightQuery)
+          )
+          Query.booleanQuery(occurQueries.asJava)
+        
+        case Not(child) =>
+          logger.debug(s"Creating Not query: NOT $child")
+          val childQuery = convertFilterToQuery(child, schema)
+          // For NOT queries, we need both MUST (match all) and MUST_NOT (exclude) clauses
+          val allQuery = Query.allQuery()
+          val occurQueries = java.util.Arrays.asList(
+            new Query.OccurQuery(Occur.MUST, allQuery),
+            new Query.OccurQuery(Occur.MUST_NOT, childQuery)
+          )
+          Query.booleanQuery(occurQueries)
+        
+        case StringStartsWith(attribute, value) =>
+          logger.debug(s"Creating StringStartsWith query: $attribute starts with '$value'")
+          val pattern = value + "*"
+          Query.wildcardQuery(schema, attribute, pattern, true)
+        
+        case StringEndsWith(attribute, value) =>
+          logger.debug(s"Creating StringEndsWith query: $attribute ends with '$value'")
+          val pattern = "*" + value
+          Query.wildcardQuery(schema, attribute, pattern, true)
+        
+        case StringContains(attribute, value) =>
+          logger.debug(s"Creating StringContains query: $attribute contains '$value'")
+          val pattern = "*" + value + "*"
+          Query.wildcardQuery(schema, attribute, pattern, true)
+        
+        case _ =>
+          logger.warn(s"Unsupported filter: $filter, falling back to match-all")
+          Query.allQuery()
+      }
+    } catch {
+      case e: Exception =>
+        logger.error(s"Failed to convert filter $filter to Query: ${e.getMessage}", e)
+        Query.allQuery() // Fallback to match-all query
     }
-
-    if (query.nonEmpty) Some(query) else None
   }
-
-  private def escapeValue(value: Any): String = {
-    val str = value.toString
-    // Escape special characters for Tantivy query syntax
-    str.replaceAll("""([\+\-\!\(\)\{\}\[\]\^\~\*\?\:\\"])""", """\\$1""")
+  
+  /**
+   * Get the field type from the schema for a given field name.
+   */
+  private def getFieldType(schema: Schema, fieldName: String): FieldType = {
+    try {
+      val fieldInfo = schema.getFieldInfo(fieldName)
+      fieldInfo.getType()
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Could not determine field type for '$fieldName', defaulting to TEXT: ${e.getMessage}")
+        FieldType.TEXT
+    }
   }
 }

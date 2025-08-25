@@ -54,6 +54,12 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         if (!cloudProvider.exists(transactionLogPathStr)) {
           cloudProvider.createDirectory(transactionLogPathStr)
           
+          // DEBUG: Log the original schema being written
+          logger.info(s"Writing schema to transaction log: ${schema.prettyJson}")
+          schema.fields.foreach { field =>
+            logger.info(s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}")
+          }
+          
           // Write initial metadata file
           val metadataAction = MetadataAction(
             id = java.util.UUID.randomUUID().toString,
@@ -116,7 +122,15 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
           if (versions.nonEmpty) {
             val actions = readVersion(versions.head)
             actions.collectFirst {
-              case metadata: MetadataAction => DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+              case metadata: MetadataAction => 
+                // DEBUG: Log the schema being read from transaction log
+                logger.info(s"Reading schema from transaction log: ${metadata.schemaString}")
+                val deserializedSchema = DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+                logger.info(s"Deserialized schema: ${deserializedSchema.prettyJson}")
+                deserializedSchema.fields.foreach { field =>
+                  logger.info(s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}")
+                }
+                deserializedSchema
             }
           } else {
             None

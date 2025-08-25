@@ -180,34 +180,45 @@ class Tantivy4SparkPartitionReader(
             Set.empty[String]
         }
         
-        // Log the filters before conversion
-        if (filters.nonEmpty) {
-          logger.info(s"Applying ${filters.length} filters: ${filters.mkString(", ")}")
-        }
+        // Log the filters and limit for debugging
+        logger.info(s"Pushdown configuration for ${addAction.path}:")
+        logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
+        logger.info(s"  - Limit: $effectiveLimit")
         
-        // Convert filters to Tantivy query with schema validation
-        val query = if (splitFieldNames.nonEmpty) {
-          val validatedQuery = FiltersToQueryConverter.convert(filters, Some(splitFieldNames))
-          logger.info(s"Generated query after schema validation: '$validatedQuery'")
-          validatedQuery
+        // Convert filters to Tantivy Query object with schema validation
+        val query = if (filters.nonEmpty) {
+          val queryObj = if (splitFieldNames.nonEmpty) {
+            val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, splitSchema, Some(splitFieldNames))
+            logger.info(s"  - Query (with schema validation): ${validatedQuery.getClass.getSimpleName}")
+            validatedQuery
+          } else {
+            // Fall back to no schema validation if we can't get field names
+            val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, splitSchema)
+            logger.info(s"  - Query (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
+            fallbackQuery
+          }
+          queryObj
         } else {
-          // Fall back to no schema validation if we can't get field names
-          val fallbackQuery = FiltersToQueryConverter.convert(filters)
-          logger.info(s"Generated query without schema validation: '$fallbackQuery'")
-          fallbackQuery
+          null // Use null to indicate no filters
         }
         
-        if (query.nonEmpty) {
-          val results = splitSearchEngine.search(query, limit = effectiveLimit)
-          resultIterator = results.iterator
+        // Push down query and limit to Quickwit searcher
+        val results = if (query != null) {
+          logger.info(s"Executing search with Query object and limit: $effectiveLimit")
+          val searchResults = splitSearchEngine.search(query, limit = effectiveLimit)
+          logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
+          searchResults
         } else {
-          // No filters, return all documents
-          val results = splitSearchEngine.searchAll(limit = effectiveLimit)
-          resultIterator = results.iterator
+          // No filters, but still push down the limit
+          logger.info(s"No query filters, executing searchAll with pushed limit: $effectiveLimit")
+          val allResults = splitSearchEngine.searchAll(limit = effectiveLimit)
+          logger.info(s"SearchAll returned ${allResults.length} results (pushed limit: $effectiveLimit)")
+          allResults
         }
         
+        resultIterator = results.iterator
         initialized = true
-        logger.info(s"Initialized split reader for ${addAction.path} with query: $query, limit: $effectiveLimit")
+        logger.info(s"Pushdown complete for ${addAction.path}: query='$query', limit=$effectiveLimit, results=${results.length}")
         
       } catch {
         case ex: Exception =>
@@ -278,13 +289,16 @@ class Tantivy4SparkDataWriter(
   private var recordCount = 0L
 
   override def write(record: InternalRow): Unit = {
+    if (recordCount < 5) { // Log first 5 records for debugging
+      logger.warn(s"Writing record ${recordCount + 1}: ${record}")
+    }
     searchEngine.addDocument(record)
     statistics.updateRow(record)
     recordCount += 1
   }
 
   override def commit(): WriterCommitMessage = {
-    logger.info(s"Committing Tantivy index with $recordCount documents")
+    logger.warn(s"Committing Tantivy index with $recordCount documents")
     
     // Create split file name - change extension from .tnt4s to .split
     val fileName = f"part-$partitionId%05d-$taskId.split"

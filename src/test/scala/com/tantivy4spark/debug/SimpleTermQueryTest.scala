@@ -1,0 +1,130 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.tantivy4spark.debug
+
+import com.tantivy4spark.TestBase
+import com.tantivy4java._
+import org.apache.spark.sql.{DataFrame, SaveMode}
+import org.apache.spark.sql.functions._
+import scala.util.Random
+
+/**
+ * Simple test to validate that tantivy4java term queries work properly
+ * on the indexes we create.
+ */
+class SimpleTermQueryTest extends TestBase {
+
+  private def isNativeLibraryAvailable(): Boolean = {
+    try {
+      import com.tantivy4spark.search.TantivyNative
+      TantivyNative.ensureLibraryLoaded()
+    } catch {
+      case _: Exception => false
+    }
+  }
+
+  test("tantivy4java direct term query should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+    
+    withTempPath { tempPath =>
+      println(s"🔧 Using temp path: $tempPath")
+      
+      // Create simple test data
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+      
+      val testData = Seq(
+        (1, "Engineering", "active"),
+        (2, "Marketing", "pending"),
+        (3, "Sales", "active"),
+        (4, "Engineering", "pending"),
+        (5, "HR", "active")
+      ).toDF("id", "department", "status")
+      
+      println(s"📊 Created test data with ${testData.count()} rows")
+      testData.show()
+      
+      // Write data using tantivy4spark
+      println("💾 Writing data...")
+      testData.write
+        .format("tantivy4spark")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+      
+      println("✅ Data written successfully")
+      
+      // Find the split file
+      import java.nio.file.{Files, Paths}
+      import java.io.File
+      val splitFiles = new File(tempPath).listFiles().filter(_.getName.endsWith(".split"))
+      splitFiles.length should be > 0
+      val splitFile = splitFiles.head
+      println(s"📂 Found split file: ${splitFile.getName}")
+      
+      // Use tantivy4java directly to test queries
+      val cacheConfig = new SplitCacheManager.CacheConfig("simple-test-cache")
+        .withMaxCacheSize(50000000L) // 50MB
+      val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      val splitSearcher = cacheManager.createSplitSearcher("file://" + splitFile.getAbsolutePath)
+      
+      try {
+        val schema = splitSearcher.getSchema()
+        println(s"🔍 Schema fields: ${schema.getFieldNames()}")
+        
+        // Test 1: Simple term query for "Engineering"
+        println("\n🔎 Test 1: Term query for department = 'Engineering'")
+        val engineeringQuery = Query.termQuery(schema, "department", "Engineering")
+        println(s"Created query: ${engineeringQuery.getClass.getSimpleName}")
+        
+        val engineeringResults = splitSearcher.search(engineeringQuery, 10)
+        println(s"Found ${engineeringResults.getHits().size()} results")
+        
+        engineeringResults.getHits().forEach { hit =>
+          val doc = splitSearcher.doc(hit.getDocAddress())
+          val id = doc.get("id").get(0)
+          val dept = doc.get("department").get(0)
+          val status = doc.get("status").get(0)
+          println(s"  📄 id=$id, department=$dept, status=$status")
+          doc.close()
+        }
+        engineeringResults.close()
+        
+        // Test 2: Try different case
+        println("\n🔎 Test 2: Term query for department = 'engineering' (lowercase)")
+        val engineeringLowerQuery = Query.termQuery(schema, "department", "engineering")
+        val engineeringLowerResults = splitSearcher.search(engineeringLowerQuery, 10)
+        println(s"Found ${engineeringLowerResults.getHits().size()} results")
+        engineeringLowerResults.close()
+        
+        // Test 3: All documents
+        println("\n🔎 Test 3: All documents")
+        val allQuery = Query.allQuery()
+        val allResults = splitSearcher.search(allQuery, 10)
+        println(s"Found ${allResults.getHits().size()} total documents")
+        allResults.close()
+        
+        // The main test should find Engineering records
+        engineeringResults.getHits().size() should be > 0
+        
+      } finally {
+        splitSearcher.close()
+        cacheManager.close()
+      }
+    }
+  }
+}
