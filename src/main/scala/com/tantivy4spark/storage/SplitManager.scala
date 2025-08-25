@@ -339,6 +339,19 @@ object SplitLocationRegistry {
         "unknown"
     }
   }
+  
+  /**
+   * Clear all split location tracking information.
+   * Returns the number of entries that were cleared.
+   */
+  def clearAllLocations(): SplitLocationFlushResult = {
+    lock.synchronized {
+      val clearedCount = splitLocations.size
+      splitLocations = Map.empty
+      logger.info(s"Cleared all split location tracking ($clearedCount entries)")
+      SplitLocationFlushResult(clearedCount)
+    }
+  }
 }
 
 /**
@@ -434,6 +447,32 @@ object GlobalSplitCacheManager {
   }
   
   /**
+   * Flush all global split cache managers.
+   * This will close all cache managers and clear the global registry.
+   * Returns the number of cache managers that were flushed.
+   */
+  def flushAllCaches(): SplitCacheFlushResult = {
+    lock.synchronized {
+      val flushedCount = cacheManagers.size
+      logger.info(s"Flushing all split cache managers ($flushedCount managers)")
+      
+      cacheManagers.values.foreach { manager =>
+        try {
+          manager.close()
+          logger.debug(s"Flushed cache manager")
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"Error flushing cache manager: ${ex.getMessage}")
+        }
+      }
+      
+      cacheManagers = Map.empty
+      logger.info(s"Successfully flushed all split cache managers")
+      SplitCacheFlushResult(flushedCount)
+    }
+  }
+  
+  /**
    * Get statistics for all active cache managers.
    */
   def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] = {
@@ -464,3 +503,7 @@ object GlobalSplitCacheManager {
     }
   }
 }
+
+// Result classes for cache flush operations
+case class SplitCacheFlushResult(flushedManagers: Int)
+case class SplitLocationFlushResult(clearedEntries: Int)

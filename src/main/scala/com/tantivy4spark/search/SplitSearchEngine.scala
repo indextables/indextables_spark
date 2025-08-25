@@ -82,7 +82,7 @@ class SplitSearchEngine(
    */
   def search(queryString: String, limit: Int = 10): Array[InternalRow] = {
     try {
-      logger.debug(s"Searching split with query: '$queryString', limit: $limit")
+      logger.warn(s"Searching split with query: '$queryString', limit: $limit")
       
       // Parse the query string into a Tantivy Query
       val tantivySchema = splitSearcher.getSchema()
@@ -97,7 +97,7 @@ class SplitSearchEngine(
       // Close the search result to free resources
       searchResult.close()
       
-      logger.debug(s"Search completed: ${results.length} results returned")
+      logger.warn(s"Search completed: ${results.length} results returned")
       results
       
     } catch {

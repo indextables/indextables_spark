@@ -17,7 +17,7 @@ import random
 
 from pyspark.sql import SparkSession
 from pyspark.sql.types import *
-#from pyspark.sql.functions import *
+from pyspark.sql.functions import avg
 
 
 def find_tantivy_jar():
@@ -50,12 +50,12 @@ def create_spark_session():
     spark = (SparkSession.builder
              .appName("Tantivy4Spark-Million-Records-Demo")
              .config("spark.jars", jar_path)
-             .config("spark.driver.memory", "4g")
-             .config("spark.executor.memory", "4g")
+             .config("spark.driver.memory", "8g")
+             .config("spark.executor.memory", "8g")
              .config("spark.driver.maxResultSize", "2g")
-             .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-             .config("spark.sql.adaptive.enabled", "true")
-             .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+             #.config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+             #.config("spark.sql.adaptive.enabled", "true")
+             #.config("spark.sql.adaptive.coalescePartitions.enabled", "true")
              .getOrCreate())
     
     spark.sparkContext.setLogLevel("WARN")
@@ -118,7 +118,7 @@ def generate_million_records(spark, num_records=1000000):
             profile = f"{title} at {company} in {department}. Based in {city} with {experience} years of experience."
             
             batch_data.append((
-                i,                                    # employee_id
+                i,                                    # employee_id 
                 f"Employee_{i}",                     # name
                 email,                               # email
                 company,                             # company
@@ -176,8 +176,7 @@ def save_as_tantivy(df, output_path):
     start_time = time.time()
     
     # Save with partitioning for better query performance
-    (df.repartition(20)  # Create 20 partitions for better parallelism
-       .write
+    (df.write
        .format("tantivy4spark")
        .mode("overwrite")
        .partitionBy("company", "department")  # Partition by company and department
@@ -187,6 +186,16 @@ def save_as_tantivy(df, output_path):
     print(f"✓ Data saved in {write_time:.1f}s")
     
     return write_time
+
+
+def read_data(spark, input_path):
+    print("Reading data")
+
+    df = spark.read.format('tantivy4spark').load(input_path)
+    df.createOrReplaceTempView("tempview")
+    res = spark.sql("select * from tempview where email='employee6999@techcorp.com' limit 10")
+    print(f"Count is={res.count()}")
+    print(f"Result is={res.collect()}")
 
 
 def verify_data(spark, input_path):
@@ -250,8 +259,8 @@ def main():
     print("=" * 50)
     
     # Configuration
-    num_records = 1000000
-    output_path = "file:///tmp/tantivy4spark_million_records"
+    num_records = 100000
+    output_path = "file:/tmp/tantivy4spark_million_records/"
     
     print(f"Creating {num_records:,} records and saving to: {output_path}")
     print()
@@ -267,15 +276,15 @@ def main():
         write_time = save_as_tantivy(df, output_path)
         
         # Verify the saved data
-        read_time = verify_data(spark, output_path)
-        
+        #read_time = verify_data(spark, output_path)
+        read_time = read_data(spark, output_path)    
         # Summary
         print("\n" + "=" * 50)
         print("PERFORMANCE SUMMARY")
         print("=" * 50)
         print(f"Records created: {num_records:,}")
         print(f"Write time: {write_time:.1f}s ({num_records/write_time:,.0f} records/sec)")
-        print(f"Read time: {read_time:.1f}s ({num_records/read_time:,.0f} records/sec)")
+        #print(f"Read time: {read_time:.1f}s ({num_records/read_time:,.0f} records/sec)")
         print(f"Storage location: {output_path}")
         print("\n✓ Demo completed successfully!")
         
