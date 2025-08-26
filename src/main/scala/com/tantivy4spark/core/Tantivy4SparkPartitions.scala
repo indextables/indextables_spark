@@ -96,7 +96,7 @@ class Tantivy4SparkPartitionReader(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
   
   // Calculate effective limit: use pushed limit or fall back to Int.MaxValue
-  private val effectiveLimit: Int = limit.getOrElse(Int.MaxValue)
+  private val effectiveLimit: Int = limit.getOrElse(5000)
   private val spark = SparkSession.active
   private val hadoopConf = spark.sparkContext.hadoopConfiguration
   

@@ -53,7 +53,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 # Build the project
 mvn clean compile
 
-# Run tests (126 tests, 126 pass, 0 failures)
+# Run tests (133 tests, 133 pass, 0 failures)
 mvn test
 
 # Package

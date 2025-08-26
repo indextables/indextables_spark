@@ -191,11 +191,18 @@ def save_as_tantivy(df, output_path):
 def read_data(spark, input_path):
     print("Reading data")
 
+    start_time = time.time()
     df = spark.read.format('tantivy4spark').load(input_path)
+
+    print(f"df collect is {df.limit(10).collect()}")
+    psc = df.filter("email='employee100@techcorp.com'").limit(10)
+    print(f"Pyspark collect is {psc.collect()}")
+
     df.createOrReplaceTempView("tempview")
-    res = spark.sql("select * from tempview where email='employee6999@techcorp.com' limit 10")
-    print(f"Count is={res.count()}")
+    res = spark.sql("select * from tempview where email='employee100@techcorp.com' limit 10")
+    #print(f"Count is={res.count()}")
     print(f"Result is={res.collect()}")
+    return time.time() - start_time
 
 
 def verify_data(spark, input_path):
@@ -259,8 +266,8 @@ def main():
     print("=" * 50)
     
     # Configuration
-    num_records = 100000
-    output_path = "file:/tmp/tantivy4spark_million_records/"
+    num_records = 1000000
+    output_path = "/tmp/tantivy4spark_million_records/"
     
     print(f"Creating {num_records:,} records and saving to: {output_path}")
     print()
@@ -284,7 +291,7 @@ def main():
         print("=" * 50)
         print(f"Records created: {num_records:,}")
         print(f"Write time: {write_time:.1f}s ({num_records/write_time:,.0f} records/sec)")
-        #print(f"Read time: {read_time:.1f}s ({num_records/read_time:,.0f} records/sec)")
+        print(f"Read time: {read_time:.1f}s ({num_records/read_time:,.0f} records/sec)")
         print(f"Storage location: {output_path}")
         print("\n✓ Demo completed successfully!")
         

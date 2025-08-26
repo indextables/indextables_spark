@@ -171,7 +171,7 @@ object Tantivy4SparkRelation {
       }
       
       // Calculate effective limit
-      val effectiveLimit = limit.getOrElse(Int.MaxValue)
+      val effectiveLimit = limit.getOrElse(5000)
       executorLogger.info(s"V1 API: Pushing down limit: $effectiveLimit")
       
       // Execute search with pushed down query and limit

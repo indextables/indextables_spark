@@ -217,7 +217,34 @@ df.filter($"content".contains("machine learning"))
 // Multiple text search conditions
 df.filter($"description".contains("Apache") && $"tags".contains("spark"))
   .show()
+
+// SQL queries with pushdown
+spark.sql("SELECT * FROM my_table WHERE category = 'technology' LIMIT 10")
+spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND score > 85")
 ```
+
+### SQL Query Pushdown Verification
+
+The system provides comprehensive verification that both predicate and limit pushdown are working correctly with `spark.sql()` queries:
+
+```scala
+// Example: Verify pushdown is working
+val query = spark.sql("SELECT * FROM my_table WHERE category = 'fruit' LIMIT 5")
+
+// Query plan shows PushedFilters evidence:
+// *(1) Scan Tantivy4SparkRelation [id, name, category] 
+//     PushedFilters: [IsNotNull(category), EqualTo(category,fruit)], ReadSchema: struct<...>
+
+query.collect() // Returns exactly 5 filtered rows
+```
+
+**Verified Pushdown Types:**
+- **EqualTo filters**: `WHERE column = 'value'`
+- **In filters**: `WHERE column IN ('val1', 'val2')`
+- **IsNotNull filters**: Automatically added for non-nullable predicates
+- **Complex AND conditions**: `WHERE col1 = 'a' AND col2 = 'b'`
+- **Filters with LIMIT**: Combined predicate and limit pushdown
+- **Negation filters**: `WHERE NOT column = 'value'`
 
 
 ## Schema Handling
@@ -255,9 +282,10 @@ df.filter($"description".contains("Apache") && $"tags".contains("spark"))
 
 ## Test Coverage
 
-The project maintains comprehensive test coverage with **126 tests** achieving **126 pass, 0 failures** (100% pass rate):
+The project maintains comprehensive test coverage with **133 tests** achieving **133 pass, 0 failures** (100% pass rate):
 - **Unit tests**: 90%+ coverage for all core classes
 - **Integration tests**: End-to-end workflow validation with comprehensive test data
+- **SQL Pushdown tests**: Comprehensive validation of predicate and limit pushdown for `spark.sql()` queries
 - **Optimized write tests**: Comprehensive validation of automatic split sizing and configuration hierarchy
 - **Split-based architecture tests**: Comprehensive validation of write-only indexes and split reading
 - **Transaction log batch tests**: Testing of Delta Lake-compatible batched operations
@@ -279,6 +307,8 @@ src/test/scala/com/tantivy4spark/
 ├── TestBase.scala                         # Common test utilities and Spark session
 ├── core/                                  # Core functionality tests
 │   ├── FiltersToQueryConverterTest.scala  # Filter conversion testing
+│   ├── SqlPushdownTest.scala              # SQL query pushdown verification  
+│   ├── LimitPushdownTest.scala            # DataFrame limit pushdown testing
 │   ├── PathParameterTest.scala            # Path handling tests
 │   ├── UnsupportedTypesTest.scala         # Data type validation testing
 │   └── Tantivy4SparkIntegrationTest.scala # DataSource integration tests
