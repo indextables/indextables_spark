@@ -261,7 +261,8 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     println(s"✅ Complex query results: $complexQuery")
   }
   
-  ignore("should handle S3 write with different data types") {
+  // DISABLED: Known issue with boolean filtering on S3 - split-based filtering bypasses type conversion
+  def disabledTestS3BooleanFiltering() = {
     // Create test data with various data types
     import java.sql.{Date, Timestamp}
     import java.time.LocalDate

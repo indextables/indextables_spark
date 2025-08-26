@@ -103,7 +103,7 @@ class OptimizedWriteTest extends TestBase {
       // Read back and verify data
       val result = spark.read
         .format("tantivy4spark")
-        .load(tempPath)
+        .load(tempPath).limit(100000)
 
       result.count() shouldBe 1500
       println("✅ Optimized write configured via Spark conf")
