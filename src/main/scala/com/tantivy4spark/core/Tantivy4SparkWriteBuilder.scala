@@ -18,7 +18,7 @@
 
 package com.tantivy4spark.core
 
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder, SupportsTruncate, SupportsOverwrite}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 import com.tantivy4spark.transaction.TransactionLog
@@ -30,14 +30,29 @@ class Tantivy4SparkWriteBuilder(
     info: LogicalWriteInfo,
     options: CaseInsensitiveStringMap,
     hadoopConf: org.apache.hadoop.conf.Configuration
-) extends WriteBuilder {
+) extends WriteBuilder with SupportsTruncate with SupportsOverwrite {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkWriteBuilder])
+  private var isOverwrite = false
+
+  override def truncate(): WriteBuilder = {
+    logger.info("Truncate mode enabled for write operation")
+    isOverwrite = true
+    this
+  }
+
+  override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): WriteBuilder = {
+    logger.info(s"Overwrite mode enabled with ${filters.length} filters")
+    isOverwrite = true
+    // For now, ignore filters and do full table overwrite
+    // TODO: Implement filter-based overwrite (replaceWhere functionality)
+    this
+  }
 
   override def build(): org.apache.spark.sql.connector.write.Write = {
-    logger.info(s"Building optimized write for table at: $tablePath")
+    logger.info(s"Building optimized write for table at: $tablePath (overwrite mode: $isOverwrite)")
     // Use write options from info (DataFrame .option() calls), not table-level options
     // This ensures write-specific options override table/session configuration
-    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, info.options(), hadoopConf)
+    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, info.options(), hadoopConf, isOverwrite)
   }
 }

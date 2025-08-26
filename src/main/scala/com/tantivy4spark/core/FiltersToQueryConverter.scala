@@ -120,8 +120,13 @@ object FiltersToQueryConverter {
             import scala.jdk.CollectionConverters._
             val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
             Query.phraseQuery(schema, attribute, words)
+          } else if (isNumericFieldType(fieldType)) {
+            // For numeric fields (INTEGER, FLOAT, DATE), use range query for equality
+            logger.debug(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+            val convertedValue = convertSparkValueToTantivy(value, fieldType)
+            Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
           } else {
-            // For non-TEXT fields, use term query with converted value
+            // For other non-TEXT fields (BOOLEAN, BYTES), use term query with converted value
             logger.debug(s"Field '$attribute' is $fieldType, using termQuery")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
             logger.info(s"Passing to tantivy4java termQuery: field='$attribute', value=$convertedValue (${convertedValue.getClass.getSimpleName})")
@@ -139,8 +144,15 @@ object FiltersToQueryConverter {
           } else {
             logger.debug(s"Creating EqualNullSafe query: $attribute = $value")
             val fieldType = getFieldType(schema, attribute)
-            val convertedValue = convertSparkValueToTantivy(value, fieldType)
-            Query.termQuery(schema, attribute, convertedValue)
+            if (isNumericFieldType(fieldType)) {
+              // For numeric fields, use range query for equality
+              logger.debug(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+              val convertedValue = convertSparkValueToTantivy(value, fieldType)
+              Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+            } else {
+              val convertedValue = convertSparkValueToTantivy(value, fieldType)
+              Query.termQuery(schema, attribute, convertedValue)
+            }
           }
         
         case GreaterThan(attribute, value) =>
@@ -180,8 +192,17 @@ object FiltersToQueryConverter {
             }
             val occurQueries = phraseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
+          } else if (isNumericFieldType(fieldType)) {
+            // For numeric fields, create OR query with range queries for each value
+            logger.debug(s"Field '$attribute' is numeric $fieldType, using OR of rangeQueries for IN query")
+            val rangeQueries = values.map { value =>
+              val convertedValue = convertSparkValueToTantivy(value, fieldType)
+              Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+            }
+            val occurQueries = rangeQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
+            Query.booleanQuery(occurQueries.asJava)
           } else {
-            // For non-TEXT fields, use term set query with converted values
+            // For other fields (BOOLEAN, BYTES), use term set query with converted values
             logger.debug(s"Field '$attribute' is $fieldType, using termSetQuery")
             val convertedValues = values.map(value => convertSparkValueToTantivy(value, fieldType))
             if (fieldType == FieldType.BOOLEAN) {
@@ -277,6 +298,16 @@ object FiltersToQueryConverter {
       case e: Exception =>
         logger.warn(s"Could not determine field type for '$fieldName', defaulting to TEXT: ${e.getMessage}")
         FieldType.TEXT
+    }
+  }
+  
+  /**
+   * Check if a field type is numeric (should use range queries instead of term queries for equality)
+   */
+  private def isNumericFieldType(fieldType: FieldType): Boolean = {
+    fieldType match {
+      case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => true
+      case _ => false
     }
   }
   

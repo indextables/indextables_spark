@@ -21,7 +21,7 @@ package com.tantivy4spark.core
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder, SupportsTruncate}
 import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, RelationProvider, TableScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.rdd.RDD
@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory
 import java.util
 import scala.collection.JavaConverters._
 import org.apache.spark.broadcast.Broadcast
+import com.tantivy4spark.io.CloudStorageProviderFactory
 
 object Tantivy4SparkRelation {
   @transient private lazy val logger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
@@ -128,12 +129,8 @@ object Tantivy4SparkRelation {
     try {
       executorLogger.info(s"Reading Tantivy split file: $filePath")
       
-      // Normalize path for tantivy4java compatibility (s3a:// -> s3://)
-      val normalizedPath = if (filePath.startsWith("s3a://") || filePath.startsWith("s3n://")) {
-        filePath.replaceFirst("^s3[an]://", "s3://")
-      } else {
-        filePath
-      }
+      // Path should already be normalized by buildScan method
+      val normalizedPath = filePath
       
       // Use SplitSearchEngine to read from split with proper cache configuration
       val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFile(
@@ -316,10 +313,10 @@ object Tantivy4SparkRelation {
       executorLogger.debug(s"Converted ${rows.length} rows from search")
     } catch {
       case ex: Exception =>
-        // If we can't read the Tantivy split file, log and return empty
+        // Re-throw exceptions instead of silently returning empty results
+        // This ensures that missing files and other errors are properly surfaced
         executorLogger.error(s"Failed to read Tantivy split file $filePath: ${ex.getMessage}")
-        ex.printStackTrace()
-        // Return empty iterator on error
+        throw new RuntimeException(s"Failed to read Tantivy split file $filePath", ex)
     }
     
     rows.toIterator
@@ -391,7 +388,19 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     
     // Get the write builder and execute the write
     val writeBuilder = table.asInstanceOf[Tantivy4SparkTable].newWriteBuilder(writeInfo)
-    val write = writeBuilder.build()
+    
+    // Handle SaveMode for V1 DataSource API
+    val finalWriteBuilder = mode match {
+      case SaveMode.Overwrite =>
+        logger.info("V1 API: SaveMode.Overwrite detected, enabling overwrite mode")
+        // For V1 API, SaveMode.Overwrite should call truncate() to enable overwrite behavior
+        writeBuilder.asInstanceOf[Tantivy4SparkWriteBuilder].truncate()
+      case _ => 
+        logger.info(s"V1 API: SaveMode detected: $mode")
+        writeBuilder
+    }
+    
+    val write = finalWriteBuilder.build()
     val batchWrite = write.toBatch
     
     // Extract serializable parameters before the closure
@@ -547,7 +556,7 @@ class Tantivy4SparkRelation(
     val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     val transactionLog = new TransactionLog(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
-      throw new IllegalArgumentException(s"Unable to infer schema from path: $path")
+      throw new RuntimeException(s"Table does not exist at path: $path. No transaction log found. Use spark.write to create the table first.")
     }
   }
   
@@ -560,15 +569,64 @@ class Tantivy4SparkRelation(
     val spark = sqlContext.sparkSession
     val transactionLog = new TransactionLog(new Path(path), spark)
     
+    // Create options map for CloudStorageProviderFactory
+    val options = new CaseInsensitiveStringMap(readOptions.asJava)
+    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    
+    // Check if table exists by trying to get schema first
+    val tableSchema = transactionLog.getSchema()
+    if (tableSchema.isEmpty) {
+      // Table doesn't exist - throw exception instead of returning empty results
+      throw new RuntimeException(s"Table does not exist at path: $path. No transaction log found. Use spark.write to create the table first.")
+    }
+    
     // Get list of files from transaction log
     val files = transactionLog.listFiles()
     
     if (files.isEmpty) {
-      // Return empty RDD if no files
+      // Table exists but has no data files (legitimate empty table)
       spark.sparkContext.emptyRDD[org.apache.spark.sql.Row]
     } else {
-      // Extract serializable data
-      val serializableFiles = files.map(_.path)
+      // Hadoop configuration already available above
+      
+      // Extract serializable data - resolve relative paths to full paths
+      // Normalize table path for tantivy4java compatibility (s3a:// -> s3://)
+      val normalizedTablePath = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+        path.replaceFirst("^s3[an]://", "s3://")
+      } else {
+        path
+      }
+      val tablePath = new Path(normalizedTablePath)
+      
+      val serializableFiles = files.map { addAction =>
+        if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
+          // Already absolute path - normalize protocol if needed
+          val result = if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
+            addAction.path.replaceFirst("^s3[an]://", "s3://")
+          } else {
+            addAction.path
+          }
+          result
+        } else {
+          // Relative path, resolve against normalized table path
+          // Check if this is a flattened S3Mock path (contains ___) 
+          if (addAction.path.contains("___")) {
+            // This is a flattened key - reconstruct the S3 path directly
+            val tableUri = java.net.URI.create(tablePath.toString)
+            val reconstructedPath = s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
+            reconstructedPath
+          } else {
+            // Standard relative path resolution
+            val fullPath = new Path(tablePath, addAction.path)
+            if (fullPath.toString.startsWith("file:")) {
+              // Extract local filesystem path for tantivy4java compatibility
+              new java.io.File(fullPath.toUri).getAbsolutePath
+            } else {
+              fullPath.toString
+            }
+          }
+        }
+      }
       val fullSchema = schema
      
       // Apply column pruning if required columns are specified
@@ -586,8 +644,7 @@ class Tantivy4SparkRelation(
         logger.info(s"V1 API: Required columns: ${requiredColumns.mkString(", ")}")
       }
       
-      // Get Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
-      val hadoopConf = spark.sparkContext.hadoopConfiguration
+      // Use Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
       val baseHadoopProps = Map(
         "fs.defaultFS" -> hadoopConf.get("fs.defaultFS", ""),
         "fs.s3a.access.key" -> hadoopConf.get("fs.s3a.access.key", ""),
@@ -720,6 +777,7 @@ class Tantivy4SparkTable(
     
     new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, options, hadoopConf)
   }
+
 }
 
 class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.TableProvider {
@@ -762,7 +820,7 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val transactionLog = new TransactionLog(new Path(paths.head), spark)
     
     transactionLog.getSchema().getOrElse {
-      throw new IllegalArgumentException(s"Unable to infer schema from path: ${paths.head}")
+      throw new RuntimeException(s"Table does not exist at path: ${paths.head}. No transaction log found. Use spark.write to create the table first.")
     }
   }
 

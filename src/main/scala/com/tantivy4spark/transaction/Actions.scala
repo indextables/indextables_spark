@@ -18,9 +18,27 @@
 
 package com.tantivy4spark.transaction
 
-import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.{JsonProperty, JsonCreator}
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
+import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
+import scala.util.Try
 
 sealed trait Action
+
+// Custom deserializer to handle Integer -> Long conversion for numRecords
+class NumRecordsDeserializer extends JsonDeserializer[Option[Long]] {
+  override def deserialize(p: JsonParser, ctxt: DeserializationContext): Option[Long] = {
+    val node = p.getCodec.readTree[JsonNode](p)
+    if (node.isNull) {
+      None
+    } else if (node.isNumber) {
+      Some(node.asLong())
+    } else {
+      None
+    }
+  }
+}
 
 case class FileFormat(
   provider: String,
@@ -48,7 +66,7 @@ case class AddAction(
   tags: Option[Map[String, String]] = None,
   @JsonProperty("minValues") minValues: Option[Map[String, String]] = None,
   @JsonProperty("maxValues") maxValues: Option[Map[String, String]] = None,
-  @JsonProperty("numRecords") numRecords: Option[Long] = None
+  @JsonProperty("numRecords") @JsonDeserialize(using = classOf[NumRecordsDeserializer]) numRecords: Option[Long] = None
 ) extends Action
 
 case class RemoveAction(

@@ -46,16 +46,30 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
   private val transactionLogPathStr = transactionLogPath.toString
 
+  def getTablePath(): Path = tablePath
+
   override def close(): Unit = {
     cloudProvider.close()
   }
 
   def initialize(schema: StructType): Unit = {
+    initialize(schema, Seq.empty)
+  }
+  
+  def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = {
         if (!cloudProvider.exists(transactionLogPathStr)) {
           cloudProvider.createDirectory(transactionLogPathStr)
           
+          // Validate partition columns exist in schema
+          val schemaFields = schema.fieldNames.toSet
+          val invalidPartitionCols = partitionColumns.filterNot(schemaFields.contains)
+          if (invalidPartitionCols.nonEmpty) {
+            throw new IllegalArgumentException(s"Partition columns ${invalidPartitionCols.mkString(", ")} not found in schema")
+          }
+          
           // DEBUG: Log the original schema being written
           logger.info(s"Writing schema to transaction log: ${schema.prettyJson}")
+          logger.info(s"Partition columns: ${partitionColumns.mkString(", ")}")
           schema.fields.foreach { field =>
             logger.info(s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}")
           }
@@ -67,7 +81,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
             description = None,
             format = FileFormat("tantivy4spark", Map.empty),
             schemaString = schema.json,
-            partitionColumns = Seq.empty,
+            partitionColumns = partitionColumns,
             configuration = Map.empty,
             createdTime = Some(System.currentTimeMillis())
           )
@@ -97,6 +111,38 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         writeActions(version, addActions)
         version
   }
+  
+  /**
+   * Add files in overwrite mode - removes all existing files and adds new ones.
+   * This is similar to Delta Lake's overwrite mode.
+   */
+  def overwriteFiles(addActions: Seq[AddAction]): Long = {
+    if (addActions.isEmpty) {
+      logger.warn("Overwrite operation with no files to add")
+    }
+    
+    // Get all existing files to remove
+    val existingFiles = listFiles()
+    val removeActions = existingFiles.map { existingFile =>
+      RemoveAction(
+        path = existingFile.path,
+        deletionTimestamp = Some(System.currentTimeMillis()),
+        dataChange = true,
+        extendedFileMetadata = None,
+        partitionValues = Some(existingFile.partitionValues),
+        size = Some(existingFile.size)
+      )
+    }
+    
+    val version = getLatestVersion() + 1
+    
+    // Write both REMOVE and ADD actions in a single transaction
+    val allActions = removeActions ++ addActions
+    writeActions(version, allActions)
+    
+    logger.info(s"Overwrite operation: removed ${removeActions.length} files, added ${addActions.length} files in version $version")
+    version
+  }
 
   def listFiles(): Seq[AddAction] = {
         // Legacy Hadoop implementation
@@ -113,6 +159,23 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         }
         
         files.toSeq
+  }
+  
+  /**
+   * Get the total row count across all active files.
+   */
+  def getTotalRowCount(): Long = {
+    listFiles().map { file =>
+      file.numRecords.map { (count: Any) =>
+        // Handle any numeric type and convert to Long
+        count match {
+          case l: Long => l
+          case i: Int => i.toLong
+          case i: java.lang.Integer => i.toLong
+          case _ => count.toString.toLong
+        }
+      }.getOrElse(0L)
+    }.sum
   }
 
   def getSchema(): Option[StructType] = {
@@ -179,6 +242,24 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
   }
 
+  /**
+   * Get partition columns from metadata.
+   */
+  def getPartitionColumns(): Seq[String] = {
+    try {
+      getMetadata().partitionColumns
+    } catch {
+      case _: Exception => Seq.empty
+    }
+  }
+  
+  /**
+   * Check if the table is partitioned.
+   */
+  def isPartitioned(): Boolean = {
+    getPartitionColumns().nonEmpty
+  }
+  
   /**
    * Get the current metadata action from the transaction log.
    */
@@ -248,7 +329,12 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         .map(_.replace(".json", "").toLong)
         .sorted
       result
-    }.getOrElse(Seq.empty[Long])
+    } match {
+      case Success(versions) => versions
+      case Failure(_) => 
+        logger.debug(s"Transaction log directory does not exist yet (normal for new tables): $transactionLogPathStr")
+        Seq.empty[Long]
+    }
   }
 
   private def getLatestVersion(): Long = {

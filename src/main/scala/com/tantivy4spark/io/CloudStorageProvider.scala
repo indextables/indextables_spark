@@ -435,4 +435,44 @@ object CloudStorageProviderFactory {
       bufferSize = options.getInt("spark.tantivy4spark.cloud.bufferSize", 16 * 1024 * 1024)
     )
   }
+  
+  /**
+   * Static method to normalize a path for tantivy4java compatibility without creating a provider instance.
+   * This applies protocol normalization (s3a:// -> s3://) and S3Mock path flattening if needed.
+   */
+  def normalizePathForTantivy(path: String, options: CaseInsensitiveStringMap, hadoopConf: Configuration): String = {
+    // First normalize protocol (s3a:// -> s3://)
+    val protocolNormalized = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+      path.replaceFirst("^s3[an]://", "s3://")
+    } else {
+      path
+    }
+    
+    // Check if we're in S3Mock mode by looking at the endpoint
+    val endpointValue = Option(options.get("spark.tantivy4spark.s3.endpoint"))
+      .orElse(Option(options.get("spark.tantivy4spark.aws.endpoint")))
+      .orElse(Option(hadoopConf.get("spark.tantivy4spark.s3.endpoint")))
+      .orElse(Option(hadoopConf.get("spark.tantivy4spark.aws.endpoint")))
+      .orElse(Option(hadoopConf.get("fs.s3a.endpoint")))
+    
+    val isS3Mock = endpointValue.exists(endpoint => endpoint.contains("localhost") || endpoint.contains("127.0.0.1"))
+    
+    // Apply S3Mock path flattening if needed
+    if (isS3Mock && protocolNormalized.startsWith("s3://")) {
+      val uri = java.net.URI.create(protocolNormalized)
+      val bucket = uri.getHost
+      val key = uri.getPath.stripPrefix("/")
+      
+      // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
+      val flattenedKey = if (key.contains("/")) {
+        key.replace("/", "___")
+      } else {
+        key
+      }
+      
+      s"s3://$bucket/$flattenedKey"
+    } else {
+      protocolNormalized
+    }
+  }
 }

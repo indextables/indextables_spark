@@ -24,7 +24,7 @@ import org.apache.spark.sql.connector.write.{DataWriter, DataWriterFactory, Writ
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import com.tantivy4spark.transaction.AddAction
+import com.tantivy4spark.transaction.{AddAction, PartitionUtils}
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry}
 import com.tantivy4spark.util.StatisticsCalculator
@@ -65,7 +65,8 @@ class Tantivy4SparkReaderFactory(
     readSchema: StructType,
     options: CaseInsensitiveStringMap,
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]]
+    broadcastConfig: Broadcast[Map[String, String]],
+    tablePath: Path
 ) extends PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkReaderFactory])
@@ -80,7 +81,8 @@ class Tantivy4SparkReaderFactory(
       tantivyPartition.filters,
       options,
       tantivyPartition.limit.orElse(limit),
-      broadcastConfig
+      broadcastConfig,
+      tablePath
     )
   }
 }
@@ -91,7 +93,8 @@ class Tantivy4SparkPartitionReader(
     filters: Array[Filter],
     options: CaseInsensitiveStringMap,
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]]
+    broadcastConfig: Broadcast[Map[String, String]],
+    tablePath: Path
 ) extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
@@ -101,7 +104,14 @@ class Tantivy4SparkPartitionReader(
   private val spark = SparkSession.active
   private val hadoopConf = spark.sparkContext.hadoopConfiguration
   
-  private val filePath = new Path(addAction.path)
+  // Resolve relative path from AddAction against table path
+  private val filePath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
+    // Already absolute path
+    new Path(addAction.path)
+  } else {
+    // Relative path, resolve against table path
+    new Path(tablePath, addAction.path)
+  }
   
   private var splitSearchEngine: SplitSearchEngine = _
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
@@ -160,13 +170,17 @@ class Tantivy4SparkPartitionReader(
         val cacheConfig = createCacheConfig()
         
         // Create split search engine using the split file directly
-        // Normalize path for tantivy4java compatibility (s3a:// -> s3://)
-        val normalizedPath = if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
-          addAction.path.replaceFirst("^s3[an]://", "s3://")
+        // Use raw filesystem path for tantivy4java compatibility
+        val actualPath = if (filePath.toString.startsWith("file:")) {
+          // Extract local filesystem path for tantivy4java
+          new java.io.File(filePath.toUri).getAbsolutePath
+        } else if (filePath.toString.startsWith("s3a://") || filePath.toString.startsWith("s3n://")) {
+          // Normalize s3 paths for tantivy4java compatibility (s3a:// -> s3://)
+          filePath.toString.replaceFirst("^s3[an]://", "s3://")
         } else {
-          addAction.path
+          filePath.toString
         }
-        splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, normalizedPath, cacheConfig)
+        splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, actualPath, cacheConfig)
         
         // Get the schema from the split to validate filters
         val splitSchema = splitSearchEngine.getSchema()
@@ -249,14 +263,18 @@ class Tantivy4SparkWriterFactory(
     tablePath: Path,
     writeSchema: StructType,
     options: CaseInsensitiveStringMap,
-    hadoopConf: org.apache.hadoop.conf.Configuration
+    hadoopConf: org.apache.hadoop.conf.Configuration,
+    partitionColumns: Seq[String] = Seq.empty
 ) extends DataWriterFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkWriterFactory])
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
     logger.info(s"Creating writer for partition $partitionId, task $taskId")
-    new Tantivy4SparkDataWriter(tablePath, writeSchema, partitionId, taskId, options, hadoopConf)
+    if (partitionColumns.nonEmpty) {
+      logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
+    }
+    new Tantivy4SparkDataWriter(tablePath, writeSchema, partitionId, taskId, options, hadoopConf, partitionColumns)
   }
 }
 
@@ -266,10 +284,22 @@ class Tantivy4SparkDataWriter(
     partitionId: Int,
     taskId: Long,
     options: CaseInsensitiveStringMap,
-    hadoopConf: org.apache.hadoop.conf.Configuration
+    hadoopConf: org.apache.hadoop.conf.Configuration,
+    partitionColumns: Seq[String] = Seq.empty  // Partition columns from metadata
 ) extends DataWriter[InternalRow] {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
+
+  // Normalize table path for consistent S3 protocol handling (s3a:// -> s3://)
+  private val normalizedTablePath = {
+    val pathStr = tablePath.toString
+    if (pathStr.startsWith("s3a://") || pathStr.startsWith("s3n://")) {
+      val normalizedStr = pathStr.replaceFirst("^s3[an]://", "s3://")
+      new Path(normalizedStr)
+    } else {
+      tablePath
+    }
+  }
   
   // Debug: Log options and hadoop config available in executor
   if (logger.isDebugEnabled) {
@@ -288,11 +318,26 @@ class Tantivy4SparkDataWriter(
   private val searchEngine = new TantivySearchEngine(writeSchema, options, hadoopConf)
   private val statistics = new StatisticsCalculator.DatasetStatistics(writeSchema)
   private var recordCount = 0L
+  private var partitionValues: Map[String, String] = Map.empty
+  private var partitionValuesExtracted = false
 
   override def write(record: InternalRow): Unit = {
     if (recordCount < 5) { // Log first 5 records for debugging
       logger.debug(s"Writing record ${recordCount + 1}: ${record}")
     }
+    
+    // Extract partition values from the first record (all records in a partition should have same values)
+    if (!partitionValuesExtracted && partitionColumns.nonEmpty) {
+      try {
+        partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
+        partitionValuesExtracted = true
+        logger.debug(s"Extracted partition values for partition $partitionId: ${partitionValues}")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to extract partition values: ${ex.getMessage}", ex)
+      }
+    }
+    
     searchEngine.addDocument(record)
     statistics.updateRow(record)
     recordCount += 1
@@ -305,8 +350,18 @@ class Tantivy4SparkDataWriter(
     // Format: part-{partitionId}-{taskId}-{uuid}.split
     val splitId = UUID.randomUUID().toString
     val fileName = f"part-$partitionId%05d-$taskId-$splitId.split"
-    val filePath = new Path(tablePath, fileName)
-    val outputPath = filePath.toString
+    val filePath = new Path(normalizedTablePath, fileName)
+    
+    // Use raw filesystem path for tantivy, not file:// URI
+    // For S3Mock, apply path flattening via CloudStorageProvider  
+    val outputPath = if (filePath.toString.startsWith("file:")) {
+      // Extract the local filesystem path from file:// URI
+      new java.io.File(filePath.toUri).getAbsolutePath
+    } else {
+      // For cloud paths (S3), normalize the path for storage compatibility
+      val normalized = CloudStorageProviderFactory.normalizePathForTantivy(filePath.toString, options, hadoopConf)
+      normalized
+    }
     
     // Generate node ID for the split (hostname + executor ID)
     val nodeId = java.net.InetAddress.getLocalHost.getHostName + "-" + 
@@ -344,9 +399,45 @@ class Tantivy4SparkDataWriter(
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
     
+    // For AddAction path, we need to store the relative path that will resolve to the actual
+    // file location during read. If S3Mock flattening was applied, we need to calculate the
+    // relative path that will resolve to the flattened location.
+    val addActionPath = if (outputPath != filePath.toString) {
+      // Path normalization was applied - calculate relative path from table path to normalized output path
+      val tablePath = normalizedTablePath.toString
+      val tableUri = java.net.URI.create(tablePath)
+      val outputUri = java.net.URI.create(outputPath)
+      
+      if (tableUri.getScheme == outputUri.getScheme && tableUri.getHost == outputUri.getHost) {
+        // Same scheme and host - calculate relative path
+        val tableKey = tableUri.getPath.stripPrefix("/")
+        val outputKey = outputUri.getPath.stripPrefix("/")
+        
+        // For S3Mock flattening, we need to store the complete relative path that will
+        // resolve to the flattened location when combined with the table path
+        if (outputKey.contains("___") && !tableKey.contains("___")) {
+          // S3Mock flattening occurred - store the entire flattened key relative to bucket
+          // This will allow proper resolution during read
+          val bucketPrefix = tableUri.getHost
+          val flattenedKey = outputKey
+          flattenedKey
+        } else if (outputKey.startsWith(tableKey)) {
+          // Standard case - remove table prefix to get relative path
+          val relativePath = outputKey.substring(tableKey.length).stripPrefix("/")
+          relativePath
+        } else {
+          fileName
+        }
+      } else {
+        fileName
+      }
+    } else {
+      fileName  // No normalization was applied
+    }
+    
     val addAction = AddAction(
-      path = normalizedSplitPath,
-      partitionValues = Map.empty,
+      path = addActionPath,  // Use the path that will correctly resolve during read
+      partitionValues = partitionValues,  // Use extracted partition values
       size = splitSize,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
@@ -354,6 +445,10 @@ class Tantivy4SparkDataWriter(
       minValues = if (minValues.nonEmpty) Some(minValues) else None,
       maxValues = if (maxValues.nonEmpty) Some(maxValues) else None
     )
+    
+    if (partitionValues.nonEmpty) {
+      logger.info(s"📁 Created partitioned split with values: ${partitionValues}")
+    }
     
     logger.info(s"📝 AddAction created with path: ${addAction.path}")
     

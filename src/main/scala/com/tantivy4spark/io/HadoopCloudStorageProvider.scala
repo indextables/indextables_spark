@@ -40,6 +40,9 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
       val statuses = fs.listStatus(hadoopPath)
       statuses.map(convertFileStatus).toSeq
     } catch {
+      case ex: java.io.FileNotFoundException =>
+        logger.debug(s"Directory does not exist (normal when creating new table): $path")
+        Seq.empty
       case ex: Exception =>
         logger.error(s"Failed to list files at path: $path", ex)
         Seq.empty

@@ -38,7 +38,8 @@ class Tantivy4SparkOptimizedWrite(
     tablePath: Path,
     writeInfo: LogicalWriteInfo,
     options: CaseInsensitiveStringMap,
-    hadoopConf: org.apache.hadoop.conf.Configuration
+    hadoopConf: org.apache.hadoop.conf.Configuration,
+    isOverwrite: Boolean = false  // Track whether this is an overwrite operation
 ) extends Write with BatchWrite with SupportsOverwrite with SupportsTruncate {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
@@ -173,6 +174,19 @@ class Tantivy4SparkOptimizedWrite(
       logger.warn("Each partition will create one split file, regardless of target records per split")
     }
     
+    // Get partition columns from transaction log metadata
+    val partitionColumns = try {
+      transactionLog.getPartitionColumns()
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Could not retrieve partition columns: ${ex.getMessage}")
+        Seq.empty[String]
+    }
+    
+    if (partitionColumns.nonEmpty) {
+      logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
+    }
+    
     // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
     val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
     
@@ -187,24 +201,61 @@ class Tantivy4SparkOptimizedWrite(
       }
     }
     
-    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, enrichedHadoopConf)
+    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, enrichedHadoopConf, partitionColumns)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    logger.info(s"Committing ${messages.length} writer messages")
-    
-    // Initialize transaction log with schema if this is the first commit
-    transactionLog.initialize(writeInfo.schema())
+    logger.info(s"Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     
     val addActions = messages.collect {
       case msg: Tantivy4SparkCommitMessage => msg.addAction
     }
 
-    // Add all files in a single transaction (like Delta Lake)
-    val version = transactionLog.addFiles(addActions)
-    logger.info(s"Added ${addActions.length} files in transaction version $version")
+    // Determine if this should be an overwrite based on existing table state and mode
+    val shouldOverwrite = if (isOverwrite) {
+      // Explicit overwrite flag from truncate() call
+      true
+    } else {
+      // Check if this is the first write to the table and we have SaveMode.Overwrite semantics
+      // For DataSource V2, SaveMode.Overwrite might not trigger truncate() but we should still
+      // check if we need to overwrite existing data
+      try {
+        val existingFiles = transactionLog.listFiles()
+        if (existingFiles.nonEmpty) {
+          logger.info(s"Table has ${existingFiles.length} existing files, checking if overwrite is needed")
+          // If the table exists with files and this is a write operation, we need to determine
+          // if this should overwrite. For now, we'll assume it's append unless explicitly truncated.
+          false
+        } else {
+          false
+        }
+      } catch {
+        case _: Exception => false // If we can't read transaction log, assume append
+      }
+    }
     
-    logger.info(s"Successfully committed ${addActions.length} files")
+    // Initialize transaction log with schema if this is the first commit  
+    transactionLog.initialize(writeInfo.schema())
+
+    // Use appropriate transaction log method based on write mode
+    val version = if (shouldOverwrite) {
+      logger.info(s"Performing overwrite operation with ${addActions.length} new files")
+      transactionLog.overwriteFiles(addActions)
+    } else {
+      logger.info(s"Performing append operation with ${addActions.length} files")
+      transactionLog.addFiles(addActions)
+    }
+    
+    logger.info(s"Successfully committed ${addActions.length} files in transaction version $version")
+    
+    // Log total row count after commit (safely handling different types)
+    try {
+      val totalRows = transactionLog.getTotalRowCount()
+      logger.info(s"Total rows in table after commit: $totalRows")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Could not calculate total row count: ${e.getMessage}")
+    }
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
@@ -221,19 +272,19 @@ class Tantivy4SparkOptimizedWrite(
 
   override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): org.apache.spark.sql.connector.write.WriteBuilder = {
     logger.info(s"Overwrite operation with ${filters.length} filters")
-    // For simplicity, return a new WriteBuilder that wraps this Write
+    // Return a new WriteBuilder that creates an overwrite Write
     new org.apache.spark.sql.connector.write.WriteBuilder {
       override def build(): org.apache.spark.sql.connector.write.Write = 
-        Tantivy4SparkOptimizedWrite.this
+        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, options, hadoopConf, isOverwrite = true)
     }
   }
 
   override def truncate(): org.apache.spark.sql.connector.write.WriteBuilder = {
     logger.info("Truncate operation")
-    // For simplicity, return a new WriteBuilder that wraps this Write
+    // Truncate is treated as overwrite with no filters
     new org.apache.spark.sql.connector.write.WriteBuilder {
       override def build(): org.apache.spark.sql.connector.write.Write = 
-        Tantivy4SparkOptimizedWrite.this
+        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, options, hadoopConf, isOverwrite = true)
     }
   }
 }

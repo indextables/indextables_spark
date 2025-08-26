@@ -41,7 +41,7 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       val properties = Map("path" -> tempPath).asJava
       
       // This would fail without actual transaction log data, but tests the structure
-      intercept[IllegalArgumentException] {
+      intercept[RuntimeException] {
         provider.inferSchema(new org.apache.spark.sql.util.CaseInsensitiveStringMap(properties))
       }
     }

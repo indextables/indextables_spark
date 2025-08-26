@@ -22,7 +22,7 @@ import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionRead
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLog, AddAction, PartitionPruning}
 import com.tantivy4spark.storage.SplitLocationRegistry
 import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
@@ -45,6 +45,8 @@ class Tantivy4SparkScan(
 
   override def planInputPartitions(): Array[InputPartition] = {
     val addActions = transactionLog.listFiles()
+    
+    // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
     
     logger.info(s"Planning ${filteredActions.length} partitions from ${addActions.length} total files")
@@ -67,7 +69,8 @@ class Tantivy4SparkScan(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    new Tantivy4SparkReaderFactory(readSchema, options, limit, broadcastConfig)
+    val tablePath = transactionLog.getTablePath()
+    new Tantivy4SparkReaderFactory(readSchema, options, limit, broadcastConfig, tablePath)
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
@@ -75,15 +78,68 @@ class Tantivy4SparkScan(
       return addActions
     }
 
-    // Apply traditional min/max data skipping only
-    val skippedActions = addActions.filterNot { addAction =>
-      filters.exists(filter => shouldSkipFile(addAction, filter))
+    val partitionColumns = transactionLog.getPartitionColumns()
+    val initialCount = addActions.length
+    
+    // Step 1: Apply partition pruning
+    val partitionPrunedActions = if (partitionColumns.nonEmpty) {
+      val pruned = PartitionPruning.prunePartitions(addActions, partitionColumns, filters)
+      val prunedCount = addActions.length - pruned.length
+      if (prunedCount > 0) {
+        logger.info(s"Partition pruning: filtered out $prunedCount of ${addActions.length} split files")
+      }
+      pruned
+    } else {
+      addActions
+    }
+    
+    // Step 2: Apply min/max value skipping on remaining files
+    val nonPartitionFilters = filters.filterNot { filter =>
+      // Only apply min/max skipping to non-partition columns to avoid double filtering
+      getFilterReferencedColumns(filter).exists(partitionColumns.contains)
+    }
+    
+    val finalActions = if (nonPartitionFilters.nonEmpty) {
+      val skipped = partitionPrunedActions.filterNot { addAction =>
+        nonPartitionFilters.exists(filter => shouldSkipFile(addAction, filter))
+      }
+      val skippedCount = partitionPrunedActions.length - skipped.length
+      if (skippedCount > 0) {
+        logger.info(s"Data skipping (min/max): filtered out $skippedCount of ${partitionPrunedActions.length} files")
+      }
+      skipped
+    } else {
+      partitionPrunedActions
     }
 
-    val totalSkipped = addActions.length - skippedActions.length
-    logger.info(s"Data skipping: ${addActions.length} files -> ${skippedActions.length} files (skipped $totalSkipped)")
+    val totalSkipped = initialCount - finalActions.length
+    if (totalSkipped > 0) {
+      logger.info(s"Total data skipping: ${initialCount} files -> ${finalActions.length} files (skipped $totalSkipped total)")
+    }
 
-    skippedActions
+    finalActions
+  }
+  
+  private def getFilterReferencedColumns(filter: Filter): Set[String] = {
+    import org.apache.spark.sql.sources._
+    filter match {
+      case EqualTo(attribute, _) => Set(attribute)
+      case EqualNullSafe(attribute, _) => Set(attribute)
+      case GreaterThan(attribute, _) => Set(attribute)
+      case GreaterThanOrEqual(attribute, _) => Set(attribute)
+      case LessThan(attribute, _) => Set(attribute)
+      case LessThanOrEqual(attribute, _) => Set(attribute)
+      case In(attribute, _) => Set(attribute)
+      case IsNull(attribute) => Set(attribute)
+      case IsNotNull(attribute) => Set(attribute)
+      case StringStartsWith(attribute, _) => Set(attribute)
+      case StringEndsWith(attribute, _) => Set(attribute)
+      case StringContains(attribute, _) => Set(attribute)
+      case And(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Or(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Not(child) => getFilterReferencedColumns(child)
+      case _ => Set.empty
+    }
   }
 
   private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {
