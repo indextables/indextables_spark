@@ -89,6 +89,10 @@ val df = spark.read
 // Query with filters (automatically converted to Tantivy queries)
 df.filter($"name".contains("John") && $"age" > 25).show()
 
+// SQL queries with automatic predicate pushdown
+spark.sql("SELECT * FROM my_table WHERE category = 'technology' LIMIT 10")
+spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND score > 85")
+
 // Text search
 df.filter($"content".contains("machine learning")).show()
 
@@ -241,6 +245,34 @@ df.filter($"bio".contains("machine* *learning")) // Matches terms with both patt
 - Wildcard queries work at the term level after tokenization
 - Case sensitivity follows the tokenizer configuration (default is case-insensitive)
 
+#### SQL Pushdown Verification
+
+Tantivy4Spark provides comprehensive verification that both predicate and limit pushdown work correctly with `spark.sql()` queries:
+
+```scala
+// Create a temporary view
+spark.read.format("tantivy4spark").load("s3://bucket/path").createOrReplaceTempView("my_table")
+
+// SQL queries with pushdown (filters are pushed to the data source)
+val query = spark.sql("SELECT * FROM my_table WHERE category = 'fruit' AND active = true LIMIT 5")
+
+// View the execution plan to verify pushdown
+query.explain(true)
+// Shows: PushedFilters: [IsNotNull(category), EqualTo(category,fruit), EqualTo(active,true)]
+
+query.collect() // Returns exactly 5 filtered rows
+```
+
+**Verified Pushdown Types:**
+- ✅ **EqualTo filters**: `WHERE column = 'value'`
+- ✅ **In filters**: `WHERE column IN ('val1', 'val2')`
+- ✅ **IsNotNull filters**: Automatically added for non-nullable predicates
+- ✅ **Complex AND conditions**: `WHERE col1 = 'a' AND col2 = 'b'`
+- ✅ **Filters with LIMIT**: Combined predicate and limit pushdown
+- ✅ **Negation filters**: `WHERE NOT column = 'value'`
+
+The system includes comprehensive tests (`SqlPushdownTest.scala`) that verify pushdown is working by examining query execution plans and confirming that filters appear in the `PushedFilters` section of the Spark physical plan.
+
 #### Multi-Cloud Support
 
 The system supports multiple cloud storage providers:
@@ -291,8 +323,8 @@ src/main/scala/com/tantivy4spark/
 ├── storage/        # S3-optimized storage layer
 └── transaction/    # Transaction log system
 
-src/test/scala/     # Comprehensive test suite (126 tests, 126 pass, 0 failures)
-├── core/           # Core functionality tests
+src/test/scala/     # Comprehensive test suite (133 tests, 133 pass, 0 failures)
+├── core/           # Core functionality tests including SQL pushdown verification
 ├── integration/    # End-to-end integration tests  
 ├── optimize/       # Optimized writes tests
 ├── storage/        # Storage protocol tests
@@ -303,11 +335,12 @@ src/test/scala/     # Comprehensive test suite (126 tests, 126 pass, 0 failures)
 ### Running Tests
 
 ```bash
-# All tests (126 tests, 126 pass, 0 failures)
+# All tests (133 tests, 133 pass, 0 failures)
 mvn test
 
 # Specific test suites
 mvn test -Dtest="*IntegrationTest"                # Integration tests
+mvn test -Dtest="SqlPushdownTest"                 # SQL pushdown verification tests
 mvn test -Dtest="OptimizedWriteTest"              # Optimized writes tests
 mvn test -Dtest="UnsupportedTypesTest"            # Type safety tests
 mvn test -Dtest="BatchTransactionLogTest"         # Transaction log batch operations
@@ -454,5 +487,6 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 ## Support
 
 - GitHub Issues: Report bugs and request features
-- Documentation: Comprehensive test suite with 126 tests demonstrating usage patterns
+- Documentation: Comprehensive test suite with 133 tests demonstrating usage patterns
 - Community: Check the test files in `src/test/scala/` for detailed usage examples
+- SQL Pushdown: See `SqlPushdownTest.scala` for detailed examples of predicate and limit pushdown verification
