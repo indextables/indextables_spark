@@ -10,13 +10,16 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Transaction Log**: Delta Lake-style transaction log with batched operations for metadata management  
 - **Optimized Writes**: Delta Lake-style optimized writes with automatic split sizing based on target records per split
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
-- **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation
-- **S3-Optimized Storage**: Intelligent caching and compression for object storage
+- **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation to prevent native crashes
+- **S3-Optimized Storage**: Intelligent caching and compression for object storage with S3Mock compatibility
 - **AWS Session Token Support**: Full support for temporary credentials via AWS STS
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
 - **Schema Evolution**: Automatic schema inference and evolution support
 - **Thread-Safe Architecture**: ThreadLocal IndexWriter pattern eliminates race conditions
 - **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
+- **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
+- **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
+- **Production Ready**: 100% test pass rate (133/133 tests) with comprehensive coverage
 
 ## Architecture
 
@@ -308,6 +311,9 @@ Tantivy indexes are stored as `.split` files (QuickwitSplit format):
 
 Located in `_transaction_log/` directory (Delta Lake compatible):
 - **Batched operations**: Single JSON file per transaction with multiple ADD entries
+- **Atomic operations**: REMOVE + ADD actions in single transaction for overwrite mode
+- **Partition tracking**: Comprehensive partition support with pruning integration
+- **Row count tracking**: Per-file record counts for statistics and optimization
 - `00000000000000000000.json` - Initial metadata and schema
 - `00000000000000000001.json` - First transaction (multiple ADD operations)
 - `00000000000000000002.json` - Second transaction (additional files)
@@ -398,6 +404,20 @@ mvn scoverage:report
    - Leverage data skipping with min/max statistics
    - Partition large datasets by common query dimensions
    - Let the cache locality system build up over time for maximum benefit
+
+## Roadmap
+
+See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
+
+### Planned Features
+- **ReplaceWhere with Partition Predicates**: Delta Lake-style selective partition replacement
+- **Transaction Log Compaction**: Checkpoint system for improved metadata performance
+- **Enhanced Query Optimization**: Bloom filters and advanced column statistics
+- **Multi-cloud Enhancements**: Expanded Azure and GCP support
+
+### Design Documents
+- [ReplaceWhere Design](docs/REPLACE_WHERE_DESIGN.md) - Selective partition replacement functionality
+- [Log Compaction Design](docs/LOG_COMPACTION_DESIGN.md) - Checkpoint-based transaction log optimization
 
 ## Known Issues and Solutions
 

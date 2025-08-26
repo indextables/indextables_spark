@@ -10,13 +10,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Embedded search**: Tantivy runs directly within Spark executors via tantivy4java
 - **Split-based architecture**: Write-only indexes with split-based reading using QuickwitSplit format
 - **Optimized writes**: Delta Lake-style automatic split sizing with adaptive shuffle for optimal performance
-- **Transaction log**: Delta Lake-style transaction log with batched operations for metadata management  
+- **Transaction log**: Delta Lake-style transaction log with batched operations and atomic REMOVE+ADD operations
 - **Smart file skipping**: Min/max value tracking for efficient query pruning
 - **Schema-aware filter pushdown**: Field validation prevents native crashes during query execution
-- **S3-optimized storage**: Intelligent caching and compression for object storage
+- **S3-optimized storage**: Intelligent caching and compression with S3Mock path flattening compatibility
 - **Flexible storage**: Support for local, HDFS, and S3 storage protocols
 - **Schema evolution**: Automatic schema inference and evolution support
 - **JVM-wide caching**: Shared SplitCacheManager reduces memory usage across executors
+- **Robust error handling**: Proper exceptions for missing tables instead of silent failures
+- **Type safety**: Comprehensive validation with clear error messages for unsupported types
+- **Production ready**: 100% test pass rate with comprehensive coverage
 
 ## Architecture
 
@@ -26,10 +29,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Split structure**: Self-contained immutable index files with native tantivy4java caching support
 - **Write-only pattern**: Create index → add documents → commit → create split → close index
 - **Transaction log**: `_transaction_log/` directory (Delta Lake compatible) contains:
-  - Schema metadata
+  - Schema metadata with comprehensive partition tracking
   - **Batched ADD operations**: Multiple ADD entries per transaction file (like Delta Lake)
-  - Min/max values for query pruning
-  - Partition key information and row counts
+  - **Atomic overwrite operations**: REMOVE + ADD actions in single transaction
+  - Min/max values for query pruning and data skipping
+  - Partition key information and row counts for optimization
+  - Proper table existence validation to prevent silent failures
 
 ### Integration Design
 The system implements a custom Spark DataSource V2 provider modeled after [Delta Lake's DeltaDataSource](https://github.com/delta-io/delta/blob/d16d591ae90d5e2024e3d2306b1018361bda8e80/spark/src/main/scala/org/apache/spark/sql/delta/sources/DeltaDataSource.scala):
@@ -289,12 +294,16 @@ The project maintains comprehensive test coverage with **133 tests** achieving *
 - **SQL Pushdown tests**: Comprehensive validation of predicate and limit pushdown for `spark.sql()` queries
 - **Optimized write tests**: Comprehensive validation of automatic split sizing and configuration hierarchy
 - **Split-based architecture tests**: Comprehensive validation of write-only indexes and split reading
-- **Transaction log batch tests**: Testing of Delta Lake-compatible batched operations
+- **Transaction log tests**: Testing of Delta Lake-compatible batched operations with atomic overwrite support
 - **Schema-aware filter tests**: Validation of field existence checking to prevent native crashes
-- **Type safety tests**: Comprehensive validation of supported/unsupported data type handling
+- **Type safety tests**: Comprehensive validation of supported/unsupported data type handling with clear error messages
+- **Error handling tests**: Validation of proper exception throwing for missing tables and invalid operations
+- **S3Mock compatibility tests**: Testing of path flattening logic for S3Mock testing environments
 - **Performance tests**: Large-scale operation validation with 1000+ document datasets
 - **Query Testing**: Full coverage of text search, numeric ranges, boolean logic, null handling
 - **Schema Evolution**: Testing of schema changes and backward compatibility
+- **Partition support tests**: Comprehensive validation of partition tracking and pruning
+- **Path resolution tests**: Testing of complex path resolution between V1/V2 DataSource APIs
 
 ### Disabled Tests
 - **S3 Boolean Filtering**: Test "should handle S3 write with different data types" disabled due to known issue with boolean filtering on S3 storage
@@ -376,7 +385,9 @@ The project is registered as a Spark data source via:
 - **Transaction isolation**: ACID properties through Delta Lake-compatible transaction log
 - **Batched transactions**: Multiple ADD entries per transaction file (Delta Lake pattern)
 - **Type safety**: Explicit rejection of unsupported data types with clear error messages
-- **Error handling**: Graceful degradation when native library unavailable
+- **Robust error handling**: Proper exceptions for missing tables, invalid operations, and schema issues
+- **S3Mock compatibility**: Path flattening logic specifically for S3Mock testing (localhost endpoints only)
+- **Path resolution fixes**: Complex path resolution between V1/V2 DataSource APIs with S3Mock support
 - **tantivy4java Integration**: Pure Java bindings via tantivy4java library
 - **Search Engine**: Uses SplitSearchEngine with document field extraction via document.getFirst()
 - **Type Conversion**: Robust handling of Spark ↔ Tantivy type mappings (Integer/Long/Boolean)
@@ -487,6 +498,32 @@ df.filter($"path".contains("/usr/*/bin"))    // Path pattern matching
 - Pattern `"Hello*World"` won't match "Hello World" (two separate terms)
 - Use `"Hello* *World"` for multi-term patterns (requires both terms present)
 - See `/Users/schenksj/tmp/x/tantivy4java_pyport/WILDCARD_IMPLEMENTATION_GUIDE.md` for complete implementation details
+
+---
+
+## Development Roadmap
+
+### Completed Features ✅
+- **Core Transaction Log**: Delta Lake-style transaction log with atomic operations, partition support, and comprehensive testing
+- **S3Mock Compatibility**: Path flattening logic for S3Mock testing environments with proper path resolution
+- **Error Handling Improvements**: Robust exception handling for missing tables, invalid operations, and schema validation
+- **Type Safety Enhancements**: Comprehensive validation of supported/unsupported data types with clear error messages
+- **Path Resolution Fixes**: Complex path resolution between V1/V2 DataSource APIs with S3Mock compatibility
+- **Test Coverage**: 100% test pass rate (133/133 tests) with comprehensive integration and error handling coverage
+
+### Planned Features (Design Complete)
+- **ReplaceWhere with Partition Predicates**: Delta Lake-style selective partition replacement functionality
+  - Design Document: `docs/REPLACE_WHERE_DESIGN.md`
+  - Implementation phases defined with comprehensive API design
+  - Support for SQL predicates on partition columns with validation
+  
+- **Transaction Log Compaction**: Checkpoint system for improved metadata performance
+  - Design Document: `docs/LOG_COMPACTION_DESIGN.md`  
+  - Parquet-based checkpoint format for 10-100x faster cold starts
+  - Automatic cleanup of old transaction files with configurable retention
+
+### Development Backlog
+See `BACKLOG.md` for complete development roadmap including medium and low priority features.
 
 ---
 
