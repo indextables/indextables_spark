@@ -28,6 +28,7 @@ import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry}
 import com.tantivy4spark.util.StatisticsCalculator
+import java.util.UUID
 import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
@@ -300,8 +301,10 @@ class Tantivy4SparkDataWriter(
   override def commit(): WriterCommitMessage = {
     logger.debug(s"Committing Tantivy index with $recordCount documents")
     
-    // Create split file name - change extension from .tnt4s to .split
-    val fileName = f"part-$partitionId%05d-$taskId.split"
+    // Create split file name with UUID for guaranteed uniqueness
+    // Format: part-{partitionId}-{taskId}-{uuid}.split
+    val splitId = UUID.randomUUID().toString
+    val fileName = f"part-$partitionId%05d-$taskId-$splitId.split"
     val filePath = new Path(tablePath, fileName)
     val outputPath = filePath.toString
     

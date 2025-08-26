@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### File Format
 - **Split files**: `*.split` files contain Tantivy indexes using tantivy4java's optimized QuickwitSplit format
+- **UUID-based naming**: Split files use UUID-based naming (`part-{partitionId}-{taskId}-{uuid}.split`) for guaranteed uniqueness across concurrent writes
 - **Split structure**: Self-contained immutable index files with native tantivy4java caching support
 - **Write-only pattern**: Create index → add documents → commit → create split → close index
 - **Transaction log**: `_transaction_log/` directory (Delta Lake compatible) contains:
@@ -380,6 +381,7 @@ The project is registered as a Spark data source via:
 - **Search Engine**: Uses SplitSearchEngine with document field extraction via document.getFirst()
 - **Type Conversion**: Robust handling of Spark ↔ Tantivy type mappings (Integer/Long/Boolean)
 - **Split format**: QuickwitSplit (.split) format with JVM-wide caching support
+- **UUID-based file naming**: Guaranteed uniqueness prevents conflicts in concurrent/retry scenarios
 - **Shaded Dependencies**: Google Guava repackaged to avoid conflicts (`tantivy4spark.com.google.common`)
 - **Split Location Tracking**: SplitLocationRegistry tracks host-to-split cache mappings for optimal task scheduling
   - **Automatic Host Recording**: Records which hosts access which splits during partition reader initialization

@@ -298,6 +298,7 @@ df.write.format("tantivy4spark").save("gs://bucket/path")
 
 Tantivy indexes are stored as `.split` files (QuickwitSplit format):
 - **Split-based storage**: Optimized binary format for fast loading and caching
+- **UUID-based naming**: Split files use UUID-based naming (`part-{partitionId}-{taskId}-{uuid}.split`) for guaranteed uniqueness across concurrent writes
 - **JVM-wide caching**: Shared `SplitCacheManager` reduces memory usage across executors
 - **Native compatibility**: Direct integration with tantivy4java library
 - **S3-optimized**: Efficient partial loading and caching for object storage
