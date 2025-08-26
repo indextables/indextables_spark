@@ -38,7 +38,7 @@ class Tantivy4SparkScanBuilder(
     with SupportsPushDownLimit {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
-  // TODO: do we push-down?
+  // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters = Array.empty[Filter]
   private var requiredSchema = schema
   private var _limit: Option[Int] = None
@@ -50,7 +50,17 @@ class Tantivy4SparkScanBuilder(
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     val (supported, unsupported) = filters.partition(isSupportedFilter)
     _pushedFilters = supported
-    logger.info(s"Pushed ${supported.length} filters, ${unsupported.length} unsupported")
+    
+    logger.info(s"Filter pushdown summary:")
+    logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
+    supported.foreach(filter => logger.info(s"    ✓ PUSHED: $filter"))
+    
+    logger.info(s"  - ${unsupported.length} filters NOT SUPPORTED (will be re-evaluated by Spark after reading)")
+    unsupported.foreach(filter => logger.info(s"    ✗ NOT PUSHED: $filter"))
+    
+    // Critical: Return ONLY unsupported filters
+    // This tells Spark that supported filters are FULLY HANDLED by the data source
+    // and Spark should NOT re-apply them after reading data
     unsupported
   }
 
