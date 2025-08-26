@@ -53,7 +53,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 # Build the project
 mvn clean compile
 
-# Run tests (103 tests, 100% pass rate)
+# Run tests (127 tests, 126 pass, 1 known failure)
 mvn test
 
 # Package
@@ -291,7 +291,7 @@ src/main/scala/com/tantivy4spark/
 ├── storage/        # S3-optimized storage layer
 └── transaction/    # Transaction log system
 
-src/test/scala/     # Comprehensive test suite (103 tests, 100% pass rate)
+src/test/scala/     # Comprehensive test suite (127 tests, 126 pass, 1 known failure)
 ├── core/           # Core functionality tests
 ├── integration/    # End-to-end integration tests  
 ├── optimize/       # Optimized writes tests
@@ -303,7 +303,7 @@ src/test/scala/     # Comprehensive test suite (103 tests, 100% pass rate)
 ### Running Tests
 
 ```bash
-# All tests (103 tests, 100% pass rate)
+# All tests (127 tests, 126 pass, 1 known failure)
 mvn test
 
 # Specific test suites
@@ -399,6 +399,16 @@ spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")  // Standard regio
 spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://localhost:9000")  // Custom endpoint
 ```
 
+### Boolean Filtering with S3 Storage (Known Issue)
+
+**Issue**: Boolean filtering queries may return incorrect results (0 matches) when using S3 storage, while the same queries work correctly with local filesystem storage.
+
+**Status**: Under investigation. Root cause identified as split-based filtering bypass of type conversion logic.
+
+**Workaround**: Use local or HDFS storage for workloads requiring boolean filtering until this issue is resolved.
+
+**Details**: S3 split-based filtering uses a different execution path that bypasses the `FiltersToQueryConverter` where proper Java Boolean type conversion occurs. This causes incompatible types to be passed to the native tantivy4java library.
+
 ### Schema Evolution Limitations
 
 **Issue**: Limited support for schema changes after initial creation.
@@ -442,5 +452,5 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 ## Support
 
 - GitHub Issues: Report bugs and request features
-- Documentation: Comprehensive test suite with 103+ tests demonstrating usage patterns
+- Documentation: Comprehensive test suite with 127 tests demonstrating usage patterns
 - Community: Check the test files in `src/test/scala/` for detailed usage examples

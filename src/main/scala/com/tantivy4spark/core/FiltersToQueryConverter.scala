@@ -124,6 +124,7 @@ object FiltersToQueryConverter {
             // For non-TEXT fields, use term query with converted value
             logger.debug(s"Field '$attribute' is $fieldType, using termQuery")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
+            logger.info(s"Passing to tantivy4java termQuery: field='$attribute', value=$convertedValue (${convertedValue.getClass.getSimpleName})")
             Query.termQuery(schema, attribute, convertedValue)
           }
           logger.debug(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
@@ -183,6 +184,10 @@ object FiltersToQueryConverter {
             // For non-TEXT fields, use term set query with converted values
             logger.debug(s"Field '$attribute' is $fieldType, using termSetQuery")
             val convertedValues = values.map(value => convertSparkValueToTantivy(value, fieldType))
+            if (fieldType == FieldType.BOOLEAN) {
+              logger.debug(s"Boolean IN query - converted values: ${convertedValues.mkString("[", ", ", "]")}")
+              convertedValues.foreach(v => logger.debug(s"  Value: $v (${v.getClass.getSimpleName})"))
+            }
             val valuesList = convertedValues.toList.asJava.asInstanceOf[java.util.List[Object]]
             Query.termSetQuery(schema, attribute, valuesList)
           }
@@ -298,8 +303,30 @@ object FiltersToQueryConverter {
           case i: java.lang.Integer => i.longValue()
           case other => other
         }
+      case FieldType.BOOLEAN =>
+        val booleanResult = value match {
+          case b: java.lang.Boolean => b.booleanValue()
+          case b: Boolean => b
+          case i: java.lang.Integer => i != 0
+          case l: java.lang.Long => l != 0
+          case s: String => s.toLowerCase == "true" || s == "1"
+          case other => throw new IllegalArgumentException(s"Cannot convert $other to Boolean for field type BOOLEAN")
+        }
+        // Ensure we return a Java Boolean object that tantivy4java expects
+        val convertedValue = java.lang.Boolean.valueOf(booleanResult)
+        logger.debug(s"Boolean conversion: $value (${value.getClass.getSimpleName}) -> $convertedValue (${convertedValue.getClass.getSimpleName})")
+        convertedValue
+      case FieldType.FLOAT =>
+        value match {
+          case f: java.lang.Float => f.floatValue()
+          case d: java.lang.Double => d.doubleValue()
+          case i: java.lang.Integer => i.doubleValue()
+          case l: java.lang.Long => l.doubleValue()
+          case s: String => try { s.toDouble } catch { case _: Exception => throw new IllegalArgumentException(s"Cannot convert string '$s' to Float") }
+          case other => other
+        }
       case _ =>
-        // For other types (TEXT, FLOAT, BOOLEAN, BYTES), pass through as-is
+        // For other types (TEXT, BYTES), pass through as-is
         value
     }
   }

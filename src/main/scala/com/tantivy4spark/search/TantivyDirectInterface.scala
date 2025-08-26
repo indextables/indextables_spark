@@ -75,7 +75,7 @@ object TantivyDirectInterface {
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
             builder.addFloatField(fieldName, true, true, true)
           case org.apache.spark.sql.types.BooleanType =>
-            builder.addBooleanField(fieldName, true, true, false)
+            builder.addBooleanField(fieldName, true, true, true)
           case org.apache.spark.sql.types.BinaryType =>
             builder.addBytesField(fieldName, true, true, false, "position")
           case org.apache.spark.sql.types.TimestampType =>
