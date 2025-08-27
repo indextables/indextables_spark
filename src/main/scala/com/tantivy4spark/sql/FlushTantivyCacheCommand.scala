@@ -20,8 +20,8 @@ package com.tantivy4spark.sql
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.types.{StringType, LongType, StructField, StructType}
-import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry, SplitCacheFlushResult, SplitLocationFlushResult}
+import org.apache.spark.sql.types.{StringType, LongType}
+import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
 import org.slf4j.LoggerFactory
 
 /**

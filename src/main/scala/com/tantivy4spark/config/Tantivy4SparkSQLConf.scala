@@ -17,7 +17,6 @@
 
 package com.tantivy4spark.config
 
-import org.apache.spark.sql.internal.SQLConf
 
 /**
  * SQL configuration settings for Tantivy4Spark.

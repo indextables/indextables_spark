@@ -19,7 +19,6 @@ package com.tantivy4spark.io
 
 import com.tantivy4spark.TestBase
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.matchers.should.Matchers._
 import java.util.{Collections => JCollections}
 
 /**

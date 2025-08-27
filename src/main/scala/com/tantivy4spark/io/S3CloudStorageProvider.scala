@@ -28,7 +28,7 @@ import java.io.{InputStream, OutputStream, ByteArrayInputStream, ByteArrayOutput
 import java.net.URI
 import java.util.concurrent.{CompletableFuture, Executors}
 import scala.jdk.CollectionConverters._
-import scala.util.{Try, Success, Failure}
+import scala.util.{Try}
 
 /**
  * High-performance S3 storage provider using AWS SDK directly.

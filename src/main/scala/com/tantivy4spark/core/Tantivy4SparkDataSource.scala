@@ -21,7 +21,7 @@ package com.tantivy4spark.core
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder, SupportsTruncate}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, RelationProvider, TableScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.rdd.RDD
@@ -34,11 +34,9 @@ import org.slf4j.LoggerFactory
 
 import java.util
 import scala.collection.JavaConverters._
-import org.apache.spark.broadcast.Broadcast
 import com.tantivy4spark.io.CloudStorageProviderFactory
 
 object Tantivy4SparkRelation {
-  @transient private lazy val logger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
   def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {
     val bais = new java.io.ByteArrayInputStream(zipData)
     val zis = new java.util.zip.ZipInputStream(bais)
@@ -404,7 +402,6 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val batchWrite = write.toBatch
     
     // Extract serializable parameters before the closure
-    val serializableOptions = parameters
     val serializablePath = path
     val serializableSchema = data.schema
     
@@ -570,7 +567,6 @@ class Tantivy4SparkRelation(
     val transactionLog = new TransactionLog(new Path(path), spark)
     
     // Create options map for CloudStorageProviderFactory
-    val options = new CaseInsensitiveStringMap(readOptions.asJava)
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // Check if table exists by trying to get schema first

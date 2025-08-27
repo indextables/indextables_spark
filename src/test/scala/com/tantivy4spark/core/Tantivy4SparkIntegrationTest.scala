@@ -57,10 +57,10 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       // Test that the write operation can be set up and executed
       // This may succeed if native library works, or fail with specific exceptions
       try {
-        (df.write
+        df.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
-          .save(tempPath))
+          .save(tempPath)
         
         // If write succeeds, the data source is working correctly
         succeed
@@ -84,11 +84,11 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       
       // Test that configuration is accepted and processed
       try {
-        (df.write
+        df.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .option("spark.tantivy4spark.storage.force.standard", "true")
-          .save(tempPath))
+          .save(tempPath)
         
         // If write succeeds, configuration was properly handled
         succeed
@@ -113,10 +113,10 @@ class Tantivy4SparkIntegrationTest extends TestBase {
         
         // Should be able to handle different storage protocols
         try {
-          (createTestDataFrame().write
+          createTestDataFrame().write
             .format("tantivy4spark")
             .mode(SaveMode.Overwrite)
-            .save(path))
+            .save(path)
           
           // If write succeeds, protocol handling is working
           succeed
@@ -138,10 +138,10 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       
       // Should be able to process larger datasets
       try {
-        (largeDf.write
+        largeDf.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
-          .save(tempPath))
+          .save(tempPath)
         
         // If write succeeds, large dataset handling is working
         succeed
@@ -174,11 +174,11 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       
       // Test partitioned write setup
       try {
-        (df.write
+        df.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .partitionBy("role")
-          .save(tempPath))
+          .save(tempPath)
         
         // If write succeeds, partitioning is working
         succeed
@@ -199,10 +199,10 @@ class Tantivy4SparkIntegrationTest extends TestBase {
       
       // Test append mode setup
       try {
-        (df1.write
+        df1.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
-          .save(tempPath))
+          .save(tempPath)
         
         // If write succeeds, append mode setup is working
         succeed

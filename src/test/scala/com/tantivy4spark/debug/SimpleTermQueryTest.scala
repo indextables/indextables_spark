@@ -21,7 +21,6 @@ import com.tantivy4spark.TestBase
 import com.tantivy4java._
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
-import scala.util.Random
 
 /**
  * Simple test to validate that tantivy4java term queries work properly
@@ -69,7 +68,6 @@ class SimpleTermQueryTest extends TestBase {
       println("✅ Data written successfully")
       
       // Find the split file
-      import java.nio.file.{Files, Paths}
       import java.io.File
       val splitFiles = new File(tempPath).listFiles().filter(_.getName.endsWith(".split"))
       splitFiles.length should be > 0

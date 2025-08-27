@@ -1,8 +1,5 @@
 package com.tantivy4spark.sql
 
-import com.tantivy4spark.TestBase
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
 
 /**
  * Demo to test SQL FLUSH command functionality

@@ -74,13 +74,9 @@ class TantivySearchEngine private (
     }
   }
 
-  def searchAll(limit: Int = Int.MaxValue): Array[InternalRow] = {
-    directInterface.searchAll(limit)
-  }
-
-  def search(query: String, limit: Int = 100): Array[InternalRow] = {
-    directInterface.search(query, limit)
-  }
+  // Search methods removed - use SplitSearchEngine for reading from splits
+  // The write-only architecture means TantivySearchEngine only creates indexes,
+  // not reads from them
 
   override def close(): Unit = {
     directInterface.close()

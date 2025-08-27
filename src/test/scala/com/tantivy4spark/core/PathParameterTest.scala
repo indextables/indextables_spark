@@ -29,10 +29,10 @@ class PathParameterTest extends TestBase {
       
       // Test direct path parameter usage - this should work the same as .option("path", tempPath)
       try {
-        (df.write
+        df.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
-          .save(tempPath))  // Direct path parameter instead of .option("path", tempPath)
+          .save(tempPath)  // Direct path parameter instead of .option("path", tempPath)
         
         // If write succeeds, direct path parameters are working
         succeed

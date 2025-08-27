@@ -19,11 +19,10 @@ package com.tantivy4spark.storage
 
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.io.{CloudStorageConfig, S3CloudStorageProvider}
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.scalatest.matchers.should.Matchers._
 import io.findify.s3mock.S3Mock
 import java.net.ServerSocket
 import scala.util.Using
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Direct test of S3 cloud storage provider using S3Mock.

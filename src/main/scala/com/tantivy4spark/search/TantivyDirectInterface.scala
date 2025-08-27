@@ -19,14 +19,11 @@ package com.tantivy4spark.search
 
 import com.tantivy4java._
 import org.slf4j.LoggerFactory
-import java.nio.file.{Files, Paths, Path}
-import java.io.{File, FileInputStream, FileOutputStream, ByteArrayOutputStream}
-// ZIP imports removed - using splits instead of archives
+import java.nio.file.{Path, Files}
+import java.io.{File}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
-import scala.util.{Try, Success, Failure}
 import scala.util.Using
-import scala.collection.mutable
 
 /**
  * Direct tantivy4java interface that eliminates Long handles and thread safety issues.
@@ -307,117 +304,6 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
       "Use TantivySearchEngine.commitAndCreateSplit() to create a split, " +
       "then use SplitSearchEngine.fromSplitFile() to read from the split."
     )
-  }
-  
-  private def convertDocumentToInternalRow(document: Document): InternalRow = {
-    val values = new Array[Any](schema.fields.length)
-    
-    schema.fields.zipWithIndex.foreach { case (field, index) =>
-      val fieldValues = document.get(field.name)
-      if (fieldValues != null && !fieldValues.isEmpty) {
-        val value = fieldValues.get(0)
-        values(index) = convertValueToSpark(value, field.dataType)
-      } else {
-        values(index) = null
-      }
-    }
-    
-    InternalRow.fromSeq(values.toSeq)
-  }
-  
-  private def convertValueToSpark(value: Any, dataType: org.apache.spark.sql.types.DataType): Any = {
-    if (value == null) {
-      return null
-    }
-    
-    try {
-      dataType match {
-        case org.apache.spark.sql.types.StringType => 
-          org.apache.spark.unsafe.types.UTF8String.fromString(value.toString)
-        case org.apache.spark.sql.types.IntegerType => 
-          value match {
-            case i: java.lang.Integer => i.intValue()
-            case l: java.lang.Long => l.intValue()
-            case s: String => 
-              try { s.toInt } catch { case _: NumberFormatException => 0 }
-            case _ => 0
-          }
-        case org.apache.spark.sql.types.LongType => 
-          value match {
-            case l: java.lang.Long => l.longValue()
-            case i: java.lang.Integer => i.longValue()
-            case s: String => 
-              try { s.toLong } catch { case _: NumberFormatException => 0L }
-            case _ => 0L
-          }
-        case org.apache.spark.sql.types.DoubleType => 
-          value match {
-            case d: java.lang.Double => d.doubleValue()
-            case f: java.lang.Float => f.doubleValue()
-            case s: String => 
-              try { s.toDouble } catch { case _: NumberFormatException => 0.0 }
-            case i: java.lang.Integer => i.doubleValue()
-            case l: java.lang.Long => l.doubleValue()
-            case _ => 0.0
-          }
-        case org.apache.spark.sql.types.FloatType => 
-          value match {
-            case f: java.lang.Float => f.floatValue()
-            case d: java.lang.Double => d.floatValue()
-            case s: String => 
-              try { s.toFloat } catch { case _: NumberFormatException => 0.0f }
-            case i: java.lang.Integer => i.floatValue()
-            case l: java.lang.Long => l.floatValue()
-            case _ => 0.0f
-          }
-        case org.apache.spark.sql.types.BooleanType => 
-          value match {
-            case b: java.lang.Boolean => b.booleanValue()
-            case i: java.lang.Integer => i != 0
-            case l: java.lang.Long => l != 0
-            case s: String => s.toLowerCase == "true" || s == "1"
-            case _ => false
-          }
-        case org.apache.spark.sql.types.TimestampType => 
-          value match {
-            case l: java.lang.Long => l.longValue() * 1000L // Convert millis to microseconds for Spark InternalRow
-            case i: java.lang.Integer => i.longValue() * 1000L
-            case s: String => 
-              try { s.toLong * 1000L } catch { case _: NumberFormatException => 0L }
-            case _ => 0L
-          }
-        case org.apache.spark.sql.types.DateType => 
-          value match {
-            case i: java.lang.Integer => i.intValue() // Days since epoch - already correct for Spark
-            case l: java.lang.Long => l.intValue()
-            case s: String => 
-              try { s.toInt } catch { case _: NumberFormatException => 0 }
-            case _ => 0
-          }
-        case org.apache.spark.sql.types.BinaryType =>
-          value match {
-            case bytes: Array[Byte] => bytes
-            case _ => Array.empty[Byte]
-          }
-        case _ => value
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to convert value $value (${value.getClass.getSimpleName}) to $dataType, using default: ${e.getMessage}")
-        // Return appropriate default value for the type
-        dataType match {
-          case org.apache.spark.sql.types.StringType => org.apache.spark.unsafe.types.UTF8String.fromString("")
-          case org.apache.spark.sql.types.IntegerType => 0
-          case org.apache.spark.sql.types.LongType => 0L
-          case org.apache.spark.sql.types.DoubleType => 0.0
-          case org.apache.spark.sql.types.FloatType => 0.0f
-          case org.apache.spark.sql.types.BooleanType => false
-          case org.apache.spark.sql.types.TimestampType => 0L
-          case org.apache.spark.sql.types.DateType => 0
-          case org.apache.spark.sql.types.BinaryType => Array.empty[Byte]
-          case _ => null
-        }
-    }
   }
   
   // Note: getIndexComponents and createZipArchive removed - using splits instead of ZIP archives

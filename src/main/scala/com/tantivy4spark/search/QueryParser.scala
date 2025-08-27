@@ -19,7 +19,7 @@ package com.tantivy4spark.search
 
 import com.tantivy4java.{Query, Schema, Occur}
 import org.slf4j.LoggerFactory
-import scala.util.{Try, Success, Failure}
+import scala.util.{Try}
 import scala.jdk.CollectionConverters._
 
 /**

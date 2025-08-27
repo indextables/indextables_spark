@@ -2,8 +2,8 @@ package com.tantivy4spark.sql
 
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
 
 class FlushTantivyCacheCommandTest extends TestBase {
 
@@ -19,7 +19,7 @@ class FlushTantivyCacheCommandTest extends TestBase {
     results.foreach { row =>
       val cacheType = row.getString(0)  // cache_type
       val status = row.getString(1)     // status
-      val clearedEntries = row.getLong(2) // cleared_entries
+      val _ = row.getLong(2) // cleared_entries
       val message = row.getString(3)    // message
       
       assert(cacheType != null)

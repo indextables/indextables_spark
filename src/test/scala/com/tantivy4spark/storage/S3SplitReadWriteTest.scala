@@ -19,7 +19,6 @@ package com.tantivy4spark.storage
 
 import com.tantivy4spark.TestBase
 import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers._
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import io.findify.s3mock.S3Mock
 import java.net.ServerSocket
@@ -264,7 +263,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
   // DISABLED: Known issue with boolean filtering on S3 - split-based filtering bypasses type conversion
   def disabledTestS3BooleanFiltering() = {
     // Create test data with various data types
-    import java.sql.{Date, Timestamp}
+    import java.sql.{Date}
     import java.time.LocalDate
     
     val data = spark.range(25).select(

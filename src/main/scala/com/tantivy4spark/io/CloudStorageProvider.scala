@@ -21,8 +21,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.conf.Configuration
 import org.slf4j.LoggerFactory
 import java.io.{InputStream, OutputStream, Closeable}
-import java.net.URI
-import scala.util.{Try, Success, Failure}
+import scala.util.{Try}
 import scala.jdk.CollectionConverters._
 
 /**

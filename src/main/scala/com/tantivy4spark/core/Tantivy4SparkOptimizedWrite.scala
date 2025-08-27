@@ -18,7 +18,6 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
@@ -170,7 +169,7 @@ class Tantivy4SparkOptimizedWrite(
     
     if (shouldOptimize) {
       logger.warn("ISSUE: Optimized write is enabled but DataSource V2 API doesn't allow execution plan modification at this stage")
-      logger.warn("The number of partitions (${info.numPartitions}) was determined by Spark's default partitioning")
+      logger.warn(s"The number of partitions (${info.numPartitions}) was determined by Spark's default partitioning")
       logger.warn("Each partition will create one split file, regardless of target records per split")
     }
     

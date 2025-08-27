@@ -92,7 +92,7 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
     val _names = Array("John", "Jane", "Bob", "Alice", "Charlie", "Diana", "Eve", "Frank")
     val _lastNames = Array("Doe", "Smith", "Johnson", "Brown", "Wilson", "Davis", "Miller", "Moore")
 
-    val data = 1.until(numRows + 1).map { i =>
+    val data = (1 until (numRows + 1)).map { i =>
       val name = s"${_names(random.nextInt(_names.length))} ${_lastNames(random.nextInt(_lastNames.length))}"
       val age = 20 + random.nextInt(40)
       val role = roles(random.nextInt(roles.length))

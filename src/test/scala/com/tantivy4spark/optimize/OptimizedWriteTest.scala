@@ -18,12 +18,11 @@
 package com.tantivy4spark.optimize
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.config.{Tantivy4SparkSQLConf, Tantivy4SparkConfig}
+import com.tantivy4spark.config.{Tantivy4SparkConfig}
 import com.tantivy4spark.core.Tantivy4SparkOptions
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers._
+import org.apache.spark.sql.types._
 
 class OptimizedWriteTest extends TestBase {
 
@@ -119,7 +118,7 @@ class OptimizedWriteTest extends TestBase {
       val data = spark.range(100).toDF("id")
       
       // Try to set invalid target records per split (should fail gracefully)
-      val exception = intercept[IllegalArgumentException] {
+      val _ = intercept[IllegalArgumentException] {
         data.write
           .format("tantivy4spark")
           .option("targetRecordsPerSplit", "0")

@@ -22,7 +22,6 @@ import com.tantivy4spark.io.CloudStorageProviderFactory
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.matchers.should.Matchers._
 
 class BatchTransactionLogTest extends TestBase {
 

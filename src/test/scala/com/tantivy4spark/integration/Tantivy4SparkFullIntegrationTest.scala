@@ -731,21 +731,21 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
     
-    val _random = new Random(42)
+    val random = new Random(42)
     val departments = Array("Engineering", "Data Science", "Product", "Marketing", "Sales", "HR")
     val locations = Array("San Francisco", "New York", "Seattle", "Austin", "Denver", "Boston")
     val titles = Array("Software Engineer", "Senior Engineer", "Staff Engineer", "Principal Engineer",
                       "Data Scientist", "Senior Data Scientist", "Product Manager", "Marketing Manager")
     
-    val data = 1.to(1000).map { i =>
-      val age = 22 + _random.nextInt(40)
-      val experienceYears = math.max(0, age - 22 - _random.nextInt(4))
-      val department = departments(_random.nextInt(departments.length))
-      val location = locations(_random.nextInt(locations.length))
-      val title = titles(_random.nextInt(titles.length))
-      val salary = 50000 + _random.nextInt(150000)
-      val isActive = _random.nextBoolean()
-      val bio = generateBio(title, department, _random)
+    val data = (1 to 1000).map { i =>
+      val age = 22 + random.nextInt(40)
+      val experienceYears = math.max(0, age - 22 - random.nextInt(4))
+      val department = departments(random.nextInt(departments.length))
+      val location = locations(random.nextInt(locations.length))
+      val title = titles(random.nextInt(titles.length))
+      val salary = 50000 + random.nextInt(150000)
+      val isActive = random.nextBoolean()
+      val bio = generateBio(title, department, random)
       
       (
         i.toLong,
@@ -758,8 +758,8 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
         salary.toDouble,
         isActive,
         bio,
-        new Timestamp(System.currentTimeMillis() - _random.nextInt(365 * 24 * 60 * 60) * 1000L),
-        new Date(System.currentTimeMillis() - _random.nextInt(1000 * 24 * 60 * 60) * 1000L)
+        new Timestamp(System.currentTimeMillis() - random.nextInt(365 * 24 * 60 * 60) * 1000L),
+        new Date(System.currentTimeMillis() - random.nextInt(1000 * 24 * 60 * 60) * 1000L)
       )
     }
     
@@ -794,7 +794,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     import sparkImplicits._
     
     val random = new Random(42)
-    val numericData = 1.to(100).map { i =>
+    val numericData = (1 to 100).map { i =>
       (
         i.toLong * 100,
         20 + random.nextInt(50),
@@ -811,19 +811,19 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
     
-    val _random = new Random(42)
+    val random = new Random(42)
     val departments = Array("Engineering", "Marketing", "Sales", "HR", "Legal", "Finance")
     val statuses = Array("active", "inactive", "pending", "deleted", "archived")
     val countries = Array("USA", "Canada", "UK", "Germany", "France", "Japan")
     val priorities = Array(1, 2, 3, 4, 5)
     
-    val categoricalData = 1.to(200).map { i =>
+    val categoricalData = (1 to 200).map { i =>
       (
         i,
-        departments(_random.nextInt(departments.length)),
-        statuses(_random.nextInt(statuses.length)),
-        countries(_random.nextInt(countries.length)),
-        priorities(_random.nextInt(priorities.length))
+        departments(random.nextInt(departments.length)),
+        statuses(random.nextInt(statuses.length)),
+        countries(random.nextInt(countries.length)),
+        priorities(random.nextInt(priorities.length))
       )
     }
     
@@ -835,7 +835,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     import sparkImplicits._
     
     val random = new Random(42)
-    val nullableData = 1.to(100).map { i =>
+    val nullableData = (1 to 100).map { i =>
       (
         i,
         s"User$i",
@@ -854,7 +854,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     import sparkImplicits._
     
     val random = new Random(42)
-    val booleanData = 1.to(100).map { i =>
+    val booleanData = (1 to 100).map { i =>
       (
         i,
         random.nextBoolean(),
@@ -870,16 +870,16 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
     
-    val _random = new Random(42)
+    val random = new Random(42)
     val baseTime = System.currentTimeMillis()
-    val dateTimeData = 1.to(100).map { i =>
-      val createdTime = baseTime - _random.nextInt(365 * 24 * 60 * 60) * 1000L
-      val _updatedTime = createdTime + _random.nextInt(30 * 24 * 60 * 60) * 1000L
+    val dateTimeData = (1 to 100).map { i =>
+      val createdTime = baseTime - random.nextInt(365 * 24 * 60 * 60) * 1000L
+      val updatedTime = createdTime + random.nextInt(30 * 24 * 60 * 60) * 1000L
       
       (
         i,
         new Date(createdTime),
-        new Timestamp(_updatedTime)
+        new Timestamp(updatedTime)
       )
     }
     
@@ -890,7 +890,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     val techSkills = Array("Python", "Java", "Scala", "machine learning", "data analysis", "cloud computing")
     val experiences = Array("startup experience", "enterprise software", "open source contributor", "team leadership")
     
-    val skills = 1.to(2).map(_ => techSkills(random.nextInt(techSkills.length))).mkString(", ")
+    val skills = (1 to 2).map(_ => techSkills(random.nextInt(techSkills.length))).mkString(", ")
     val experience = experiences(random.nextInt(experiences.length))
     
     s"Experienced $title in $department with expertise in $skills and $experience."

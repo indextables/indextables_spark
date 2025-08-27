@@ -23,7 +23,7 @@ import com.tantivy4spark.schema.SchemaMapping
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 import org.slf4j.LoggerFactory
-import scala.util.{Try, Success, Failure}
+import scala.util.{Try}
 
 /**
  * Search engine implementation using tantivy4java's SplitSearcher with global caching.

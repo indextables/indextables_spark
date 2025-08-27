@@ -29,7 +29,7 @@ import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry}
 import com.tantivy4spark.util.StatisticsCalculator
 import java.util.UUID
-import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import com.tantivy4spark.io.{CloudStorageProviderFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.broadcast.Broadcast
@@ -102,7 +102,6 @@ class Tantivy4SparkPartitionReader(
   // Calculate effective limit: use pushed limit or fall back to Int.MaxValue
   private val effectiveLimit: Int = limit.getOrElse(5000)
   private val spark = SparkSession.active
-  private val hadoopConf = spark.sparkContext.hadoopConfiguration
   
   // Resolve relative path from AddAction against table path
   private val filePath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
@@ -135,7 +134,7 @@ class Tantivy4SparkPartitionReader(
     SplitCacheConfig(
       cacheName = options.get("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
       maxCacheSize = options.getLong("spark.tantivy4spark.cache.maxSize", 200000000L),
-      maxConcurrentLoads = options.getInt("spark.tantivy4spark.cache.maxConcurrentLoads", 8),
+      maxConcurrentLoads = options.get("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
       enableQueryCache = options.getBoolean("spark.tantivy4spark.cache.queryCache", true),
       // AWS configuration with broadcast fallback
       awsAccessKey = getConfigWithBroadcast("spark.tantivy4spark.aws.accessKey"),
@@ -385,7 +384,7 @@ class Tantivy4SparkDataWriter(
     }
     
     // Normalize the splitPath for tantivy4java compatibility (convert s3a:// to s3://)
-    val normalizedSplitPath = {
+    val _ = {
       val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
       try {
         cloudProvider.normalizePathForTantivy(splitPath)
@@ -418,7 +417,7 @@ class Tantivy4SparkDataWriter(
         if (outputKey.contains("___") && !tableKey.contains("___")) {
           // S3Mock flattening occurred - store the entire flattened key relative to bucket
           // This will allow proper resolution during read
-          val bucketPrefix = tableUri.getHost
+          val _ = tableUri.getHost
           val flattenedKey = outputKey
           flattenedKey
         } else if (outputKey.startsWith(tableKey)) {
