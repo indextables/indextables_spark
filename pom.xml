@@ -16,7 +16,7 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <scala.version>2.12.17</scala.version>
+        <scala.version>2.12.20</scala.version>
         <scala.compat.version>2.12</scala.compat.version>
         <spark.version>3.5.3</spark.version>
         <hadoop.version>3.3.4</hadoop.version>
@@ -287,8 +287,40 @@
                             <artifactSet>
                                 <includes>
                                     <include>com.tantivy4java:tantivy4java</include>
+                                    <include>software.amazon.awssdk:*</include>
+                                    <include>com.fasterxml.jackson.core:*</include>
+                                    <include>com.fasterxml.jackson.module:*</include>
+                                    <include>com.thoughtworks.paranamer:paranamer</include>
+                                    <include>org.reactivestreams:reactive-streams</include>
+                                    <include>software.amazon.eventstream:eventstream</include>
                                 </includes>
                             </artifactSet>
+                            <relocations>
+                                <relocation>
+                                    <pattern>com.tantivy4java</pattern>
+                                    <shadedPattern>tantivy4spark.com.tantivy4java</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>software.amazon.awssdk</pattern>
+                                    <shadedPattern>tantivy4spark.software.amazon.awssdk</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>tantivy4spark.com.fasterxml.jackson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.thoughtworks.paranamer</pattern>
+                                    <shadedPattern>tantivy4spark.com.thoughtworks.paranamer</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.reactivestreams</pattern>
+                                    <shadedPattern>tantivy4spark.org.reactivestreams</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>software.amazon.eventstream</pattern>
+                                    <shadedPattern>tantivy4spark.software.amazon.eventstream</shadedPattern>
+                                </relocation>
+                            </relocations>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
