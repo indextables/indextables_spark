@@ -548,9 +548,28 @@ class Tantivy4SparkRelation(
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkRelation])
   
   override def schema: StructType = {
+    import scala.jdk.CollectionConverters._
+    
     // Get schema from transaction log
     val spark = sqlContext.sparkSession
-    val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    
+    // Extract tantivy4spark configurations from Spark session for credential propagation
+    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val tantivyConfigs = hadoopConf.iterator().asScala
+      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .map(entry => entry.getKey -> entry.getValue)
+      .toMap
+    
+    // Also get configs from Spark session (in case they weren't propagated to Hadoop config)
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    
+    // Include read options (from DataFrame read API)
+    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+    
+    // Combine all sources: readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
+    val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
+    val options = new CaseInsensitiveStringMap(allConfigs.asJava)
+    
     val transactionLog = new TransactionLog(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
       throw new RuntimeException(s"Table does not exist at path: $path. No transaction log found. Use spark.write to create the table first.")
@@ -563,11 +582,27 @@ class Tantivy4SparkRelation(
   }
   
   override def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[org.apache.spark.sql.Row] = {
-    val spark = sqlContext.sparkSession
-    val transactionLog = new TransactionLog(new Path(path), spark)
+    import scala.jdk.CollectionConverters._
     
-    // Create options map for CloudStorageProviderFactory
+    val spark = sqlContext.sparkSession
+    
+    // Extract tantivy4spark configurations for credential propagation (same as schema method)
     val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val tantivyConfigs = hadoopConf.iterator().asScala
+      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .map(entry => entry.getKey -> entry.getValue)
+      .toMap
+    
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    
+    // Include read options (from DataFrame read API)  
+    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+    
+    // Combine all sources: readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
+    val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
+    val options = new CaseInsensitiveStringMap(allConfigs.asJava)
+    
+    val transactionLog = new TransactionLog(new Path(path), spark, options)
     
     // Check if table exists by trying to get schema first
     val tableSchema = transactionLog.getSchema()
