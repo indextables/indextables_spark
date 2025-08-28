@@ -139,7 +139,17 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
     val (bucket, originalPrefix) = parseS3Path(path)
     
     // Apply uniform path flattening for S3Mock compatibility
-    val prefix = flattenPathForS3Mock(originalPrefix)
+    val basePrefix = flattenPathForS3Mock(originalPrefix)
+    
+    // Add trailing slash only for transaction log directory listings to prevent matching
+    // similarly named directories like _transaction_log_backup
+    val prefix = if (basePrefix.nonEmpty && 
+                     (basePrefix.endsWith("/_transaction_log") || basePrefix == "_transaction_log") &&
+                     !basePrefix.endsWith("/")) {
+      basePrefix + "/"
+    } else {
+      basePrefix
+    }
     
     try {
       logger.info(s"🔍 S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")

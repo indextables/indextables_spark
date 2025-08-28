@@ -288,14 +288,14 @@
                                 <includes>
                                     <include>com.tantivy4java:tantivy4java</include>
                                     <include>software.amazon.awssdk:*</include>
-                                    <include>com.fasterxml.jackson.core:*</include>
-                                    <include>com.fasterxml.jackson.module:*</include>
+                                    <!-- <include>com.fasterxml.jackson.core:*</include>
+                                    <include>com.fasterxml.jackson.module:*</include> -->
                                     <include>com.thoughtworks.paranamer:paranamer</include>
                                     <include>org.reactivestreams:reactive-streams</include>
                                     <include>software.amazon.eventstream:eventstream</include>
                                 </includes>
                             </artifactSet>
-                            <relocations>
+                            <!-- <relocations>
                                 <relocation>
                                     <pattern>com.tantivy4java</pattern>
                                     <shadedPattern>tantivy4spark.com.tantivy4java</shadedPattern>
@@ -320,7 +320,7 @@
                                     <pattern>software.amazon.eventstream</pattern>
                                     <shadedPattern>tantivy4spark.software.amazon.eventstream</shadedPattern>
                                 </relocation>
-                            </relocations>
+                            </relocations> -->
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
