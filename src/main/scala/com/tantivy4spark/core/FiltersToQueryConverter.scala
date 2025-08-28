@@ -42,6 +42,12 @@ object FiltersToQueryConverter {
       return Query.allQuery()
     }
 
+    // Debug logging to understand what filters we receive  
+    logger.debug(s"🔍 FiltersToQueryConverter received ${filters.length} filters:")
+    filters.zipWithIndex.foreach { case (filter, idx) =>
+      logger.debug(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
+    }
+
     // Filter out filters that reference non-existent fields
     val validFilters = schemaFieldNames match {
       case Some(fieldNames) =>
@@ -278,26 +284,20 @@ object FiltersToQueryConverter {
         
         case StringStartsWith(attribute, value) =>
           logger.debug(s"Creating StringStartsWith query: $attribute starts with '$value'")
-          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
-          // Convert spaces to wildcards and add trailing wildcard for startsWith
-          val pattern = value.replaceAll("\\s+", "*") + "*"
-          logger.debug(s"StringStartsWith pattern converted to wildcard: '$pattern'")
+          val pattern = value + "*"
+          logger.debug(s"StringStartsWith pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case StringEndsWith(attribute, value) =>
           logger.debug(s"Creating StringEndsWith query: $attribute ends with '$value'")
-          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
-          // Convert spaces to wildcards and add leading wildcard for endsWith
-          val pattern = "*" + value.replaceAll("\\s+", "*")
-          logger.debug(s"StringEndsWith pattern converted to wildcard: '$pattern'")
+          val pattern = "*" + value
+          logger.debug(s"StringEndsWith pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case StringContains(attribute, value) =>
           logger.debug(s"Creating StringContains query: $attribute contains '$value'")
-          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
-          // Convert spaces to wildcards and add leading/trailing wildcards for contains
-          val pattern = "*" + value.replaceAll("\\s+", "*") + "*"
-          logger.debug(s"StringContains pattern converted to wildcard: '$pattern'")
+          val pattern = "*" + value + "*"
+          logger.debug(s"StringContains pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case _ =>

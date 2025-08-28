@@ -64,8 +64,6 @@ object TantivyDirectInterface {
         
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            // Try "raw" tokenizer which preserves the text as-is without complex processing
-            logger.debug(s"Adding text field '$fieldName' with raw tokenizer for better searchability")
             builder.addTextField(fieldName, true, false, "raw", "position")
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
             builder.addIntegerField(fieldName, true, true, true)
