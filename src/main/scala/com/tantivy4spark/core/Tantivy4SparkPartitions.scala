@@ -202,12 +202,12 @@ class Tantivy4SparkPartitionReader(
         // Convert filters to Tantivy Query object with schema validation
         val query = if (filters.nonEmpty) {
           val queryObj = if (splitFieldNames.nonEmpty) {
-            val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, splitSchema, Some(splitFieldNames))
+            val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine, Some(splitFieldNames))
             logger.info(s"  - Query (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, splitSchema)
+            val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine)
             logger.info(s"  - Query (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }

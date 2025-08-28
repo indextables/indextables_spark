@@ -64,7 +64,7 @@ object TantivyDirectInterface {
         
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            builder.addTextField(fieldName, true, false, "raw", "position")
+            builder.addTextField(fieldName, true, false, "default", "position")
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
             builder.addIntegerField(fieldName, true, true, true)
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>

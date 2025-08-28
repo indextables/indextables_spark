@@ -150,13 +150,12 @@ object Tantivy4SparkRelation {
       
       // Convert filters to Tantivy Query object
       val query = if (filters.nonEmpty) {
-        val tantivySchema = splitSearchEngine.getSchema()
         val queryObj = if (splitFieldNames.nonEmpty) {
-          val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, tantivySchema, Some(splitFieldNames))
+          val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine, Some(splitFieldNames))
           executorLogger.info(s"V1 API: Created query with schema validation: ${validatedQuery.getClass.getSimpleName}")
           validatedQuery
         } else {
-          val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, tantivySchema)
+          val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine)
           executorLogger.info(s"V1 API: Created query without validation: ${fallbackQuery.getClass.getSimpleName}")
           fallbackQuery
         }

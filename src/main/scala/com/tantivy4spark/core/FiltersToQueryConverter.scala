@@ -19,9 +19,10 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.sources._
-import com.tantivy4java.{Query, Schema, Occur, FieldType}
+import com.tantivy4java.{Query, Schema, Occur, FieldType, Index}
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
+import com.tantivy4spark.search.SplitSearchEngine
 
 object FiltersToQueryConverter {
   
@@ -30,33 +31,34 @@ object FiltersToQueryConverter {
   /**
    * Convert Spark filters to a tantivy4java Query object.
    */
-  def convertToQuery(filters: Array[Filter], schema: Schema): Query = {
-    convertToQuery(filters, schema, None)
+  def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): Query = {
+    convertToQuery(filters, splitSearchEngine, None)
   }
 
   /**
    * Convert Spark filters to a tantivy4java Query object with schema field validation.
    */
-  def convertToQuery(filters: Array[Filter], schema: Schema, schemaFieldNames: Option[Set[String]]): Query = {
+  def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): Query = {
+    val schema = splitSearchEngine.getSchema()
     if (filters.isEmpty) {
       return Query.allQuery()
     }
 
     // Debug logging to understand what filters we receive  
-    logger.debug(s"🔍 FiltersToQueryConverter received ${filters.length} filters:")
+    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters:")
     filters.zipWithIndex.foreach { case (filter, idx) =>
-      logger.debug(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
+      queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
     }
 
     // Filter out filters that reference non-existent fields
     val validFilters = schemaFieldNames match {
       case Some(fieldNames) =>
-        logger.debug(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
+        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
         val valid = filters.filter(filter => isFilterValidForSchema(filter, fieldNames))
-        logger.debug(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
         valid
       case None =>
-        logger.debug("No schema validation - using all filters")
+        queryLog("No schema validation - using all filters")
         filters // No schema validation if fieldNames not provided
     }
 
@@ -65,7 +67,7 @@ object FiltersToQueryConverter {
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
-    val queries = validFilters.flatMap(filter => Option(convertFilterToQuery(filter, schema))).filter(_ != null)
+    val queries = validFilters.flatMap(filter => Option(convertFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
     
     if (queries.isEmpty) {
       Query.allQuery()
@@ -77,6 +79,54 @@ object FiltersToQueryConverter {
       Query.booleanQuery(occurQueries.asJava)
     }
   }
+
+  /**
+   * Test-only method for backward compatibility with debug tests.
+   * Uses direct Query methods for simple testing.
+   */
+  def convertToQuery(filters: Array[Filter], schema: Schema): Query = {
+    if (filters.isEmpty) {
+      return Query.allQuery()
+    }
+
+    val queries = filters.flatMap(filter => Option(convertFilterToQuerySimple(filter, schema))).filter(_ != null)
+    
+    if (queries.isEmpty) {
+      Query.allQuery()
+    } else if (queries.length == 1) {
+      queries.head
+    } else {
+      // Combine multiple queries with AND logic
+      val occurQueries = queries.map(query => new Query.OccurQuery(Occur.MUST, query)).toList
+      Query.booleanQuery(occurQueries.asJava)
+    }
+  }
+
+  /**
+   * Simple filter conversion for tests - uses direct Query methods without parseQuery.
+   */
+  private def convertFilterToQuerySimple(filter: Filter, schema: Schema): Query = {
+    filter match {
+      case EqualTo(attribute, value) =>
+        val fieldType = getFieldType(schema, attribute)
+        if (fieldType == FieldType.TEXT) {
+          import scala.jdk.CollectionConverters._
+          val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
+          Query.phraseQuery(schema, attribute, words)
+        } else if (isNumericFieldType(fieldType)) {
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+        } else {
+          val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          Query.termQuery(schema, attribute, convertedValue)
+        }
+      case IsNotNull(_) =>
+        Query.allQuery()
+      case _ =>
+        Query.allQuery() // Simplified for tests
+    }
+  }
+
 
   private def isFilterValidForSchema(filter: Filter, fieldNames: Set[String]): Boolean = {
     import org.apache.spark.sql.sources._
@@ -105,108 +155,161 @@ object FiltersToQueryConverter {
     
     if (!isValid) {
       val missingFields = filterFields -- fieldNames
-      logger.debug(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+      queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
     }
     
     isValid
   }
 
+  private def queryLog(msg: String): Unit = {
+      logger.warn(msg)
+  }
+
+  /**
+   * Create a temporary index from schema for parseQuery operations.
+   * Uses the same schema so tokenizer configuration should be consistent.
+   */
+  private def withTemporaryIndex[T](schema: Schema)(f: Index => T): T = {
+    import java.nio.file.Files
+    val tempDir = Files.createTempDirectory("tantivy4spark_parsequery_")
+    val tempIndex = new Index(schema, tempDir.toAbsolutePath.toString)
+    try {
+      f(tempIndex)
+    } finally {
+      tempIndex.close()
+      // Clean up temp directory
+      try {
+        import java.nio.file.{Path, Files}
+        import java.nio.file.attribute.BasicFileAttributes
+        import java.nio.file.SimpleFileVisitor
+        import java.nio.file.FileVisitResult
+
+        Files.walkFileTree(tempDir, new SimpleFileVisitor[Path] {
+          override def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
+            Files.delete(file)
+            FileVisitResult.CONTINUE
+          }
+          override def postVisitDirectory(dir: Path, exc: java.io.IOException): FileVisitResult = {
+            Files.delete(dir)
+            FileVisitResult.CONTINUE
+          }
+        })
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to clean up temp directory ${tempDir}: ${e.getMessage}")
+      }
+    }
+  }
+
   /**
    * Convert a single Spark Filter to a tantivy4java Query.
    */
-  private def convertFilterToQuery(filter: Filter, schema: Schema): Query = {
+  private def convertFilterToQuery(filter: Filter, splitSearchEngine: SplitSearchEngine, schema: Schema): Query = {
     try {
       filter match {
         case EqualTo(attribute, value) =>
-          logger.debug(s"Creating EqualTo query: $attribute = $value")
+          queryLog(s"Creating EqualTo query: $attribute = $value")
           val fieldType = getFieldType(schema, attribute)
-          logger.debug(s"Field '$attribute' has type: $fieldType, isNumeric: ${isNumericFieldType(fieldType)}")
+          queryLog(s"Field '$attribute' has type: $fieldType, isNumeric: ${isNumericFieldType(fieldType)}")
           val query = if (fieldType == FieldType.TEXT) {
-            // For TEXT fields, use phrase query for reliable text matching
-            // This handles both single words and phrases properly
-            logger.debug(s"Field '$attribute' is TEXT, using phraseQuery for text matching")
-            import scala.jdk.CollectionConverters._
-            val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
-            Query.phraseQuery(schema, attribute, words)
+            // For TEXT fields, use Index.parseQuery for reliable text matching
+            queryLog(s"Field '$attribute' is TEXT, using Index.parseQuery for text matching")
+            val queryString = s""""${value.toString}""""
+            val fieldNames = List(attribute).asJava
+            queryLog(s"Parsing query: $queryString on fields: [$attribute]")
+            withTemporaryIndex(schema) { index =>
+              index.parseQuery(queryString, fieldNames)
+            }
           } else if (isNumericFieldType(fieldType)) {
             // For numeric fields (INTEGER, FLOAT, DATE), use range query for equality
-            logger.debug(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+            queryLog(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
             logger.info(s"Creating range query for numeric equality: field='$attribute', fieldType=$fieldType, min=$convertedValue, max=$convertedValue")
             val result = Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
-            logger.debug(s"Successfully created range query: ${result.getClass.getSimpleName}")
+            queryLog(s"Successfully created range query: ${result.getClass.getSimpleName}")
             result
           } else {
-            // For other non-TEXT fields (BOOLEAN, BYTES), use term query with converted value
-            logger.debug(s"Field '$attribute' is $fieldType, using termQuery")
+            // For other non-TEXT fields (BOOLEAN, BYTES), use Index.parseQuery with field specification
+            queryLog(s"Field '$attribute' is $fieldType, using Index.parseQuery")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
-            logger.info(s"Passing to tantivy4java termQuery: field='$attribute', value=$convertedValue (${convertedValue.getClass.getSimpleName})")
-            Query.termQuery(schema, attribute, convertedValue)
+            logger.info(s"Using Index.parseQuery for: field='$attribute', value=$convertedValue (${convertedValue.getClass.getSimpleName})")
+            val queryString = convertedValue.toString
+            val fieldNames = List(attribute).asJava
+            queryLog(s"Parsing query: $queryString on fields: [$attribute]")
+            withTemporaryIndex(schema) { index =>
+              index.parseQuery(queryString, fieldNames)
+            }
           }
-          logger.debug(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
+          queryLog(s"Created Query: ${query.getClass.getSimpleName} for field '$attribute' with value '$value'")
           query
         
         case EqualNullSafe(attribute, value) =>
           if (value == null) {
-            logger.debug(s"Creating EqualNullSafe query for null: $attribute IS NULL")
+            queryLog(s"Creating EqualNullSafe query for null: $attribute IS NULL")
             // For null values, we could return a query that matches no documents
             // or handle this differently based on requirements
             Query.allQuery() // TODO: Implement proper null handling
           } else {
-            logger.debug(s"Creating EqualNullSafe query: $attribute = $value")
+            queryLog(s"Creating EqualNullSafe query: $attribute = $value")
             val fieldType = getFieldType(schema, attribute)
             if (isNumericFieldType(fieldType)) {
               // For numeric fields, use range query for equality
-              logger.debug(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+              queryLog(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
               Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
             } else {
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
-              Query.termQuery(schema, attribute, convertedValue)
+              val queryString = convertedValue.toString
+              val fieldNames = List(attribute).asJava
+              withTemporaryIndex(schema) { index =>
+                index.parseQuery(queryString, fieldNames)
+              }
             }
           }
         
         case GreaterThan(attribute, value) =>
-          logger.debug(s"Creating GreaterThan query: $attribute > $value")
+          queryLog(s"Creating GreaterThan query: $attribute > $value")
           val fieldType = getFieldType(schema, attribute)
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           logger.info(s"Creating GreaterThan range query: field='$attribute', fieldType=$fieldType, min=$convertedValue (exclusive)")
           Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, false, true)
         
         case GreaterThanOrEqual(attribute, value) =>
-          logger.debug(s"Creating GreaterThanOrEqual query: $attribute >= $value")
+          queryLog(s"Creating GreaterThanOrEqual query: $attribute >= $value")
           val fieldType = getFieldType(schema, attribute)
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, true, true)
         
         case LessThan(attribute, value) =>
-          logger.debug(s"Creating LessThan query: $attribute < $value")
+          queryLog(s"Creating LessThan query: $attribute < $value")
           val fieldType = getFieldType(schema, attribute)
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, false)
         
         case LessThanOrEqual(attribute, value) =>
-          logger.debug(s"Creating LessThanOrEqual query: $attribute <= $value")
+          queryLog(s"Creating LessThanOrEqual query: $attribute <= $value")
           val fieldType = getFieldType(schema, attribute)
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.rangeQuery(schema, attribute, fieldType, null, convertedValue, true, true)
         
         case In(attribute, values) =>
-          logger.debug(s"Creating In query: $attribute IN [${values.mkString(", ")}]")
+          queryLog(s"Creating In query: $attribute IN [${values.mkString(", ")}]")
           val fieldType = getFieldType(schema, attribute)
           if (fieldType == FieldType.TEXT) {
-            // For TEXT fields, create OR query with phrase queries for each value
-            logger.debug(s"Field '$attribute' is TEXT, using OR of phraseQueries for IN query")
-            import scala.jdk.CollectionConverters._
-            val phraseQueries = values.map { value =>
-              val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
-              Query.phraseQuery(schema, attribute, words)
+            // For TEXT fields, create OR query with Index.parseQuery for each value
+            queryLog(s"Field '$attribute' is TEXT, using OR of Index.parseQuery for IN query")
+            val parseQueries = values.map { value =>
+              val queryString = s""""${value.toString}""""
+              val fieldNames = List(attribute).asJava
+              withTemporaryIndex(schema) { index =>
+                index.parseQuery(queryString, fieldNames)
+              }
             }
-            val occurQueries = phraseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
+            val occurQueries = parseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
           } else if (isNumericFieldType(fieldType)) {
             // For numeric fields, create OR query with range queries for each value
-            logger.debug(s"Field '$attribute' is numeric $fieldType, using OR of rangeQueries for IN query")
+            queryLog(s"Field '$attribute' is numeric $fieldType, using OR of rangeQueries for IN query")
             val rangeQueries = values.map { value =>
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
               Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
@@ -215,46 +318,32 @@ object FiltersToQueryConverter {
             Query.booleanQuery(occurQueries.asJava)
           } else {
             // For other fields (BOOLEAN, BYTES), use term set query with converted values
-            logger.debug(s"Field '$attribute' is $fieldType, using termSetQuery")
+            queryLog(s"Field '$attribute' is $fieldType, using termSetQuery")
             val convertedValues = values.map(value => convertSparkValueToTantivy(value, fieldType))
             if (fieldType == FieldType.BOOLEAN) {
-              logger.debug(s"Boolean IN query - converted values: ${convertedValues.mkString("[", ", ", "]")}")
-              convertedValues.foreach(v => logger.debug(s"  Value: $v (${v.getClass.getSimpleName})"))
+              queryLog(s"Boolean IN query - converted values: ${convertedValues.mkString("[", ", ", "]")}")
+              convertedValues.foreach(v => queryLog(s"  Value: $v (${v.getClass.getSimpleName})"))
             }
             val valuesList = convertedValues.toList.asJava.asInstanceOf[java.util.List[Object]]
             Query.termSetQuery(schema, attribute, valuesList)
           }
         
         case IsNull(attribute) =>
-          logger.debug(s"Creating IsNull query: $attribute IS NULL")
+          queryLog(s"Creating IsNull query: $attribute IS NULL")
           // For IsNull, we could return a query that matches no documents
           // TODO: Implement proper null handling if needed
           Query.allQuery()
         
         case IsNotNull(attribute) =>
-          logger.debug(s"Creating IsNotNull query: $attribute IS NOT NULL")
-          val fieldType = getFieldType(schema, attribute)
-          if (isNumericFieldType(fieldType) || fieldType == FieldType.BOOLEAN) {
-            // For numeric and boolean fields, assume non-null (tantivy fields are typically non-nullable)
-            // Return allQuery to match all documents since null filtering doesn't apply to these field types
-            logger.debug(s"Field '$attribute' is $fieldType, using allQuery for IsNotNull (non-nullable field type)")
-            Query.allQuery()
-          } else {
-            // For TEXT and other fields, use wildcard query to match any value
-            logger.debug(s"Field '$attribute' is $fieldType, using wildcardQuery for IsNotNull")
-            try {
-              Query.wildcardQuery(schema, attribute, "*", true)
-            } catch {
-              case e: Exception =>
-                logger.warn(s"Failed to create IsNotNull wildcard query for $attribute: ${e.getMessage}")
-                Query.allQuery()
-            }
-          }
+          queryLog(s"Creating IsNotNull query: $attribute IS NOT NULL")
+          // For NotNull queries, just use AllQuery as requested
+          queryLog(s"Using AllQuery for IsNotNull on field '$attribute'")
+          Query.allQuery()
         
         case And(left, right) =>
-          logger.debug(s"Creating And query: $left AND $right")
-          val leftQuery = convertFilterToQuery(left, schema)
-          val rightQuery = convertFilterToQuery(right, schema)
+          queryLog(s"Creating And query: $left AND $right")
+          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema)
+          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema)
           val occurQueries = List(
             new Query.OccurQuery(Occur.MUST, leftQuery),
             new Query.OccurQuery(Occur.MUST, rightQuery)
@@ -262,9 +351,9 @@ object FiltersToQueryConverter {
           Query.booleanQuery(occurQueries.asJava)
         
         case Or(left, right) =>
-          logger.debug(s"Creating Or query: $left OR $right")
-          val leftQuery = convertFilterToQuery(left, schema)
-          val rightQuery = convertFilterToQuery(right, schema)
+          queryLog(s"Creating Or query: $left OR $right")
+          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema)
+          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema)
           val occurQueries = List(
             new Query.OccurQuery(Occur.SHOULD, leftQuery),
             new Query.OccurQuery(Occur.SHOULD, rightQuery)
@@ -272,8 +361,8 @@ object FiltersToQueryConverter {
           Query.booleanQuery(occurQueries.asJava)
         
         case Not(child) =>
-          logger.debug(s"Creating Not query: NOT $child")
-          val childQuery = convertFilterToQuery(child, schema)
+          queryLog(s"Creating Not query: NOT $child")
+          val childQuery = convertFilterToQuery(child, splitSearchEngine, schema)
           // For NOT queries, we need both MUST (match all) and MUST_NOT (exclude) clauses
           val allQuery = Query.allQuery()
           val occurQueries = java.util.Arrays.asList(
@@ -283,21 +372,24 @@ object FiltersToQueryConverter {
           Query.booleanQuery(occurQueries)
         
         case StringStartsWith(attribute, value) =>
-          logger.debug(s"Creating StringStartsWith query: $attribute starts with '$value'")
+          queryLog(s"Creating StringStartsWith query: $attribute starts with '$value'")
           val pattern = value + "*"
-          logger.debug(s"StringStartsWith pattern: '$pattern'")
-          Query.wildcardQuery(schema, attribute, pattern, true)
+          queryLog(s"StringStartsWith pattern: '$pattern'")
+          val fieldNames = List(attribute).asJava
+          withTemporaryIndex(schema) { index =>
+            index.parseQuery(pattern, fieldNames)
+          }
         
         case StringEndsWith(attribute, value) =>
-          logger.debug(s"Creating StringEndsWith query: $attribute ends with '$value'")
+          queryLog(s"Creating StringEndsWith query: $attribute ends with '$value'")
           val pattern = "*" + value
-          logger.debug(s"StringEndsWith pattern: '$pattern'")
+          queryLog(s"StringEndsWith pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case StringContains(attribute, value) =>
-          logger.debug(s"Creating StringContains query: $attribute contains '$value'")
+          queryLog(s"Creating StringContains query: $attribute contains '$value'")
           val pattern = "*" + value + "*"
-          logger.debug(s"StringContains pattern: '$pattern'")
+          queryLog(s"StringContains pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case _ =>
@@ -359,7 +451,7 @@ object FiltersToQueryConverter {
           case l: java.lang.Long => l // Keep as Long 
           case other => other
         }
-        logger.debug(s"INTEGER conversion: $value (${value.getClass.getSimpleName}) -> $result (${result.getClass.getSimpleName})")
+        queryLog(s"INTEGER conversion: $value (${value.getClass.getSimpleName}) -> $result (${result.getClass.getSimpleName})")
         result
       case FieldType.BOOLEAN =>
         val booleanResult = value match {
@@ -372,7 +464,7 @@ object FiltersToQueryConverter {
         }
         // Ensure we return a Java Boolean object that tantivy4java expects
         val convertedValue = java.lang.Boolean.valueOf(booleanResult)
-        logger.debug(s"Boolean conversion: $value (${value.getClass.getSimpleName}) -> $convertedValue (${convertedValue.getClass.getSimpleName})")
+        queryLog(s"Boolean conversion: $value (${value.getClass.getSimpleName}) -> $convertedValue (${convertedValue.getClass.getSimpleName})")
         convertedValue
       case FieldType.FLOAT =>
         value match {

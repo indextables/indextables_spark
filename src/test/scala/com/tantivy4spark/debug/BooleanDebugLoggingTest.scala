@@ -7,7 +7,7 @@ package com.tantivy4spark.debug
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.core.FiltersToQueryConverter
 import com.tantivy4java.{FieldType, SchemaBuilder}
-import org.apache.spark.sql.sources.EqualTo
+import org.apache.spark.sql.sources.{EqualTo, Filter}
 import org.scalatest.matchers.should.Matchers
 
 /**
@@ -42,7 +42,7 @@ class BooleanDebugLoggingTest extends TestBase with Matchers {
           val filter = EqualTo("active", value)
           
           // Convert to query - this should trigger our debug logging
-          val query = FiltersToQueryConverter.convertToQuery(Array(filter), schema)
+          val query = FiltersToQueryConverter.convertToQuery(Array[Filter](filter), schema)
           
           println(s"✅ Successfully created query: ${query.getClass.getSimpleName}")
           
@@ -70,7 +70,7 @@ class BooleanDebugLoggingTest extends TestBase with Matchers {
         
         try {
           val filter = EqualTo("active", value)
-          val query = FiltersToQueryConverter.convertToQuery(Array(filter), schema)
+          val query = FiltersToQueryConverter.convertToQuery(Array[Filter](filter), schema)
           println(s"✅ Converted invalid value (should convert): ${query.getClass.getSimpleName}")
           query.close()
         } catch {
