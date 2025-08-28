@@ -359,11 +359,14 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     
     // Combine all available options with proper precedence: write options > Spark config > defaults
     // DataFrame write options (parameters) take highest precedence over Spark session config
-    val allOptions = sparkConfigOptions ++ parameters
+    val allOptions = Map.newBuilder[String, String]
+    allOptions ++= sparkConfigOptions
+    allOptions ++= parameters
+    val finalOptions = allOptions.result()
     
     // Copy all tantivy4spark options into Hadoop configuration so they're available in executors
     val currentHadoopConf = spark.sparkContext.hadoopConfiguration
-    allOptions.foreach { case (key, value) =>
+    finalOptions.foreach { case (key, value) =>
       if (key.startsWith("spark.tantivy4spark.")) {
         currentHadoopConf.set(key, value)
         if (logger.isDebugEnabled) {
@@ -371,7 +374,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
         }
       }
     }
-    val writeOptions = new CaseInsensitiveStringMap(allOptions.asJava)
+    val writeOptions = new CaseInsensitiveStringMap(finalOptions.asJava)
     val tableProvider = new Tantivy4SparkTableProvider()
     
     // Get or create the table
@@ -406,8 +409,8 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val serializableSchema = data.schema
     
     // Pass all merged options (write options + Spark config) to executors
-    // Use allOptions which already has the proper precedence: sparkConfigOptions ++ parameters
-    val enrichedOptions = allOptions
+    // Use finalOptions which already has the proper precedence: sparkConfigOptions ++ parameters
+    val enrichedOptions = finalOptions
     
     // Extract essential Hadoop configuration properties as a Map
     val hadoopConf = spark.sparkContext.hadoopConfiguration
@@ -566,9 +569,13 @@ class Tantivy4SparkRelation(
     // Include read options (from DataFrame read API)
     val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
     
-    // Combine all sources: readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
-    val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
-    val options = new CaseInsensitiveStringMap(allConfigs.asJava)
+    // Combine all sources with proper precedence to avoid duplicate key warnings
+    // readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
+    val allConfigs = Map.newBuilder[String, String]
+    allConfigs ++= tantivyConfigs
+    allConfigs ++= sparkConfigs  
+    allConfigs ++= readTantivyOptions
+    val options = new CaseInsensitiveStringMap(allConfigs.result().asJava)
     
     val transactionLog = new TransactionLog(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
@@ -598,9 +605,13 @@ class Tantivy4SparkRelation(
     // Include read options (from DataFrame read API)  
     val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
     
-    // Combine all sources: readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
-    val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
-    val options = new CaseInsensitiveStringMap(allConfigs.asJava)
+    // Combine all sources with proper precedence to avoid duplicate key warnings
+    // readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
+    val allConfigs = Map.newBuilder[String, String]
+    allConfigs ++= tantivyConfigs
+    allConfigs ++= sparkConfigs
+    allConfigs ++= readTantivyOptions
+    val options = new CaseInsensitiveStringMap(allConfigs.result().asJava)
     
     val transactionLog = new TransactionLog(new Path(path), spark, options)
     
