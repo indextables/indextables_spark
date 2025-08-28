@@ -85,6 +85,7 @@ class SplitSearchEngine(
   def search(query: Query, limit: Int = 10): Array[InternalRow] = {
     try {
       logger.debug(s"Searching split with Query object: ${query.getClass.getSimpleName}, limit: $limit")
+      logger.warn(s"Running query: ${query.toString()}")
       
       val tantivySchema = splitSearcher.getSchema()
       logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
@@ -118,6 +119,7 @@ class SplitSearchEngine(
       
       // Create match-all query
       val query = Query.allQuery()
+      logger.warn(s"Running query: ${query.toString()}")
       
       // Execute the search
       val searchResult = splitSearcher.search(query, limit)
