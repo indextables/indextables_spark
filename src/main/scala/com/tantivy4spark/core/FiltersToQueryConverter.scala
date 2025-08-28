@@ -114,9 +114,11 @@ object FiltersToQueryConverter {
         case EqualTo(attribute, value) =>
           logger.debug(s"Creating EqualTo query: $attribute = $value")
           val fieldType = getFieldType(schema, attribute)
+          logger.debug(s"Field '$attribute' has type: $fieldType, isNumeric: ${isNumericFieldType(fieldType)}")
           val query = if (fieldType == FieldType.TEXT) {
-            // For TEXT fields, use phrase query for exact matching
-            logger.debug(s"Field '$attribute' is TEXT, using phraseQuery for exact match")
+            // For TEXT fields, use phrase query for reliable text matching
+            // This handles both single words and phrases properly
+            logger.debug(s"Field '$attribute' is TEXT, using phraseQuery for text matching")
             import scala.jdk.CollectionConverters._
             val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
             Query.phraseQuery(schema, attribute, words)
@@ -124,7 +126,10 @@ object FiltersToQueryConverter {
             // For numeric fields (INTEGER, FLOAT, DATE), use range query for equality
             logger.debug(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
-            Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+            logger.info(s"Creating range query for numeric equality: field='$attribute', fieldType=$fieldType, min=$convertedValue, max=$convertedValue")
+            val result = Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+            logger.debug(s"Successfully created range query: ${result.getClass.getSimpleName}")
+            result
           } else {
             // For other non-TEXT fields (BOOLEAN, BYTES), use term query with converted value
             logger.debug(s"Field '$attribute' is $fieldType, using termQuery")
@@ -159,6 +164,7 @@ object FiltersToQueryConverter {
           logger.debug(s"Creating GreaterThan query: $attribute > $value")
           val fieldType = getFieldType(schema, attribute)
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
+          logger.info(s"Creating GreaterThan range query: field='$attribute', fieldType=$fieldType, min=$convertedValue (exclusive)")
           Query.rangeQuery(schema, attribute, fieldType, convertedValue, null, false, true)
         
         case GreaterThanOrEqual(attribute, value) =>
@@ -221,13 +227,22 @@ object FiltersToQueryConverter {
         
         case IsNotNull(attribute) =>
           logger.debug(s"Creating IsNotNull query: $attribute IS NOT NULL")
-          // For IsNotNull, we could use a wildcard query to match any value
-          try {
-            Query.wildcardQuery(schema, attribute, "*", true)
-          } catch {
-            case e: Exception =>
-              logger.warn(s"Failed to create IsNotNull wildcard query for $attribute: ${e.getMessage}")
-              Query.allQuery()
+          val fieldType = getFieldType(schema, attribute)
+          if (isNumericFieldType(fieldType) || fieldType == FieldType.BOOLEAN) {
+            // For numeric and boolean fields, assume non-null (tantivy fields are typically non-nullable)
+            // Return allQuery to match all documents since null filtering doesn't apply to these field types
+            logger.debug(s"Field '$attribute' is $fieldType, using allQuery for IsNotNull (non-nullable field type)")
+            Query.allQuery()
+          } else {
+            // For TEXT and other fields, use wildcard query to match any value
+            logger.debug(s"Field '$attribute' is $fieldType, using wildcardQuery for IsNotNull")
+            try {
+              Query.wildcardQuery(schema, attribute, "*", true)
+            } catch {
+              case e: Exception =>
+                logger.warn(s"Failed to create IsNotNull wildcard query for $attribute: ${e.getMessage}")
+                Query.allQuery()
+            }
           }
         
         case And(left, right) =>
@@ -263,17 +278,26 @@ object FiltersToQueryConverter {
         
         case StringStartsWith(attribute, value) =>
           logger.debug(s"Creating StringStartsWith query: $attribute starts with '$value'")
-          val pattern = value + "*"
+          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
+          // Convert spaces to wildcards and add trailing wildcard for startsWith
+          val pattern = value.replaceAll("\\s+", "*") + "*"
+          logger.debug(s"StringStartsWith pattern converted to wildcard: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case StringEndsWith(attribute, value) =>
           logger.debug(s"Creating StringEndsWith query: $attribute ends with '$value'")
-          val pattern = "*" + value
+          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
+          // Convert spaces to wildcards and add leading wildcard for endsWith
+          val pattern = "*" + value.replaceAll("\\s+", "*")
+          logger.debug(s"StringEndsWith pattern converted to wildcard: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case StringContains(attribute, value) =>
           logger.debug(s"Creating StringContains query: $attribute contains '$value'")
-          val pattern = "*" + value + "*"
+          // TODO: Replace replaceAll with actual Tantivy4Java tokenizer when exposed
+          // Convert spaces to wildcards and add leading/trailing wildcards for contains
+          val pattern = "*" + value.replaceAll("\\s+", "*") + "*"
+          logger.debug(s"StringContains pattern converted to wildcard: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case _ =>
@@ -327,13 +351,16 @@ object FiltersToQueryConverter {
           case other => other
         }
       case FieldType.INTEGER =>
-        value match {
-          case ts: java.sql.Timestamp => ts.getTime // Convert to milliseconds
-          case date: java.sql.Date => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch
-          case l: java.lang.Long => l
-          case i: java.lang.Integer => i.longValue()
+        // Keep original types for range queries - tantivy4java handles type conversion internally
+        val result = value match {
+          case ts: java.sql.Timestamp => ts.getTime // Convert to milliseconds as Long
+          case date: java.sql.Date => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch as Long
+          case i: java.lang.Integer => i // Keep as Integer for range queries
+          case l: java.lang.Long => l // Keep as Long 
           case other => other
         }
+        logger.debug(s"INTEGER conversion: $value (${value.getClass.getSimpleName}) -> $result (${result.getClass.getSimpleName})")
+        result
       case FieldType.BOOLEAN =>
         val booleanResult = value match {
           case b: java.lang.Boolean => b.booleanValue()
