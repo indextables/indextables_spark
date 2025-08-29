@@ -76,7 +76,7 @@ object TantivyDirectInterface {
           case org.apache.spark.sql.types.TimestampType =>
             builder.addIntegerField(fieldName, true, true, true) // Store as epoch millis
           case org.apache.spark.sql.types.DateType =>
-            builder.addIntegerField(fieldName, true, true, true) // Store as days since epoch
+            builder.addDateField(fieldName, true, true, true) // Use proper date field
           case _ =>
             throw new UnsupportedOperationException(s"Unsupported field type for field $fieldName: $fieldType. Tantivy4Spark does not support complex types like arrays, maps, or structs.")
         }
@@ -233,8 +233,14 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
         val millis = value.asInstanceOf[Long] / 1000
         document.addInteger(fieldName, millis)
       case org.apache.spark.sql.types.DateType =>
-        // Days since epoch
-        document.addInteger(fieldName, value.asInstanceOf[Int].toLong)
+        // Convert days since epoch to LocalDateTime for proper date storage
+        import java.time.LocalDateTime
+        import java.time.LocalDate
+        val daysSinceEpoch = value.asInstanceOf[Int]
+        val epochDate = LocalDate.of(1970, 1, 1)
+        val localDate = epochDate.plusDays(daysSinceEpoch.toLong)
+        val localDateTime = localDate.atStartOfDay()
+        document.addDate(fieldName, localDateTime)
       case _ =>
         logger.warn(s"Unsupported field type for $fieldName: $dataType")
     }

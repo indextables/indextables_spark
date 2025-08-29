@@ -112,16 +112,21 @@ class Tantivy4SparkPartitionReader(
 
   
   private def createCacheConfig(): SplitCacheConfig = {
+    logger.error(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
+    
     // Access the broadcast configuration in executor
     val broadcasted = broadcastConfig.value
     
     // Debug: Log broadcast configuration received in executor
-    logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
+    logger.error(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
+    broadcasted.foreach { case (k, v) =>
+      logger.error(s"🔍 Broadcast config: $k -> $v")
+    }
     
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
       val value = broadcasted.getOrElse(configKey, default)
-      logger.info(s"🔍 PartitionReader broadcast config for $configKey: ${value}")
+      logger.error(s"🔍 PartitionReader broadcast config for $configKey: ${value}")
       value
     }
     
@@ -133,9 +138,31 @@ class Tantivy4SparkPartitionReader(
     }
     
     val cacheConfig = SplitCacheConfig(
-      cacheName = getBroadcastConfig("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
-      maxCacheSize = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
-      maxConcurrentLoads = getBroadcastConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
+      cacheName = {
+        val rawName = getBroadcastConfig("spark.tantivy4spark.cache.name", "tantivy4spark-cache")
+        val trimmedName = rawName.trim()
+        if (trimmedName.isEmpty) "tantivy4spark-cache" else trimmedName
+      },
+      maxCacheSize = {
+        val value = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "200000000")
+        try {
+          value.toLong
+        } catch {
+          case e: NumberFormatException =>
+            logger.error(s"Invalid numeric value for spark.tantivy4spark.cache.maxSize: '$value'")
+            throw e
+        }
+      },
+      maxConcurrentLoads = {
+        val value = getBroadcastConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8")
+        try {
+          value.toInt  
+        } catch {
+          case e: NumberFormatException =>
+            logger.error(s"Invalid numeric value for spark.tantivy4spark.cache.maxConcurrentLoads: '$value'")
+            throw e
+        }
+      },
       enableQueryCache = getBroadcastConfig("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
       // AWS configuration from broadcast
       awsAccessKey = getBroadcastConfigOption("spark.tantivy4spark.aws.accessKey"),
@@ -164,6 +191,7 @@ class Tantivy4SparkPartitionReader(
   private def initialize(): Unit = {
     if (!initialized) {
       try {
+        logger.error(s"🔍 ENTERING initialize() for split: ${addAction.path}")
         logger.info(s"🔍 V2 PartitionReader initializing for split: ${addAction.path}")
         
         // Record that this host has accessed this split for future scheduling locality
@@ -172,8 +200,10 @@ class Tantivy4SparkPartitionReader(
         logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
         
         // Create cache configuration from Spark options
+        logger.error(s"🔍 ABOUT TO CALL createCacheConfig()...")
         logger.info(s"🔍 Creating cache configuration for split read...")
         val cacheConfig = createCacheConfig()
+        logger.error(s"🔍 createCacheConfig() COMPLETED SUCCESSFULLY")
         logger.info(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
         
         // Create split search engine using the split file directly

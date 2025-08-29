@@ -170,7 +170,7 @@ object Tantivy4SparkRelation {
       
       // Execute search with pushed down query and limit
       val results = if (query != null) {
-        executorLogger.info(s"Executing search with Query object and limit: $effectiveLimit")
+        executorLogger.info(s"Executing search with Query object [$query] and limit: $effectiveLimit")
         splitSearchEngine.search(query, limit = effectiveLimit)
       } else {
         executorLogger.info(s"No filters, executing searchAll with limit: $effectiveLimit")
@@ -782,6 +782,7 @@ class Tantivy4SparkTable(
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
+    println(s"🚀 newScanBuilder called with options: ${options.asScala.keys.mkString(", ")}")
     // Create broadcast variable with proper precedence: read options > Spark config > Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
@@ -816,6 +817,51 @@ class Tantivy4SparkTable(
     
     // Merge with proper precedence: Hadoop < Spark config < read options
     val tantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
+    
+    // DEBUG: Print the final merged config
+    println(s"🔍 FINAL MERGED CONFIG: ${tantivyConfigs.size} total configs")
+    tantivyConfigs.foreach { case (key, value) =>
+      println(s"   ${key} = ${value}")
+    }
+    
+    // Validate numeric configuration values early to provide better error messages
+    def validateNumericConfig(key: String, value: String, expectedType: String): Unit = {
+      println(s"🔧 Validating config: $key = '$value' (expected type: $expectedType)")
+      try {
+        expectedType match {
+          case "Long" => 
+            val parsed = value.toLong
+            println(s"✅ Successfully parsed $key as Long: $parsed")
+          case "Int" => 
+            val parsed = value.toInt
+            println(s"✅ Successfully parsed $key as Int: $parsed")
+          case _ => // No validation needed
+        }
+      } catch {
+        case e: NumberFormatException =>
+          println(s"❌ NumberFormatException for $key: '$value' - ${e.getMessage}")
+          throw e
+      }
+    }
+    
+    // Validate ALL configurations that might be numeric
+    println(s"🔍 newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
+    tantivyConfigs.foreach { case (key, value) =>
+      println(s"📋 Found config: $key = $value")
+      key.toLowerCase match {
+        case k if k.contains("maxsize") =>
+          println(s"🎯 Matching maxSize config: $k")
+          validateNumericConfig(key, value, "Long")
+        case k if k.contains("maxconcurrentloads") =>
+          println(s"🎯 Matching maxConcurrentLoads config: $k")
+          validateNumericConfig(key, value, "Int")
+        case k if k.contains("targetrecordspersplit") =>
+          println(s"🎯 Matching targetRecordsPerSplit config: $k")
+          validateNumericConfig(key, value, "Long")
+        case _ => 
+          println(s"⏭️ Skipping validation for: $key")
+      }
+    }
     
     // Debug: Log final broadcast configuration  
     logger.info(s"🔧 Broadcasting ${tantivyConfigs.size} Tantivy4Spark configurations to executors")

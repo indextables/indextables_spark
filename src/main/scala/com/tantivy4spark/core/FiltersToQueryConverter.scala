@@ -435,12 +435,27 @@ object FiltersToQueryConverter {
     
     fieldType match {
       case FieldType.DATE =>
+        // Convert to LocalDateTime for proper date field querying
+        import java.time.LocalDateTime
+        import java.time.LocalDate
         value match {
-          case ts: java.sql.Timestamp => ts.getTime // Convert to milliseconds
-          case date: java.sql.Date => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch
-          case l: java.lang.Long => l
-          case i: java.lang.Integer => i.longValue()
-          case other => other
+          case ts: java.sql.Timestamp => 
+            ts.toLocalDateTime() // Direct conversion to LocalDateTime
+          case date: java.sql.Date => 
+            date.toLocalDate().atStartOfDay() // Convert to LocalDateTime at start of day
+          case dateStr: String =>
+            // Parse string date to LocalDateTime
+            val localDate = LocalDate.parse(dateStr)
+            localDate.atStartOfDay()
+          case daysSinceEpoch: Int =>
+            // Convert days since epoch to LocalDateTime
+            val epochDate = LocalDate.of(1970, 1, 1)
+            val localDate = epochDate.plusDays(daysSinceEpoch.toLong)
+            localDate.atStartOfDay()
+          case other => 
+            queryLog(s"DATE conversion: Unexpected type ${other.getClass.getSimpleName}, trying to parse as string")
+            val localDate = LocalDate.parse(other.toString)
+            localDate.atStartOfDay()
         }
       case FieldType.INTEGER =>
         // Keep original types for range queries - tantivy4java handles type conversion internally

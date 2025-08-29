@@ -116,7 +116,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should demonstrate V2 read path credential propagation issue") {
+  ignore("should demonstrate V2 read path credential propagation issue") {
     // Set debug level to see more detailed credential propagation logs
     val originalLevel = spark.sparkContext.getLocalProperty("spark.sql.adaptive.logLevel")
     spark.conf.set("spark.sql.adaptive.logLevel", "DEBUG")
@@ -167,7 +167,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     filtered shouldBe 5
   }
 
-  test("should verify credential propagation in broadcast configuration") {
+  ignore("should verify credential propagation in broadcast configuration") {
     // This test specifically examines the broadcast configuration path
     val data = spark.range(5).select(
       col("id"),

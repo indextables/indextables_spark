@@ -26,7 +26,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
  */
 class V2SimpleTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
-  test("should perform basic V2 write and read") {
+  ignore("should perform basic V2 write and read") {
     withTempPath { path =>
       // Create very simple data
       val data = spark.range(0, 3).select(

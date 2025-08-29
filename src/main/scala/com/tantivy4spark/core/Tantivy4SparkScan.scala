@@ -20,7 +20,7 @@ package com.tantivy4spark.core
 
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StructType, DateType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, PartitionPruning}
 import com.tantivy4spark.storage.SplitLocationRegistry
@@ -49,7 +49,7 @@ class Tantivy4SparkScan(
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
     
-    logger.info(s"Planning ${filteredActions.length} partitions from ${addActions.length} total files")
+    logger.warn(s"🔍 SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
     val partitions = filteredActions.zipWithIndex.map { case (addAction, index) =>
       val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit)
@@ -74,7 +74,11 @@ class Tantivy4SparkScan(
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
+    logger.warn(s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters")
+    filters.foreach(f => logger.warn(s"🔍 DATA SKIPPING DEBUG: Filter: $f"))
+    
     if (filters.isEmpty) {
+      logger.warn(s"🔍 DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")
       return addActions
     }
 
@@ -144,6 +148,7 @@ class Tantivy4SparkScan(
 
   private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
+    import java.time.LocalDate
 
     (addAction.minValues, addAction.maxValues) match {
       case (Some(minVals), Some(maxVals)) =>
@@ -151,35 +156,172 @@ class Tantivy4SparkScan(
           case EqualTo(attribute, value) =>
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
+            logger.warn(s"🔍 DATA SKIPPING DEBUG: EqualTo filter for $attribute = $value")
+            logger.warn(s"🔍 DATA SKIPPING DEBUG: minVal=$minVal, maxVal=$maxVal")
             (minVal, maxVal) match {
               case (Some(min), Some(max)) =>
-                val valueStr = value.toString
-                valueStr < min || valueStr > max
-              case _ => false
+                val (convertedValue, convertedMin, convertedMax) = convertValuesForComparison(attribute, value, min, max)
+                val shouldSkip = convertedValue.compareTo(convertedMin) < 0 || convertedValue.compareTo(convertedMax) > 0
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: convertedValue=$convertedValue, convertedMin=$convertedMin, convertedMax=$convertedMax")
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: shouldSkip=$shouldSkip")
+                shouldSkip
+              case _ => 
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: No min/max values found, not skipping")
+                false
             }
           case GreaterThan(attribute, value) =>
             maxVals.get(attribute) match {
-              case Some(max) => max.toString <= value.toString
+              case Some(max) => 
+                val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
+                convertedMax.compareTo(convertedValue) <= 0
               case None => false
             }
           case LessThan(attribute, value) =>
             minVals.get(attribute) match {
-              case Some(min) => min.toString >= value.toString
+              case Some(min) => 
+                val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
+                convertedMin.compareTo(convertedValue) >= 0
               case None => false
             }
           case GreaterThanOrEqual(attribute, value) =>
             maxVals.get(attribute) match {
-              case Some(max) => max.toString < value.toString
+              case Some(max) => 
+                val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
+                convertedMax.compareTo(convertedValue) < 0
               case None => false
             }
           case LessThanOrEqual(attribute, value) =>
             minVals.get(attribute) match {
-              case Some(min) => min.toString > value.toString
+              case Some(min) => 
+                val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
+                convertedMin.compareTo(convertedValue) > 0
               case None => false
             }
           case _ => false
         }
       case _ => false
+    }
+  }
+
+  private def convertValuesForComparison(attribute: String, filterValue: Any, minValue: String, maxValue: String): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
+    import java.time.LocalDate
+    import java.sql.Date
+    import org.apache.spark.sql.types._
+    
+    // Find the field data type in the schema
+    val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
+    
+    // logger.info(s"🔍 TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
+    // logger.info(s"🔍 TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
+    
+    fieldType match {
+      case Some(DateType) =>
+        // For DateType, the table stores values as days since epoch (integer)
+        logger.warn(s"🔍 DATE CONVERSION: Processing DateType field $attribute")
+        logger.warn(s"🔍 DATE CONVERSION: filterValue=$filterValue (${filterValue.getClass.getSimpleName})")
+        try {
+          val filterDaysSinceEpoch = filterValue match {
+            case dateStr: String =>
+              logger.warn(s"🔍 DATE CONVERSION: Parsing string date: $dateStr")
+              val filterDate = LocalDate.parse(dateStr)
+              val epochDate = LocalDate.of(1970, 1, 1)
+              val days = epochDate.until(filterDate).getDays
+              logger.warn(s"🔍 DATE CONVERSION: String '$dateStr' -> LocalDate '$filterDate' -> days since epoch: $days")
+              days
+            case sqlDate: Date =>
+              logger.warn(s"🔍 DATE CONVERSION: Converting SQL Date: $sqlDate")
+              // Use direct calculation from milliseconds since epoch
+              val millisSinceEpoch = sqlDate.getTime
+              val daysSinceEpoch = (millisSinceEpoch / (24 * 60 * 60 * 1000)).toInt
+              logger.warn(s"🔍 DATE CONVERSION: SQL Date '$sqlDate' -> millis=$millisSinceEpoch -> days since epoch: $daysSinceEpoch")
+              daysSinceEpoch
+            case intVal: Int => 
+              logger.warn(s"🔍 DATE CONVERSION: Using int value directly: $intVal")
+              intVal
+            case _ =>
+              logger.warn(s"🔍 DATE CONVERSION: Fallback parsing toString: ${filterValue.toString}")
+              val filterDate = LocalDate.parse(filterValue.toString)
+              val epochDate = LocalDate.of(1970, 1, 1)
+              val days = epochDate.until(filterDate).getDays
+              logger.warn(s"🔍 DATE CONVERSION: Fallback '${filterValue.toString}' -> LocalDate '$filterDate' -> days since epoch: $days")
+              days
+          }
+          
+          val minDays = minValue.toInt
+          val maxDays = maxValue.toInt
+          // logger.info(s"🔍 DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
+          (filterDaysSinceEpoch.asInstanceOf[Comparable[Any]], minDays.asInstanceOf[Comparable[Any]], maxDays.asInstanceOf[Comparable[Any]])
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"🔍 DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}")
+            // Fallback to string comparison
+            (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
+        }
+        
+      case Some(IntegerType) =>
+        // Convert integer values for proper numeric comparison
+        logger.info(s"🔍 INTEGER CONVERSION: Processing IntegerType field $attribute")
+        try {
+          val filterInt = filterValue.toString.toInt
+          val minInt = minValue.toInt
+          val maxInt = maxValue.toInt
+          logger.info(s"🔍 INTEGER CONVERSION RESULT: filterInt=$filterInt, minInt=$minInt, maxInt=$maxInt")
+          (filterInt.asInstanceOf[Comparable[Any]], minInt.asInstanceOf[Comparable[Any]], maxInt.asInstanceOf[Comparable[Any]])
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"🔍 INTEGER CONVERSION FAILED: $filterValue - ${ex.getMessage}")
+            (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
+        }
+        
+      case Some(LongType) =>
+        // Convert long values for proper numeric comparison
+        logger.info(s"🔍 LONG CONVERSION: Processing LongType field $attribute")
+        try {
+          val filterLong = filterValue.toString.toLong
+          val minLong = minValue.toLong
+          val maxLong = maxValue.toLong
+          logger.info(s"🔍 LONG CONVERSION RESULT: filterLong=$filterLong, minLong=$minLong, maxLong=$maxLong")
+          (filterLong.asInstanceOf[Comparable[Any]], minLong.asInstanceOf[Comparable[Any]], maxLong.asInstanceOf[Comparable[Any]])
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"🔍 LONG CONVERSION FAILED: $filterValue - ${ex.getMessage}")
+            (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
+        }
+        
+      case Some(FloatType) =>
+        // Convert float values for proper numeric comparison
+        logger.info(s"🔍 FLOAT CONVERSION: Processing FloatType field $attribute")
+        try {
+          val filterFloat = filterValue.toString.toFloat
+          val minFloat = minValue.toFloat
+          val maxFloat = maxValue.toFloat
+          logger.info(s"🔍 FLOAT CONVERSION RESULT: filterFloat=$filterFloat, minFloat=$minFloat, maxFloat=$maxFloat")
+          (filterFloat.asInstanceOf[Comparable[Any]], minFloat.asInstanceOf[Comparable[Any]], maxFloat.asInstanceOf[Comparable[Any]])
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"🔍 FLOAT CONVERSION FAILED: $filterValue - ${ex.getMessage}")
+            (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
+        }
+        
+      case Some(DoubleType) =>
+        // Convert double values for proper numeric comparison
+        logger.info(s"🔍 DOUBLE CONVERSION: Processing DoubleType field $attribute")
+        try {
+          val filterDouble = filterValue.toString.toDouble
+          val minDouble = minValue.toDouble
+          val maxDouble = maxValue.toDouble
+          logger.info(s"🔍 DOUBLE CONVERSION RESULT: filterDouble=$filterDouble, minDouble=$minDouble, maxDouble=$maxDouble")
+          (filterDouble.asInstanceOf[Comparable[Any]], minDouble.asInstanceOf[Comparable[Any]], maxDouble.asInstanceOf[Comparable[Any]])
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"🔍 DOUBLE CONVERSION FAILED: $filterValue - ${ex.getMessage}")
+            (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
+        }
+        
+      case _ =>
+        // For other data types (strings, etc.), use string comparison
+        logger.info(s"🔍 STRING CONVERSION: Using string comparison for $attribute")
+        (filterValue.toString.asInstanceOf[Comparable[Any]], minValue.asInstanceOf[Comparable[Any]], maxValue.asInstanceOf[Comparable[Any]])
     }
   }
 }

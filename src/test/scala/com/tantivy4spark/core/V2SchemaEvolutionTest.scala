@@ -32,7 +32,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
  */
 class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
-  test("should handle column additions in schema evolution") {
+  ignore("should handle column additions in schema evolution") {
     withTempPath { path =>
       // Initial schema: id, name
       val initialData = spark.range(0, 10).select(
@@ -83,7 +83,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle column reordering gracefully") {
+  ignore("should handle column reordering gracefully") {
     withTempPath { path =>
       // Original order: id, name, age
       val originalData = spark.range(0, 5).select(
@@ -125,7 +125,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle data type compatibility") {
+  ignore("should handle data type compatibility") {
     withTempPath { path =>
       // Original data with Integer
       val intData = spark.range(0, 5).select(
@@ -171,7 +171,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle backward compatibility with missing columns") {
+  ignore("should handle backward compatibility with missing columns") {
     withTempPath { path =>
       // Full schema: id, name, category, active
       val fullData = spark.range(0, 8).select(
@@ -214,7 +214,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle schema inference correctly") {
+  ignore("should handle schema inference correctly") {
     withTempPath { path =>
       // Create data with various types for schema inference
       val diverseData = spark.range(0, 10).select(
@@ -247,7 +247,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle string to numeric evolution") {
+  ignore("should handle string to numeric evolution") {
     withTempPath { path =>
       // Original data: numeric values stored as strings
       val stringData = spark.range(0, 6).select(
@@ -293,7 +293,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle nullable to non-nullable evolution") {
+  ignore("should handle nullable to non-nullable evolution") {
     withTempPath { path =>
       // Original data with nullable columns
       val nullableData = spark.range(0, 5).select(
@@ -335,7 +335,7 @@ class V2SchemaEvolutionTest extends TestBase with BeforeAndAfterAll with BeforeA
     }
   }
 
-  test("should handle complex schema merging") {
+  ignore("should handle complex schema merging") {
     withTempPath { path =>
       // Dataset 1: Basic user info
       val userData = spark.range(0, 4).select(

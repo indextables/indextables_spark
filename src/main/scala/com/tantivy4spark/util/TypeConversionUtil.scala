@@ -43,7 +43,7 @@ object TypeConversionUtil {
     case BooleanType => "i64" // Store as 0/1
     case BinaryType => "bytes"
     case TimestampType => "i64" // Store as epoch millis
-    case DateType => "i64" // Store as days since epoch
+    case DateType => "date" // Use proper Tantivy date field
     case ArrayType(_, _) => 
       throw new UnsupportedOperationException(s"Array types are not supported by Tantivy4Spark: $dataType")
     case MapType(_, _, _) => 
@@ -60,6 +60,7 @@ object TypeConversionUtil {
     case "f64" => DoubleType
     case "boolean" => BooleanType
     case "bytes" => BinaryType
+    case "date" => DateType // Proper date field mapping
     case _ => 
       throw new UnsupportedOperationException(s"Unsupported Tantivy type: $tantivyType")
   }

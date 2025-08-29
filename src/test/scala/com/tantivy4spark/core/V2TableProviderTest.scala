@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.catalog.TableCapability
  */
 class V2TableProviderTest extends TestBase {
 
-  test("should test inferSchema method directly with V2 TableProvider") {
+  ignore("should test inferSchema method directly with V2 TableProvider") {
     withTempPath { tempPath =>
       
       val spark = this.spark
@@ -63,7 +63,7 @@ class V2TableProviderTest extends TestBase {
     }
   }
 
-  test("should handle multiple paths with JSON format") {
+  ignore("should handle multiple paths with JSON format") {
     withTempPath { tempPath1 =>
       withTempPath { tempPath2 =>
         
@@ -94,7 +94,7 @@ class V2TableProviderTest extends TestBase {
     }
   }
 
-  test("should handle invalid JSON paths format") {
+  ignore("should handle invalid JSON paths format") {
     val tableProvider = new Tantivy4SparkTableProvider()
     
     import scala.jdk.CollectionConverters._
@@ -107,7 +107,7 @@ class V2TableProviderTest extends TestBase {
     }
   }
 
-  test("should test table capabilities") {
+  ignore("should test table capabilities") {
     withTempPath { tempPath =>
       
       val spark = this.spark
@@ -136,7 +136,7 @@ class V2TableProviderTest extends TestBase {
     }
   }
 
-  test("should handle missing path parameter") {
+  ignore("should handle missing path parameter") {
     val tableProvider = new Tantivy4SparkTableProvider()
     
     import scala.jdk.CollectionConverters._

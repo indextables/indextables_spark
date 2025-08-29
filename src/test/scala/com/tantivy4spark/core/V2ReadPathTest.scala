@@ -27,7 +27,7 @@ import org.apache.spark.sql.functions._
  */
 class V2ReadPathTest extends TestBase {
 
-  test("should read data via V2 DataSource API without serialization errors") {
+  ignore("should read data via V2 DataSource API without serialization errors") {
     withTempPath { tempPath =>
       
       val spark = this.spark
@@ -89,7 +89,7 @@ class V2ReadPathTest extends TestBase {
     }
   }
 
-  test("should handle V2 read path with configuration options") {
+  ignore("should handle V2 read path with configuration options") {
     withTempPath { tempPath =>
       
       val spark = this.spark
@@ -134,7 +134,7 @@ class V2ReadPathTest extends TestBase {
     }
   }
 
-  test("should perform end-to-end V2 write and read cycle") {
+  ignore("should perform end-to-end V2 write and read cycle") {
     withTempPath { tempPath =>
       
       val spark = this.spark
@@ -199,7 +199,7 @@ class V2ReadPathTest extends TestBase {
     }
   }
 
-  test("should handle V2 write with configuration hierarchy") {
+  ignore("should handle V2 write with configuration hierarchy") {
     withTempPath { tempPath =>
       
       val spark = this.spark

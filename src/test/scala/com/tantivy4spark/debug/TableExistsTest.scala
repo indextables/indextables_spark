@@ -16,9 +16,10 @@ class TableExistsTest extends TestBase {
         .collect()  // Trigger the read operation
     }
     
-    exception.getMessage should include("Table does not exist")
+    exception.getMessage should include("Path does not exist")
     exception.getMessage should include(nonExistentPath)
     exception.getMessage should include("No transaction log found")
+    exception.getMessage should include("Use spark.write to create the table first")
     
     println(s"✅ Exception correctly thrown: ${exception.getMessage}")
   }

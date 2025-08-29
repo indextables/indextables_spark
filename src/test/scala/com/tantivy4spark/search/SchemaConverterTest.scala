@@ -76,7 +76,7 @@ class SchemaConverterTest extends TestBase {
     timestampField("type") shouldBe "i64"
     
     val dateField = fields.find(_("name") == "date").get
-    dateField("type") shouldBe "i64"
+    dateField("type") shouldBe "date"
     
     val binaryField = fields.find(_("name") == "binary_data").get
     binaryField("type") shouldBe "bytes"

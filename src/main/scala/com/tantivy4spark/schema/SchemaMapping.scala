@@ -275,6 +275,15 @@ object SchemaMapping {
         // DATE -> DateType
         case (FieldType.DATE, DateType) =>
           rawValue match {
+            case ldt: java.time.LocalDateTime => 
+              // Convert LocalDateTime back to days since epoch for Spark DateType
+              val localDate = ldt.toLocalDate()
+              val epochDate = java.time.LocalDate.of(1970, 1, 1)
+              java.time.temporal.ChronoUnit.DAYS.between(epochDate, localDate).toInt
+            case ld: java.time.LocalDate => 
+              // Convert LocalDate back to days since epoch for Spark DateType
+              val epochDate = java.time.LocalDate.of(1970, 1, 1)
+              java.time.temporal.ChronoUnit.DAYS.between(epochDate, ld).toInt
             case l: java.lang.Long => l.intValue() // Days since epoch
             case i: java.lang.Integer => i.intValue()
             case s: String => s.toInt

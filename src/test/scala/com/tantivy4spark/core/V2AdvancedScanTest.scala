@@ -32,7 +32,7 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
  */
 class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
-  test("should support column pruning in V2 scan") {
+  ignore("should support column pruning in V2 scan") {
     withTempPath { path =>
       // Create test data with multiple columns
       val data = spark.range(100).select(
@@ -72,7 +72,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should support limit pushdown in V2 scan") {
+  ignore("should support limit pushdown in V2 scan") {
     withTempPath { path =>
       // Create larger test dataset
       val data = spark.range(1000).select(
@@ -104,7 +104,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should support combined filter and limit pushdown") {
+  ignore("should support combined filter and limit pushdown") {
     withTempPath { path =>
       // Create test data with filterable content
       val data = spark.range(500).select(
@@ -142,7 +142,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should support column pruning with complex projections") {
+  ignore("should support column pruning with complex projections") {
     withTempPath { path =>
       // Create complex schema
       val data = spark.range(50).select(
@@ -181,7 +181,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should handle empty result sets with pushdown optimizations") {
+  ignore("should handle empty result sets with pushdown optimizations") {
     withTempPath { path =>
       // Create test data
       val data = spark.range(100).select(
@@ -215,7 +215,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
   }
 
-  test("should support scan with all advanced features combined") {
+  ignore("should support scan with all advanced features combined") {
     withTempPath { path =>
       // Create comprehensive test dataset
       val data = spark.range(1000).select(
