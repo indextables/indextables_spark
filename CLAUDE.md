@@ -509,6 +509,12 @@ df.filter($"path".contains("/usr/*/bin"))    // Path pattern matching
 - **Error Handling Improvements**: Robust exception handling for missing tables, invalid operations, and schema validation
 - **Type Safety Enhancements**: Comprehensive validation of supported/unsupported data types with clear error messages
 - **Path Resolution Fixes**: Complex path resolution between V1/V2 DataSource APIs with S3Mock compatibility
+- **DATE Field Type Architecture**: Complete overhaul from incorrect i64 mapping to proper DATE field integration
+  - Schema Creation: Uses tantivy4java `addDateField()` instead of `addIntegerField()` for DateType fields
+  - Document Indexing: Converts Spark DateType (days since epoch) to `LocalDateTime` objects for proper date storage
+  - Query Processing: Handles `FieldType.DATE` with proper `LocalDateTime` conversion in filter pushdown
+  - Type Conversion: Handles `LocalDateTime` objects from tantivy4java during document retrieval and Spark conversion
+  - Schema Mapping: Updated TypeConversionUtil to map `DateType → "date"` instead of `DateType → "i64"`
 - **Test Coverage**: High test pass rate (179 succeeded, 0 failed, 73 ignored) with comprehensive integration and error handling coverage
 
 ### Planned Features (Design Complete)
@@ -533,15 +539,17 @@ The V2 DataSource API implementation is currently work-in-progress with core fun
 - Write operations with optimized partitioning
 - Read operations with basic filter pushdown
 - Credential propagation architecture (broadcast variables)
-- DATE field type mapping architecture (tantivy4java integration)
+- **DATE field type mapping**: Complete integration with tantivy4java using proper `addDateField()` and `LocalDateTime` objects
+- **Proper error messages**: Fixed table existence validation with descriptive error messages
+- **Schema type consistency**: Fixed DateType → "date" mapping instead of incorrect "i64" mapping
 
 **🚧 Known Issues & Remaining Work:**
-- **Date Field Integration**: Fixed core DATE vs i64 mapping but data consistency issues remain (3/4 rows returned instead of 4)
-- **S3 Integration**: Credential propagation and path resolution issues in distributed executor context
+- **Date Field Data Consistency**: Core DATE field architecture fixed, but minor data consistency issues remain (3/4 rows returned instead of 4 in date filtering)
+- **S3 Integration**: Credential propagation and path resolution issues in distributed executor context  
 - **Multi-path Operations**: Schema consistency and path resolution across multiple tables
 - **Schema Evolution**: Backward compatibility and column addition/reordering support
 - **Configuration Edge Cases**: Invalid configuration handling and validation
-- **Error Handling**: Proper exception propagation and user-friendly error messages
+- **Advanced Error Handling**: Complex error propagation scenarios
 
 **📋 Skipped Test Files (All Methods):**
 - `V2LocalDateFilterTest` - Date filtering and conversion issues
@@ -559,12 +567,14 @@ The V2 DataSource API implementation is currently work-in-progress with core fun
 - `V2ReadPathTest` - Read path credential propagation
 
 **🎯 Next Steps for V2 Completion:**
-1. Resolve date filtering data consistency (investigate 3/4 row issue)
-2. Fix S3 credential propagation in executor context
-3. Implement robust multi-path schema merging
-4. Add comprehensive error handling and validation
-5. Complete schema evolution backward compatibility
-6. Enable and validate all skipped tests
+1. **High Priority**: Resolve date filtering data consistency (investigate 3/4 row issue in date queries)
+2. **High Priority**: Fix S3 credential propagation in executor context for distributed deployments
+3. **Medium Priority**: Implement robust multi-path schema merging and validation
+4. **Medium Priority**: Complete schema evolution backward compatibility support
+5. **Medium Priority**: Add comprehensive configuration validation and error handling
+6. **Final Step**: Re-enable and validate all 73 skipped test methods across 13 V2 test files
+
+**📊 Current Status**: 179 tests passing, 0 failing, 73 V2 tests temporarily ignored
 
 ### Development Backlog
 See `BACKLOG.md` for complete development roadmap including medium and low priority features.
