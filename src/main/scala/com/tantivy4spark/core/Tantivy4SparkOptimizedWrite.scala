@@ -33,17 +33,46 @@ import org.slf4j.LoggerFactory
  * that can shuffle data to target optimal split sizes.
  */
 class Tantivy4SparkOptimizedWrite(
-    transactionLog: TransactionLog,
+    @transient transactionLog: TransactionLog,
     tablePath: Path,
-    writeInfo: LogicalWriteInfo,
-    options: CaseInsensitiveStringMap,
-    hadoopConf: org.apache.hadoop.conf.Configuration,
+    @transient writeInfo: LogicalWriteInfo,
+    serializedOptions: Map[String, String],  // Use serializable Map instead of CaseInsensitiveStringMap
+    @transient hadoopConf: org.apache.hadoop.conf.Configuration,
     isOverwrite: Boolean = false  // Track whether this is an overwrite operation
-) extends Write with BatchWrite with SupportsOverwrite with SupportsTruncate {
+) extends Write with BatchWrite with SupportsOverwrite with SupportsTruncate with Serializable {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
+  @transient private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
 
-  private val tantivyOptions = Tantivy4SparkOptions(options)
+  // Extract serializable values from transient fields during construction
+  private val writeSchema = writeInfo.schema()
+  private val serializedHadoopConf = {
+    // Serialize only the tantivy4spark config properties from hadoopConf
+    val props = scala.collection.mutable.Map[String, String]()
+    val iter = hadoopConf.iterator()
+    while (iter.hasNext) {
+      val entry = iter.next()
+      if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+        props.put(entry.getKey, entry.getValue)
+      }
+    }
+    props.toMap
+  }
+  private val partitionColumns = try {
+    transactionLog.getPartitionColumns()
+  } catch {
+    case ex: Exception =>
+      logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
+      Seq.empty[String]
+  }
+
+  @transient private lazy val tantivyOptions = {
+    // Recreate CaseInsensitiveStringMap from serialized options for API compatibility
+    import scala.jdk.CollectionConverters._
+    val optionsMap = new java.util.HashMap[String, String]()
+    serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
+    val caseInsensitiveMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
+    Tantivy4SparkOptions(caseInsensitiveMap)
+  }
 
   /**
    * Determine if optimized writes should be enabled based on configuration hierarchy:
@@ -173,34 +202,21 @@ class Tantivy4SparkOptimizedWrite(
       logger.warn("Each partition will create one split file, regardless of target records per split")
     }
     
-    // Get partition columns from transaction log metadata
-    val partitionColumns = try {
-      transactionLog.getPartitionColumns()
-    } catch {
-      case ex: Exception =>
-        logger.warn(s"Could not retrieve partition columns: ${ex.getMessage}")
-        Seq.empty[String]
-    }
-    
     if (partitionColumns.nonEmpty) {
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
     
-    // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
-    val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
-    
-    // Copy all tantivy4spark options to hadoop config to ensure they reach executors
-    import scala.jdk.CollectionConverters._
-    options.entrySet().asScala.foreach { entry =>
-      val key = entry.getKey
-      val value = entry.getValue
+    // Combine serialized hadoop config with tantivy4spark options
+    val combinedHadoopConfig = serializedHadoopConf ++ 
+      serializedOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+      
+    serializedOptions.foreach { case (key, value) =>
       if (key.startsWith("spark.tantivy4spark.")) {
-        enrichedHadoopConf.set(key, value)
-        logger.info(s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
+        logger.info(s"Will copy DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
       }
     }
     
-    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, enrichedHadoopConf, partitionColumns)
+    new Tantivy4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -274,7 +290,7 @@ class Tantivy4SparkOptimizedWrite(
     // Return a new WriteBuilder that creates an overwrite Write
     new org.apache.spark.sql.connector.write.WriteBuilder {
       override def build(): org.apache.spark.sql.connector.write.Write = 
-        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, options, hadoopConf, isOverwrite = true)
+        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, serializedOptions, hadoopConf, isOverwrite = true)
     }
   }
 
@@ -283,7 +299,7 @@ class Tantivy4SparkOptimizedWrite(
     // Truncate is treated as overwrite with no filters
     new org.apache.spark.sql.connector.write.WriteBuilder {
       override def build(): org.apache.spark.sql.connector.write.Write = 
-        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, options, hadoopConf, isOverwrite = true)
+        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, serializedOptions, hadoopConf, isOverwrite = true)
     }
   }
 }

@@ -514,11 +514,24 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
         }
       }
       
+      // Serialize hadoop config to avoid Configuration serialization issues
+      val serializedHadoopConfig = {
+        val props = scala.collection.mutable.Map[String, String]()
+        val iter = localHadoopConf.iterator()
+        while (iter.hasNext) {
+          val entry = iter.next()
+          if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+            props.put(entry.getKey, entry.getValue)
+          }
+        }
+        props.toMap
+      }
+      
       val localWriterFactory = new com.tantivy4spark.core.Tantivy4SparkWriterFactory(
         new Path(serializablePath),
         serializableSchema,
-        new CaseInsensitiveStringMap(enrichedOptions.asJava),
-        localHadoopConf
+        enrichedOptions.filter(_._1.startsWith("spark.tantivy4spark.")),
+        serializedHadoopConfig
       )
       val writer = localWriterFactory.createWriter(partitionId, 0L)
       try {
@@ -858,7 +871,34 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     }
 
     val spark = SparkSession.active
-    val transactionLog = new TransactionLog(new Path(paths.head), spark)
+    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    
+    // Extract configurations with proper precedence hierarchy: Hadoop < Spark config < read options
+    val hadoopTantivyConfigs = hadoopConf.iterator().asScala
+      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .map(entry => entry.getKey -> entry.getValue)
+      .toMap
+    
+    val sparkTantivyConfigs = try {
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    } catch {
+      case _: Exception => Map.empty[String, String]
+    }
+    
+    val readTantivyConfigs = options.asScala
+      .filter(_._1.startsWith("spark.tantivy4spark."))
+      .toMap
+    
+    // Merge with proper precedence: Hadoop < Spark config < read options
+    val mergedTantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
+    
+    // Create a serializable map first, then convert to CaseInsensitiveStringMap
+    // This avoids serialization issues when the TransactionLog is used in distributed contexts
+    import scala.jdk.CollectionConverters._
+    val mergedConfigMap = options.asScala.toMap ++ mergedTantivyConfigs
+    val mergedOptions = new CaseInsensitiveStringMap(mergedConfigMap.asJava)
+    
+    val transactionLog = new TransactionLog(new Path(paths.head), spark, mergedOptions)
     
     transactionLog.getSchema().getOrElse {
       throw new RuntimeException(s"Table does not exist at path: ${paths.head}. No transaction log found. Use spark.write to create the table first.")
@@ -879,8 +919,35 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
       )
     }
 
+    val spark = SparkSession.active
+    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    
+    // Apply the same configuration hierarchy as inferSchema: Hadoop < Spark config < table properties
+    val hadoopTantivyConfigs = hadoopConf.iterator().asScala
+      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .map(entry => entry.getKey -> entry.getValue)
+      .toMap
+    
+    val sparkTantivyConfigs = try {
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    } catch {
+      case _: Exception => Map.empty[String, String]
+    }
+    
+    val tableTantivyConfigs = options.asScala
+      .filter(_._1.startsWith("spark.tantivy4spark."))
+      .toMap
+    
+    // Merge with proper precedence: Hadoop < Spark config < table properties
+    val mergedTantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ tableTantivyConfigs
+    
+    // Create a serializable map first, then convert to CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+    val mergedConfigMap = options.asScala.toMap ++ mergedTantivyConfigs
+    val mergedOptions = new CaseInsensitiveStringMap(mergedConfigMap.asJava)
+
     // Use the first path as the primary table path (support for multiple paths can be added later)
-    new Tantivy4SparkTable(paths.head, schema, options)
+    new Tantivy4SparkTable(paths.head, schema, mergedOptions)
   }
 
   override def supportsExternalMetadata(): Boolean = true

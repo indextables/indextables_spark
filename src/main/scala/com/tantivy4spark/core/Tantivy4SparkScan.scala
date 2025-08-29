@@ -52,7 +52,7 @@ class Tantivy4SparkScan(
     logger.info(s"Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
     val partitions = filteredActions.zipWithIndex.map { case (addAction, index) =>
-      val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, options, index, limit)
+      val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit)
       val preferredHosts = partition.preferredLocations()
       if (preferredHosts.nonEmpty) {
         logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
@@ -70,7 +70,7 @@ class Tantivy4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new Tantivy4SparkReaderFactory(readSchema, options, limit, broadcastConfig, tablePath)
+    new Tantivy4SparkReaderFactory(readSchema, limit, broadcastConfig, tablePath)
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {

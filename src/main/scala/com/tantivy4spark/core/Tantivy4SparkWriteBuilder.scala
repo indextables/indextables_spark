@@ -53,6 +53,13 @@ class Tantivy4SparkWriteBuilder(
     logger.info(s"Building optimized write for table at: $tablePath (overwrite mode: $isOverwrite)")
     // Use write options from info (DataFrame .option() calls), not table-level options
     // This ensures write-specific options override table/session configuration
-    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, info.options(), hadoopConf, isOverwrite)
+    
+    // Serialize options to Map[String, String] to avoid CaseInsensitiveStringMap serialization issues
+    import scala.jdk.CollectionConverters._
+    val serializedOptions = info.options().entrySet().asScala.map { entry =>
+      entry.getKey -> entry.getValue
+    }.toMap
+    
+    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite)
   }
 }

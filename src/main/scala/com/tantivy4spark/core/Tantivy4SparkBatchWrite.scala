@@ -43,16 +43,31 @@ class Tantivy4SparkBatchWrite(
     
     // Copy all tantivy4spark options to hadoop config to ensure they reach executors
     import scala.jdk.CollectionConverters._
+    val serializedOptions = scala.collection.mutable.Map[String, String]()
     options.entrySet().asScala.foreach { entry =>
       val key = entry.getKey
       val value = entry.getValue
       if (key.startsWith("spark.tantivy4spark.")) {
         enrichedHadoopConf.set(key, value)
+        serializedOptions.put(key, value)
         logger.info(s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
       }
     }
     
-    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), options, enrichedHadoopConf)
+    // Serialize hadoop config properties to avoid Configuration serialization issues
+    val serializedHadoopConfig = {
+      val props = scala.collection.mutable.Map[String, String]()
+      val iter = enrichedHadoopConf.iterator()
+      while (iter.hasNext) {
+        val entry = iter.next()
+        if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+          props.put(entry.getKey, entry.getValue)
+        }
+      }
+      props.toMap
+    }
+    
+    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
