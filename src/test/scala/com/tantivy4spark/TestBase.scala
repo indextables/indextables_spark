@@ -40,6 +40,7 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
+      .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
       // Set default AWS parameters to non-null values for all tests
       .config("spark.tantivy4spark.aws.accessKey", "test-default-access-key")
       .config("spark.tantivy4spark.aws.secretKey", "test-default-secret-key")

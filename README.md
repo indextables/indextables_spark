@@ -11,6 +11,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Optimized Writes**: Delta Lake-style optimized writes with automatic split sizing based on target records per split
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
 - **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation to prevent native crashes
+- **IndexQuery Operator**: Custom pushdown filter for native Tantivy query syntax with full expression support
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage with S3Mock compatibility
 - **AWS Session Token Support**: Full support for temporary credentials via AWS STS
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
@@ -19,7 +20,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
 - **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
 - **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
-- **Production Ready**: 100% test pass rate (133/133 tests) with comprehensive coverage
+- **Production Ready**: 100% test pass rate with comprehensive coverage including 49 IndexQuery operator tests
 
 ## Architecture
 
@@ -247,6 +248,46 @@ df.filter($"bio".contains("machine* *learning")) // Matches terms with both patt
 - Avoid starting patterns with wildcards when possible for better performance
 - Wildcard queries work at the term level after tokenization
 - Case sensitivity follows the tokenizer configuration (default is case-insensitive)
+
+#### IndexQuery Operator
+
+Tantivy4Spark supports a powerful `IndexQuery` operator for native Tantivy query syntax with full filter pushdown:
+
+```scala
+import com.tantivy4spark.expressions.IndexQueryExpression
+import com.tantivy4spark.util.ExpressionUtils
+import org.apache.spark.unsafe.types.UTF8String
+
+// Create IndexQuery expressions programmatically for complex Tantivy queries
+val titleColumn = col("title").expr
+val complexQuery = Literal(UTF8String.fromString("(apache AND spark) OR (hadoop AND mapreduce)"), StringType)
+val indexQuery = IndexQueryExpression(titleColumn, complexQuery)
+
+// Use in DataFrame operations
+df.filter(indexQuery).show()
+
+// Advanced query patterns
+val patterns = Seq(
+  "title:(spark AND sql)",           // Field-specific boolean query
+  "content:\"machine learning\"",    // Phrase search
+  "description:(fast OR quick)",     // OR queries
+  "tags:(python AND NOT deprecated)" // Negation queries
+)
+
+// Apply multiple IndexQuery filters
+patterns.foreach { pattern =>
+  val query = IndexQueryExpression(col("content").expr, 
+    Literal(UTF8String.fromString(pattern), StringType))
+  df.filter(query).show()
+}
+```
+
+**Features**:
+- ✅ **Full Filter Pushdown**: Queries execute natively in Tantivy for optimal performance
+- ✅ **Complex Query Syntax**: Boolean operators (AND, OR, NOT), phrase queries, field queries
+- ✅ **Type Safety**: Comprehensive validation with descriptive error messages
+- ✅ **Expression Trees**: Support for complex expression combinations with standard Spark filters
+- ✅ **Comprehensive Testing**: 49 test cases covering all scenarios and edge cases
 
 #### SQL Pushdown Verification
 

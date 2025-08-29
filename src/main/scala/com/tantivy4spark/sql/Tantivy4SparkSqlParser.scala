@@ -22,6 +22,7 @@ import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
+import com.tantivy4spark.expressions.IndexQueryExpression
 
 /**
  * Custom SQL parser for Tantivy4Spark that extends the default Spark SQL parser
@@ -29,6 +30,9 @@ import org.apache.spark.sql.types.{DataType, StructType}
  *
  * Supported commands:
  * - FLUSH TANTIVY4SPARK SEARCHER CACHE
+ * 
+ * Supported operators:
+ * - indexquery: column indexquery 'query_string'
  */
 class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
@@ -38,13 +42,30 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
     if (trimmed == "FLUSH TANTIVY4SPARK SEARCHER CACHE") {
       FlushTantivyCacheCommand()
     } else {
-      // Delegate to the default Spark SQL parser for all other commands
-      delegate.parsePlan(sqlText)
+      // Check if SQL contains indexquery operator and preprocess it
+      val preprocessedSql = preprocessIndexQueryOperators(sqlText)
+      delegate.parsePlan(preprocessedSql)
     }
   }
 
   override def parseExpression(sqlText: String): Expression = {
-    delegate.parseExpression(sqlText)
+    // Check for indexquery operator pattern
+    val indexQueryPattern = """(.+?)\s+indexquery\s+(.+)""".r
+    
+    sqlText.trim match {
+      case indexQueryPattern(leftExpr, rightExpr) =>
+        try {
+          val left = delegate.parseExpression(leftExpr.trim)
+          val right = delegate.parseExpression(rightExpr.trim)
+          IndexQueryExpression(left, right)
+        } catch {
+          case e: ParseException =>
+            // If parsing individual parts fails, delegate to default parser
+            delegate.parseExpression(sqlText)
+        }
+      case _ =>
+        delegate.parseExpression(sqlText)
+    }
   }
 
   override def parseTableIdentifier(sqlText: String): TableIdentifier = {
@@ -73,8 +94,25 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
     if (trimmed == "FLUSH TANTIVY4SPARK SEARCHER CACHE") {
       FlushTantivyCacheCommand()
     } else {
-      // Delegate to the default Spark SQL parser for all other commands
-      delegate.parseQuery(sqlText)
+      // Check if SQL contains indexquery operator and preprocess it
+      val preprocessedSql = preprocessIndexQueryOperators(sqlText)
+      delegate.parseQuery(preprocessedSql)
     }
+  }
+  
+  /**
+   * Preprocess SQL text to convert indexquery operators to function calls that Spark can parse.
+   * This allows us to inject our custom expressions into the logical plan.
+   */
+  private def preprocessIndexQueryOperators(sqlText: String): String = {
+    // Pattern to match: column_name indexquery 'query_string'
+    val indexQueryPattern = """(\w+)\s+indexquery\s+'([^']*)'""".r
+    
+    indexQueryPattern.replaceAllIn(sqlText, m => {
+      val columnName = m.group(1)
+      val queryString = m.group(2)
+      // Convert to a function call that we can intercept later
+      s"tantivy4spark_indexquery('$columnName', '$queryString')"
+    })
   }
 }

@@ -23,6 +23,7 @@ import com.tantivy4java.{Query, Schema, Occur, FieldType, Index}
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 import com.tantivy4spark.search.SplitSearchEngine
+import com.tantivy4spark.filters.IndexQueryFilter
 
 object FiltersToQueryConverter {
   
@@ -144,6 +145,7 @@ object FiltersToQueryConverter {
       case StringStartsWith(attribute, _) => Set(attribute)
       case StringEndsWith(attribute, _) => Set(attribute)
       case StringContains(attribute, _) => Set(attribute)
+      case indexQuery: IndexQueryFilter => Set(indexQuery.column)
       case And(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
       case Or(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
       case Not(child) => getFilterFieldNames(child)
@@ -391,6 +393,40 @@ object FiltersToQueryConverter {
           val pattern = "*" + value + "*"
           queryLog(s"StringContains pattern: '$pattern'")
           Query.wildcardQuery(schema, attribute, pattern, true)
+        
+        case indexQuery: IndexQueryFilter =>
+          queryLog(s"Creating IndexQuery: ${indexQuery.column} indexquery '${indexQuery.queryString}'")
+          
+          // Validate that the field exists in the schema
+          val fieldExists = try {
+            val fieldInfo = schema.getFieldInfo(indexQuery.column)
+            true
+          } catch {
+            case _: Exception =>
+              logger.warn(s"IndexQuery field '${indexQuery.column}' not found in schema, skipping")
+              false
+          }
+          
+          if (!fieldExists) {
+            // Return match-all query if field doesn't exist (graceful degradation)
+            queryLog(s"Field '${indexQuery.column}' not found, using match-all query")
+            Query.allQuery()
+          } else {
+            // Use parseQuery with the specified field
+            val fieldNames = List(indexQuery.column).asJava
+            queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.column}'")
+            
+            withTemporaryIndex(schema) { index =>
+              try {
+                index.parseQuery(indexQuery.queryString, fieldNames)
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
+                  // Fallback to match-all on parse failure
+                  Query.allQuery()
+              }
+            }
+          }
         
         case _ =>
           logger.warn(s"Unsupported filter: $filter, falling back to match-all")

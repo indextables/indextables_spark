@@ -79,6 +79,7 @@ class Tantivy4SparkScanBuilder(
 
   private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
+    import com.tantivy4spark.filters.IndexQueryFilter
     
     filter match {
       case _: EqualTo => true
@@ -96,6 +97,7 @@ class Tantivy4SparkScanBuilder(
       case _: StringStartsWith => true
       case _: StringEndsWith => true
       case _: StringContains => true
+      case _: IndexQueryFilter => true  // Add support for IndexQueryFilter
       case _ => false
     }
   }
