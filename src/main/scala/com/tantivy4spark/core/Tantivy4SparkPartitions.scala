@@ -115,6 +115,9 @@ class Tantivy4SparkPartitionReader(
     // Access the broadcast configuration in executor
     val broadcasted = broadcastConfig.value
     
+    // Debug: Log broadcast configuration received in executor
+    logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
+    
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
       val value = broadcasted.getOrElse(configKey, default)
@@ -123,12 +126,13 @@ class Tantivy4SparkPartitionReader(
     }
     
     def getBroadcastConfigOption(configKey: String): Option[String] = {
-      val value = broadcasted.get(configKey)
+      // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
+      val value = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
       logger.info(s"🔍 PartitionReader broadcast config for $configKey: ${value.getOrElse("None")}")
       value
     }
     
-    SplitCacheConfig(
+    val cacheConfig = SplitCacheConfig(
       cacheName = getBroadcastConfig("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
       maxCacheSize = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
       maxConcurrentLoads = getBroadcastConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
@@ -150,12 +154,17 @@ class Tantivy4SparkPartitionReader(
       gcpCredentialsFile = getBroadcastConfigOption("spark.tantivy4spark.gcp.credentialsFile"),
       gcpEndpoint = getBroadcastConfigOption("spark.tantivy4spark.gcp.endpoint")
     )
+    
+    // Debug: Log final cache configuration
+    logger.debug(s"🔍 Created SplitCacheConfig with AWS region: ${cacheConfig.awsRegion.getOrElse("None")}")
+    
+    cacheConfig
   }
 
   private def initialize(): Unit = {
     if (!initialized) {
       try {
-        logger.info(s"Reading Tantivy split: ${addAction.path}")
+        logger.info(s"🔍 V2 PartitionReader initializing for split: ${addAction.path}")
         
         // Record that this host has accessed this split for future scheduling locality
         val currentHostname = SplitLocationRegistry.getCurrentHostname
@@ -163,7 +172,9 @@ class Tantivy4SparkPartitionReader(
         logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
         
         // Create cache configuration from Spark options
+        logger.info(s"🔍 Creating cache configuration for split read...")
         val cacheConfig = createCacheConfig()
+        logger.info(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
         
         // Create split search engine using the split file directly
         // Use raw filesystem path for tantivy4java compatibility

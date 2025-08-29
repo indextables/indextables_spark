@@ -591,7 +591,7 @@ class Tantivy4SparkRelation(
     
     val transactionLog = new TransactionLog(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
-      throw new RuntimeException(s"Table does not exist at path: $path. No transaction log found. Use spark.write to create the table first.")
+      throw new RuntimeException(s"Path does not exist: $path. No transaction log found. Use spark.write to create the table first.")
     }
   }
   
@@ -631,7 +631,7 @@ class Tantivy4SparkRelation(
     val tableSchema = transactionLog.getSchema()
     if (tableSchema.isEmpty) {
       // Table doesn't exist - throw exception instead of returning empty results
-      throw new RuntimeException(s"Table does not exist at path: $path. No transaction log found. Use spark.write to create the table first.")
+      throw new RuntimeException(s"Path does not exist: $path. No transaction log found. Use spark.write to create the table first.")
     }
     
     // Get list of files from transaction log
@@ -799,13 +799,25 @@ class Tantivy4SparkTable(
     }
     
     // Extract configurations from read options (highest precedence)
+    println(s"🔧 V2 Read: ALL options received: ${options.asScala.keys.mkString(", ")}")
     val readTantivyConfigs = options.asScala
       .filter(_._1.startsWith("spark.tantivy4spark."))
       .toMap
     
+    // Debug: Log all configurations being merged with values
+    println(s"🔧 V2 Read: Hadoop configs: ${hadoopTantivyConfigs.keys.mkString(", ")}")
+    println(s"🔧 V2 Read: Spark session configs: ${sparkTantivyConfigs.keys.mkString(", ")}")
+    println(s"🔧 V2 Read: Read option configs: ${readTantivyConfigs.keys.mkString(", ")}")
+    
+    // Debug: Show specific credential keys in each source (check both cases)
+    println(s"🔧 HADOOP accessKey: ${if (hadoopTantivyConfigs.contains("spark.tantivy4spark.aws.accessKey")) "SET" else "MISSING"}")
+    println(s"🔧 SPARK accessKey: ${if (sparkTantivyConfigs.contains("spark.tantivy4spark.aws.accessKey")) "SET" else "MISSING"}")  
+    println(s"🔧 OPTIONS accessKey: ${if (readTantivyConfigs.contains("spark.tantivy4spark.aws.accesskey")) "SET(lowercase)" else if (readTantivyConfigs.contains("spark.tantivy4spark.aws.accessKey")) "SET(camelCase)" else "MISSING"}")
+    
     // Merge with proper precedence: Hadoop < Spark config < read options
     val tantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
     
+    // Debug: Log final broadcast configuration  
     logger.info(s"🔧 Broadcasting ${tantivyConfigs.size} Tantivy4Spark configurations to executors")
     logger.info(s"🔧 Sources: Hadoop(${hadoopTantivyConfigs.size}), Spark(${sparkTantivyConfigs.size}), Options(${readTantivyConfigs.size})")
     val broadcastConfig = spark.sparkContext.broadcast(tantivyConfigs)
@@ -816,17 +828,37 @@ class Tantivy4SparkTable(
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
+    // Debug: Log existing hadoop config before modification
+    logger.info(s"🔧 V2 Write: Existing Hadoop config tantivy4spark properties:")
+    hadoopConf.iterator().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
+      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
+      logger.info(s"  ${entry.getKey} = $value")
+    }
+    
     // Copy write options to Hadoop configuration so they're available in executors
     // Write options from info.options() should override any existing configuration
     import scala.jdk.CollectionConverters._
     val writeOptions = info.options()
+    logger.info(s"🔧 V2 Write: DataFrame options to copy:")
+    writeOptions.entrySet().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
+      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
+      logger.info(s"  ${entry.getKey} = $value")
+    }
+    
     writeOptions.entrySet().asScala.foreach { entry =>
       val key = entry.getKey
       val value = entry.getValue
       if (key.startsWith("spark.tantivy4spark.")) {
         hadoopConf.set(key, value)
-        logger.debug(s"🔧 V2 Write: Setting Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
+        logger.info(s"🔧 V2 Write: Set Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value}")
       }
+    }
+    
+    // Debug: Log final hadoop config after modification
+    logger.info(s"🔧 V2 Write: Final Hadoop config tantivy4spark properties:")
+    hadoopConf.iterator().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
+      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
+      logger.info(s"  ${entry.getKey} = $value")
     }
     
     new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, options, hadoopConf)
@@ -901,7 +933,7 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val transactionLog = new TransactionLog(new Path(paths.head), spark, mergedOptions)
     
     transactionLog.getSchema().getOrElse {
-      throw new RuntimeException(s"Table does not exist at path: ${paths.head}. No transaction log found. Use spark.write to create the table first.")
+      throw new RuntimeException(s"Path does not exist: ${paths.head}. No transaction log found. Use spark.write to create the table first.")
     }
   }
 

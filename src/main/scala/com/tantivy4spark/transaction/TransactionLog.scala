@@ -311,8 +311,8 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     } match {
       case Success(actions) => actions
       case Failure(ex) =>
-        logger.error(s"Failed to read version $version", ex)
-        Seq.empty
+        logger.error(s"Failed to read transaction log version $version", ex)
+        throw new RuntimeException(s"Failed to read transaction log: ${ex.getMessage}", ex)
     }
   }
 
