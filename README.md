@@ -12,7 +12,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
 - **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation to prevent native crashes
 - **IndexQuery Operator**: Custom pushdown filter for native Tantivy query syntax with full expression support
-- **IndexQueryAll Function**: All-fields search capability without column specification using native Tantivy queries
+- **IndexQueryAll Virtual Column**: All-fields search capability using virtual `_indexall` column with native Tantivy queries
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage with S3Mock compatibility
 - **AWS Session Token Support**: Full support for temporary credentials via AWS STS
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
@@ -255,7 +255,7 @@ df.filter($"bio".contains("machine* *learning")) // Matches terms with both patt
 Tantivy4Spark supports powerful query operators for native Tantivy query syntax with full filter pushdown:
 
 - **IndexQuery**: Field-specific search with column specification
-- **IndexQueryAll**: All-fields search without column specification
+- **IndexQueryAll**: All-fields search using virtual `_indexall` column
 
 ##### SQL Usage
 
@@ -271,24 +271,24 @@ OPTIONS (path 's3://bucket/my-data');
 -- Basic IndexQuery usage in SQL (field-specific)
 SELECT * FROM my_documents WHERE title indexquery 'apache AND spark';
 
--- Basic IndexQueryAll usage in SQL (all-fields search)
-SELECT * FROM my_documents WHERE indexqueryall('VERIZON OR T-MOBILE');
+-- Basic IndexQueryAll usage in SQL (all-fields search with virtual _indexall column)
+SELECT * FROM my_documents WHERE _indexall indexquery 'VERIZON OR T-MOBILE';
 
 -- Complex boolean queries
 SELECT * FROM my_documents WHERE content indexquery '(machine AND learning) OR (data AND science)';
-SELECT * FROM my_documents WHERE indexqueryall('(apache AND spark) OR (machine AND learning)');
+SELECT * FROM my_documents WHERE _indexall indexquery '(apache AND spark) OR (machine AND learning)';
 
 -- Field-specific queries vs all-fields
 SELECT * FROM my_documents WHERE description indexquery 'title:(fast OR quick) AND content:"deep learning"';
-SELECT * FROM my_documents WHERE indexqueryall('"artificial intelligence" AND NOT deprecated');
+SELECT * FROM my_documents WHERE _indexall indexquery '"artificial intelligence" AND NOT deprecated';
 
 -- Phrase searches
 SELECT * FROM my_documents WHERE content indexquery '"artificial intelligence"';
-SELECT * FROM my_documents WHERE indexqueryall('"natural language processing"');
+SELECT * FROM my_documents WHERE _indexall indexquery '"natural language processing"';
 
 -- Negation queries
 SELECT * FROM my_documents WHERE tags indexquery 'python AND NOT deprecated';
-SELECT * FROM my_documents WHERE indexqueryall('apache AND NOT legacy');
+SELECT * FROM my_documents WHERE _indexall indexquery 'apache AND NOT legacy';
 
 -- Combined with standard SQL predicates
 SELECT title, content, score 
@@ -303,9 +303,10 @@ LIMIT 10;
 ##### Programmatic Usage
 
 ```scala
-import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
+import com.tantivy4spark.expressions.IndexQueryExpression
 import com.tantivy4spark.util.ExpressionUtils
 import org.apache.spark.unsafe.types.UTF8String
+import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.Column
 
 // Create IndexQuery expressions programmatically for field-specific queries
@@ -313,13 +314,13 @@ val titleColumn = col("title").expr
 val complexQuery = Literal(UTF8String.fromString("(apache AND spark) OR (hadoop AND mapreduce)"), StringType)
 val indexQuery = IndexQueryExpression(titleColumn, complexQuery)
 
-// Create IndexQueryAll expressions for all-fields search
+// Create all-fields search using virtual _indexall column
 val allFieldsQuery = Literal(UTF8String.fromString("VERIZON OR T-MOBILE"), StringType)
-val indexQueryAll = IndexQueryAllExpression(allFieldsQuery)
+val indexQueryAll = IndexQueryExpression(col("_indexall").expr, allFieldsQuery)
 
 // Use in DataFrame operations
 df.filter(indexQuery).show()                    // Field-specific search
-df.filter(new Column(indexQueryAll)).show()    // All-fields search
+df.filter(new Column(indexQueryAll)).show()    // All-fields search using _indexall
 
 // Advanced query patterns
 val patterns = Seq(
@@ -346,7 +347,7 @@ patterns.foreach { pattern =>
 
 #### IndexQueryAll Operator
 
-Tantivy4Spark also supports an `IndexQueryAll` function for searching across all fields without specifying column names:
+Tantivy4Spark supports searching across all fields using the virtual `_indexall` column with the `indexquery` operator:
 
 ##### SQL Usage
 
@@ -359,19 +360,19 @@ CREATE TEMPORARY VIEW my_documents
 USING com.tantivy4spark.core.Tantivy4SparkTableProvider
 OPTIONS (path 's3://bucket/my-data');
 
--- Basic IndexQueryAll usage - searches across ALL fields
-SELECT * FROM my_documents WHERE indexqueryall('VERIZON OR T-MOBILE');
+-- Basic IndexQueryAll usage - searches across ALL fields using virtual _indexall column
+SELECT * FROM my_documents WHERE _indexall indexquery 'VERIZON OR T-MOBILE';
 
 -- Complex boolean queries across all fields
-SELECT * FROM my_documents WHERE indexqueryall('(apache AND spark) OR (machine AND learning)');
+SELECT * FROM my_documents WHERE _indexall indexquery '(apache AND spark) OR (machine AND learning)';
 
 -- Phrase searches across all fields
-SELECT * FROM my_documents WHERE indexqueryall('"artificial intelligence"');
+SELECT * FROM my_documents WHERE _indexall indexquery '"artificial intelligence"';
 
 -- Combined with standard SQL predicates
 SELECT title, content, category 
 FROM my_documents 
-WHERE indexqueryall('spark AND sql') 
+WHERE _indexall indexquery 'spark AND sql' 
   AND category = 'technology' 
   AND status = 'published'
 ORDER BY score DESC 
@@ -379,25 +380,28 @@ LIMIT 10;
 
 -- Multiple search patterns
 SELECT * FROM my_documents 
-WHERE indexqueryall('apache OR python') 
-   OR indexqueryall('machine learning');
+WHERE _indexall indexquery 'apache OR python' 
+   OR _indexall indexquery 'machine learning';
 ```
 
 ##### Programmatic Usage
 
 ```scala
-import com.tantivy4spark.expressions.IndexQueryAllExpression
+import com.tantivy4spark.expressions.IndexQueryExpression
 import com.tantivy4spark.util.ExpressionUtils
+import org.apache.spark.sql.functions.col
 import org.apache.spark.unsafe.types.UTF8String
 
-// Create IndexQueryAll expressions for all-fields search
-val allFieldsQuery = Literal(UTF8String.fromString("VERIZON OR T-MOBILE"), StringType)
-val indexQueryAllExpr = IndexQueryAllExpression(allFieldsQuery)
+// Create all-fields search using virtual _indexall column
+val allFieldsQuery = IndexQueryExpression(
+  col("_indexall").expr,
+  Literal(UTF8String.fromString("VERIZON OR T-MOBILE"), StringType)
+)
 
 // Use in DataFrame operations
-df.filter(new Column(indexQueryAllExpr)).show()
+df.filter(new Column(allFieldsQuery)).show()
 
-// Complex patterns across all fields
+// Complex patterns across all fields using _indexall virtual column
 val patterns = Seq(
   "apache AND spark",           // Boolean query across all fields
   "\"machine learning\"",       // Phrase search across all fields
@@ -406,19 +410,26 @@ val patterns = Seq(
 )
 
 patterns.foreach { pattern =>
-  val query = IndexQueryAllExpression(
+  val query = IndexQueryExpression(
+    col("_indexall").expr,
     Literal(UTF8String.fromString(pattern), StringType)
   )
   df.filter(new Column(query)).show()
 }
+
+// Alternative: Use Spark SQL with temp view for cleaner syntax
+df.createOrReplaceTempView("my_docs")
+spark.sql("SELECT * FROM my_docs WHERE _indexall indexquery 'apache AND spark'").show()
 ```
 
 **IndexQueryAll Features**:
+- ✅ **Virtual Column**: Uses virtual `_indexall` column with standard `indexquery` operator
 - ✅ **All-Fields Search**: Automatically searches across all text fields in the index
-- ✅ **No Column Specification**: No need to specify field names
+- ✅ **No Field Specification**: No need to specify actual field names - just use `_indexall`
 - ✅ **Full Filter Pushdown**: Queries execute natively in Tantivy with empty field list
-- ✅ **Same Query Syntax**: Supports same boolean, phrase, and wildcard syntax as IndexQuery
-- ✅ **Comprehensive Testing**: 36+ test cases covering expression, utils, and integration scenarios
+- ✅ **Same Query Syntax**: Supports same boolean, phrase, and wildcard syntax as field-specific IndexQuery
+- ✅ **V2 DataSource Integration**: Seamless integration with Spark's V2 DataSource API
+- ✅ **Comprehensive Testing**: 44+ test cases covering expression, utils, and integration scenarios
 
 #### SQL Pushdown Verification
 
