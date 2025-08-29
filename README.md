@@ -253,6 +253,44 @@ df.filter($"bio".contains("machine* *learning")) // Matches terms with both patt
 
 Tantivy4Spark supports a powerful `IndexQuery` operator for native Tantivy query syntax with full filter pushdown:
 
+##### SQL Usage
+
+```sql
+-- Register Tantivy4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+
+-- Create table/view from Tantivy4Spark data
+CREATE TEMPORARY VIEW my_documents 
+USING com.tantivy4spark.core.Tantivy4SparkTableProvider
+OPTIONS (path 's3://bucket/my-data');
+
+-- Basic IndexQuery usage in SQL
+SELECT * FROM my_documents WHERE title indexquery 'apache AND spark';
+
+-- Complex boolean queries
+SELECT * FROM my_documents WHERE content indexquery '(machine AND learning) OR (data AND science)';
+
+-- Field-specific queries
+SELECT * FROM my_documents WHERE description indexquery 'title:(fast OR quick) AND content:"deep learning"';
+
+-- Phrase searches
+SELECT * FROM my_documents WHERE content indexquery '"artificial intelligence"';
+
+-- Negation queries
+SELECT * FROM my_documents WHERE tags indexquery 'python AND NOT deprecated';
+
+-- Combined with standard SQL predicates
+SELECT title, content, score 
+FROM my_documents 
+WHERE content indexquery 'spark AND sql' 
+  AND category = 'technology' 
+  AND published_date >= '2023-01-01'
+ORDER BY score DESC 
+LIMIT 10;
+```
+
+##### Programmatic Usage
+
 ```scala
 import com.tantivy4spark.expressions.IndexQueryExpression
 import com.tantivy4spark.util.ExpressionUtils

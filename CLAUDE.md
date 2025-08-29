@@ -534,6 +534,49 @@ IndexQueryExpression → IndexQueryFilter → SplitIndex.parseQuery()
 
 ### Usage Examples
 
+#### SQL Usage
+
+```sql
+-- Register Tantivy4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+
+-- Create table/view from Tantivy4Spark data
+CREATE TEMPORARY VIEW documents 
+USING com.tantivy4spark.core.Tantivy4SparkTableProvider
+OPTIONS (path 's3://my-bucket/search-data');
+
+-- Basic IndexQuery usage in SQL
+SELECT title, content, score FROM documents 
+WHERE content indexquery 'machine learning AND spark';
+
+-- Complex boolean queries with field targeting
+SELECT * FROM documents 
+WHERE description indexquery 'title:(apache AND spark) OR content:"data science"';
+
+-- Phrase searches and negation
+SELECT title, tags FROM documents 
+WHERE content indexquery '"natural language processing"' 
+  AND tags indexquery 'python AND NOT deprecated';
+
+-- Combined with standard SQL predicates and operations
+SELECT title, content, category, published_date
+FROM documents 
+WHERE content indexquery '(AI OR ML) AND NOT outdated'
+  AND category IN ('technology', 'research')
+  AND published_date >= '2023-01-01'
+ORDER BY published_date DESC 
+LIMIT 20;
+
+-- Subqueries with IndexQuery
+SELECT category, COUNT(*) as doc_count
+FROM documents 
+WHERE content indexquery 'spark AND (SQL OR streaming)'
+GROUP BY category
+HAVING COUNT(*) > 5;
+```
+
+#### Programmatic Usage
+
 ```scala
 import com.tantivy4spark.expressions.IndexQueryExpression
 import com.tantivy4spark.util.ExpressionUtils
