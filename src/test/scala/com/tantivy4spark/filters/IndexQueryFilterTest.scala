@@ -24,7 +24,7 @@ class IndexQueryFilterTest extends AnyFunSuite {
   test("IndexQueryFilter should store column and query string correctly") {
     val filter = IndexQueryFilter("title", "machine learning AND spark")
     
-    assert(filter.column == "title")
+    assert(filter.columnName == "title")
     assert(filter.queryString == "machine learning AND spark")
     assert(filter.isValid)
   }
@@ -79,7 +79,7 @@ class IndexQueryFilterTest extends AnyFunSuite {
     val complexQuery = "(machine AND learning) OR (deep AND neural) NOT deprecated"
     val filter = IndexQueryFilter("content", complexQuery)
     
-    assert(filter.column == "content")
+    assert(filter.columnName == "content")
     assert(filter.queryString == complexQuery)
     assert(filter.normalizedQuery == complexQuery) // No extra whitespace
     assert(filter.isValid)

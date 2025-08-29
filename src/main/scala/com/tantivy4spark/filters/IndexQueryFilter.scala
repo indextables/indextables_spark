@@ -39,22 +39,22 @@ import org.apache.spark.sql.sources.Filter
  * - Range queries: field:[min TO max]
  */
 case class IndexQueryFilter(
-    column: String,
+    columnName: String,
     queryString: String
 ) {
   
-  override def toString: String = s"IndexQuery($column, '$queryString')"
+  override def toString: String = s"IndexQuery($columnName, '$queryString')"
   
   /**
    * References returns the set of column names that this filter references.
    */
-  def references: Array[String] = Array(column)
+  def references: Array[String] = Array(columnName)
   
   /**
    * Check if this filter is valid (non-empty column and query).
    */
   def isValid: Boolean = {
-    column.nonEmpty && queryString.nonEmpty
+    columnName.nonEmpty && queryString.nonEmpty
   }
   
   /**
@@ -62,3 +62,4 @@ case class IndexQueryFilter(
    */
   def normalizedQuery: String = queryString.trim
 }
+

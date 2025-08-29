@@ -50,7 +50,7 @@ object ExpressionUtils {
    * Useful for testing and reverse conversion scenarios.
    */
   def filterToExpression(filter: IndexQueryFilter): IndexQueryExpression = {
-    val leftExpr = UnresolvedAttribute(Seq(filter.column))
+    val leftExpr = UnresolvedAttribute(Seq(filter.columnName))
     val rightExpr = Literal(UTF8String.fromString(filter.queryString), StringType)
     IndexQueryExpression(leftExpr, rightExpr)
   }

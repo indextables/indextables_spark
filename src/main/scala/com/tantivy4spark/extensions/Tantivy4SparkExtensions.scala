@@ -25,7 +25,8 @@ import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 import com.tantivy4spark.sql.Tantivy4SparkSqlParser
-import com.tantivy4spark.expressions.IndexQueryExpression
+import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
+import com.tantivy4spark.catalyst.V2IndexQueryExpressionRule
 
 /**
  * Spark session extensions for Tantivy4Spark.
@@ -69,10 +70,28 @@ class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
       }
     ))
     
-    // Future: Add optimizer rules, strategies, etc.
-    // extensions.injectOptimizerRule { session =>
-    //   // Custom optimization rules can go here
-    // }
+    // Register the tantivy4spark_indexqueryall function
+    extensions.injectFunction((
+      FunctionIdentifier("tantivy4spark_indexqueryall"), 
+      new ExpressionInfo(
+        "com.tantivy4spark.expressions.IndexQueryAllExpression",
+        "tantivy4spark_indexqueryall",
+        "tantivy4spark_indexqueryall(query) - Creates an IndexQueryAll expression for searching across all fields."
+      ), 
+      (children: Seq[Expression]) => {
+        if (children.length == 1) {
+          IndexQueryAllExpression(children(0))
+        } else {
+          throw new IllegalArgumentException("tantivy4spark_indexqueryall requires exactly 1 argument")
+        }
+      }
+    ))
+    
+    // Register V2 IndexQuery expression conversion rule in post-hoc resolution phase
+    // This runs after function resolution but before optimization
+    extensions.injectPostHocResolutionRule { session =>
+      V2IndexQueryExpressionRule
+    }
     
     // Future: Add planning strategies
     // extensions.injectPlannerStrategy { session =>

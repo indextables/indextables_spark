@@ -64,7 +64,7 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
   test("Tantivy4SparkSqlParser should parse indexquery with qualified column names") {
     val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
     
-    val expr = parser.parseExpression("table.column indexquery 'search term'")
+    val expr = parser.parseExpression("table.columnName indexquery 'search term'")
     
     assert(expr.isInstanceOf[IndexQueryExpression])
     val indexQueryExpr = expr.asInstanceOf[IndexQueryExpression]

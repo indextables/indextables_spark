@@ -36,7 +36,7 @@ class ExpressionUtilsTest extends AnyFunSuite {
     
     assert(filter.isDefined)
     val indexQueryFilter = filter.get
-    assert(indexQueryFilter.column == "title")
+    assert(indexQueryFilter.columnName == "title")
     assert(indexQueryFilter.queryString == "spark AND sql")
   }
   
@@ -49,7 +49,7 @@ class ExpressionUtilsTest extends AnyFunSuite {
     
     assert(filter.isDefined)
     val indexQueryFilter = filter.get
-    assert(indexQueryFilter.column == "content.text")
+    assert(indexQueryFilter.columnName == "content.text")
     assert(indexQueryFilter.queryString == "machine learning")
   }
   
@@ -62,7 +62,7 @@ class ExpressionUtilsTest extends AnyFunSuite {
     
     assert(filter.isDefined)
     val indexQueryFilter = filter.get.asInstanceOf[IndexQueryFilter]
-    assert(indexQueryFilter.column == "description")
+    assert(indexQueryFilter.columnName == "description")
     assert(indexQueryFilter.queryString == "apache spark")
   }
   

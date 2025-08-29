@@ -34,7 +34,8 @@ class Tantivy4SparkScan(
     pushedFilters: Array[Filter],
     options: CaseInsensitiveStringMap,
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]]
+    broadcastConfig: Broadcast[Map[String, String]],
+    indexQueryFilters: Array[Any] = Array.empty
 ) extends Scan with Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScan])
@@ -52,7 +53,7 @@ class Tantivy4SparkScan(
     logger.warn(s"🔍 SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
     val partitions = filteredActions.zipWithIndex.map { case (addAction, index) =>
-      val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit)
+      val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
       val preferredHosts = partition.preferredLocations()
       if (preferredHosts.nonEmpty) {
         logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")

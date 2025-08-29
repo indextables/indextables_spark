@@ -135,10 +135,10 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
       s"tantivy4spark_indexquery('$columnName', '$queryString')"
     })
     
-    // Then replace indexqueryall functions
+    // Then replace indexqueryall functions  
     indexQueryAllPattern.replaceAllIn(afterIndexQuery, m => {
       val queryString = m.group(1)
-      // Convert to a function call that we can intercept later
+      // Convert to a function call using the registered function name
       s"tantivy4spark_indexqueryall('$queryString')"
     })
   }

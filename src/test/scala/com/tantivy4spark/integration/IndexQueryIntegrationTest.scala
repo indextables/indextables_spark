@@ -40,7 +40,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
     
     assert(filterOpt.isDefined)
     val filter = filterOpt.get
-    assert(filter.column == "title")
+    assert(filter.columnName == "title")
     assert(filter.queryString == "spark AND sql")
   }
   
@@ -116,7 +116,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
     assert(convertedFilter.isDefined)
     val roundTripFilter = convertedFilter.get
     
-    assert(roundTripFilter.column == originalFilter.column)
+    assert(roundTripFilter.columnName == originalFilter.columnName)
     assert(roundTripFilter.queryString == originalFilter.queryString)
   }
   
@@ -142,7 +142,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       
       val filter = ExpressionUtils.expressionToIndexQueryFilter(expr)
       assert(filter.isDefined)
-      assert(filter.get.column == column)
+      assert(filter.get.columnName == column)
       assert(filter.get.queryString == query)
     }
   }

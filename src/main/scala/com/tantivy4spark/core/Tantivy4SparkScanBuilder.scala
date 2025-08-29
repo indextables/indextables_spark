@@ -19,7 +19,6 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns, SupportsPushDownLimit}
-// Removed unused import
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -40,16 +39,40 @@ class Tantivy4SparkScanBuilder(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters = Array.empty[Filter]
+  // Store IndexQuery filters separately since they don't extend Filter
+  private var _pushedIndexQueryFilters = Array.empty[Any]
   private var requiredSchema = schema
   private var _limit: Option[Int] = None
 
   override def build(): Scan = {
-    new Tantivy4SparkScan(transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig)
+    new Tantivy4SparkScan(transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, _pushedIndexQueryFilters)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    val (supported, unsupported) = filters.partition(isSupportedFilter)
-    _pushedFilters = supported
+    logger.info(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} regular filters")
+    filters.foreach(filter => logger.info(s"  - Input filter: $filter"))
+    
+    // Get IndexQuery filters that were extracted by the V2IndexQueryExpressionRule
+    val extractedIndexQueryFilters = com.tantivy4spark.catalyst.V2IndexQueryExpressionRule.getExtractedFilters()
+    
+    logger.info(s"🔍 PUSHFILTERS DEBUG: Retrieved ${extractedIndexQueryFilters.length} IndexQuery filters from V2IndexQueryExpressionRule")
+    if (extractedIndexQueryFilters.nonEmpty) {
+      extractedIndexQueryFilters.foreach(filter => logger.info(s"  - Retrieved: $filter"))
+    }
+    
+    // Combine regular filters with extracted IndexQuery filters
+    val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ extractedIndexQueryFilters
+    
+    val (supported, unsupported) = allFilters.partition(isSupportedFilter)
+    
+    // Store regular Spark filters and IndexQuery filters separately
+    val supportedFilters = supported.collect { case f: Filter => f }
+    val supportedIndexQueryFilters = supported.filterNot(_.isInstanceOf[Filter])
+    
+    // Store them in separate fields to avoid type casting issues
+    _pushedFilters = supportedFilters
+    _pushedIndexQueryFilters = supportedIndexQueryFilters
+    
     
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
@@ -58,10 +81,10 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"  - ${unsupported.length} filters NOT SUPPORTED (will be re-evaluated by Spark after reading)")
     unsupported.foreach(filter => logger.info(s"    ✗ NOT PUSHED: $filter"))
     
-    // Critical: Return ONLY unsupported filters
+    // Critical: Return ONLY unsupported filters (and filter out any that aren't actually Spark Filters)
     // This tells Spark that supported filters are FULLY HANDLED by the data source
     // and Spark should NOT re-apply them after reading data
-    unsupported
+    unsupported.collect { case f: Filter => f }
   }
 
   override def pushedFilters(): Array[Filter] = _pushedFilters
@@ -77,7 +100,7 @@ class Tantivy4SparkScanBuilder(
     true // We support limit pushdown
   }
 
-  private def isSupportedFilter(filter: Filter): Boolean = {
+  private def isSupportedFilter(filter: Any): Boolean = {
     import org.apache.spark.sql.sources._
     import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
     

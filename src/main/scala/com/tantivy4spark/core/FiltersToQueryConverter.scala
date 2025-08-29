@@ -35,6 +35,58 @@ object FiltersToQueryConverter {
   def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): Query = {
     convertToQuery(filters, splitSearchEngine, None)
   }
+  
+  /**
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object.
+   */
+  def convertToQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine): Query = {
+    convertToQuery(filters, splitSearchEngine, None)
+  }
+  
+  /**
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object with schema field validation.
+   */
+  def convertToQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): Query = {
+    val schema = splitSearchEngine.getSchema()
+    if (filters.isEmpty) {
+      return Query.allQuery()
+    }
+
+    // Debug logging to understand what filters we receive  
+    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters:")
+    filters.zipWithIndex.foreach { case (filter, idx) =>
+      queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
+    }
+
+    // Filter out filters that reference non-existent fields
+    val validFilters = schemaFieldNames match {
+      case Some(fieldNames) =>
+        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
+        val valid = filters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
+        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        valid
+      case None =>
+        queryLog("No schema validation - using all filters")
+        filters // No schema validation if fieldNames not provided
+    }
+
+    if (validFilters.length < filters.length) {
+      val skippedCount = filters.length - validFilters.length
+      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
+    }
+
+    val queries = validFilters.flatMap(filter => Option(convertMixedFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
+    
+    if (queries.isEmpty) {
+      Query.allQuery()
+    } else if (queries.length == 1) {
+      queries.head
+    } else {
+      // Combine multiple queries with AND logic
+      val occurQueries = queries.map(query => new Query.OccurQuery(Occur.MUST, query)).toList
+      Query.booleanQuery(occurQueries.asJava)
+    }
+  }
 
   /**
    * Convert Spark filters to a tantivy4java Query object with schema field validation.
@@ -145,7 +197,7 @@ object FiltersToQueryConverter {
       case StringStartsWith(attribute, _) => Set(attribute)
       case StringEndsWith(attribute, _) => Set(attribute)
       case StringContains(attribute, _) => Set(attribute)
-      case indexQuery: IndexQueryFilter => Set(indexQuery.column)
+      case indexQuery: IndexQueryFilter => Set(indexQuery.columnName)
       case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
       case And(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
       case Or(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
@@ -396,26 +448,26 @@ object FiltersToQueryConverter {
           Query.wildcardQuery(schema, attribute, pattern, true)
         
         case indexQuery: IndexQueryFilter =>
-          queryLog(s"Creating IndexQuery: ${indexQuery.column} indexquery '${indexQuery.queryString}'")
+          queryLog(s"Creating IndexQuery: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
           
           // Validate that the field exists in the schema
           val fieldExists = try {
-            val fieldInfo = schema.getFieldInfo(indexQuery.column)
+            val fieldInfo = schema.getFieldInfo(indexQuery.columnName)
             true
           } catch {
             case _: Exception =>
-              logger.warn(s"IndexQuery field '${indexQuery.column}' not found in schema, skipping")
+              logger.warn(s"IndexQuery field '${indexQuery.columnName}' not found in schema, skipping")
               false
           }
           
           if (!fieldExists) {
             // Return match-all query if field doesn't exist (graceful degradation)
-            queryLog(s"Field '${indexQuery.column}' not found, using match-all query")
+            queryLog(s"Field '${indexQuery.columnName}' not found, using match-all query")
             Query.allQuery()
           } else {
             // Use parseQuery with the specified field
-            val fieldNames = List(indexQuery.column).asJava
-            queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.column}'")
+            val fieldNames = List(indexQuery.columnName).asJava
+            queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
             
             withTemporaryIndex(schema) { index =>
               try {
@@ -432,13 +484,12 @@ object FiltersToQueryConverter {
         case indexQueryAll: IndexQueryAllFilter =>
           queryLog(s"Creating IndexQueryAll: indexqueryall('${indexQueryAll.queryString}')")
           
-          // Use parseQuery without specifying field names for all-fields search
-          val fieldNames = java.util.Collections.emptyList[String]()
+          // Use single-argument parseQuery for all-fields search
           queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
           
           withTemporaryIndex(schema) { index =>
             try {
-              index.parseQuery(indexQueryAll.queryString, fieldNames)
+              index.parseQuery(indexQueryAll.queryString)
             } catch {
               case e: Exception =>
                 logger.warn(s"Failed to parse indexqueryall '${indexQueryAll.queryString}': ${e.getMessage}")
@@ -455,6 +506,121 @@ object FiltersToQueryConverter {
       case e: Exception =>
         logger.error(s"Failed to convert filter $filter to Query: ${e.getMessage}", e)
         Query.allQuery() // Fallback to match-all query
+    }
+  }
+  
+  /**
+   * Check if a mixed filter (Spark Filter or custom filter) is valid for the schema.
+   */
+  private def isMixedFilterValidForSchema(filter: Any, fieldNames: Set[String]): Boolean = {
+    import org.apache.spark.sql.sources._
+    import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
+    
+    def getMixedFilterFieldNames(f: Any): Set[String] = f match {
+      // Handle standard Spark filters
+      case sparkFilter: Filter =>
+        sparkFilter match {
+          case EqualTo(attribute, _) => Set(attribute)
+          case EqualNullSafe(attribute, _) => Set(attribute)
+          case GreaterThan(attribute, _) => Set(attribute)
+          case GreaterThanOrEqual(attribute, _) => Set(attribute)
+          case LessThan(attribute, _) => Set(attribute)
+          case LessThanOrEqual(attribute, _) => Set(attribute)
+          case In(attribute, _) => Set(attribute)
+          case IsNull(attribute) => Set(attribute)
+          case IsNotNull(attribute) => Set(attribute)
+          case StringStartsWith(attribute, _) => Set(attribute)
+          case StringEndsWith(attribute, _) => Set(attribute)
+          case StringContains(attribute, _) => Set(attribute)
+          case And(left, right) => getMixedFilterFieldNames(left) ++ getMixedFilterFieldNames(right)
+          case Or(left, right) => getMixedFilterFieldNames(left) ++ getMixedFilterFieldNames(right)
+          case Not(child) => getMixedFilterFieldNames(child)
+          case _ => Set.empty
+        }
+      // Handle custom filters
+      case indexQuery: IndexQueryFilter => Set(indexQuery.columnName)
+      case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
+      case _ => Set.empty
+    }
+    
+    val filterFields = getMixedFilterFieldNames(filter)
+    val isValid = filterFields.subsetOf(fieldNames)
+    
+    if (!isValid) {
+      val missingFields = filterFields -- fieldNames
+      queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
+    }
+    
+    isValid
+  }
+  
+  /**
+   * Convert a mixed filter (Spark Filter or custom filter) to a Query object.
+   */
+  private def convertMixedFilterToQuery(filter: Any, splitSearchEngine: SplitSearchEngine, schema: Schema): Query = {
+    import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
+    
+    filter match {
+      // Handle standard Spark filters
+      case sparkFilter: Filter =>
+        convertFilterToQuery(sparkFilter, splitSearchEngine, schema)
+      
+      // Handle custom IndexQuery filters  
+      case indexQuery: IndexQueryFilter =>
+        queryLog(s"Converting custom IndexQueryFilter: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
+        
+        // Validate that the field exists in the schema
+        val fieldExists = try {
+          val fieldInfo = schema.getFieldInfo(indexQuery.columnName)
+          true
+        } catch {
+          case _: Exception =>
+            logger.warn(s"IndexQuery field '${indexQuery.columnName}' not found in schema, skipping")
+            false
+        }
+        
+        if (!fieldExists) {
+          // Return match-all query if field doesn't exist (graceful degradation)
+          queryLog(s"Field '${indexQuery.columnName}' not found, using match-all query")
+          Query.allQuery()
+        } else {
+          // Use parseQuery with the specified field
+          val fieldNames = List(indexQuery.columnName).asJava
+          queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
+          
+          withTemporaryIndex(schema) { index =>
+            try {
+              index.parseQuery(indexQuery.queryString, fieldNames)
+            } catch {
+              case e: Exception =>
+                logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
+                // Fallback to match-all on parse failure
+                Query.allQuery()
+            }
+          }
+        }
+      
+      // Handle custom IndexQueryAll filters
+      case indexQueryAll: IndexQueryAllFilter =>
+        queryLog(s"Converting custom IndexQueryAllFilter: indexqueryall('${indexQueryAll.queryString}')")
+        
+        // Use single-argument parseQuery for all-fields search
+        queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
+        
+        withTemporaryIndex(schema) { index =>
+          try {
+            index.parseQuery(indexQueryAll.queryString)
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to parse indexqueryall '${indexQueryAll.queryString}': ${e.getMessage}")
+              // Fallback to match-all on parse failure
+              Query.allQuery()
+          }
+        }
+      
+      case _ =>
+        logger.warn(s"Unsupported mixed filter: $filter (${filter.getClass.getSimpleName}), falling back to match-all")
+        Query.allQuery()
     }
   }
   

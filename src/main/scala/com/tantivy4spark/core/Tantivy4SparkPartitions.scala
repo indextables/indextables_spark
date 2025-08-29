@@ -41,7 +41,8 @@ class Tantivy4SparkInputPartition(
     val readSchema: StructType,
     val filters: Array[Filter],
     val partitionId: Int,
-    val limit: Option[Int] = None
+    val limit: Option[Int] = None,
+    val indexQueryFilters: Array[Any] = Array.empty
 ) extends InputPartition {
   
   /**
@@ -78,7 +79,8 @@ class Tantivy4SparkReaderFactory(
       tantivyPartition.filters,
       tantivyPartition.limit.orElse(limit),
       broadcastConfig,
-      tablePath
+      tablePath,
+      tantivyPartition.indexQueryFilters
     )
   }
 }
@@ -89,7 +91,8 @@ class Tantivy4SparkPartitionReader(
     filters: Array[Filter],
     limit: Option[Int] = None,
     broadcastConfig: Broadcast[Map[String, String]],
-    tablePath: Path
+    tablePath: Path,
+    indexQueryFilters: Array[Any] = Array.empty
 ) extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
@@ -235,17 +238,22 @@ class Tantivy4SparkPartitionReader(
         // Log the filters and limit for debugging
         logger.info(s"Pushdown configuration for ${addAction.path}:")
         logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
+        logger.info(s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}")
         logger.info(s"  - Limit: $effectiveLimit")
         
+        // Combine regular Spark filters with IndexQuery filters
+        val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+        logger.info(s"  - Combined Filters: ${allFilters.length} total filters")
+        
         // Convert filters to Tantivy Query object with schema validation
-        val query = if (filters.nonEmpty) {
+        val query = if (allFilters.nonEmpty) {
           val queryObj = if (splitFieldNames.nonEmpty) {
-            val validatedQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine, Some(splitFieldNames))
+            val validatedQuery = FiltersToQueryConverter.convertToQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
             logger.info(s"  - Query (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToQuery(filters, splitSearchEngine)
+            val fallbackQuery = FiltersToQueryConverter.convertToQuery(allFilters, splitSearchEngine)
             logger.info(s"  - Query (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }
