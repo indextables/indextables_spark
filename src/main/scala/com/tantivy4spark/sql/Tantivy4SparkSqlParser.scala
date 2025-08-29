@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
-import com.tantivy4spark.expressions.IndexQueryExpression
+import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
 
 /**
  * Custom SQL parser for Tantivy4Spark that extends the default Spark SQL parser
@@ -33,6 +33,7 @@ import com.tantivy4spark.expressions.IndexQueryExpression
  * 
  * Supported operators:
  * - indexquery: column indexquery 'query_string'
+ * - indexqueryall: indexqueryall('query_string')
  */
 class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
@@ -52,6 +53,9 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
     // Check for indexquery operator pattern
     val indexQueryPattern = """(.+?)\s+indexquery\s+(.+)""".r
     
+    // Check for indexqueryall function pattern
+    val indexQueryAllPattern = """indexqueryall\s*\(\s*(.+)\s*\)""".r
+    
     sqlText.trim match {
       case indexQueryPattern(leftExpr, rightExpr) =>
         try {
@@ -63,6 +67,17 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
             // If parsing individual parts fails, delegate to default parser
             delegate.parseExpression(sqlText)
         }
+      
+      case indexQueryAllPattern(queryExpr) =>
+        try {
+          val query = delegate.parseExpression(queryExpr.trim)
+          IndexQueryAllExpression(query)
+        } catch {
+          case e: ParseException =>
+            // If parsing query fails, delegate to default parser
+            delegate.parseExpression(sqlText)
+        }
+      
       case _ =>
         delegate.parseExpression(sqlText)
     }
@@ -101,18 +116,30 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
   }
   
   /**
-   * Preprocess SQL text to convert indexquery operators to function calls that Spark can parse.
-   * This allows us to inject our custom expressions into the logical plan.
+   * Preprocess SQL text to convert indexquery operators and indexqueryall functions 
+   * to function calls that Spark can parse. This allows us to inject our custom 
+   * expressions into the logical plan.
    */
   private def preprocessIndexQueryOperators(sqlText: String): String = {
     // Pattern to match: column_name indexquery 'query_string'
     val indexQueryPattern = """(\w+)\s+indexquery\s+'([^']*)'""".r
     
-    indexQueryPattern.replaceAllIn(sqlText, m => {
+    // Pattern to match: indexqueryall('query_string')
+    val indexQueryAllPattern = """indexqueryall\s*\(\s*'([^']*)'\s*\)""".r
+    
+    // First replace indexquery operators
+    val afterIndexQuery = indexQueryPattern.replaceAllIn(sqlText, m => {
       val columnName = m.group(1)
       val queryString = m.group(2)
       // Convert to a function call that we can intercept later
       s"tantivy4spark_indexquery('$columnName', '$queryString')"
+    })
+    
+    // Then replace indexqueryall functions
+    indexQueryAllPattern.replaceAllIn(afterIndexQuery, m => {
+      val queryString = m.group(1)
+      // Convert to a function call that we can intercept later
+      s"tantivy4spark_indexqueryall('$queryString')"
     })
   }
 }

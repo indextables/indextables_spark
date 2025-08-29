@@ -23,7 +23,7 @@ import com.tantivy4java.{Query, Schema, Occur, FieldType, Index}
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 import com.tantivy4spark.search.SplitSearchEngine
-import com.tantivy4spark.filters.IndexQueryFilter
+import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
 object FiltersToQueryConverter {
   
@@ -146,6 +146,7 @@ object FiltersToQueryConverter {
       case StringEndsWith(attribute, _) => Set(attribute)
       case StringContains(attribute, _) => Set(attribute)
       case indexQuery: IndexQueryFilter => Set(indexQuery.column)
+      case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
       case And(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
       case Or(left, right) => getFilterFieldNames(left) ++ getFilterFieldNames(right)
       case Not(child) => getFilterFieldNames(child)
@@ -425,6 +426,24 @@ object FiltersToQueryConverter {
                   // Fallback to match-all on parse failure
                   Query.allQuery()
               }
+            }
+          }
+        
+        case indexQueryAll: IndexQueryAllFilter =>
+          queryLog(s"Creating IndexQueryAll: indexqueryall('${indexQueryAll.queryString}')")
+          
+          // Use parseQuery without specifying field names for all-fields search
+          val fieldNames = java.util.Collections.emptyList[String]()
+          queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
+          
+          withTemporaryIndex(schema) { index =>
+            try {
+              index.parseQuery(indexQueryAll.queryString, fieldNames)
+            } catch {
+              case e: Exception =>
+                logger.warn(s"Failed to parse indexqueryall '${indexQueryAll.queryString}': ${e.getMessage}")
+                // Fallback to match-all on parse failure
+                Query.allQuery()
             }
           }
         

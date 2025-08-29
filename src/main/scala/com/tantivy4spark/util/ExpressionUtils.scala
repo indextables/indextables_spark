@@ -22,8 +22,8 @@ import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
-import com.tantivy4spark.expressions.IndexQueryExpression
-import com.tantivy4spark.filters.IndexQueryFilter
+import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
+import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
 object ExpressionUtils {
   
@@ -56,6 +56,27 @@ object ExpressionUtils {
   }
   
   /**
+   * Convert Catalyst expressions to IndexQueryAllFilter for pushdown.
+   * This is used during filter pushdown to convert IndexQueryAllExpression to IndexQueryAllFilter.
+   */
+  def expressionToIndexQueryAllFilter(expr: Expression): Option[IndexQueryAllFilter] = {
+    expr match {
+      case IndexQueryAllExpression(child) =>
+        extractStringLiteral(child).map(IndexQueryAllFilter.apply)
+      case _ => None
+    }
+  }
+  
+  /**
+   * Convert an IndexQueryAllFilter back to an IndexQueryAllExpression.
+   * Useful for testing and reverse conversion scenarios.
+   */
+  def filterToIndexQueryAllExpression(filter: IndexQueryAllFilter): IndexQueryAllExpression = {
+    val queryExpr = Literal(UTF8String.fromString(filter.queryString), StringType)
+    IndexQueryAllExpression(queryExpr)
+  }
+  
+  /**
    * Extract column name from various expression types.
    */
   def extractColumnName(expr: Expression): Option[String] = {
@@ -83,20 +104,50 @@ object ExpressionUtils {
   def isValidIndexQuery(expr: Expression): Boolean = {
     expr match {
       case iq: IndexQueryExpression => iq.canPushDown
+      case iq: IndexQueryAllExpression => iq.canPushDown
       case _ => false
     }
   }
   
   /**
-   * Extract all IndexQueryExpression instances from a complex expression tree.
+   * Extract all IndexQuery expressions from a complex expression tree.
+   * Returns both IndexQueryExpression and IndexQueryAllExpression instances.
    * Useful for analyzing complex WHERE clauses with multiple indexquery operators.
    */
-  def extractIndexQueries(expr: Expression): Seq[IndexQueryExpression] = {
+  def extractIndexQueries(expr: Expression): Seq[Expression] = {
     expr match {
       case iq: IndexQueryExpression => Seq(iq)
+      case iq: IndexQueryAllExpression => Seq(iq)
       case And(left, right) => extractIndexQueries(left) ++ extractIndexQueries(right)
       case Or(left, right) => extractIndexQueries(left) ++ extractIndexQueries(right)
       case Not(child) => extractIndexQueries(child)
+      case _ => Seq.empty
+    }
+  }
+  
+  /**
+   * Extract only IndexQueryExpression instances from a complex expression tree.
+   * Maintains backward compatibility for existing code.
+   */
+  def extractIndexQueryExpressions(expr: Expression): Seq[IndexQueryExpression] = {
+    expr match {
+      case iq: IndexQueryExpression => Seq(iq)
+      case And(left, right) => extractIndexQueryExpressions(left) ++ extractIndexQueryExpressions(right)
+      case Or(left, right) => extractIndexQueryExpressions(left) ++ extractIndexQueryExpressions(right)
+      case Not(child) => extractIndexQueryExpressions(child)
+      case _ => Seq.empty
+    }
+  }
+  
+  /**
+   * Extract only IndexQueryAllExpression instances from a complex expression tree.
+   */
+  def extractIndexQueryAllExpressions(expr: Expression): Seq[IndexQueryAllExpression] = {
+    expr match {
+      case iq: IndexQueryAllExpression => Seq(iq)
+      case And(left, right) => extractIndexQueryAllExpressions(left) ++ extractIndexQueryAllExpressions(right)
+      case Or(left, right) => extractIndexQueryAllExpressions(left) ++ extractIndexQueryAllExpressions(right)
+      case Not(child) => extractIndexQueryAllExpressions(child)
       case _ => Seq.empty
     }
   }
@@ -116,6 +167,19 @@ object ExpressionUtils {
       case Some(query) if query.nonEmpty => scala.util.Right(())
       case Some(_) => scala.util.Left("Query string cannot be empty")
       case None => scala.util.Left(s"Invalid query string in indexquery: ${expr.right}")
+    }
+    
+    queryCheck
+  }
+  
+  /**
+   * Validate that an IndexQueryAllExpression has the correct structure and types.
+   */
+  def validateIndexQueryAllExpression(expr: IndexQueryAllExpression): Either[String, Unit] = {
+    val queryCheck = expr.getQueryString match {
+      case Some(query) if query.nonEmpty => scala.util.Right(())
+      case Some(_) => scala.util.Left("Query string cannot be empty")
+      case None => scala.util.Left(s"Invalid query string in indexqueryall: ${expr.child}")
     }
     
     queryCheck

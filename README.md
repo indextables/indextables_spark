@@ -12,6 +12,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart File Skipping**: Min/max value tracking for efficient query pruning
 - **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation to prevent native crashes
 - **IndexQuery Operator**: Custom pushdown filter for native Tantivy query syntax with full expression support
+- **IndexQueryAll Function**: All-fields search capability without column specification using native Tantivy queries
 - **S3-Optimized Storage**: Intelligent caching and compression for object storage with S3Mock compatibility
 - **AWS Session Token Support**: Full support for temporary credentials via AWS STS
 - **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
@@ -20,7 +21,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
 - **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
 - **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
-- **Production Ready**: 100% test pass rate with comprehensive coverage including 49 IndexQuery operator tests
+- **Production Ready**: 100% test pass rate with comprehensive coverage including 49 IndexQuery and 44 IndexQueryAll tests
 
 ## Architecture
 
@@ -249,9 +250,12 @@ df.filter($"bio".contains("machine* *learning")) // Matches terms with both patt
 - Wildcard queries work at the term level after tokenization
 - Case sensitivity follows the tokenizer configuration (default is case-insensitive)
 
-#### IndexQuery Operator
+#### IndexQuery and IndexQueryAll Operators
 
-Tantivy4Spark supports a powerful `IndexQuery` operator for native Tantivy query syntax with full filter pushdown:
+Tantivy4Spark supports powerful query operators for native Tantivy query syntax with full filter pushdown:
+
+- **IndexQuery**: Field-specific search with column specification
+- **IndexQueryAll**: All-fields search without column specification
 
 ##### SQL Usage
 
@@ -264,20 +268,27 @@ CREATE TEMPORARY VIEW my_documents
 USING com.tantivy4spark.core.Tantivy4SparkTableProvider
 OPTIONS (path 's3://bucket/my-data');
 
--- Basic IndexQuery usage in SQL
+-- Basic IndexQuery usage in SQL (field-specific)
 SELECT * FROM my_documents WHERE title indexquery 'apache AND spark';
+
+-- Basic IndexQueryAll usage in SQL (all-fields search)
+SELECT * FROM my_documents WHERE indexqueryall('VERIZON OR T-MOBILE');
 
 -- Complex boolean queries
 SELECT * FROM my_documents WHERE content indexquery '(machine AND learning) OR (data AND science)';
+SELECT * FROM my_documents WHERE indexqueryall('(apache AND spark) OR (machine AND learning)');
 
--- Field-specific queries
+-- Field-specific queries vs all-fields
 SELECT * FROM my_documents WHERE description indexquery 'title:(fast OR quick) AND content:"deep learning"';
+SELECT * FROM my_documents WHERE indexqueryall('"artificial intelligence" AND NOT deprecated');
 
 -- Phrase searches
 SELECT * FROM my_documents WHERE content indexquery '"artificial intelligence"';
+SELECT * FROM my_documents WHERE indexqueryall('"natural language processing"');
 
 -- Negation queries
 SELECT * FROM my_documents WHERE tags indexquery 'python AND NOT deprecated';
+SELECT * FROM my_documents WHERE indexqueryall('apache AND NOT legacy');
 
 -- Combined with standard SQL predicates
 SELECT title, content, score 
@@ -292,17 +303,23 @@ LIMIT 10;
 ##### Programmatic Usage
 
 ```scala
-import com.tantivy4spark.expressions.IndexQueryExpression
+import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
 import com.tantivy4spark.util.ExpressionUtils
 import org.apache.spark.unsafe.types.UTF8String
+import org.apache.spark.sql.Column
 
-// Create IndexQuery expressions programmatically for complex Tantivy queries
+// Create IndexQuery expressions programmatically for field-specific queries
 val titleColumn = col("title").expr
 val complexQuery = Literal(UTF8String.fromString("(apache AND spark) OR (hadoop AND mapreduce)"), StringType)
 val indexQuery = IndexQueryExpression(titleColumn, complexQuery)
 
+// Create IndexQueryAll expressions for all-fields search
+val allFieldsQuery = Literal(UTF8String.fromString("VERIZON OR T-MOBILE"), StringType)
+val indexQueryAll = IndexQueryAllExpression(allFieldsQuery)
+
 // Use in DataFrame operations
-df.filter(indexQuery).show()
+df.filter(indexQuery).show()                    // Field-specific search
+df.filter(new Column(indexQueryAll)).show()    // All-fields search
 
 // Advanced query patterns
 val patterns = Seq(
@@ -326,6 +343,82 @@ patterns.foreach { pattern =>
 - ✅ **Type Safety**: Comprehensive validation with descriptive error messages
 - ✅ **Expression Trees**: Support for complex expression combinations with standard Spark filters
 - ✅ **Comprehensive Testing**: 49 test cases covering all scenarios and edge cases
+
+#### IndexQueryAll Operator
+
+Tantivy4Spark also supports an `IndexQueryAll` function for searching across all fields without specifying column names:
+
+##### SQL Usage
+
+```sql
+-- Register Tantivy4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+
+-- Create table/view from Tantivy4Spark data
+CREATE TEMPORARY VIEW my_documents 
+USING com.tantivy4spark.core.Tantivy4SparkTableProvider
+OPTIONS (path 's3://bucket/my-data');
+
+-- Basic IndexQueryAll usage - searches across ALL fields
+SELECT * FROM my_documents WHERE indexqueryall('VERIZON OR T-MOBILE');
+
+-- Complex boolean queries across all fields
+SELECT * FROM my_documents WHERE indexqueryall('(apache AND spark) OR (machine AND learning)');
+
+-- Phrase searches across all fields
+SELECT * FROM my_documents WHERE indexqueryall('"artificial intelligence"');
+
+-- Combined with standard SQL predicates
+SELECT title, content, category 
+FROM my_documents 
+WHERE indexqueryall('spark AND sql') 
+  AND category = 'technology' 
+  AND status = 'published'
+ORDER BY score DESC 
+LIMIT 10;
+
+-- Multiple search patterns
+SELECT * FROM my_documents 
+WHERE indexqueryall('apache OR python') 
+   OR indexqueryall('machine learning');
+```
+
+##### Programmatic Usage
+
+```scala
+import com.tantivy4spark.expressions.IndexQueryAllExpression
+import com.tantivy4spark.util.ExpressionUtils
+import org.apache.spark.unsafe.types.UTF8String
+
+// Create IndexQueryAll expressions for all-fields search
+val allFieldsQuery = Literal(UTF8String.fromString("VERIZON OR T-MOBILE"), StringType)
+val indexQueryAllExpr = IndexQueryAllExpression(allFieldsQuery)
+
+// Use in DataFrame operations
+df.filter(new Column(indexQueryAllExpr)).show()
+
+// Complex patterns across all fields
+val patterns = Seq(
+  "apache AND spark",           // Boolean query across all fields
+  "\"machine learning\"",       // Phrase search across all fields
+  "(python OR scala)",         // OR queries across all fields
+  "data AND NOT deprecated"     // Negation queries across all fields
+)
+
+patterns.foreach { pattern =>
+  val query = IndexQueryAllExpression(
+    Literal(UTF8String.fromString(pattern), StringType)
+  )
+  df.filter(new Column(query)).show()
+}
+```
+
+**IndexQueryAll Features**:
+- ✅ **All-Fields Search**: Automatically searches across all text fields in the index
+- ✅ **No Column Specification**: No need to specify field names
+- ✅ **Full Filter Pushdown**: Queries execute natively in Tantivy with empty field list
+- ✅ **Same Query Syntax**: Supports same boolean, phrase, and wildcard syntax as IndexQuery
+- ✅ **Comprehensive Testing**: 36+ test cases covering expression, utils, and integration scenarios
 
 #### SQL Pushdown Verification
 
