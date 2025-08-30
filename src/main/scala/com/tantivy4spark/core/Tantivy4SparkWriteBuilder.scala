@@ -22,6 +22,7 @@ import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder, Sup
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.config.Tantivy4SparkConfig
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkWriteBuilder(
@@ -50,9 +51,7 @@ class Tantivy4SparkWriteBuilder(
   }
 
   override def build(): org.apache.spark.sql.connector.write.Write = {
-    logger.info(s"Building optimized write for table at: $tablePath (overwrite mode: $isOverwrite)")
-    // Use write options from info (DataFrame .option() calls), not table-level options
-    // This ensures write-specific options override table/session configuration
+    logger.info(s"Building write for table at: $tablePath (overwrite mode: $isOverwrite)")
     
     // Serialize options to Map[String, String] to avoid CaseInsensitiveStringMap serialization issues
     import scala.jdk.CollectionConverters._
@@ -60,6 +59,48 @@ class Tantivy4SparkWriteBuilder(
       entry.getKey -> entry.getValue
     }.toMap
     
-    new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite)
+    // Check if optimized write is enabled
+    val tantivyOptions = Tantivy4SparkOptions(info.options())
+    val spark = org.apache.spark.sql.SparkSession.active
+    
+    // Check DataFrame write options first
+    val optimizeWriteEnabled = tantivyOptions.optimizeWrite.getOrElse {
+      // Check Spark session configuration
+      spark.conf.getOption("spark.tantivy4spark.optimizeWrite.enabled")
+        .map(_.toBoolean)
+        .getOrElse {
+          // Check table properties or use default
+          try {
+            val metadata = transactionLog.getMetadata()
+            Tantivy4SparkConfig.OPTIMIZE_WRITE.fromMetadata(metadata).getOrElse(
+              Tantivy4SparkConfig.OPTIMIZE_WRITE.defaultValue
+            )
+          } catch {
+            case _: Exception => Tantivy4SparkConfig.OPTIMIZE_WRITE.defaultValue
+          }
+        }
+    }
+    
+    logger.info(s"WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled")
+    
+    if (optimizeWriteEnabled) {
+      logger.info("Using Tantivy4SparkOptimizedWrite with RequiresDistributionAndOrdering")
+      
+      // Try to get row count hint from options or compute it
+      val estimatedRowCount = serializedOptions.get("estimatedRowCount").map(_.toLong).getOrElse {
+        // Default estimate - in production you might sample the DataFrame
+        1000000L
+      }
+      
+      logger.info(s"Creating Tantivy4SparkOptimizedWrite with estimatedRowCount = $estimatedRowCount")
+      val optimizedWrite = new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite, estimatedRowCount)
+      logger.info(s"Created write instance: ${optimizedWrite.getClass.getSimpleName}")
+      optimizedWrite
+    } else {
+      logger.info("Using Tantivy4SparkStandardWrite without RequiresDistributionAndOrdering")
+      val standardWrite = new Tantivy4SparkStandardWrite(transactionLog, tablePath, info, serializedOptions, hadoopConf, isOverwrite)
+      logger.info(s"Created write instance: ${standardWrite.getClass.getSimpleName}")
+      standardWrite
+    }
   }
 }

@@ -75,7 +75,7 @@ object Tantivy4SparkConfig {
    */
   val OPTIMIZE_WRITE: BooleanConfigEntry = BooleanConfigEntry(
     "tantivy4spark.autoOptimize.optimizeWrite",
-    defaultValue = true // Enabled by default
+    defaultValue = false
   )
 
   /**

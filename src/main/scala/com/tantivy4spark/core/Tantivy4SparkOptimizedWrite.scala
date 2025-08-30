@@ -18,7 +18,9 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage, RequiresDistributionAndOrdering}
+import org.apache.spark.sql.connector.distributions.{Distribution, Distributions}
+import org.apache.spark.sql.connector.expressions.{SortOrder, SortDirection, Expressions}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
 import com.tantivy4spark.config.{Tantivy4SparkConfig, Tantivy4SparkSQLConf}
@@ -38,8 +40,9 @@ class Tantivy4SparkOptimizedWrite(
     @transient writeInfo: LogicalWriteInfo,
     serializedOptions: Map[String, String],  // Use serializable Map instead of CaseInsensitiveStringMap
     @transient hadoopConf: org.apache.hadoop.conf.Configuration,
-    isOverwrite: Boolean = false  // Track whether this is an overwrite operation
-) extends Write with BatchWrite with SupportsOverwrite with SupportsTruncate with Serializable {
+    isOverwrite: Boolean = false,  // Track whether this is an overwrite operation
+    estimatedRowCount: Long = 1000000L  // Estimated row count for optimized partitioning
+) extends Write with BatchWrite with RequiresDistributionAndOrdering with Serializable {
 
   @transient private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
 
@@ -188,19 +191,63 @@ class Tantivy4SparkOptimizedWrite(
   }
 
   override def toBatch: BatchWrite = this
+  
+  /**
+   * RequiresDistributionAndOrdering implementation for V2 optimized writes.
+   * This tells Spark how to distribute (repartition) the data before writing.
+   */
+  override def requiredDistribution(): Distribution = {
+    // Use clustered distribution with the first available column for clustering
+    // This ensures we have non-empty clustering expressions to avoid the 
+    // "UnspecifiedDistribution + numPartitions" validation error
+    val clusteringExpressions = if (writeSchema.fields.nonEmpty) {
+      // Use the first field in the schema for clustering
+      Array[org.apache.spark.sql.connector.expressions.Expression](
+        Expressions.column(writeSchema.fields(0).name)
+      )
+    } else {
+      // Fallback to empty array if no schema fields (shouldn't happen in practice)
+      logger.warn("No schema fields available for clustering, using empty clustering")
+      Array[org.apache.spark.sql.connector.expressions.Expression]()
+    }
+    
+    val distribution = Distributions.clustered(clusteringExpressions)
+    logger.info(s"V2 optimized write: requiredDistribution() returning ClusteredDistribution with ${clusteringExpressions.length} clustering expressions")
+    if (clusteringExpressions.nonEmpty) {
+      logger.info(s"Clustering by field: ${clusteringExpressions(0)}")
+    }
+    distribution
+  }
+  
+  /**
+   * Return the number of partitions required for optimized writes.
+   * This is the key method that actually controls partitioning in V2.
+   * Returns 0 to indicate no specific requirement.
+   */
+  override def requiredNumPartitions(): Int = {
+    // Since this is Tantivy4SparkOptimizedWrite, always optimize
+    val targetRecords = getTargetRecordsPerSplit()
+    
+    // Use the estimated row count passed from the write builder
+    val numPartitions = math.ceil(estimatedRowCount.toDouble / targetRecords).toInt
+    val finalPartitions = math.max(1, numPartitions)
+    
+    logger.info(s"V2 optimized write: Requesting $finalPartitions partitions for ~$estimatedRowCount records with target $targetRecords per split")
+    finalPartitions
+  }
+  
+  /**
+   * No specific ordering requirements for Tantivy4Spark writes.
+   */
+  override def requiredOrdering(): Array[SortOrder] = Array.empty
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    val shouldOptimize = shouldOptimizeWrite()
     val targetRecords = getTargetRecordsPerSplit()
     
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
-    logger.info(s"Optimized write enabled: $shouldOptimize, target records per split: $targetRecords")
-    
-    if (shouldOptimize) {
-      logger.warn("ISSUE: Optimized write is enabled but DataSource V2 API doesn't allow execution plan modification at this stage")
-      logger.warn(s"The number of partitions (${info.numPartitions}) was determined by Spark's default partitioning")
-      logger.warn("Each partition will create one split file, regardless of target records per split")
-    }
+    logger.info(s"V2 optimized write enabled, target records per split: $targetRecords")
+    logger.info(s"V2 optimized write: Using RequiresDistributionAndOrdering to control partitioning")
+    logger.info(s"Actual partitions: ${info.numPartitions} (controlled by requiredNumPartitions)")
     
     if (partitionColumns.nonEmpty) {
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
@@ -285,21 +332,4 @@ class Tantivy4SparkOptimizedWrite(
     logger.warn(s"Would clean up ${addActions.length} uncommitted files")
   }
 
-  override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): org.apache.spark.sql.connector.write.WriteBuilder = {
-    logger.info(s"Overwrite operation with ${filters.length} filters")
-    // Return a new WriteBuilder that creates an overwrite Write
-    new org.apache.spark.sql.connector.write.WriteBuilder {
-      override def build(): org.apache.spark.sql.connector.write.Write = 
-        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, serializedOptions, hadoopConf, isOverwrite = true)
-    }
-  }
-
-  override def truncate(): org.apache.spark.sql.connector.write.WriteBuilder = {
-    logger.info("Truncate operation")
-    // Truncate is treated as overwrite with no filters
-    new org.apache.spark.sql.connector.write.WriteBuilder {
-      override def build(): org.apache.spark.sql.connector.write.Write = 
-        new Tantivy4SparkOptimizedWrite(transactionLog, tablePath, writeInfo, serializedOptions, hadoopConf, isOverwrite = true)
-    }
-  }
 }
