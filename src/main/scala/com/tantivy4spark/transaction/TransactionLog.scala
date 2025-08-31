@@ -215,6 +215,22 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         writeAction(version, removeAction)
         version
   }
+  
+  /**
+   * Atomically commit a set of REMOVE and ADD actions in a single transaction.
+   * This is used for operations like MERGE SPLITS where we need to atomically
+   * replace old split files with merged ones.
+   * 
+   * @param removeActions Files to remove
+   * @param addActions Files to add
+   * @return The new version number
+   */
+  def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
+    val version = getLatestVersion() + 1
+    val actions = removeActions ++ addActions
+    writeActions(version, actions)
+    version
+  }
 
   private def writeAction(version: Long, action: Action): Unit = {
     writeActions(version, Seq(action))

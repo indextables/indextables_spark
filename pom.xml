@@ -23,6 +23,7 @@
         <aws.sdk.version>2.20.26</aws.sdk.version>
         <scalatest.version>3.2.15</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
+        <antlr.version>4.9.3</antlr.version>
     </properties>
 
     <dependencyManagement>
@@ -146,6 +147,13 @@
             <version>1.7.36</version>
         </dependency>
 
+        <!-- ANTLR for SQL parsing -->
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>${antlr.version}</version>
+        </dependency>
+
         <!-- Test Dependencies -->
         <dependency>
             <groupId>org.scalatest</groupId>
@@ -211,6 +219,23 @@
                 </configuration>
             </plugin>
 
+            <!-- ANTLR Plugin -->
+            <plugin>
+                <groupId>org.antlr</groupId>
+                <artifactId>antlr4-maven-plugin</artifactId>
+                <version>${antlr.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>antlr4</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <visitor>true</visitor>
+                    <listener>true</listener>
+                </configuration>
+            </plugin>
 
             <!-- ScalaTest -->
             <plugin>
