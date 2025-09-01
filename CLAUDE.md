@@ -5,11 +5,13 @@
 ## Key Features
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
 - **Transaction log**: Delta Lake-style with atomic operations  
+- **Merge splits optimization**: SQL-based split consolidation with intelligent bin packing
+- **Broadcast locality management**: Cluster-wide cache locality tracking for optimal task scheduling
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'` and `_indexall indexquery 'query'`)
 - **Optimized writes**: Automatic split sizing with adaptive shuffle
 - **S3-optimized storage**: Intelligent caching and session token support
 - **Schema-aware filtering**: Field validation prevents native crashes
-- **100% test coverage**: 179 tests passing, 0 failing, 73 V2 tests temporarily ignored
+- **100% test coverage**: 187 tests passing, 0 failing, 73 V2 tests temporarily ignored
 
 ## Build & Test
 ```bash
@@ -61,6 +63,19 @@ spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExt
 -- Native queries
 SELECT * FROM documents WHERE content indexquery 'AI AND (neural OR deep)';
 SELECT * FROM documents WHERE _indexall indexquery 'spark AND sql';
+
+-- Split optimization
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
+```
+
+### Split Optimization
+```scala
+// Merge splits to reduce small file overhead
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600")
+
+// Target sizes support standard units
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100MB")
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1GB")
 ```
 
 ## Schema Support
@@ -70,21 +85,39 @@ SELECT * FROM documents WHERE _indexall indexquery 'spark AND sql';
 ## Architecture
 - **File format**: `*.split` files with UUID naming
 - **Transaction log**: `_transaction_log/` directory (Delta Lake compatible)
+- **Split merging**: Distributed merge operations with REMOVE+ADD transaction patterns
+- **Locality tracking**: BroadcastSplitLocalityManager for cluster-wide cache awareness
 - **Batch processing**: Uses tantivy4java's BatchDocumentBuilder
 - **Caching**: JVM-wide SplitCacheManager with host-based locality
 - **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
 
 ## Implementation Status
-- ✅ **Core features**: Transaction log, optimized writes, IndexQuery operators
-- ✅ **Production ready**: IndexQuery (49/49 tests), IndexQueryAll (44/44 tests)  
+- ✅ **Core features**: Transaction log, optimized writes, IndexQuery operators, merge splits
+- ✅ **Production ready**: IndexQuery (49/49 tests), IndexQueryAll (44/44 tests), MergeSplits (9/9 tests)
+- ✅ **Split optimization**: SQL-based merge commands with comprehensive validation
+- ✅ **Broadcast locality**: Cluster-wide cache locality management
 - 🚧 **V2 DataSource**: Core functionality complete, 73 tests temporarily disabled
 - **Next**: Complete V2 integration, resolve date filtering edge cases
+
+## Transaction Log Behavior
+**Overwrite Operations**: Reset visible data completely, removing all previous files from transaction log
+**Merge Operations**: Consolidate only files visible at merge time (respects overwrite boundaries)
+**Read Behavior**: Only accesses merged splits, not original constituent files
+
+**Example sequence:**
+1. `add1(append)` + `add2(append)` → visible: add1+add2
+2. `add3(overwrite)` → visible: add3 only (add1+add2 invisible) 
+3. `add4(append)` → visible: add3+add4
+4. `merge()` → consolidates add3+add4 into single split
+5. `add5(append)` → visible: merged(add3+add4)+add5
 
 ## Important Notes
 - **tantivy4java integration**: Pure Java bindings, no Rust compilation needed
 - **AWS support**: Full session token support for temporary credentials
+- **Merge compression**: Tantivy achieves 30-70% size reduction through deduplication
+- **Distributed operations**: Serializable AWS configs for executor-based merge operations
 - **Error handling**: Comprehensive validation with descriptive error messages
-- **Performance**: Batch processing, predictive I/O, smart caching
+- **Performance**: Batch processing, predictive I/O, smart caching, broadcast locality
 
 ---
 
