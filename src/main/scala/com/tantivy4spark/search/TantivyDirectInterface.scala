@@ -151,8 +151,10 @@ class TantivyDirectInterface(
   // Resolve index writer configuration
   private val heapSize = getConfigValueInt("spark.tantivy4spark.indexWriter.heapSize", 100000000) // 100MB default
   private val threadCount = getConfigValueInt("spark.tantivy4spark.indexWriter.threads", 2) // 2 threads default
+  private val batchSize = getConfigValueInt("spark.tantivy4spark.indexWriter.batchSize", 10000) // 10,000 records default
+  private val useBatch = getConfigValue("spark.tantivy4spark.indexWriter.useBatch", "true").toBoolean // Use batch by default
   
-  logger.info(s"Index writer configuration: heapSize=${heapSize} bytes, threadCount=${threadCount}")
+  logger.info(s"Index writer configuration: heapSize=${heapSize} bytes, threadCount=${threadCount}, batchSize=${batchSize}, useBatch=${useBatch}")
   
   // Create appropriate index and schema based on whether this is a restored index or new one
   private val (index, tempIndexDir, needsCleanup, tantivySchema) = restoredIndexPath match {
@@ -204,6 +206,37 @@ class TantivyDirectInterface(
   // Use ThreadLocal to ensure each Spark task gets its own IndexWriter - no sharing between tasks
   private val threadLocalWriter = new ThreadLocal[IndexWriter]()
   
+  // Batch writing support - ThreadLocal to ensure each Spark task gets its own batch
+  private val threadLocalBatch = new ThreadLocal[BatchDocumentBuilder]()
+  private val threadLocalBatchCount = new ThreadLocal[Integer]()
+  
+  private def getOrCreateBatch(): BatchDocumentBuilder = {
+    Option(threadLocalBatch.get()) match {
+      case Some(batch) => batch
+      case None =>
+        val batch = new BatchDocumentBuilder()
+        threadLocalBatch.set(batch)
+        threadLocalBatchCount.set(0)
+        logger.debug(s"Created new BatchDocumentBuilder for Spark task thread ${Thread.currentThread().getName}")
+        batch
+    }
+  }
+  
+  private def flushBatchIfNeeded(forceBatch: Boolean = false): Unit = {
+    val batch = threadLocalBatch.get()
+    val count: Int = Option(threadLocalBatchCount.get()).map(_.intValue()).getOrElse(0)
+    
+    if (batch != null && (count >= batchSize || forceBatch) && count > 0) {
+      val writer = getOrCreateWriter()
+      writer.addDocumentsBatch(batch)
+      logger.debug(s"Flushed batch with $count documents")
+      
+      // Reset batch
+      threadLocalBatch.set(new BatchDocumentBuilder())
+      threadLocalBatchCount.set(0)
+    }
+  }
+  
   private def getOrCreateWriter(): IndexWriter = {
     Option(threadLocalWriter.get()) match {
       case Some(writer) => writer
@@ -216,6 +249,14 @@ class TantivyDirectInterface(
   }
   
   def addDocument(row: InternalRow): Unit = {
+    if (useBatch) {
+      addDocumentBatch(row)
+    } else {
+      addDocumentIndividual(row)
+    }
+  }
+  
+  private def addDocumentIndividual(row: InternalRow): Unit = {
     // Each Spark task gets its own IndexWriter via ThreadLocal - no sharing between tasks
     val document = new Document()
     
@@ -258,6 +299,40 @@ class TantivyDirectInterface(
     }
   }
   
+  private def addDocumentBatch(row: InternalRow): Unit = {
+    try {
+      val batchDocument = new BatchDocument()
+      
+      // Convert InternalRow to BatchDocument 
+      schema.fields.zipWithIndex.foreach { case (field, index) =>
+        try {
+          val value = row.get(index, field.dataType)
+          if (value != null) {
+            addFieldToBatchDocument(batchDocument, field.name, value, field.dataType)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}")
+            throw ex
+        }
+      }
+      
+      val batch = getOrCreateBatch()
+      batch.addDocument(batchDocument)
+      
+      val currentCount = Option(threadLocalBatchCount.get()).map(_.intValue()).getOrElse(0) + 1
+      threadLocalBatchCount.set(currentCount)
+      logger.debug(s"Added document to batch ($currentCount/${batchSize})")
+      
+      // Flush if batch is full
+      flushBatchIfNeeded()
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to add document to batch: ${ex.getMessage}")
+        throw ex
+    }
+  }
+  
   private def addFieldToDocument(document: Document, fieldName: String, value: Any, dataType: org.apache.spark.sql.types.DataType): Unit = {
     dataType match {
       case org.apache.spark.sql.types.StringType =>
@@ -296,11 +371,54 @@ class TantivyDirectInterface(
     }
   }
   
+  private def addFieldToBatchDocument(batchDocument: BatchDocument, fieldName: String, value: Any, dataType: org.apache.spark.sql.types.DataType): Unit = {
+    dataType match {
+      case org.apache.spark.sql.types.StringType =>
+        val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+        batchDocument.addText(fieldName, str)
+      case org.apache.spark.sql.types.LongType =>
+        batchDocument.addInteger(fieldName, value.asInstanceOf[Long])
+      case org.apache.spark.sql.types.IntegerType =>
+        batchDocument.addInteger(fieldName, value.asInstanceOf[Int].toLong)
+      case org.apache.spark.sql.types.DoubleType =>
+        batchDocument.addFloat(fieldName, value.asInstanceOf[Double])
+      case org.apache.spark.sql.types.FloatType =>
+        batchDocument.addFloat(fieldName, value.asInstanceOf[Float].toDouble)
+      case org.apache.spark.sql.types.BooleanType =>
+        batchDocument.addBoolean(fieldName, value.asInstanceOf[Boolean])
+      case org.apache.spark.sql.types.BinaryType =>
+        batchDocument.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
+      case org.apache.spark.sql.types.TimestampType =>
+        // Convert microseconds to milliseconds
+        val millis = value.asInstanceOf[Long] / 1000
+        batchDocument.addInteger(fieldName, millis)
+      case org.apache.spark.sql.types.DateType =>
+        // Convert days since epoch to LocalDateTime for proper date storage
+        import java.time.LocalDateTime
+        import java.time.LocalDate
+        val daysSinceEpoch = value.asInstanceOf[Int]
+        val epochDate = LocalDate.of(1970, 1, 1)
+        val localDate = epochDate.plusDays(daysSinceEpoch.toLong)
+        val localDateTime = localDate.atStartOfDay()
+        batchDocument.addDate(fieldName, localDateTime)
+      case _ =>
+        logger.warn(s"Unsupported field type for $fieldName: $dataType")
+    }
+  }
+  
   def addDocuments(rows: Iterator[InternalRow]): Unit = {
     rows.foreach(addDocument)
   }
   
   def commit(): Unit = {
+    // Flush any remaining batch before committing
+    if (useBatch) {
+      flushBatchIfNeeded(forceBatch = true)
+      // Clean up batch ThreadLocal
+      threadLocalBatch.remove()
+      threadLocalBatchCount.remove()
+    }
+    
     // Commit and close the ThreadLocal writer for this task
     Option(threadLocalWriter.get()).foreach { writer =>
       writer.commit()

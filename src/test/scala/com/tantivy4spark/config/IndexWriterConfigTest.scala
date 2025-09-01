@@ -33,13 +33,13 @@ class IndexWriterConfigTest extends TestBase {
       
       // Write without any custom configuration - should use defaults (100MB heap, 2 threads)
       testData.write
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
       // Read back to verify it worked
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tempPath)
       
       readData.count() shouldBe 100
@@ -136,6 +136,78 @@ class IndexWriterConfigTest extends TestBase {
         spark.conf.unset("spark.tantivy4spark.indexWriter.heapSize")
         spark.conf.unset("spark.tantivy4spark.indexWriter.threads")
       }
+    }
+  }
+
+  test("should use batch writing by default") {
+    withTempPath { tempPath =>
+      // Generate test data that will require multiple batches (default batch size is 10,000)
+      val testData = spark.range(25000).select(
+        col("id"),
+        concat(lit("Record"), col("id")).as("content")
+      )
+      
+      // Write with default batch settings
+      testData.write
+        .format("tantivy4spark")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+      
+      // Read back to verify all documents were written correctly
+      val readData = spark.read
+        .format("tantivy4spark")
+        .load(tempPath)
+      
+      readData.count() shouldBe 25000
+    }
+  }
+
+  test("should support custom batch size configuration") {
+    withTempPath { tempPath =>
+      // Generate test data
+      val testData = spark.range(1000).select(
+        col("id"),
+        concat(lit("Record"), col("id")).as("content")
+      )
+      
+      // Write with custom batch size (smaller for testing)
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.tantivy4spark.indexWriter.batchSize", "100") // Small batch size
+        .option("spark.tantivy4spark.indexWriter.useBatch", "true")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+      
+      // Read back to verify it worked
+      val readData = spark.read
+        .format("tantivy4spark")
+        .load(tempPath)
+      
+      readData.count() shouldBe 1000
+    }
+  }
+
+  test("should support disabling batch writing") {
+    withTempPath { tempPath =>
+      // Generate test data
+      val testData = spark.range(100).select(
+        col("id"),
+        concat(lit("Record"), col("id")).as("content")
+      )
+      
+      // Write with batch writing disabled
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.tantivy4spark.indexWriter.useBatch", "false") // Disable batch writing
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+      
+      // Read back to verify it worked
+      val readData = spark.read
+        .format("tantivy4spark")
+        .load(tempPath)
+      
+      readData.count() shouldBe 100
     }
   }
 }

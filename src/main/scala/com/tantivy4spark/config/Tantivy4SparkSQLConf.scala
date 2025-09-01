@@ -49,6 +49,8 @@ object Tantivy4SparkSQLConf {
 
   val TANTIVY4SPARK_INDEX_WRITER_HEAP_SIZE = "spark.tantivy4spark.indexWriter.heapSize"
   val TANTIVY4SPARK_INDEX_WRITER_THREADS = "spark.tantivy4spark.indexWriter.threads"
+  val TANTIVY4SPARK_INDEX_WRITER_BATCH_SIZE = "spark.tantivy4spark.indexWriter.batchSize"
+  val TANTIVY4SPARK_INDEX_WRITER_USE_BATCH = "spark.tantivy4spark.indexWriter.useBatch"
 
   /////////////////////
   // General Configuration

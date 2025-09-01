@@ -32,12 +32,12 @@ class BulkLoadValidationTest extends TestBase {
     }
   }
 
-  test("should write 39,999 records using V2 provider and read them back") {
+  test("should write 439,999 records using V2 provider and read them back") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping bulk load test")
     
     withTempPath { tempPath =>
       // Generate test data
-      val testData = spark.range(39999).select(
+      val testData = spark.range(439999).select(
         col("id"),
         concat(lit("User"), col("id")).as("name"),
         (col("id") % 10).as("category")
@@ -57,7 +57,7 @@ class BulkLoadValidationTest extends TestBase {
       
       // Validate count
       val actualCount = readData.count()
-      actualCount shouldBe 39999
+      actualCount shouldBe 439999
     }
   }
 }

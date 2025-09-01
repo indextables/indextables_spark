@@ -141,6 +141,8 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
 | `spark.tantivy4spark.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default) |
 | `spark.tantivy4spark.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
+| `spark.tantivy4spark.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
+| `spark.tantivy4spark.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
@@ -185,6 +187,21 @@ df.write.format("tantivy4spark").save("s3://bucket/path")
 df.write.format("tantivy4spark")
   .option("spark.tantivy4spark.indexWriter.heapSize", "150000000") // 150MB heap
   .option("spark.tantivy4spark.indexWriter.threads", "3") // 3 indexing threads
+  .save("s3://bucket/path")
+
+// Configure batch writing settings (V2 provider)
+spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "5000") // 5,000 documents per batch
+spark.conf.set("spark.tantivy4spark.indexWriter.useBatch", "true") // Enable batch writing
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
+
+// Disable batch writing (use individual document indexing) - V2 provider
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+  .option("spark.tantivy4spark.indexWriter.useBatch", "false") // Use one-at-a-time indexing
+  .save("s3://bucket/path")
+
+// Custom batch size via DataFrame options - V2 provider
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+  .option("spark.tantivy4spark.indexWriter.batchSize", "20000") // 20,000 documents per batch
   .save("s3://bucket/path")
 
 // AWS-specific configuration for split access
