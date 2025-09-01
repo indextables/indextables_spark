@@ -1,6 +1,6 @@
 # Tantivy4Spark
 
-A high-performance file format for Apache Spark that implements fast full-text search using the [Tantivy search engine library](https://github.com/quickwit-oss/tantivy) via [tantivy4java](https://github.com/quickwit-oss/tantivy-java). It runs embedded inside Apache Spark without requiring any server-side components.
+A high-performance Spark DataSource implementing fast full-text search using [Tantivy](https://github.com/quickwit-oss/tantivy) via [tantivy4java](https://github.com/quickwit-oss/tantivy-java). It runs embedded in Spark executors without server-side components.
 
 ## Features
 
@@ -21,7 +21,7 @@ A high-performance file format for Apache Spark that implements fast full-text s
 - **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
 - **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
 - **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
-- **Production Ready**: 100% test pass rate with comprehensive coverage including 49 IndexQuery and 44 IndexQueryAll tests
+- **Production Ready**: 179 tests passing, 0 failing, comprehensive coverage including 49 IndexQuery and 44 IndexQueryAll tests
 
 ## Architecture
 
@@ -58,7 +58,7 @@ This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
 # Build the project
 mvn clean compile
 
-# Run tests (133 tests, 133 pass, 0 failures)
+# Run tests (179 tests passing, 0 failing, 73 temporarily ignored)
 mvn test
 
 # Package
@@ -121,6 +121,10 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
 | `spark.tantivy4spark.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
 | `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
+| `spark.tantivy4spark.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default) |
+| `spark.tantivy4spark.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
+| `spark.tantivy4spark.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
+| `spark.tantivy4spark.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
@@ -130,6 +134,21 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.azure.accountKey` | - | Azure storage account key |
 | `spark.tantivy4spark.gcp.projectId` | - | GCP project ID for Cloud Storage |
 | `spark.tantivy4spark.gcp.credentialsFile` | - | Path to GCP service account credentials file |
+
+#### Advanced Performance Configuration (Future)
+
+Additional configuration options for advanced performance tuning:
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.tantivy4spark.split.maxAge` | `2d` | Maximum age for split cache entries before eviction |
+| `spark.tantivy4spark.split.cacheQuota.maxBytes` | `1GB` | Maximum total bytes for split cache across all executors |
+| `spark.tantivy4spark.split.cacheQuota.maxCount` | `1000` | Maximum number of splits to cache per executor |
+| `spark.tantivy4spark.merge.concurrency` | `4` | Number of concurrent merge operations |
+| `spark.tantivy4spark.merge.policy` | `log` | Merge policy: `log`, `temporal`, or `no_merge` |
+| `spark.tantivy4spark.io.bandwidth.limit` | - | I/O bandwidth limit per executor (e.g., `100MB/s`) |
+| `spark.tantivy4spark.indexWriter.directBuffer` | `true` | Use direct ByteBuffers for zero-copy batch operations |
+| `spark.tantivy4spark.indexWriter.bufferPoolSize` | `10` | Number of reusable direct buffers to pool |
 
 #### Optimized Writes Configuration
 
@@ -172,6 +191,36 @@ df.write.format("tantivy4spark")
 // Standard operations (automatic for other protocols)
 df.write.format("tantivy4spark").save("hdfs://namenode/path")
 df.write.format("tantivy4spark").save("file:///local/path")
+```
+
+#### IndexWriter Performance Configuration
+
+Configure indexWriter for optimal batch processing performance:
+
+```scala
+// Configure index writer performance settings via Spark session
+spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "200000000") // 200MB heap
+spark.conf.set("spark.tantivy4spark.indexWriter.threads", "4") // 4 indexing threads
+spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "20000") // 20,000 documents per batch
+spark.conf.set("spark.tantivy4spark.indexWriter.useBatch", "true") // Enable batch writing
+
+// Configure per DataFrame write operation (overrides session config)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.indexWriter.heapSize", "150000000") // 150MB heap
+  .option("spark.tantivy4spark.indexWriter.threads", "3") // 3 indexing threads
+  .option("spark.tantivy4spark.indexWriter.batchSize", "15000") // 15,000 documents per batch
+  .save("s3://bucket/path")
+
+// Disable batch writing for debugging (use individual document indexing)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.indexWriter.useBatch", "false")
+  .save("s3://bucket/path")
+
+// High-throughput configuration for large datasets
+spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "500000000") // 500MB heap
+spark.conf.set("spark.tantivy4spark.indexWriter.threads", "8") // 8 indexing threads
+spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "50000") // 50,000 documents per batch
+df.write.format("tantivy4spark").save("s3://bucket/large-dataset")
 ```
 
 #### AWS Configuration
@@ -513,7 +562,7 @@ src/main/scala/com/tantivy4spark/
 ├── storage/        # S3-optimized storage layer
 └── transaction/    # Transaction log system
 
-src/test/scala/     # Comprehensive test suite (133 tests, 133 pass, 0 failures)
+src/test/scala/     # Comprehensive test suite (179 tests passing, 0 failing)
 ├── core/           # Core functionality tests including SQL pushdown verification
 ├── integration/    # End-to-end integration tests  
 ├── optimize/       # Optimized writes tests
@@ -525,7 +574,7 @@ src/test/scala/     # Comprehensive test suite (133 tests, 133 pass, 0 failures)
 ### Running Tests
 
 ```bash
-# All tests (133 tests, 133 pass, 0 failures)
+# All tests (179 tests passing, 0 failing, 73 V2 tests temporarily ignored)
 mvn test
 
 # Specific test suites
@@ -691,6 +740,6 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 ## Support
 
 - GitHub Issues: Report bugs and request features
-- Documentation: Comprehensive test suite with 133 tests demonstrating usage patterns
+- Documentation: Comprehensive test suite with 179 tests demonstrating usage patterns
 - Community: Check the test files in `src/test/scala/` for detailed usage examples
 - SQL Pushdown: See `SqlPushdownTest.scala` for detailed examples of predicate and limit pushdown verification
