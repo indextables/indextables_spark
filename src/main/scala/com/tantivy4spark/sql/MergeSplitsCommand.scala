@@ -223,6 +223,53 @@ class MergeSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
   
   /**
+   * Extract AWS configuration from SparkSession for tantivy4java merge operations.
+   * Uses same pattern as TantivySearchEngine for consistency.
+   */
+  private def extractAwsConfig(): QuickwitSplit.AwsConfig = {
+    try {
+      val sparkConf = sparkSession.conf
+      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+      
+      // Helper function to get config with Hadoop fallback
+      def getConfigWithFallback(sparkKey: String): Option[String] = {
+        val sparkValue = sparkConf.getOption(sparkKey)
+        val hadoopValue = Option(hadoopConf.get(sparkKey))
+        val result = sparkValue.orElse(hadoopValue)
+        
+        logger.debug(s"🔍 AWS Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
+        result
+      }
+      
+      val accessKey = getConfigWithFallback("spark.tantivy4spark.aws.accessKey")
+      val secretKey = getConfigWithFallback("spark.tantivy4spark.aws.secretKey")
+      val sessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken")
+      val region = getConfigWithFallback("spark.tantivy4spark.aws.region")
+      val endpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint")
+      val pathStyleAccess = sparkConf.getOption("spark.tantivy4spark.s3.pathStyleAccess")
+        .map(_.toLowerCase == "true").getOrElse(false)
+      
+      logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
+      logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
+      
+      // Create AwsConfig with the extracted credentials
+      new QuickwitSplit.AwsConfig(
+        accessKey.getOrElse(""),
+        secretKey.getOrElse(""),
+        sessionToken.orNull, // Can be null for permanent credentials
+        region.getOrElse("us-east-1"),
+        endpoint.orNull, // Can be null for default AWS endpoint
+        pathStyleAccess
+      )
+    } catch {
+      case ex: Exception =>
+        logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
+        // Return empty config that will use default AWS credential chain
+        new QuickwitSplit.AwsConfig("", "", null, "us-east-1", null, false)
+    }
+  }
+  
+  /**
    * Smart string ordering that handles numeric values correctly.
    * Tries numeric comparison first, falls back to string comparison.
    */
@@ -566,11 +613,15 @@ class MergeSplitsExecutor(
     
     logger.info("Attempting to merge splits using Tantivy4Java merge functionality")
     
-    // Create merge configuration
+    // Extract AWS configuration from SparkSession
+    val awsConfig = extractAwsConfig()
+    
+    // Create merge configuration with AWS credentials
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId  
-      "merge-node"      // nodeId
+      "merge-node",      // nodeId
+      awsConfig          // AWS configuration for S3 access
     )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
