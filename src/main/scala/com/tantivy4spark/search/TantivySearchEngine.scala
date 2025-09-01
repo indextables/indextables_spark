@@ -36,7 +36,7 @@ class TantivySearchEngine private (
   
   // Constructor with cloud storage support
   def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) = 
-    this(new TantivyDirectInterface(schema), options, hadoopConf)
+    this(new TantivyDirectInterface(schema, None, options, hadoopConf), options, hadoopConf)
 
   def addDocument(row: InternalRow): Unit = {
     directInterface.addDocument(row)

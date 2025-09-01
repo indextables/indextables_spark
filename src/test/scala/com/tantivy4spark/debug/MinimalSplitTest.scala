@@ -45,7 +45,7 @@ class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
       
       // Create index and add documents
       val index = new Index(schema, indexPath.toString)
-      val writer = index.writer(50, 1)
+      val writer = index.writer(50000000, 1)
       
       // Add test documents
       for (i <- 1 to 3) {

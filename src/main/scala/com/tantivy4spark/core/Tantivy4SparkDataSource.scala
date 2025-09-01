@@ -165,8 +165,8 @@ object Tantivy4SparkRelation {
         null // Use null to indicate no filters
       }
       
-      // Calculate effective limit
-      val effectiveLimit = limit.getOrElse(5000)
+      // Calculate effective limit - use MaxInt for unlimited behavior in V1
+      val effectiveLimit = limit.getOrElse(Int.MaxValue)
       executorLogger.info(s"V1 API: Pushing down limit: $effectiveLimit")
       
       // Execute search with pushed down query and limit
@@ -430,8 +430,8 @@ object Tantivy4SparkRelation {
         null // Use null to indicate no filters
       }
       
-      // Calculate effective limit
-      val effectiveLimit = limit.getOrElse(5000)
+      // Calculate effective limit - use MaxInt for unlimited behavior in V1
+      val effectiveLimit = limit.getOrElse(Int.MaxValue)
       executorLogger.info(s"CatalystScan: Pushing down limit: $effectiveLimit")
       
       // Execute search with pushed down query and limit

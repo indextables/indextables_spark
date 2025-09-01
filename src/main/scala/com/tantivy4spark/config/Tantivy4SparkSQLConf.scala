@@ -44,6 +44,13 @@ object Tantivy4SparkSQLConf {
   val TANTIVY4SPARK_S3_ENDPOINT = "spark.tantivy4spark.s3.endpoint"
 
   /////////////////////
+  // Index Writer Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_INDEX_WRITER_HEAP_SIZE = "spark.tantivy4spark.indexWriter.heapSize"
+  val TANTIVY4SPARK_INDEX_WRITER_THREADS = "spark.tantivy4spark.indexWriter.threads"
+
+  /////////////////////
   // General Configuration
   /////////////////////
 

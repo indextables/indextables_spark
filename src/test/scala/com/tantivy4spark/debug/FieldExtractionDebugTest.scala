@@ -45,7 +45,7 @@ class FieldExtractionDebugTest extends AnyFunSuite {
       
       // Create index exactly like successful test
       val index = new Index(schema, indexPath.toString)
-      val writer = index.writer(50, 1)
+      val writer = index.writer(50000000, 1)
       
       // Add documents exactly like successful test
       val doc = new Document()

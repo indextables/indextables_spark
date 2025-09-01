@@ -92,7 +92,12 @@ object TantivyDirectInterface {
   // Note: fromIndexComponents and extractZipArchive removed - using splits instead of ZIP archives
 }
 
-class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[Path] = None) extends AutoCloseable {
+class TantivyDirectInterface(
+    val schema: StructType, 
+    restoredIndexPath: Option[Path] = None,
+    options: org.apache.spark.sql.util.CaseInsensitiveStringMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+    hadoopConf: org.apache.hadoop.conf.Configuration = new org.apache.hadoop.conf.Configuration()
+) extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivyDirectInterface])
   
   // Initialize tantivy4java library only once
@@ -103,6 +108,51 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
   
   // Flag to prevent cleanup until split is created
   @volatile private var delayCleanup = false
+  
+  // Configuration resolution with proper hierarchy: options -> table props -> spark props -> defaults
+  private def getConfigValue(key: String, defaultValue: String): String = {
+    import com.tantivy4spark.config.Tantivy4SparkSQLConf._
+    
+    // First try options (highest precedence)
+    Option(options.get(key)).filter(_.nonEmpty).getOrElse {
+      // Then try hadoop conf (includes table properties)
+      Option(hadoopConf.get(key)).filter(_.nonEmpty).getOrElse {
+        // Then try spark session config (if available)
+        try {
+          val sparkSession = org.apache.spark.sql.SparkSession.active
+          sparkSession.conf.getOption(key).getOrElse(defaultValue)
+        } catch {
+          case _: Exception => defaultValue
+        }
+      }
+    }
+  }
+  
+  private def getConfigValueLong(key: String, defaultValue: Long): Long = {
+    try {
+      getConfigValue(key, defaultValue.toString).toLong
+    } catch {
+      case _: NumberFormatException => 
+        logger.warn(s"Invalid numeric value for $key, using default: $defaultValue")
+        defaultValue
+    }
+  }
+  
+  private def getConfigValueInt(key: String, defaultValue: Int): Int = {
+    try {
+      getConfigValue(key, defaultValue.toString).toInt
+    } catch {
+      case _: NumberFormatException => 
+        logger.warn(s"Invalid numeric value for $key, using default: $defaultValue")
+        defaultValue
+    }
+  }
+  
+  // Resolve index writer configuration
+  private val heapSize = getConfigValueInt("spark.tantivy4spark.indexWriter.heapSize", 100000000) // 100MB default
+  private val threadCount = getConfigValueInt("spark.tantivy4spark.indexWriter.threads", 2) // 2 threads default
+  
+  logger.info(s"Index writer configuration: heapSize=${heapSize} bytes, threadCount=${threadCount}")
   
   // Create appropriate index and schema based on whether this is a restored index or new one
   private val (index, tempIndexDir, needsCleanup, tantivySchema) = restoredIndexPath match {
@@ -158,7 +208,7 @@ class TantivyDirectInterface(val schema: StructType, restoredIndexPath: Option[P
     Option(threadLocalWriter.get()) match {
       case Some(writer) => writer
       case None =>
-        val writer = index.writer(50, 1) // Small memory arena like tantivy4java tests
+        val writer = index.writer(heapSize, threadCount)
         threadLocalWriter.set(writer)
         logger.debug(s"Created new IndexWriter for Spark task thread ${Thread.currentThread().getName}")
         writer

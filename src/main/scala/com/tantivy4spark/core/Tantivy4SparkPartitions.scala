@@ -97,7 +97,7 @@ class Tantivy4SparkPartitionReader(
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
   
-  // Calculate effective limit: use pushed limit or fall back to Int.MaxValue
+  // Calculate effective limit: use pushed limit or fall back to default 5000
   private val effectiveLimit: Int = limit.getOrElse(5000)
   
   // Resolve relative path from AddAction against table path
