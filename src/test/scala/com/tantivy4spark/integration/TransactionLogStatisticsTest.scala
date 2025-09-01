@@ -255,6 +255,9 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
       .mode(SaveMode.Overwrite)
       .save(testTablePath.toString)
     
+    // Invalidate cache after write since Spark creates separate TransactionLog instances
+    transactionLog.invalidateCache()
+    
     val initialActions = transactionLog.listFiles()
     assert(initialActions.length == 1, "Should have 1 file after initial write")
     
@@ -265,6 +268,9 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
     
+    // Invalidate cache after write since Spark creates separate TransactionLog instances
+    transactionLog.invalidateCache()
+    
     val afterAppend1 = transactionLog.listFiles()
     assert(afterAppend1.length == 2, "Should have 2 files after first append")
     
@@ -274,6 +280,9 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
       .format("tantivy4spark")
       .mode(SaveMode.Append)
       .save(testTablePath.toString)
+    
+    // Invalidate cache after write since Spark creates separate TransactionLog instances
+    transactionLog.invalidateCache()
     
     val finalActions = transactionLog.listFiles().sortBy(_.modificationTime)
     assert(finalActions.length == 3, "Should have 3 files after second append")

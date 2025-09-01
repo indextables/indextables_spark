@@ -147,6 +147,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     
     val result = command.run(spark)
     
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
+    
     // Validate transaction log changes
     val finalFiles = transactionLog.listFiles()
     val finalFilePaths = finalFiles.map(_.path).toSet
@@ -203,6 +206,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       .asInstanceOf[MergeSplitsCommand]
     
     command.run(spark)
+    
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
     
     // Verify merged statistics
     val mergedFiles = transactionLog.listFiles().filter(_.tags.exists(_.get("operation").contains("optimize")))
@@ -265,6 +271,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     
     command.run(spark)
     
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
+    
     // Verify only 2023 partitions were affected
     val finalFiles = transactionLog.listFiles()
     val files2022Remaining = finalFiles.filter(_.partitionValues.get("year").contains("2022"))
@@ -323,6 +332,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       .asInstanceOf[MergeSplitsCommand]
     
     val result = command.run(spark)
+    
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
     
     // Get final file list from transaction log
     val finalFiles = transactionLog.listFiles()
@@ -394,6 +406,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       .asInstanceOf[MergeSplitsCommand]
     
     command.run(spark)
+    
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
     
     val finalFiles = transactionLog.listFiles()
     logger.info(s"Final files: ${finalFiles.map(f => s"${f.path}(${f.size/1024/1024}MB)").mkString(", ")}")

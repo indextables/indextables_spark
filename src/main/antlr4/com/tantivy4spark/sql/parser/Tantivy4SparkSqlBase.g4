@@ -47,6 +47,8 @@ statement
         (TARGET SIZE targetSize=sizeValue)?
         PRECOMMIT?                                              #mergeSplitsTable
     | FLUSH TANTIVY4SPARK SEARCHER CACHE                        #flushTantivyCache
+    | INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE 
+        (FOR (path=STRING | table=qualifiedName))?             #invalidateTantivyTransactionLogCache
     | .*?                                                       #passThrough
     ;
 
@@ -77,7 +79,7 @@ quotedIdentifier
     ;
 
 nonReserved
-    : CACHE | SEARCHER | TANTIVY4SPARK
+    : CACHE | SEARCHER | TANTIVY4SPARK | FOR | TRANSACTION | LOG
     ;
 
 // Keywords (case-insensitive)
@@ -88,6 +90,10 @@ TARGET: [Tt][Aa][Rr][Gg][Ee][Tt];
 SIZE: [Ss][Ii][Zz][Ee];
 PRECOMMIT: [Pp][Rr][Ee][Cc][Oo][Mm][Mm][Ii][Tt];
 FLUSH: [Ff][Ll][Uu][Ss][Hh];
+INVALIDATE: [Ii][Nn][Vv][Aa][Ll][Ii][Dd][Aa][Tt][Ee];
+TRANSACTION: [Tt][Rr][Aa][Nn][Ss][Aa][Cc][Tt][Ii][Oo][Nn];
+LOG: [Ll][Oo][Gg];
+FOR: [Ff][Oo][Rr];
 TANTIVY4SPARK: [Tt][Aa][Nn][Tt][Ii][Vv][Yy]'4'[Ss][Pp][Aa][Rr][Kk];
 SEARCHER: [Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr];
 CACHE: [Cc][Aa][Cc][Hh][Ee];

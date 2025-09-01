@@ -180,6 +180,9 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     // Step 6: Verify merge actually happened
     Thread.sleep(1000) // Allow merge operations to complete
     
+    // Invalidate cache to ensure we see the latest transaction log state
+    transactionLog.invalidateCache()
+    
     val finalFiles = transactionLog.listFiles()
     logger.info(s"After merge: ${finalFiles.length} split files remain")
     finalFiles.foreach { file =>

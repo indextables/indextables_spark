@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.sql.parser
 
-import com.tantivy4spark.sql.{FlushTantivyCacheCommand, MergeSplitsCommand}
+import com.tantivy4spark.sql.{FlushTantivyCacheCommand, MergeSplitsCommand, InvalidateTransactionLogCacheCommand}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.parser.ParserUtils
@@ -125,6 +125,30 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
 
   override def visitFlushTantivyCache(ctx: FlushTantivyCacheContext): LogicalPlan = {
     FlushTantivyCacheCommand()
+  }
+
+  override def visitInvalidateTantivyTransactionLogCache(ctx: InvalidateTantivyTransactionLogCacheContext): LogicalPlan = {
+    logger.debug(s"visitInvalidateTantivyTransactionLogCache called with context: $ctx")
+    
+    // Extract table path or identifier if provided
+    val pathOption = if (ctx.path != null) {
+      logger.debug(s"Processing path: ${ctx.path.getText}")
+      val pathStr = ParserUtils.string(ctx.path)
+      logger.debug(s"Parsed path: $pathStr")
+      Some(pathStr)
+    } else if (ctx.table != null) {
+      logger.debug(s"Processing table: ${ctx.table.getText}")
+      val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+      logger.debug(s"Parsed table ID: $tableId")
+      Some(tableId.mkString("."))
+    } else {
+      logger.debug("No path or table specified - global cache invalidation")
+      None
+    }
+    
+    val result = InvalidateTransactionLogCacheCommand(pathOption)
+    logger.debug(s"Created InvalidateTransactionLogCacheCommand: $result")
+    result
   }
 
   override def visitPassThrough(ctx: PassThroughContext): AnyRef = {

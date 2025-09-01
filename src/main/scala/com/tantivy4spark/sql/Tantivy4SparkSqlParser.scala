@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory
  * Supported commands:
  * - FLUSH TANTIVY4SPARK SEARCHER CACHE
  * - MERGE SPLITS <path_or_table> [WHERE predicates] [TARGET SIZE <bytes>] [PRECOMMIT]
+ * - INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE [FOR <path_or_table>]
  * 
  * Supported operators:
  * - indexquery: column indexquery 'query_string'

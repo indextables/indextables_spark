@@ -45,10 +45,16 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private val cloudProvider = CloudStorageProviderFactory.createProvider(tablePath.toString, options, spark.sparkContext.hadoopConfiguration)
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
   private val transactionLogPathStr = transactionLogPath.toString
+  
+  // Cache configuration and initialization
+  private val cacheEnabled = options.getBoolean("spark.tantivy4spark.transaction.cache.enabled", true)
+  private val cacheExpirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
+  private val cache = if (cacheEnabled) Some(new TransactionLogCache(cacheExpirationSeconds)) else None
 
   def getTablePath(): Path = tablePath
 
   override def close(): Unit = {
+    cache.foreach(_.shutdown())
     cloudProvider.close()
   }
 
@@ -145,20 +151,31 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   }
 
   def listFiles(): Seq[AddAction] = {
-        // Legacy Hadoop implementation
-        val files = ListBuffer[AddAction]()
-        val versions = getVersions()
-        
-        for (version <- versions) {
-          val actions = readVersion(version)
-          actions.foreach {
-            case add: AddAction => files += add
-            case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-            case _ => // Ignore other actions for file listing
-          }
+        // Check cache first
+        cache.flatMap(_.getCachedFiles()) match {
+          case Some(cachedFiles) =>
+            logger.debug(s"Using cached files list: ${cachedFiles.length} files")
+            cachedFiles
+          case None =>
+            // Compute from transaction log
+            val files = ListBuffer[AddAction]()
+            val versions = getVersions()
+            
+            for (version <- versions) {
+              val actions = readVersion(version)
+              actions.foreach {
+                case add: AddAction => files += add
+                case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                case _ => // Ignore other actions for file listing
+              }
+            }
+            
+            val result = files.toSeq
+            // Cache the result
+            cache.foreach(_.cacheFiles(result))
+            logger.debug(s"Computed and cached files list: ${result.length} files")
+            result
         }
-        
-        files.toSeq
   }
   
   /**
@@ -255,6 +272,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     
     cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
     
+    // Invalidate caches after any write operation since the transaction log state has changed
+    cache.foreach(_.invalidateVersionDependentCaches())
+    
     logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
   }
 
@@ -280,81 +300,134 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
    * Get the current metadata action from the transaction log.
    */
   def getMetadata(): MetadataAction = {
-    val latestVersion = getLatestVersion()
-    
-    // Look for metadata in reverse chronological order
-    for (version <- latestVersion to 0L by -1) {
-      val actions = readVersion(version)
-      actions.collectFirst {
-        case metadata: MetadataAction => metadata
-      } match {
-        case Some(metadata) => return metadata
-        case None => // Continue searching
-      }
+    // Check cache first
+    cache.flatMap(_.getCachedMetadata()) match {
+      case Some(cachedMetadata) =>
+        logger.debug("Using cached metadata")
+        cachedMetadata
+      case None =>
+        // Compute from transaction log
+        val latestVersion = getLatestVersion()
+        
+        // Look for metadata in reverse chronological order
+        for (version <- latestVersion to 0L by -1) {
+          val actions = readVersion(version)
+          actions.collectFirst {
+            case metadata: MetadataAction => metadata
+          } match {
+            case Some(metadata) =>
+              // Cache the result
+              cache.foreach(_.cacheMetadata(metadata))
+              logger.debug(s"Computed and cached metadata: ${metadata.id}")
+              return metadata
+            case None => // Continue searching
+          }
+        }
+        
+        throw new RuntimeException("No metadata found in transaction log")
     }
-    
-    throw new RuntimeException("No metadata found in transaction log")
   }
 
   private def readVersion(version: Long): Seq[Action] = {
-    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
-    val versionFilePath = versionFile.toString
-    
-    if (!cloudProvider.exists(versionFilePath)) {
-      return Seq.empty
-    }
-
-    Try {
-      val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-      val lines = content.split("\n").filter(_.nonEmpty)
+    // Check cache first
+    cache.flatMap(_.getCachedVersion(version)) match {
+      case Some(cachedActions) =>
+        logger.debug(s"Using cached version $version: ${cachedActions.length} actions")
+        cachedActions
+      case None =>
+        // Read from storage
+        val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+        val versionFilePath = versionFile.toString
         
-        lines.map { line =>
-          val jsonNode = JsonUtil.mapper.readTree(line)
-          
-          if (jsonNode.has("metaData")) {
-            val metadataNode = jsonNode.get("metaData")
-            JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
-          } else if (jsonNode.has("add")) {
-            val addNode = jsonNode.get("add")
-            JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
-          } else if (jsonNode.has("remove")) {
-            val removeNode = jsonNode.get("remove")
-            JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
-          } else {
-            throw new IllegalArgumentException(s"Unknown action type in line: $line")
-          }
-        }.toSeq
-    } match {
-      case Success(actions) => actions
-      case Failure(ex) =>
-        logger.error(s"Failed to read transaction log version $version", ex)
-        throw new RuntimeException(s"Failed to read transaction log: ${ex.getMessage}", ex)
+        if (!cloudProvider.exists(versionFilePath)) {
+          return Seq.empty
+        }
+
+        Try {
+          val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
+          val lines = content.split("\n").filter(_.nonEmpty)
+            
+            lines.map { line =>
+              val jsonNode = JsonUtil.mapper.readTree(line)
+              
+              if (jsonNode.has("metaData")) {
+                val metadataNode = jsonNode.get("metaData")
+                JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
+              } else if (jsonNode.has("add")) {
+                val addNode = jsonNode.get("add")
+                JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
+              } else if (jsonNode.has("remove")) {
+                val removeNode = jsonNode.get("remove")
+                JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
+              } else {
+                throw new IllegalArgumentException(s"Unknown action type in line: $line")
+              }
+            }.toSeq
+        } match {
+          case Success(actions) => 
+            // Cache the result
+            cache.foreach(_.cacheVersion(version, actions))
+            logger.debug(s"Read and cached version $version: ${actions.length} actions")
+            actions
+          case Failure(ex) =>
+            logger.error(s"Failed to read transaction log version $version", ex)
+            throw new RuntimeException(s"Failed to read transaction log: ${ex.getMessage}", ex)
+        }
     }
   }
 
   private def getVersions(): Seq[Long] = {
-    Try {
-      val files = cloudProvider.listFiles(transactionLogPathStr, recursive = false)
-      val result: Seq[Long] = files
-        .filter(!_.isDirectory)
-        .map { fileInfo =>
-          val path = new Path(fileInfo.path)
-          path.getName
+    // Check cache first
+    cache.flatMap(_.getCachedVersions()) match {
+      case Some(cachedVersions) =>
+        logger.debug(s"Using cached versions list: ${cachedVersions.length} versions")
+        cachedVersions
+      case None =>
+        // Read from storage
+        Try {
+          val files = cloudProvider.listFiles(transactionLogPathStr, recursive = false)
+          val result: Seq[Long] = files
+            .filter(!_.isDirectory)
+            .map { fileInfo =>
+              val path = new Path(fileInfo.path)
+              path.getName
+            }
+            .filter(_.endsWith(".json"))
+            .map(_.replace(".json", "").toLong)
+            .sorted
+          
+          // Cache the result
+          cache.foreach(_.cacheVersions(result))
+          logger.debug(s"Read and cached versions list: ${result.length} versions")
+          result
+        } match {
+          case Success(versions) => versions
+          case Failure(_) => 
+            logger.debug(s"Transaction log directory does not exist yet (normal for new tables): $transactionLogPathStr")
+            Seq.empty[Long]
         }
-        .filter(_.endsWith(".json"))
-        .map(_.replace(".json", "").toLong)
-        .sorted
-      result
-    } match {
-      case Success(versions) => versions
-      case Failure(_) => 
-        logger.debug(s"Transaction log directory does not exist yet (normal for new tables): $transactionLogPathStr")
-        Seq.empty[Long]
     }
   }
 
   private def getLatestVersion(): Long = {
     val versions = getVersions()
     if (versions.nonEmpty) versions.max else -1L
+  }
+  
+  /**
+   * Get cache statistics for monitoring and debugging.
+   * Returns None if caching is disabled.
+   */
+  def getCacheStats(): Option[CacheStats] = {
+    cache.map(_.getStats())
+  }
+  
+  /**
+   * Manually invalidate all cached data.
+   * Useful for debugging or when you know the transaction log has been modified externally.
+   */
+  def invalidateCache(): Unit = {
+    cache.foreach(_.invalidateAll())
+    logger.info("Transaction log cache invalidated manually")
   }
 }
