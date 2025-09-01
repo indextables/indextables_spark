@@ -83,18 +83,23 @@ class DateTimeTypeConversionTest extends TestBase with Matchers {
       readData.show(false)
       readData.printSchema()
       
-      // Collect and verify data
-      val originalRows = testData.collect()
-      val readRows = readData.collect()
+      // Collect and verify data - sort both by id to ensure consistent ordering
+      val originalRows = testData.orderBy("id").collect()
+      val readRows = readData.orderBy("id").collect()
       
       readRows.length shouldBe originalRows.length
       
-      // Verify each row
-      for (i <- 0 until readRows.length) {
+      // Verify each row by matching on id (not relying on array index order)
+      for (i <- originalRows.indices) {
         val originalRow = originalRows(i)
-        val readRow = readRows(i)
+        val originalId = originalRow.getLong(0)
         
-        println(s"🔍 Verifying row $i:")
+        // Find the matching read row by id, not by array position
+        val readRowOption = readRows.find(_.getLong(0) == originalId)
+        readRowOption should be(defined)
+        val readRow = readRowOption.get
+        
+        println(s"🔍 Verifying row with id=$originalId:")
         println(s"  Original: id=${originalRow.getLong(0)}, name=${originalRow.getString(1)}, date=${originalRow.getDate(2)}, timestamp=${originalRow.getTimestamp(3)}")
         println(s"  Read:     id=${readRow.getLong(0)}, name=${readRow.getString(1)}, date=${readRow.getDate(2)}, timestamp=${readRow.getTimestamp(3)}")
         
