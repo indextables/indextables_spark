@@ -1346,7 +1346,7 @@ class Tantivy4SparkTable(
     logger.info(s"🔧 Sources: Hadoop(${hadoopTantivyConfigs.size}), Spark(${sparkTantivyConfigs.size}), Options(${readTantivyConfigs.size})")
     val broadcastConfig = spark.sparkContext.broadcast(tantivyConfigs)
     
-    new Tantivy4SparkScanBuilder(transactionLog, schema(), options, broadcastConfig)
+    new Tantivy4SparkScanBuilder(spark, transactionLog, schema(), options, broadcastConfig)
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {

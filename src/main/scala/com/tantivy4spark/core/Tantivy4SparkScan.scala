@@ -18,17 +18,19 @@
 
 package com.tantivy4spark.core
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{StructType, DateType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, PartitionPruning}
-import com.tantivy4spark.storage.SplitLocationRegistry
+import com.tantivy4spark.storage.{SplitLocationRegistry, BroadcastSplitLocalityManager}
 import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkScan(
+    sparkSession: SparkSession,
     transactionLog: TransactionLog,
     readSchema: StructType,
     pushedFilters: Array[Filter],
@@ -47,23 +49,44 @@ class Tantivy4SparkScan(
   override def planInputPartitions(): Array[InputPartition] = {
     val addActions = transactionLog.listFiles()
     
+    // Update broadcast locality information for better scheduling
+    // This helps ensure preferred locations are accurate during partition planning
+    try {
+      // Access the SparkContext from the SparkSession
+      val sparkContext = sparkSession.sparkContext
+      println(s"🔄 [DRIVER-SCAN] Updating broadcast locality before partition planning")
+      BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
+      println(s"🔄 [DRIVER-SCAN] Broadcast locality update completed")
+      logger.debug("Updated broadcast locality information for partition planning")
+    } catch {
+      case ex: Exception =>
+        println(s"❌ [DRIVER-SCAN] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn("Failed to update broadcast locality information", ex)
+    }
+    
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
     
     logger.warn(s"🔍 SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
+    println(s"🗺️  [DRIVER-SCAN] Planning ${filteredActions.length} partitions")
+    
     val partitions = filteredActions.zipWithIndex.map { case (addAction, index) =>
+      println(s"🗺️  [DRIVER-SCAN] Creating partition $index for split: ${addAction.path}")
       val partition = new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
       val preferredHosts = partition.preferredLocations()
       if (preferredHosts.nonEmpty) {
+        println(s"🗺️  [DRIVER-SCAN] Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
         logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
       } else {
+        println(s"🗺️  [DRIVER-SCAN] Partition $index (${addAction.path}) has no cache locality information")
         logger.debug(s"Partition $index (${addAction.path}) has no cache locality information")
       }
       partition
     }
     
     val totalPreferred = partitions.count(_.preferredLocations().nonEmpty)
+    println(s"🗺️  [DRIVER-SCAN] Split cache locality summary: $totalPreferred of ${partitions.length} partitions have preferred host assignments")
     logger.info(s"Split cache locality: $totalPreferred of ${partitions.length} partitions have preferred host assignments")
     
     partitions.toArray[InputPartition]

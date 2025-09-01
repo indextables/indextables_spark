@@ -167,7 +167,7 @@ object DataSkippingDemo extends TestBase {
     
     val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
     val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-    val scan = new Tantivy4SparkScan(transactionLog, schema, filters, options, None, emptyBroadcastConfig)
+    val scan = new Tantivy4SparkScan(spark, transactionLog, schema, filters, options, None, emptyBroadcastConfig)
     
     val totalFiles = transactionLog.listFiles().length
     val partitions = scan.planInputPartitions()

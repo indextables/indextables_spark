@@ -18,6 +18,7 @@
 
 package com.tantivy4spark.core
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns, SupportsPushDownLimit}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
@@ -27,6 +28,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkScanBuilder(
+    sparkSession: SparkSession,
     transactionLog: TransactionLog,
     schema: StructType,
     options: CaseInsensitiveStringMap,
@@ -45,7 +47,7 @@ class Tantivy4SparkScanBuilder(
   private var _limit: Option[Int] = None
 
   override def build(): Scan = {
-    new Tantivy4SparkScan(transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, _pushedIndexQueryFilters)
+    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, _pushedIndexQueryFilters)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {

@@ -208,6 +208,33 @@ object MergeSplitsCommand {
 }
 
 /**
+ * Serializable wrapper for AWS configuration that can be broadcast across executors.
+ */
+case class SerializableAwsConfig(
+    accessKey: String,
+    secretKey: String, 
+    sessionToken: Option[String],
+    region: String,
+    endpoint: Option[String],
+    pathStyleAccess: Boolean
+) extends Serializable {
+  
+  /**
+   * Convert to tantivy4java AwsConfig instance.
+   */
+  def toQuickwitSplitAwsConfig(): QuickwitSplit.AwsConfig = {
+    new QuickwitSplit.AwsConfig(
+      accessKey,
+      secretKey,
+      sessionToken.orNull,
+      region,
+      endpoint.orNull,
+      pathStyleAccess
+    )
+  }
+}
+
+/**
  * Executor for merge splits operation.
  * Follows Delta Lake's OptimizeExecutor pattern.
  */
@@ -225,8 +252,9 @@ class MergeSplitsExecutor(
   /**
    * Extract AWS configuration from SparkSession for tantivy4java merge operations.
    * Uses same pattern as TantivySearchEngine for consistency.
+   * Returns a serializable wrapper that can be broadcast across executors.
    */
-  private def extractAwsConfig(): QuickwitSplit.AwsConfig = {
+  private def extractAwsConfig(): SerializableAwsConfig = {
     try {
       val sparkConf = sparkSession.conf
       val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
@@ -254,20 +282,20 @@ class MergeSplitsExecutor(
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       
-      // Create AwsConfig with the extracted credentials
-      new QuickwitSplit.AwsConfig(
+      // Create SerializableAwsConfig with the extracted credentials
+      SerializableAwsConfig(
         accessKey.getOrElse(""),
         secretKey.getOrElse(""),
-        sessionToken.orNull, // Can be null for permanent credentials
+        sessionToken, // Can be None for permanent credentials
         region.getOrElse("us-east-1"),
-        endpoint.orNull, // Can be null for default AWS endpoint
+        endpoint, // Can be None for default AWS endpoint
         pathStyleAccess
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        new QuickwitSplit.AwsConfig("", "", null, "us-east-1", null, false)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false)
     }
   }
   
@@ -570,7 +598,7 @@ class MergeSplitsExecutor(
    * Execute merge for a single group of splits in executor context.
    * This version is designed to run on Spark executors and handles serialization properly.
    */
-  private def executeMergeGroupDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: QuickwitSplit.AwsConfig): MergeResult = {
+  private def executeMergeGroupDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergeResult = {
     val startTime = System.currentTimeMillis()
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
     
@@ -682,7 +710,7 @@ class MergeSplitsExecutor(
    * Create a new merged split in executor context using tantivy4java.
    * This version uses broadcast configuration parameters for executor-safe operation.
    */
-  private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: QuickwitSplit.AwsConfig): MergedSplitInfo = {
+  private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
     
     // Validate group has at least 2 files (required by tantivy4java)
@@ -732,7 +760,7 @@ class MergeSplitsExecutor(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId  
       "merge-node",      // nodeId
-      awsConfig          // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
     )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
@@ -842,7 +870,7 @@ class MergeSplitsExecutor(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId  
       "merge-node",      // nodeId
-      awsConfig          // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
     )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
@@ -1046,7 +1074,7 @@ object MergeSplitsExecutor {
    * Execute merge for a single group of splits in executor context.
    * This static method is designed to run on Spark executors and handles serialization properly.
    */
-  def executeMergeGroupDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: QuickwitSplit.AwsConfig): MergeResult = {
+  def executeMergeGroupDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergeResult = {
     val startTime = System.currentTimeMillis()
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
     
@@ -1086,7 +1114,7 @@ object MergeSplitsExecutor {
    * Create a new merged split in executor context using tantivy4java.
    * This static method uses broadcast configuration parameters for executor-safe operation.
    */
-  private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: QuickwitSplit.AwsConfig): MergedSplitInfo = {
+  private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
     
     // Validate group has at least 2 files (required by tantivy4java)
@@ -1136,7 +1164,7 @@ object MergeSplitsExecutor {
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId  
       "merge-node",      // nodeId
-      awsConfig          // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
     )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS

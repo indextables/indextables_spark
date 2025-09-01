@@ -237,6 +237,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     
     val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
     new Tantivy4SparkScan(
+      spark,
       transactionLog,
       schema,
       filters,
