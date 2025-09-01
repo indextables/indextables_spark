@@ -27,7 +27,9 @@ import org.apache.spark.sql.types.{StringType, LongType, StructType, StructField
 import org.apache.spark.unsafe.types.UTF8String
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, RemoveAction}
 import com.tantivy4spark.storage.SplitManager
+import com.tantivy4spark.io.{CloudStorageProviderFactory}
 import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.ThreadLocalRandom
@@ -122,11 +124,21 @@ case class MergeSplitsCommand(
         return Seq(Row(pathStr, "No splits merged - table or path does not exist"))
     }
     
-    // Check if path exists
-    val fs = tablePath.getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
-    if (!fs.exists(tablePath)) {
-      logger.info(s"Path does not exist: $tablePath")
-      return Seq(Row(tablePath.toString, "No splits merged - path does not exist"))
+    // Check if path exists using CloudStorageProvider
+    val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap[String, String]())
+    val cloudProvider = CloudStorageProviderFactory.createProvider(
+      tablePath.toString, 
+      options, 
+      sparkSession.sparkContext.hadoopConfiguration
+    )
+    
+    try {
+      if (!cloudProvider.exists(tablePath.toString)) {
+        logger.info(s"Path does not exist: $tablePath")
+        return Seq(Row(tablePath.toString, "No splits merged - path does not exist"))
+      }
+    } finally {
+      cloudProvider.close()
     }
     
     // Create transaction log
@@ -534,21 +546,48 @@ class MergeSplitsExecutor(
     val mergedPath = s"$partitionPath${uuid}.split"
     
     // Create full paths for input splits and output split
+    // Handle S3 paths specially to preserve the s3:// scheme
+    val isS3Path = tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")
+    
     val inputSplitPaths = mergeGroup.files.map { file =>
-      val fullPath = new Path(tablePath, file.path)
-      fullPath.toString
+      if (isS3Path) {
+        // For S3 paths, construct the URL directly
+        val baseUri = tablePath.toString.replaceAll("/$", "") // Remove trailing slash if present
+        s"$baseUri/${file.path}"
+      } else {
+        // For local/HDFS paths, use Path concatenation
+        val fullPath = new Path(tablePath, file.path)
+        fullPath.toString
+      }
     }.asJava
     
-    val outputSplitPath = new Path(tablePath, mergedPath).toString
+    val outputSplitPath = if (isS3Path) {
+      // For S3 paths, construct the URL directly
+      val baseUri = tablePath.toString.replaceAll("/$", "") // Remove trailing slash if present
+      s"$baseUri/$mergedPath"
+    } else {
+      // For local/HDFS paths, use Path concatenation
+      new Path(tablePath, mergedPath).toString
+    }
     
     logger.info(s"Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
     logger.debug(s"Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
     
     // Check if this is a test environment by seeing if the input files actually exist
-    val fs = tablePath.getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
-    val filesExist = inputSplitPaths.asScala.forall { pathStr =>
-      val path = new Path(pathStr)
-      fs.exists(path)
+    // Use CloudStorageProvider instead of Hadoop filesystem
+    val options = new CaseInsensitiveStringMap(java.util.Collections.emptyMap[String, String]())
+    val cloudProvider = CloudStorageProviderFactory.createProvider(
+      tablePath.toString,
+      options,
+      sparkSession.sparkContext.hadoopConfiguration
+    )
+    
+    val filesExist = try {
+      inputSplitPaths.asScala.forall { pathStr =>
+        cloudProvider.exists(pathStr)
+      }
+    } finally {
+      cloudProvider.close()
     }
     
     if (!filesExist) {
