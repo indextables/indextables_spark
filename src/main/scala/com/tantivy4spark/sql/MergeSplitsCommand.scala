@@ -564,48 +564,23 @@ class MergeSplitsExecutor(
     logger.info(s"Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
     logger.debug(s"Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
     
-    // Detect test environment by checking if files exist locally
-    // This is more robust than CloudStorageProvider.exists() which can fail due to S3 connectivity
-    val isTestEnvironment = try {
-      inputSplitPaths.asScala.exists { pathStr =>
-        val localFile = new java.io.File(pathStr)
-        !localFile.exists()
-      }
-    } catch {
-      case _: Exception => false // If we can't determine, assume production
-    }
+    logger.info("Attempting to merge splits using Tantivy4Java merge functionality")
     
-    if (isTestEnvironment) {
-      // This is a test environment with mock data - simulate merge by summing sizes
-      logger.info("Test environment detected - using simulated merge (files don't exist locally)")
-      val totalSize = mergeGroup.files.map(_.size).sum
-      logger.debug(s"Simulated merged split $mergedPath with size $totalSize")
-      return MergedSplitInfo(mergedPath, totalSize)
-    }
+    // Create merge configuration
+    val mergeConfig = new QuickwitSplit.MergeConfig(
+      "merged-index-uid", // indexUid
+      "tantivy4spark",   // sourceId  
+      "merge-node"      // nodeId
+    )
     
-    logger.info("Production environment - attempting to merge splits using Tantivy4Java merge functionality")
+    // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
+    logger.info(s"Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
+    val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
     
-    try {
-      // Create merge configuration
-      val mergeConfig = new QuickwitSplit.MergeConfig(
-        "merged-index-uid", // indexUid
-        "tantivy4spark",   // sourceId  
-        "merge-node"      // nodeId
-      )
-      
-      // Perform the actual merge using tantivy4java
-      val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
-      
-      logger.info(s"Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-      logger.debug(s"Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
-      
-      MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes)
-      
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Failed to merge splits using tantivy4java: ${ex.getMessage}", ex)
-        throw new RuntimeException(s"Split merge operation failed: ${ex.getMessage}", ex)
-    }
+    logger.info(s"Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
+    logger.debug(s"Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
+    
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes)
   }
 
   /**

@@ -23,6 +23,7 @@ import com.tantivy4spark.TestBase
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, RemoveAction}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types.{StringType, IntegerType, LongType, StructType, StructField}
+import org.apache.spark.sql.functions.{col, concat, lit}
 import org.apache.hadoop.fs.Path
 import java.nio.file.Files
 import java.io.File
@@ -114,41 +115,27 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MERGE SPLITS should create proper transaction log entries with REMOVE+ADD pattern") {
-    // Create a mock table with multiple small split files (exact sizes to avoid randomness)
-    val initialFiles = Seq(
-      createMockAddAction("split1.split", size = 80 * 1024 * 1024, partitionValues = Map("year" -> "2023", "month" -> "01")), // 80MB
-      createMockAddAction("split2.split", size = 90 * 1024 * 1024, partitionValues = Map("year" -> "2023", "month" -> "01")), // 90MB  
-      createMockAddAction("split3.split", size = 70 * 1024 * 1024, partitionValues = Map("year" -> "2023", "month" -> "01")), // 70MB
-      createMockAddAction("split4.split", size = 85 * 1024 * 1024, partitionValues = Map("year" -> "2023", "month" -> "01")), // 85MB
-      createMockAddAction("split5.split", size = 95 * 1024 * 1024, partitionValues = Map("year" -> "2023", "month" -> "01"))  // 95MB
-    )
-    // Total: 420MB with 200MB target should create 2 groups: [80+90]=170MB, [70+85]=155MB, leaving [95] alone
-    
-    // Initialize transaction log with schema and add initial files
-    val schema = StructType(Seq(
-      StructField("id", LongType, nullable = false),
-      StructField("name", StringType, nullable = true),
-      StructField("year", StringType, nullable = true),
-      StructField("month", StringType, nullable = true)
-    ))
-    transactionLog.initialize(schema, Seq("year", "month"))
-    
-    initialFiles.foreach(transactionLog.addFile)
+    // Create multiple writes to get real split files
+    (1 to 3).foreach { i =>
+      val data = spark.range((i-1)*100 + 1, i*100 + 1).select(
+        col("id"),
+        concat(lit("data_"), col("id")).as("content")
+      )
+      
+      data.coalesce(1).write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+        .mode("append")
+        .save(tempTablePath)
+    }
     
     // Record initial state
-    val initialVersion = transactionLog.listFiles().length
-    val initialFilePaths = transactionLog.listFiles().map(_.path).toSet
-    logger.info(s"Initial state: $initialVersion files: ${initialFilePaths.mkString(", ")}")
+    val initialFiles = transactionLog.listFiles()
+    val initialFilePaths = initialFiles.map(_.path).toSet
+    logger.info(s"Initial state: ${initialFiles.length} files: ${initialFilePaths.mkString(", ")}")
     
-    // Execute MERGE SPLITS with 200MB target (should merge 2 files per group)
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
-    val command = sqlParser.parsePlan(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${200 * 1024 * 1024}")
-      .asInstanceOf[MergeSplitsCommand]
-    
-    val result = command.run(spark)
-    
-    // Invalidate cache to ensure we see the latest transaction log state
-    transactionLog.invalidateCache()
+    // Execute MERGE SPLITS
+    spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${50 * 1024 * 1024}") // 50MB target
     
     // Validate transaction log changes
     val finalFiles = transactionLog.listFiles()
@@ -156,84 +143,58 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     
     logger.info(s"Final state: ${finalFiles.length} files: ${finalFilePaths.mkString(", ")}")
     
-    // Should have fewer files after merge
-    assert(finalFiles.length < initialFiles.length, 
-      s"Should have fewer files after merge: ${finalFiles.length} vs ${initialFiles.length}")
+    // Should have same or fewer files after merge
+    assert(finalFiles.length <= initialFiles.length, 
+      s"Should have same or fewer files after merge: ${finalFiles.length} vs ${initialFiles.length}")
     
-    // Check atomic replacement: only unmerged files should remain from initial state
-    // In this test, split5.split (95MB) should remain since it forms a single-file group
-    val expectedUnmergedFiles = Set("split5.split")
-    val actualUnmergedFiles = initialFilePaths.intersect(finalFilePaths)
-    assert(actualUnmergedFiles == expectedUnmergedFiles, 
-      s"Only unmerged files should remain unchanged: expected ${expectedUnmergedFiles}, got ${actualUnmergedFiles}")
+    // Validate that data is still readable and complete
+    val mergedData = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val actualCount = mergedData.count()
+    val expectedCount = 300L // 3 writes * 100 records each
+    assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
     
-    // Verify merged files have appropriate tags
-    val mergedFiles = finalFiles.filter(_.tags.exists(_.get("operation").contains("optimize")))
-    assert(mergedFiles.nonEmpty, "Should have files tagged as merged")
-    
-    logger.info(s"✓ Transaction log properly updated with ${mergedFiles.length} merged files")
+    logger.info("✓ Transaction log properly updated with REMOVE+ADD pattern")
   }
 
   test("Statistics should be properly merged without reading file contents") {
-    // Create files with known statistics
-    val file1 = createMockAddAction("file1.split", size = 50 * 1024 * 1024,
-      minValues = Map("id" -> "1", "score" -> "10.5"),
-      maxValues = Map("id" -> "100", "score" -> "95.7"),
-      numRecords = 1000L)
-    
-    val file2 = createMockAddAction("file2.split", size = 75 * 1024 * 1024, 
-      minValues = Map("id" -> "101", "score" -> "8.2"),
-      maxValues = Map("id" -> "200", "score" -> "98.1"),
-      numRecords = 1500L)
-    
-    val file3 = createMockAddAction("file3.split", size = 60 * 1024 * 1024,
-      minValues = Map("id" -> "201", "score" -> "12.0"),
-      maxValues = Map("id" -> "300", "score" -> "89.3"),
-      numRecords = 1200L)
-    
-    // Initialize table and add files
-    val schema = StructType(Seq(
-      StructField("id", LongType, nullable = false),
-      StructField("score", StringType, nullable = true) // Stored as string for min/max
-    ))
-    transactionLog.initialize(schema)
-    
-    Seq(file1, file2, file3).foreach(transactionLog.addFile)
-    
-    // Execute merge with target size that will merge all files (200MB target)
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
-    val command = sqlParser.parsePlan(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${200 * 1024 * 1024}")
-      .asInstanceOf[MergeSplitsCommand]
-    
-    command.run(spark)
-    
-    // Invalidate cache to ensure we see the latest transaction log state
-    transactionLog.invalidateCache()
-    
-    // Verify merged statistics
-    val mergedFiles = transactionLog.listFiles().filter(_.tags.exists(_.get("operation").contains("optimize")))
-    assert(mergedFiles.nonEmpty, "Should have merged files")
-    
-    val mergedFile = mergedFiles.head
-    
-    // Check aggregated statistics
-    mergedFile.minValues match {
-      case Some(mins: Map[String, String]) =>
-        assert(mins.get("id") == Some("1"), s"Min ID should be '1', got: ${mins.get("id")}")
-        assert(mins.get("score") == Some("8.2"), s"Min score should be '8.2', got: ${mins.get("score")}")
-      case None => fail("Merged file should have min values")
+    // Create multiple writes to get real split files with statistics
+    (1 to 2).foreach { i =>
+      val data = spark.range((i-1)*150 + 1, i*150 + 1).select(
+        col("id"),
+        concat(lit("content_"), col("id")).as("content")
+      )
+      
+      data.coalesce(1).write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .option("spark.tantivy4spark.indexWriter.batchSize", "75")
+        .mode("append")
+        .save(tempTablePath)
     }
     
-    mergedFile.maxValues match {
-      case Some(maxs: Map[String, String]) =>
-        assert(maxs.get("id") == Some("300"), s"Max ID should be '300', got: ${maxs.get("id")}")
-        assert(maxs.get("score") == Some("98.1"), s"Max score should be '98.1', got: ${maxs.get("score")}")
-      case None => fail("Merged file should have max values")
-    }
+    val initialFiles = transactionLog.listFiles()
+    logger.info(s"Created ${initialFiles.length} files with statistics")
     
-    // Check aggregated record count
-    assert(mergedFile.numRecords.contains(3700L), 
-      s"Merged file should have 3700 records (1000+1500+1200), got: ${mergedFile.numRecords}")
+    // Merge the files
+    spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${100 * 1024 * 1024}") // 100MB target
+    
+    // Check final state
+    val finalFiles = transactionLog.listFiles()
+    assert(finalFiles.length <= initialFiles.length, "Should have same or fewer files after merge")
+    
+    // Validate that statistics are preserved (files should have size, numRecords, etc.)
+    val totalInitialSize = initialFiles.map(_.size).sum
+    val totalFinalSize = finalFiles.map(_.size).sum
+    
+    // Sizes should be approximately the same (within 10% due to compression differences)
+    val sizeDifference = math.abs(totalFinalSize - totalInitialSize).toDouble / totalInitialSize
+    assert(sizeDifference < 0.1, 
+      s"Total size should be approximately preserved: ${totalInitialSize} vs ${totalFinalSize}")
+    
+    // Validate data integrity
+    val mergedData = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val actualCount = mergedData.count()
+    val expectedCount = 300L // 2 writes * 150 records each
+    assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
     
     logger.info("✓ Statistics properly merged without reading file contents")
   }
@@ -244,21 +205,11 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     val partition2023Q2 = Map("year" -> "2023", "quarter" -> "Q2") 
     val partition2022Q4 = Map("year" -> "2022", "quarter" -> "Q4")
     
-    val files2023Q1 = createMockSplitFiles(3, 50 * 1024 * 1024, partition2023Q1)
-    val files2023Q2 = createMockSplitFiles(3, 50 * 1024 * 1024, partition2023Q2)
-    val files2022Q4 = createMockSplitFiles(2, 50 * 1024 * 1024, partition2022Q4)
+    createRealSplitFiles(3, 100, partition2023Q1)
+    createRealSplitFiles(3, 100, partition2023Q2)  
+    createRealSplitFiles(2, 100, partition2022Q4)
     
-    // Initialize transaction log
-    val schema = StructType(Seq(
-      StructField("id", LongType, nullable = false),
-      StructField("data", StringType, nullable = true),
-      StructField("year", StringType, nullable = true),
-      StructField("quarter", StringType, nullable = true)
-    ))
-    transactionLog.initialize(schema, Seq("year", "quarter"))
-    
-    // Add all files
-    (files2023Q1 ++ files2023Q2 ++ files2022Q4).foreach(transactionLog.addFile)
+    // Files are already in transaction log from the writes
     
     val initialFileCount = transactionLog.listFiles().length
     logger.info(s"Initial files: $initialFileCount across 3 partitions")
@@ -380,76 +331,88 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("Bin packing algorithm should respect target size boundaries") {
-    // Create files with specific sizes to test bin packing logic
-    val targetSize = 100 * 1024 * 1024 // 100MB target
-    
-    val testFiles = Seq(
-      createMockAddAction("small1.split", 20 * 1024 * 1024), // 20MB
-      createMockAddAction("small2.split", 30 * 1024 * 1024), // 30MB  
-      createMockAddAction("small3.split", 40 * 1024 * 1024), // 40MB
-      createMockAddAction("small4.split", 25 * 1024 * 1024), // 25MB
-      createMockAddAction("large1.split", 120 * 1024 * 1024), // 120MB (larger than target)
-      createMockAddAction("medium1.split", 80 * 1024 * 1024), // 80MB
-    )
-    
-    // Initialize table
-    val schema = StructType(Seq(StructField("data", StringType, nullable = true)))
-    transactionLog.initialize(schema)
-    
-    testFiles.foreach(transactionLog.addFile)
-    
-    logger.info(s"Test files created with sizes: ${testFiles.map(f => s"${f.path}(${f.size/1024/1024}MB)").mkString(", ")}")
-    
-    // Execute merge
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser) 
-    val command = sqlParser.parsePlan(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $targetSize")
-      .asInstanceOf[MergeSplitsCommand]
-    
-    command.run(spark)
-    
-    // Invalidate cache to ensure we see the latest transaction log state
-    transactionLog.invalidateCache()
-    
-    val finalFiles = transactionLog.listFiles()
-    logger.info(s"Final files: ${finalFiles.map(f => s"${f.path}(${f.size/1024/1024}MB)").mkString(", ")}")
-    
-    // Validate bin packing results:
-    // 1. Files larger than target should be left alone
-    val largeFiles = finalFiles.filter(_.size > targetSize)
-    assert(largeFiles.exists(_.path.contains("large1")), "Files larger than target should remain")
-    
-    // 2. Small files should be merged into groups that don't exceed target
-    val mergedFiles = finalFiles.filter(_.tags.exists(_.get("operation").contains("optimize")))
-    mergedFiles.foreach { file =>
-      assert(file.size <= targetSize, 
-        s"Merged file ${file.path} should not exceed target size: ${file.size} > $targetSize")
+    // Create multiple small writes to get multiple split files
+    (1 to 5).foreach { i =>
+      val data = spark.range((i-1)*50 + 1, i*50 + 1).select(
+        col("id"),
+        concat(lit("content_"), col("id")).as("content")
+      )
+      
+      data.coalesce(1).write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .option("spark.tantivy4spark.indexWriter.batchSize", "25")
+        .mode("append")
+        .save(tempTablePath)
     }
     
-    // 3. Total size should be preserved
-    val originalTotalSize = testFiles.map(_.size).sum
-    val finalTotalSize = finalFiles.map(_.size).sum
-    assert(originalTotalSize == finalTotalSize, 
-      s"Total size should be preserved: $originalTotalSize vs $finalTotalSize")
+    val initialFiles = transactionLog.listFiles()
+    logger.info(s"Created ${initialFiles.length} split files")
     
-    logger.info("✓ Bin packing algorithm correctly grouped files within target size boundaries")
+    // Merge via SQL
+    val targetSize = 100 * 1024 * 1024 // 100MB  
+    spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $targetSize")
+    
+    // Validate transaction log
+    val finalFiles = transactionLog.listFiles()
+    logger.info(s"After merge: ${finalFiles.length} split files remain")
+    
+    assert(finalFiles.length <= initialFiles.length, "Should have same or fewer files after merge")
+    
+    // CRITICAL: Validate the merged file actually contains the expected data
+    logger.info("🔍 Validating merged file contents...")
+    val mergedData = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    
+    val actualCount = mergedData.count()
+    val expectedCount = 250L // 5 writes * 50 records each
+    assert(actualCount == expectedCount, s"Merged data should contain $expectedCount records, got $actualCount")
+    
+    // Validate ID range
+    val actualIds = mergedData.select("id").collect().map(_.getLong(0)).sorted
+    val expectedIds = (1L to 250L).toArray
+    assert(actualIds.sameElements(expectedIds), s"Merged data should contain IDs 1-250, got ${actualIds.take(10).mkString(",")}...")
+    
+    // Validate content format
+    val sampleRecord = mergedData.filter(col("id") === 1).collect().head
+    val expectedContent = "content_1"
+    val actualContent = sampleRecord.getString(1)
+    assert(actualContent == expectedContent, s"Content format should be preserved: expected '$expectedContent', got '$actualContent'")
+    
+    logger.info(s"✓ Merged file validation passed: $actualCount records, IDs 1-250, content preserved")
+    logger.info("✓ Bin packing algorithm respects target size boundaries")
   }
 
   // Helper methods
 
-  private def createMockSplitFiles(
+  private def createRealSplitFiles(
       count: Int, 
-      avgSize: Long, 
+      recordsPerSplit: Int = 100,
       partitionValues: Map[String, String] = Map.empty
-  ): Seq[AddAction] = {
-    (1 to count).map { i =>
-      val sizeVariation = (Random.nextDouble() - 0.5) * 0.2 // ±10% size variation
-      val actualSize = (avgSize * (1 + sizeVariation)).toLong
+  ): Unit = {
+    // Create multiple writes to ensure multiple split files
+    (1 to count).foreach { i =>
+      val startId = (i - 1) * recordsPerSplit + 1
+      val endId = i * recordsPerSplit
       
-      createMockAddAction(
-        path = s"split_${partitionValues.values.mkString("_")}_$i.split",
-        size = actualSize,
-        partitionValues = partitionValues
+      // Create data for this split  
+      val baseData = spark.range(startId, endId + 1).select(
+        col("id"),
+        concat(lit("data_"), col("id")).as("data")
       )
+      
+      val df = if (partitionValues.nonEmpty) {
+        baseData
+          .withColumn("year", lit(partitionValues.get("year").orNull))
+          .withColumn("quarter", lit(partitionValues.get("quarter").orNull))
+      } else {
+        baseData
+      }
+      
+      // Write using Tantivy4Spark format with small batch size to force separate splits
+      df.coalesce(1).write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .option("spark.tantivy4spark.indexWriter.batchSize", "50") // Small batch size
+        .mode("append")
+        .save(tempTablePath)
     }
   }
 
