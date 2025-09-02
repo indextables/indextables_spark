@@ -118,8 +118,17 @@ case class Tantivy4SparkOptimizedWriterExec(
     val shuffleExec = ShuffleExchangeExec(partitioning, child)
     val shuffledRDD = shuffleExec.execute()
 
+    // Set descriptive names for Spark UI
+    val jobGroup = "tantivy4spark-optimized-write"
+    val jobDescription = s"Optimized Write: ${shuffleExec.outputPartitioning.numPartitions} partitions, target ${targetRecordsPerSplit} records/split"
+    val stageName = s"Optimized Write: ${shuffleExec.outputPartitioning.numPartitions} partitions"
+    
+    sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
+    
     // Add instrumentation to track actual record distribution
-    shuffledRDD.mapPartitionsWithIndex { (partitionId, iter) =>
+    val optimizedRDD = try {
+      shuffledRDD.setName(stageName)
+      shuffledRDD.mapPartitionsWithIndex { (partitionId, iter) =>
       var recordCount = 0L
       val result = iter.map { row =>
         recordCount += 1
@@ -134,6 +143,12 @@ case class Tantivy4SparkOptimizedWriterExec(
       
       result
     }
+      .setName("Optimized Write Results")
+    } finally {
+      sparkContext.clearJobGroup()
+    }
+    
+    optimizedRDD
   }
 
   override protected def withNewChildInternal(newChild: SparkPlan): Tantivy4SparkOptimizedWriterExec = {

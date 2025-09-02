@@ -100,14 +100,23 @@ object BroadcastSplitLocalityManager {
     println(s"🚀 [DRIVER-LOCALITY] Starting broadcast locality update with ${sc.defaultParallelism} partitions")
     logger.info("Collecting split locality information from all executors")
     
+    // Set descriptive names for Spark UI
+    val jobGroup = "tantivy4spark-locality-update"
+    val jobDescription = s"Updating broadcast locality: Collecting split cache information from ${sc.defaultParallelism} executors"
+    val stageName = s"Collect Split Locality: ${sc.defaultParallelism} executors"
+    
+    sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
+    
     // Collect locality information from all executors
-    val executorLocalityInfo = sc.parallelize(1 to sc.defaultParallelism, sc.defaultParallelism)
-      .mapPartitions { partitionId =>
-        // Each executor contributes its local split access information
-        val hostname = getCurrentHostname
-        val localData = localSplitAccess.map { case (splitPath, hosts) =>
-          (splitPath, hosts.toArray)
-        }.toIterator.toList
+    val executorLocalityInfo = try {
+      sc.parallelize(1 to sc.defaultParallelism, sc.defaultParallelism)
+        .setName(stageName)
+        .mapPartitions { partitionId =>
+          // Each executor contributes its local split access information
+          val hostname = getCurrentHostname
+          val localData = localSplitAccess.map { case (splitPath, hosts) =>
+            (splitPath, hosts.toArray)
+          }.toIterator.toList
         
         println(s"🔧 [EXECUTOR-LOCALITY] Partition ${partitionId.mkString(",")} on host $hostname contributing ${localData.size} split records")
         localData.foreach { case (splitPath, hosts) =>
@@ -116,7 +125,11 @@ object BroadcastSplitLocalityManager {
         
         localData.iterator
       }
+      .setName("Split Locality Data")
       .collect()
+    } finally {
+      sc.clearJobGroup()
+    }
     
     println(s"🔄 [DRIVER-LOCALITY] Collected ${executorLocalityInfo.length} locality records from executors")
     

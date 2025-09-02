@@ -414,8 +414,24 @@ class MergeSplitsExecutor(
     val broadcastAwsConfig = sparkSession.sparkContext.broadcast(awsConfig)
     val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
     
-    val mergeGroupsRDD = sparkSession.sparkContext.parallelize(mergeGroups, mergeGroups.length)
-    val physicalMergeResults = mergeGroupsRDD.map(group => MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)).collect()
+    // Set descriptive names for Spark UI
+    val totalSplits = mergeGroups.map(_.files.length).sum
+    val totalSizeGB = mergeGroups.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
+    val jobGroup = s"tantivy4spark-merge-splits"
+    val jobDescription = f"MERGE SPLITS: Consolidating $totalSplits splits (${totalSizeGB}%.2f GB) across ${mergeGroups.length} groups"
+    val stageName = f"Merge Splits: ${mergeGroups.length} groups, $totalSplits splits (${totalSizeGB}%.2f GB)"
+    
+    sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
+    
+    val physicalMergeResults = try {
+      val mergeGroupsRDD = sparkSession.sparkContext.parallelize(mergeGroups, mergeGroups.length)
+        .setName(stageName)
+      mergeGroupsRDD.map(group => MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value))
+        .setName("Merge Split Results")
+        .collect()
+    } finally {
+      sparkSession.sparkContext.clearJobGroup()
+    }
     
     // Now handle transaction log operations on driver (these cannot be distributed)
     logger.info(s"Processing ${physicalMergeResults.length} merge results on driver for transaction log updates")

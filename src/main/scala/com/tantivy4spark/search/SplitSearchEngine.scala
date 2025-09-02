@@ -260,6 +260,14 @@ class SplitSearchEngine(
     org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
   }
 
+  /**
+   * Get the underlying SplitSearcher for direct operations like warmup.
+   * This provides access to advanced features like cache warming.
+   */
+  def getSplitSearcher(): SplitSearcher = {
+    splitSearcher
+  }
+
   override def close(): Unit = {
     try {
       logger.debug(s"Closing SplitSearchEngine for $splitPath")

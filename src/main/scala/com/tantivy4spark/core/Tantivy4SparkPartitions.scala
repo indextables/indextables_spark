@@ -27,6 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{AddAction, PartitionUtils}
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry, BroadcastSplitLocalityManager}
+import com.tantivy4spark.prewarm.PreWarmManager
 import com.tantivy4spark.util.StatisticsCalculator
 import java.util.UUID
 import com.tantivy4spark.io.{CloudStorageProviderFactory}
@@ -221,6 +222,19 @@ class Tantivy4SparkPartitionReader(
         BroadcastSplitLocalityManager.recordSplitAccess(addAction.path, currentHostname)
         logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
         
+        // Check if pre-warm is enabled and try to join warmup future
+        val broadcasted = broadcastConfig.value
+        val isPreWarmEnabled = broadcasted.getOrElse("spark.tantivy4spark.cache.prewarm.enabled", "true").toBoolean
+        if (isPreWarmEnabled) {
+          // Generate query hash from filters for warmup future lookup
+          val allFilters = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+          val queryHash = generateQueryHash(allFilters)
+          val warmupJoined = PreWarmManager.joinWarmupFuture(addAction.path, queryHash, isPreWarmEnabled)
+          if (warmupJoined) {
+            logger.info(s"🔥 Successfully joined warmup future for split: ${addAction.path}")
+          }
+        }
+        
         // Create cache configuration from Spark options
         logger.error(s"🔍 ABOUT TO CALL createCacheConfig()...")
         logger.info(s"🔍 Creating cache configuration for split read...")
@@ -354,6 +368,14 @@ class Tantivy4SparkPartitionReader(
     if (splitSearchEngine != null) {
       splitSearchEngine.close()
     }
+  }
+  
+  /**
+   * Generate a consistent hash for the query filters to identify warmup futures.
+   */
+  private def generateQueryHash(allFilters: Array[Any]): String = {
+    val filterString = allFilters.map(_.toString).mkString("|")
+    java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
   }
 }
 

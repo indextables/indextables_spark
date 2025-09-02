@@ -25,6 +25,7 @@ import org.apache.spark.sql.types.{StructType, DateType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, PartitionPruning}
 import com.tantivy4spark.storage.{SplitLocationRegistry, BroadcastSplitLocalityManager}
+import com.tantivy4spark.prewarm.PreWarmManager
 import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -66,6 +67,39 @@ class Tantivy4SparkScan(
     
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
+    
+    // Check if pre-warm is enabled
+    val broadcastConfigMap = broadcastConfig.value
+    val isPreWarmEnabled = broadcastConfigMap.getOrElse("spark.tantivy4spark.cache.prewarm.enabled", "true").toBoolean
+    
+    // Execute pre-warm phase if enabled
+    if (isPreWarmEnabled && filteredActions.nonEmpty) {
+      try {
+        val sparkContext = sparkSession.sparkContext
+        logger.info(s"🔥 Pre-warm enabled: initiating cache warming for ${filteredActions.length} splits")
+        
+        // Combine regular filters with IndexQuery filters for pre-warming
+        val allFilters = pushedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+        
+        val preWarmResult = PreWarmManager.executePreWarm(
+          sparkContext,
+          filteredActions,
+          readSchema,
+          allFilters,
+          broadcastConfig,
+          isPreWarmEnabled
+        )
+        
+        if (preWarmResult.warmupInitiated) {
+          logger.info(s"🔥 Pre-warm completed: ${preWarmResult.totalWarmupsCreated} warmup tasks across ${preWarmResult.warmupAssignments.size} hosts")
+          println(s"🔥 [DRIVER-PREWARM] Pre-warm completed: ${preWarmResult.totalWarmupsCreated} tasks across ${preWarmResult.warmupAssignments.size} hosts")
+        }
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Pre-warm failed but continuing with query execution: ${ex.getMessage}", ex)
+          println(s"⚠️  [DRIVER-PREWARM] Pre-warm failed but continuing: ${ex.getMessage}")
+      }
+    }
     
     logger.warn(s"🔍 SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
     
