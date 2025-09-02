@@ -100,7 +100,16 @@ object Tantivy4SparkRelation {
     
     // Extract cache configuration with session token support from Hadoop props
     val cacheConfig = com.tantivy4spark.storage.SplitCacheConfig(
-      cacheName = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
+      cacheName = {
+        val configName = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.name", "")
+        if (configName.trim.nonEmpty) {
+          configName.trim
+        } else {
+          // Use file path as cache name for table-specific caching
+          val tablePath = new org.apache.hadoop.fs.Path(filePath).getParent.toString
+          s"tantivy4spark-${tablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
+        }
+      },
       maxCacheSize = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
       maxConcurrentLoads = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
       enableQueryCache = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
@@ -353,7 +362,16 @@ object Tantivy4SparkRelation {
     
     // Extract cache configuration with session token support from Hadoop props
     val cacheConfig = com.tantivy4spark.storage.SplitCacheConfig(
-      cacheName = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
+      cacheName = {
+        val configName = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.name", "")
+        if (configName.trim.nonEmpty) {
+          configName.trim
+        } else {
+          // Use file path as cache name for table-specific caching
+          val tablePath = new org.apache.hadoop.fs.Path(filePath).getParent.toString
+          s"tantivy4spark-${tablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
+        }
+      },
       maxCacheSize = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
       maxConcurrentLoads = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
       enableQueryCache = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.queryCache", "true").toBoolean,

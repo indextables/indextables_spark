@@ -155,9 +155,13 @@ class Tantivy4SparkPartitionReader(
     
     val cacheConfig = SplitCacheConfig(
       cacheName = {
-        val rawName = getBroadcastConfig("spark.tantivy4spark.cache.name", "tantivy4spark-cache")
-        val trimmedName = rawName.trim()
-        if (trimmedName.isEmpty) "tantivy4spark-cache" else trimmedName
+        val configName = getBroadcastConfig("spark.tantivy4spark.cache.name", "")
+        if (configName.trim().nonEmpty) {
+          configName.trim()
+        } else {
+          // Use table path as cache name for table-specific caching
+          s"tantivy4spark-${tablePath.toString.replaceAll("[^a-zA-Z0-9]", "_")}"
+        }
       },
       maxCacheSize = {
         val value = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "200000000")

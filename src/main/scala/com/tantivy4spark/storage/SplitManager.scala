@@ -188,7 +188,7 @@ object SplitManager {
  * Configuration for the global split cache system.
  */
 case class SplitCacheConfig(
-  cacheName: String = "tantivy4spark-cache",
+  cacheName: String = "tantivy4spark-default-cache",
   maxCacheSize: Long = 200000000L, // 200MB default
   maxConcurrentLoads: Int = 8,
   enableQueryCache: Boolean = true,
