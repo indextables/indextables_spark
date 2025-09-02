@@ -50,7 +50,7 @@ class TantivySearchEngine private (
     directInterface.commit()
   }
   
-  def commitAndCreateSplit(outputPath: String, partitionId: Long, nodeId: String): String = {
+  def commitAndCreateSplit(outputPath: String, partitionId: Long, nodeId: String): (String, com.tantivy4java.QuickwitSplit.SplitMetadata) = {
     // Use commitAndClose to follow write-only pattern for production
     directInterface.commitAndClose()
     
@@ -65,8 +65,8 @@ class TantivySearchEngine private (
       import com.tantivy4spark.storage.SplitManager
       val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId, options, hadoopConf)
       
-      // Return the split file path
-      outputPath
+      // Return both the split file path and metadata with footer offsets
+      (outputPath, metadata)
       
     } finally {
       // Force cleanup now that split creation is complete

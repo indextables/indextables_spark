@@ -47,7 +47,7 @@ class DocumentExtractionTest extends TestBase {
     println("Creating split file...")
     val splitPath = "/tmp/test_split.split"
     val nodeId = java.net.InetAddress.getLocalHost.getHostName + "-test"
-    val createdSplitPath = searchEngine.commitAndCreateSplit(splitPath, 0L, nodeId)
+    val (createdSplitPath, _) = searchEngine.commitAndCreateSplit(splitPath, 0L, nodeId)
     
     println(s"Created split file: $createdSplitPath")
     

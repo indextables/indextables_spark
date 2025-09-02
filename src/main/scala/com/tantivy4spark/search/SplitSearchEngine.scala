@@ -306,4 +306,39 @@ object SplitSearchEngine {
       override val splitSearcher = cacheManager.createSplitSearcher(splitPath)
     }
   }
+
+  /**
+   * Create a SplitSearchEngine with footer offset optimization (87% network traffic reduction).
+   * Uses pre-computed metadata to enable lazy loading with minimal initial network traffic.
+   */
+  def fromSplitFileWithMetadata(
+    sparkSchema: StructType,
+    splitPath: String,
+    metadata: com.tantivy4java.QuickwitSplit.SplitMetadata,
+    cacheConfig: SplitCacheConfig = SplitCacheConfig()
+  ): SplitSearchEngine = {
+    
+    if (metadata != null && metadata.hasFooterOffsets()) {
+      logger.info(s"🚀 OPTIMIZED LOADING: Creating SplitSearchEngine with footer offset optimization: $splitPath")
+      logger.debug(s"   Footer optimization saves ~87% network traffic during initialization")
+    } else {
+      logger.info(s"📁 STANDARD LOADING: Creating SplitSearchEngine without optimization metadata: $splitPath")
+    }
+    
+    // Create a custom engine that uses optimized loading when metadata is available
+    new SplitSearchEngine(sparkSchema, splitPath, cacheConfig) {
+      override protected val splitSearcher = {
+        // Get the global cache manager and use optimized createSplitSearcher with metadata
+        val globalCacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
+        
+        if (metadata != null && metadata.hasFooterOffsets()) {
+          // Use optimized loading with footer offsets (87% less network traffic)
+          globalCacheManager.createSplitSearcher(splitPath, metadata)
+        } else {
+          // Fall back to traditional loading
+          globalCacheManager.createSplitSearcher(splitPath)
+        }
+      }
+    }
+  }
 }

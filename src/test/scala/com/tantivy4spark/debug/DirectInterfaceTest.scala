@@ -48,7 +48,7 @@ class DirectInterfaceTest extends TestBase {
       searchEngine.addDocument(row)
       
       // Commit and create split
-      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
+      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
       // Read from split instead of index with unique cache configuration
       val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-minimal-${uniqueId}")
@@ -98,7 +98,7 @@ class DirectInterfaceTest extends TestBase {
       rows.foreach(searchEngine.addDocument)
       
       // Commit and create split
-      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
+      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
       // Read from split instead of index with unique cache configuration
       val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-multi-${uniqueId}")

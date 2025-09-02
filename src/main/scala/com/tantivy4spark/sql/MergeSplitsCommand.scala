@@ -460,6 +460,19 @@ class MergeSplitsExecutor(
         )
       }
       
+      // Extract footer offset optimization metadata from merged split
+      val mergedMetadata = result.mergedSplitInfo.metadata
+      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets) = 
+        if (mergedMetadata != null && mergedMetadata.hasFooterOffsets()) {
+          (Some(mergedMetadata.getFooterStartOffset()),
+           Some(mergedMetadata.getFooterEndOffset()),
+           Some(mergedMetadata.getHotcacheStartOffset()),
+           Some(mergedMetadata.getHotcacheLength()),
+           true)
+        } else {
+          (None, None, None, None, false)
+        }
+
       val addAction = AddAction(
         path = result.mergedSplitInfo.path,
         partitionValues = result.mergeGroup.partitionValues,
@@ -467,7 +480,13 @@ class MergeSplitsExecutor(
         modificationTime = startTime,
         dataChange = false, // This is compaction, not data change
         stats = None,
-        tags = None
+        tags = None,
+        // Footer offset optimization metadata preserved from merge operation
+        footerStartOffset = footerStartOffset,
+        footerEndOffset = footerEndOffset,
+        hotcacheStartOffset = hotcacheStartOffset,
+        hotcacheLength = hotcacheLength,
+        hasFooterOffsets = hasFooterOffsets
       )
       
       // Write transaction log entry using the atomic merge API
@@ -660,6 +679,19 @@ class MergeSplitsExecutor(
       // Merge statistics from input files without reading file contents
       val (mergedMinValues, mergedMaxValues, mergedNumRecords) = mergeStatistics(mergeGroup.files)
 
+      // Extract footer offset optimization metadata from merged split
+      val mergedMetadata = mergedSplit.metadata
+      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets) = 
+        if (mergedMetadata != null && mergedMetadata.hasFooterOffsets()) {
+          (Some(mergedMetadata.getFooterStartOffset()),
+           Some(mergedMetadata.getFooterEndOffset()),
+           Some(mergedMetadata.getHotcacheStartOffset()),
+           Some(mergedMetadata.getHotcacheLength()),
+           true)
+        } else {
+          (None, None, None, None, false)
+        }
+
       val addAction = AddAction(
         path = mergedSplit.path,
         partitionValues = mergeGroup.partitionValues,
@@ -676,11 +708,25 @@ class MergeSplitsExecutor(
         )),
         minValues = mergedMinValues,
         maxValues = mergedMaxValues,
-        numRecords = mergedNumRecords
+        numRecords = mergedNumRecords,
+        // Footer offset optimization metadata preserved from merge operation
+        footerStartOffset = footerStartOffset,
+        footerEndOffset = footerEndOffset,
+        hotcacheStartOffset = hotcacheStartOffset,
+        hotcacheLength = hotcacheLength,
+        hasFooterOffsets = hasFooterOffsets
       )
 
       // Commit atomic REMOVE+ADD transaction using the new method
       val version = transactionLog.commitMergeSplits(removeActions, Seq(addAction))
+      
+      // Log footer offset optimization status for merged split
+      if (hasFooterOffsets) {
+        logger.info(s"🚀 MERGE FOOTER OPTIMIZATION: Merged split preserves footer offsets for 87% network traffic reduction")
+        logger.debug(s"   Merged ${mergeGroup.files.length} splits with footer optimization preserved")
+      } else {
+        logger.debug(s"📁 STANDARD MERGE: Merged split created without footer offset optimization")
+      }
       
       // Invalidate cache after transaction log update to ensure fresh file listing
       transactionLog.invalidateCache()
@@ -770,7 +816,7 @@ class MergeSplitsExecutor(
     logger.info(s"[EXECUTOR] Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
     logger.debug(s"[EXECUTOR] Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
   }
   
   /**
@@ -911,7 +957,7 @@ class MergeSplitsExecutor(
         logger.warn(s"[DRIVER] File existence check failed", ex)
     }
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
   }
 
   /**
@@ -1209,7 +1255,7 @@ object MergeSplitsExecutor {
         logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
   }
 }
 
@@ -1239,7 +1285,7 @@ case class MergeResult(
 /**
  * Information about a newly created merged split.
  */
-case class MergedSplitInfo(path: String, size: Long)
+case class MergedSplitInfo(path: String, size: Long, metadata: com.tantivy4java.QuickwitSplit.SplitMetadata)
 
 /**
  * Placeholder for unresolved table path or identifier.

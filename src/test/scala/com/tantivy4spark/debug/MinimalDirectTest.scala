@@ -48,7 +48,7 @@ class MinimalDirectTest extends TestBase {
       println("   Document added successfully")
       
       println("2. Committing and creating split...")
-      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "minimal-test-node")
+      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "minimal-test-node")
       println(s"   Split created at: $splitPath")
       
       println("3. Reading from split...")

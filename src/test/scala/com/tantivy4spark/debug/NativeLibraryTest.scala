@@ -178,7 +178,7 @@ class NativeLibraryTest extends TestBase {
       }
       
       // Create split using TantivySearchEngine
-      val splitPath = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "native-test-node")
+      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "native-test-node")
       
       println(s"Split created successfully: ${tempSplitFile}")
       
@@ -277,7 +277,7 @@ class NativeLibraryTest extends TestBase {
     
     try {
       // Don't add any documents - commit empty index and create split
-      val emptySplitPath = emptySearchEngine.commitAndCreateSplit(tempEmptySplitFile.toString, 0L, "empty-test-node")
+      val (emptySplitPath, _) = emptySearchEngine.commitAndCreateSplit(tempEmptySplitFile.toString, 0L, "empty-test-node")
       
       val uniqueId1 = System.nanoTime()
       val cacheConfig1 = SplitCacheConfig(cacheName = s"empty-test-cache-${uniqueId1}")
@@ -305,7 +305,7 @@ class NativeLibraryTest extends TestBase {
       val singleRow = InternalRow(1L, UTF8String.fromString("single document"))
       singleSearchEngine.addDocument(singleRow)
       
-      val singleSplitPath = singleSearchEngine.commitAndCreateSplit(tempSingleSplitFile.toString, 0L, "single-test-node")
+      val (singleSplitPath, _) = singleSearchEngine.commitAndCreateSplit(tempSingleSplitFile.toString, 0L, "single-test-node")
       
       val uniqueId2 = System.nanoTime()
       val cacheConfig2 = SplitCacheConfig(cacheName = s"single-test-cache-${uniqueId2}")
