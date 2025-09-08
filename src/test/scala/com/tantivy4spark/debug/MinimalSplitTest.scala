@@ -20,6 +20,7 @@ package com.tantivy4spark.debug
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import com.tantivy4java._
+import com.tantivy4java.QuickwitSplit
 import java.nio.file.{Files, Paths}
 import scala.util.Using
 
@@ -70,16 +71,28 @@ class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
         "test-node"
       )
       
-      QuickwitSplit.convertIndexFromPath(indexPath.toString, splitPath.toString, splitConfig)
+      // Capture the metadata returned by convertIndexFromPath (which has footer offsets)
+      val splitMetadata = QuickwitSplit.convertIndexFromPath(indexPath.toString, splitPath.toString, splitConfig)
       println("✅ Split created successfully")
+      println(s"Split metadata hasFooterOffsets: ${splitMetadata.hasFooterOffsets()}")
       
       // Step 3: Read from split using SplitCacheManager and SplitSearcher
       val cacheConfig = new SplitCacheManager.CacheConfig("minimal-test-cache")
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
       
-      val splitUrl = "file://" + splitPath.toAbsolutePath.toString
-      val splitSearcher = cacheManager.createSplitSearcher(splitUrl)
+      val splitUrl = splitPath.toAbsolutePath.toString
+      
+      // Use the metadata returned by convertIndexFromPath (which has footer offsets)
+      val metadata = splitMetadata
+      
+      // This should have footer offsets since it came directly from convertIndexFromPath
+      if (!metadata.hasFooterOffsets()) {
+        println("⚠️  ERROR: Metadata from convertIndexFromPath does not have footer offsets!")
+        throw new RuntimeException("convertIndexFromPath should return metadata with footer offsets")
+      }
+      
+      val splitSearcher = cacheManager.createSplitSearcher(splitUrl, metadata)
       
       try {
         // Test schema introspection
@@ -87,9 +100,9 @@ class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
         println(s"Split schema field count: ${splitSchema.getFieldCount()}")
         println(s"Split schema field names: ${splitSchema.getFieldNames()}")
         
-        // Search for all documents
-        val allQuery = Query.allQuery()
-        val searchResult = splitSearcher.search(allQuery, 10)
+        // Search for all documents using the new SplitQuery API
+        val splitQuery = splitSearcher.parseQuery("*")
+        val searchResult = splitSearcher.search(splitQuery, 10)
         
         val hits = searchResult.getHits()
         println(s"Found ${hits.size()} documents in split")
@@ -137,7 +150,7 @@ class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
         }
         
         searchResult.close()
-        allQuery.close()
+        // SplitQuery objects don't need to be closed
         
         println(s"\n✅ Successfully validated ${hits.size()} documents with correct field values")
         assert(hits.size() == 3, s"Should find exactly 3 documents, found ${hits.size()}")

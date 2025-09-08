@@ -19,7 +19,7 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.sources._
-import com.tantivy4java.{Query, Schema, Occur, FieldType, Index}
+import com.tantivy4java.{Query, SplitQuery, SplitMatchAllQuery, SplitTermQuery, SplitBooleanQuery, Schema, Occur, FieldType, Index}
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 import com.tantivy4spark.search.SplitSearchEngine
@@ -30,7 +30,14 @@ object FiltersToQueryConverter {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   /**
-   * Convert Spark filters to a tantivy4java Query object.
+   * Convert Spark filters to a tantivy4java SplitQuery object using the new API.
+   */
+  def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): SplitQuery = {
+    convertToSplitQuery(filters, splitSearchEngine, None)
+  }
+
+  /**
+   * Convert Spark filters to a tantivy4java Query object (legacy API).
    */
   def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): Query = {
     convertToQuery(filters, splitSearchEngine, None)
@@ -43,6 +50,98 @@ object FiltersToQueryConverter {
     convertToQuery(filters, splitSearchEngine, None)
   }
   
+  /**
+   * Convert Spark filters to a tantivy4java SplitQuery object with schema field validation.
+   */
+  def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): SplitQuery = {
+    if (filters.isEmpty) {
+      return new SplitMatchAllQuery()  // Match-all query using object type
+    }
+
+    // Debug logging to understand what filters we receive  
+    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
+    filters.zipWithIndex.foreach { case (filter, idx) =>
+      queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
+    }
+
+    // Filter out filters that reference non-existent fields
+    val validFilters = schemaFieldNames match {
+      case Some(fieldNames) =>
+        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
+        val valid = filters.filter(filter => isFilterValidForSchema(filter, fieldNames))
+        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        valid
+      case None =>
+        queryLog("No schema validation - using all filters")
+        filters // No schema validation if fieldNames not provided
+    }
+
+    if (validFilters.length < filters.length) {
+      val skippedCount = filters.length - validFilters.length
+      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
+    }
+
+    // Convert filters to SplitQuery objects
+    val splitQueries = validFilters.flatMap(filter => convertFilterToSplitQuery(filter, splitSearchEngine.getSchema()))
+    
+    if (splitQueries.isEmpty) {
+      new SplitMatchAllQuery()
+    } else if (splitQueries.length == 1) {
+      splitQueries.head
+    } else {
+      // Combine multiple queries with AND logic using SplitBooleanQuery
+      val boolQuery = new SplitBooleanQuery()
+      splitQueries.foreach(query => boolQuery.addMust(query))
+      boolQuery
+    }
+  }
+
+  /**
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object with schema field validation.
+   */
+  def convertToSplitQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): SplitQuery = {
+    if (filters.isEmpty) {
+      return new SplitMatchAllQuery()  // Match-all query using object type
+    }
+
+    // Debug logging to understand what filters we receive  
+    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters for SplitQuery conversion:")
+    filters.zipWithIndex.foreach { case (filter, idx) =>
+      queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
+    }
+
+    // Filter out filters that reference non-existent fields
+    val validFilters = schemaFieldNames match {
+      case Some(fieldNames) =>
+        queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
+        val valid = filters.filter(filter => isMixedFilterValidForSchema(filter, fieldNames))
+        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        valid
+      case None =>
+        queryLog("No schema validation - using all filters")
+        filters // No schema validation if fieldNames not provided
+    }
+
+    if (validFilters.length < filters.length) {
+      val skippedCount = filters.length - validFilters.length
+      logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
+    }
+
+    // Convert filters to SplitQuery objects
+    val splitQueries = validFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine))
+    
+    if (splitQueries.isEmpty) {
+      new SplitMatchAllQuery()
+    } else if (splitQueries.length == 1) {
+      splitQueries.head
+    } else {
+      // Combine multiple queries with AND logic using SplitBooleanQuery
+      val boolQuery = new SplitBooleanQuery()
+      splitQueries.foreach(query => boolQuery.addMust(query))
+      boolQuery
+    }
+  }
+
   /**
    * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object with schema field validation.
    */
@@ -714,6 +813,91 @@ object FiltersToQueryConverter {
       case _ =>
         // For other types (TEXT, BYTES), pass through as-is
         value
+    }
+  }
+
+  /**
+   * Convert a Spark Filter to a SplitQuery object.
+   */
+  private def convertFilterToSplitQuery(filter: Filter, schema: Schema): Option[SplitQuery] = {
+    import org.apache.spark.sql.sources._
+    
+    filter match {
+      case EqualTo(attribute, value) =>
+        val fieldType = getFieldType(schema, attribute)
+        val convertedValue = convertSparkValueToTantivy(value, fieldType)
+        Some(new SplitTermQuery(attribute, convertedValue.toString))
+      
+      case EqualNullSafe(attribute, value) if value != null =>
+        convertFilterToSplitQuery(EqualTo(attribute, value), schema)
+      
+      case In(attribute, values) if values.nonEmpty =>
+        val fieldType = getFieldType(schema, attribute)
+        val termQueries = values.map { value =>
+          val converted = convertSparkValueToTantivy(value, fieldType)
+          new SplitTermQuery(attribute, converted.toString)
+        }.toList
+        
+        // Create boolean query with OR logic for IN clause
+        val boolQuery = new SplitBooleanQuery()
+        termQueries.foreach(query => boolQuery.addShould(query))
+        Some(boolQuery)
+      
+      case IsNotNull(_) =>
+        Some(new SplitMatchAllQuery()) // Match all for IsNotNull
+      
+      // For complex operations like range queries, wildcard queries, etc., fall back to string parsing
+      case GreaterThan(attribute, value) =>
+        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
+        // For now, use string parsing for complex queries - can be enhanced with SplitRangeQuery later
+        None // Will fall back to legacy Query conversion or string parsing
+      
+      case GreaterThanOrEqual(attribute, value) =>
+        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
+        None // Will fall back to legacy Query conversion
+      
+      case LessThan(attribute, value) =>
+        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
+        None // Will fall back to legacy Query conversion
+      
+      case LessThanOrEqual(attribute, value) =>
+        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
+        None // Will fall back to legacy Query conversion
+      
+      case StringStartsWith(attribute, value) =>
+        None // Will fall back to string parsing for wildcard queries
+      
+      case StringEndsWith(attribute, value) =>
+        None // Will fall back to string parsing for wildcard queries
+      
+      case StringContains(attribute, value) =>
+        None // Will fall back to string parsing for wildcard queries
+      
+      case _ =>
+        queryLog(s"Unsupported filter type for SplitQuery conversion: $filter")
+        None
+    }
+  }
+
+  /**
+   * Convert a mixed filter (Spark Filter or custom filter) to a SplitQuery object.
+   */
+  private def convertMixedFilterToSplitQuery(filter: Any, splitSearchEngine: SplitSearchEngine): Option[SplitQuery] = {
+    filter match {
+      case sparkFilter: Filter =>
+        convertFilterToSplitQuery(sparkFilter, splitSearchEngine.getSchema())
+      
+      case IndexQueryFilter(columnName, queryString) =>
+        // Parse the custom IndexQuery using the split searcher
+        Some(splitSearchEngine.parseQuery(s"$columnName:($queryString)"))
+      
+      case IndexQueryAllFilter(queryString) =>
+        // Parse the custom IndexQueryAll using the split searcher
+        Some(splitSearchEngine.parseQuery(queryString))
+      
+      case _ =>
+        queryLog(s"Unsupported mixed filter type for SplitQuery conversion: $filter")
+        None
     }
   }
 }

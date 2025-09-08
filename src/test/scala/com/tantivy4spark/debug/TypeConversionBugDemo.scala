@@ -19,6 +19,7 @@ package com.tantivy4spark.debug
 
 import org.scalatest.funsuite.AnyFunSuite
 import com.tantivy4java._
+import com.tantivy4java.QuickwitSplit
 import java.nio.file.Files
 import scala.collection.JavaConverters._
 
@@ -85,7 +86,10 @@ class TypeConversionBugDemo extends AnyFunSuite {
       // NOW THE BUG DEMO: Read from split and check types
       val cacheConfig = new SplitCacheManager.CacheConfig("test-cache").withMaxCacheSize(100000000L)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-      val splitSearcher = cacheManager.createSplitSearcher("file://" + splitPath.toAbsolutePath)
+      // Read metadata first - required for tantivy4java split reading
+      val splitUrl = "file://" + splitPath.toAbsolutePath
+      val metadata = QuickwitSplit.readSplitMetadata(splitUrl)
+      val splitSearcher = cacheManager.createSplitSearcher(splitUrl, metadata)
       
       try {
         println("\nSplit schema:")
@@ -96,7 +100,7 @@ class TypeConversionBugDemo extends AnyFunSuite {
         }
         
         // Search all documents
-        val query = Query.allQuery()
+        val query = new SplitMatchAllQuery()
         val searchResult = splitSearcher.search(query, 10)
         val hits = searchResult.getHits().asScala
         
@@ -147,7 +151,7 @@ class TypeConversionBugDemo extends AnyFunSuite {
         }
         
         searchResult.close()
-        query.close()
+        // SplitQuery objects don't need to be closed
         
       } finally {
         splitSearcher.close()

@@ -304,24 +304,28 @@ object PreWarmManager {
       filePath
     }
     
-    // Use footer offset optimization if available
-    if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
-      val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
-        actualPath,
-        addAction.numRecords.getOrElse(0L),
-        addAction.size,
-        null, null,
-        java.util.Collections.emptySet(),
-        0L, 0,
-        addAction.footerStartOffset.get,
-        addAction.footerEndOffset.get,
-        addAction.hotcacheStartOffset.get,
-        addAction.hotcacheLength.get
-      )
-      SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
-    } else {
-      SplitSearchEngine.fromSplitFile(readSchema, actualPath, cacheConfig)
+    // Footer offset metadata is required for all split reading operations
+    if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
+      throw new RuntimeException(s"AddAction for $actualPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
     }
+    
+    // Handle potential Integer/Long type conversion from JSON deserialization
+    def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
+      case Some(value) => value match {
+        case i if i.isInstanceOf[Integer] => i.asInstanceOf[Integer].toLong
+        case l if l.isInstanceOf[Long] => l.asInstanceOf[Long]
+        case other => other.asInstanceOf[Number].longValue()
+      }
+      case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
+    }
+    
+    val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+      safeLong(addAction.footerStartOffset, "footerStartOffset"), // footerStartOffset
+      safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
+      safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
+      safeLong(addAction.hotcacheLength, "hotcacheLength") // hotcacheLength
+    )
+    SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }
   
   /**

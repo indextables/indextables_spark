@@ -254,40 +254,30 @@ class Tantivy4SparkPartitionReader(
           filePath.toString
         }
 
-        // Check if footer offset optimization metadata is available
-        if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
-          // Reconstruct SplitMetadata from AddAction for footer offset optimization
-          val splitMetadata = try {
-            new com.tantivy4java.QuickwitSplit.SplitMetadata(
-              // Basic metadata (using available fields or defaults)
-              actualPath,                                    // splitId (use path as identifier)
-              addAction.numRecords.getOrElse(0L),           // numDocs
-              addAction.size,                               // uncompressedSizeBytes 
-              null, null,                                   // timeRange (not stored in AddAction)
-              java.util.Collections.emptySet(),            // tags (not in current AddAction structure)
-              0L, 0,                                        // deleteOpstamp, numMergeOps (not stored)
-              // Footer offset optimization fields
-              addAction.footerStartOffset.get,
-              addAction.footerEndOffset.get,
-              addAction.hotcacheStartOffset.get,
-              addAction.hotcacheLength.get
-            )
-          } catch {
-            case ex: Exception =>
-              logger.warn(s"Failed to reconstruct SplitMetadata from AddAction: ${ex.getMessage}")
-              null
-          }
-
-          if (splitMetadata != null) {
-            splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
-          } else {
-            // Fall back to standard loading if metadata reconstruction failed
-            splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, actualPath, cacheConfig)
-          }
-        } else {
-          // Use standard loading without footer offset optimization
-          splitSearchEngine = SplitSearchEngine.fromSplitFile(readSchema, actualPath, cacheConfig)
+        // Footer offset metadata is required for all split reading operations
+        if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
+          throw new RuntimeException(s"AddAction for $actualPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
         }
+
+        // Reconstruct SplitMetadata from AddAction for footer offset optimization
+        // Handle potential Integer/Long type conversion from JSON deserialization
+        def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
+          case Some(value) => value match {
+            case i if i.isInstanceOf[Integer] => i.asInstanceOf[Integer].toLong
+            case l if l.isInstanceOf[Long] => l.asInstanceOf[Long]
+            case other => other.asInstanceOf[Number].longValue()
+          }
+          case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
+        }
+        
+        val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+          safeLong(addAction.footerStartOffset, "footerStartOffset"), // footerStartOffset
+          safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
+          safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
+          safeLong(addAction.hotcacheLength, "hotcacheLength") // hotcacheLength
+        )
+
+        splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
         
         // Get the schema from the split to validate filters
         val splitSchema = splitSearchEngine.getSchema()
@@ -568,16 +558,39 @@ class Tantivy4SparkDataWriter(
       fileName  // No normalization was applied
     }
     
-    // Extract footer offset optimization metadata from tantivy4java SplitMetadata
-    val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets) = 
-      if (splitMetadata != null && splitMetadata.hasFooterOffsets()) {
-        (Some(splitMetadata.getFooterStartOffset()),
-         Some(splitMetadata.getFooterEndOffset()),
-         Some(splitMetadata.getHotcacheStartOffset()),
-         Some(splitMetadata.getHotcacheLength()),
-         true)
+    // Extract ALL metadata from tantivy4java SplitMetadata for complete pipeline coverage
+    val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets, 
+         timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson) = 
+      if (splitMetadata != null) {
+        val timeStart = Option(splitMetadata.getTimeRangeStart()).map(_.toString)
+        val timeEnd = Option(splitMetadata.getTimeRangeEnd()).map(_.toString)
+        val tags = Option(splitMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
+          import scala.jdk.CollectionConverters._
+          tagSet.asScala.toSet
+        }
+        val docMapping = Option(splitMetadata.getDocMappingJson())
+        
+        if (splitMetadata.hasFooterOffsets()) {
+          (Some(splitMetadata.getFooterStartOffset()),
+           Some(splitMetadata.getFooterEndOffset()),
+           Some(splitMetadata.getHotcacheStartOffset()),
+           Some(splitMetadata.getHotcacheLength()),
+           true,
+           timeStart,
+           timeEnd,
+           tags,
+           Some(splitMetadata.getDeleteOpstamp()),
+           Some(splitMetadata.getNumMergeOps()),
+           docMapping)
+        } else {
+          (None, None, None, None, false,
+           timeStart, timeEnd, tags,
+           Some(splitMetadata.getDeleteOpstamp()),
+           Some(splitMetadata.getNumMergeOps()),
+           docMapping)
+        }
       } else {
-        (None, None, None, None, false)
+        (None, None, None, None, false, None, None, None, None, None, None)
       }
 
     val addAction = AddAction(
@@ -594,7 +607,14 @@ class Tantivy4SparkDataWriter(
       footerEndOffset = footerEndOffset,
       hotcacheStartOffset = hotcacheStartOffset,
       hotcacheLength = hotcacheLength,
-      hasFooterOffsets = hasFooterOffsets
+      hasFooterOffsets = hasFooterOffsets,
+      // Complete tantivy4java SplitMetadata fields for full pipeline coverage
+      timeRangeStart = timeRangeStart,
+      timeRangeEnd = timeRangeEnd,
+      splitTags = splitTags,
+      deleteOpstamp = deleteOpstamp,
+      numMergeOps = numMergeOps,
+      docMappingJson = docMappingJson
     )
     
     if (partitionValues.nonEmpty) {

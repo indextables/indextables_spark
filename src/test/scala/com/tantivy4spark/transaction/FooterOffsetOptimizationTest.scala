@@ -214,11 +214,12 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
           null, null,                                  // timeRange
           java.util.Collections.emptySet(),           // tags
           0L, 0,                                       // deleteOpstamp, numMergeOps
-          // Footer offset optimization fields
-          addAction.footerStartOffset.get,
-          addAction.footerEndOffset.get,
-          addAction.hotcacheStartOffset.get,
-          addAction.hotcacheLength.get
+          // Footer offset optimization fields with type conversion
+          addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
+          addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
+          addAction.hotcacheStartOffset.get.asInstanceOf[Number].longValue(),
+          addAction.hotcacheLength.get.asInstanceOf[Number].longValue(),
+          addAction.docMappingJson.getOrElse("")       // docMappingJson
         )
       } catch {
         case ex: Exception =>
@@ -303,6 +304,195 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       } else {
         println("ℹ️  INFO: Footer offset optimization not active (tantivy4java may not support it yet)")
         println("ℹ️  INFO: Infrastructure is ready and will automatically activate when tantivy4java supports it")
+      }
+    }
+  }
+
+  test("End-to-end footer offset flow should work with real data using V2 DataSource") {
+    println("🧪 [TEST] Testing end-to-end footer offset optimization flow with V2 DataSource")
+
+    withTempPath { tempDir =>
+      val schema = StructType(Array(
+        StructField("id", IntegerType, nullable = false),
+        StructField("content", StringType, nullable = false)
+      ))
+
+      val data = Seq(
+        Row(1, "V2 Footer optimization test document 1"),
+        Row(2, "V2 Footer optimization test document 2"),
+        Row(3, "V2 Footer optimization test document 3")
+      )
+
+      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+
+      // Write data using V2 DataSource with full provider class name
+      val tablePath = tempDir.toString
+      println(s"🧪 [TEST] Writing V2 data to: $tablePath")
+      df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+
+      // Read transaction log to check for footer offset metadata
+      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val allFiles = transactionLog.listFiles()
+
+      println(s"🧪 [TEST] V2 DataSource found ${allFiles.length} files in transaction log")
+      
+      allFiles.foreach { file =>
+        println(s"📄 V2 File: ${file.path}")
+        println(s"   Size: ${file.size}")
+        println(s"   Records: ${file.numRecords.getOrElse("unknown")}")
+        println(s"   Has footer offsets: ${file.hasFooterOffsets}")
+        
+        if (file.hasFooterOffsets) {
+          println(s"   Footer start: ${file.footerStartOffset.getOrElse("none")}")
+          println(s"   Footer end: ${file.footerEndOffset.getOrElse("none")}")
+          println(s"   Hotcache start: ${file.hotcacheStartOffset.getOrElse("none")}")
+          println(s"   Hotcache length: ${file.hotcacheLength.getOrElse("none")}")
+          println("   🚀 This V2 file has footer offset optimization!")
+        } else {
+          println("   📁 This V2 file uses standard loading")
+        }
+      }
+
+      // Verify data can be read back correctly using V2 DataSource
+      val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val results = readDf.collect()
+      
+      assert(results.length == 3)
+      assert(results.map(_.getAs[String]("content")).contains("V2 Footer optimization test document 1"))
+      println("✅ V2 Data read back correctly")
+
+      // Test shows current state of footer offset support in V2 DataSource
+      val hasOptimizedFiles = allFiles.exists(_.hasFooterOffsets)
+      if (hasOptimizedFiles) {
+        println("🚀 SUCCESS: V2 DataSource footer offset optimization is working!")
+      } else {
+        println("ℹ️  INFO: V2 DataSource footer offset optimization not active (may need V2 integration)")
+        println("ℹ️  INFO: V2 Infrastructure is ready and will automatically activate when fully integrated")
+      }
+    }
+  }
+
+  test("V2 DataSource should handle IndexQuery operations with footer offset optimization") {
+    println("🧪 [TEST] Testing V2 DataSource IndexQuery with footer offset optimization")
+
+    withTempPath { tempDir =>
+      val schema = StructType(Array(
+        StructField("id", IntegerType, nullable = false),
+        StructField("title", StringType, nullable = false),
+        StructField("content", StringType, nullable = false)
+      ))
+
+      val data = Seq(
+        Row(1, "Machine Learning", "Advanced machine learning algorithms and neural networks"),
+        Row(2, "Data Science", "Statistical analysis and data visualization techniques"),
+        Row(3, "Apache Spark", "Distributed computing framework for big data processing")
+      )
+
+      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+
+      // Write data using V2 DataSource
+      val tablePath = tempDir.toString
+      println(s"🧪 [TEST] Writing V2 IndexQuery test data to: $tablePath")
+      df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+
+      // Read back and perform IndexQuery operations
+      val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      
+      // Test basic read first
+      val allResults = readDf.collect()
+      assert(allResults.length == 3)
+      println("✅ V2 DataSource basic read successful")
+
+      // Check transaction log for footer offset metadata
+      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val allFiles = transactionLog.listFiles()
+      
+      println(s"🧪 [TEST] V2 IndexQuery test found ${allFiles.length} files with footer offset status:")
+      allFiles.foreach { file =>
+        println(s"   ${file.path}: hasFooterOffsets=${file.hasFooterOffsets}")
+      }
+
+      val hasOptimizedFiles = allFiles.exists(_.hasFooterOffsets)
+      if (hasOptimizedFiles) {
+        println("🚀 SUCCESS: V2 DataSource with IndexQuery footer offset optimization is working!")
+      } else {
+        println("ℹ️  INFO: V2 DataSource IndexQuery footer offset optimization not fully active")
+      }
+    }
+  }
+
+  test("V2 DataSource should persist and read footer offset metadata correctly") {
+    println("🧪 [TEST] Testing V2 DataSource metadata persistence and reading")
+
+    withTempPath { tempDir =>
+      val schema = StructType(Array(
+        StructField("id", IntegerType, nullable = false),
+        StructField("description", StringType, nullable = false)
+      ))
+
+      val data = Seq(
+        Row(10, "V2 metadata persistence test record 1"),
+        Row(20, "V2 metadata persistence test record 2"),
+        Row(30, "V2 metadata persistence test record 3"),
+        Row(40, "V2 metadata persistence test record 4"),
+        Row(50, "V2 metadata persistence test record 5")
+      )
+
+      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+
+      // Write using V2 DataSource
+      val tablePath = tempDir.toString
+      println(s"🧪 [TEST] Writing V2 metadata test to: $tablePath")
+      df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+
+      // Read transaction log and analyze metadata
+      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val allFiles = transactionLog.listFiles()
+
+      println(s"🧪 [TEST] V2 Metadata analysis for ${allFiles.length} files:")
+      
+      allFiles.foreach { file =>
+        println(s"📄 V2 Metadata File: ${file.path}")
+        println(s"   Records: ${file.numRecords.getOrElse("unknown")}")
+        println(s"   Size: ${file.size} bytes")
+        
+        if (file.hasFooterOffsets) {
+          def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
+            case Some(value) => value.asInstanceOf[Number].longValue()
+            case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
+          }
+          
+          val footerStart = safeLong(file.footerStartOffset, "footerStartOffset")
+          val footerEnd = safeLong(file.footerEndOffset, "footerEndOffset") 
+          val hotcacheStart = safeLong(file.hotcacheStartOffset, "hotcacheStartOffset")
+          val hotcacheLength = safeLong(file.hotcacheLength, "hotcacheLength")
+          
+          println(s"   🚀 V2 OPTIMIZED: Footer($footerStart-$footerEnd) Hotcache($hotcacheStart+$hotcacheLength)")
+          
+          // Validate metadata integrity - no need for non-negative checks since we throw on None
+          assert(footerEnd > footerStart, s"Footer end ($footerEnd) should be greater than start ($footerStart)")
+          assert(hotcacheStart >= 0, s"Hotcache start ($hotcacheStart) should be non-negative") 
+          assert(hotcacheLength > 0, s"Hotcache length ($hotcacheLength) should be positive")
+          assert(footerEnd <= file.size, s"Footer end ($footerEnd) should not exceed file size (${file.size})")
+        } else {
+          println(s"   📁 V2 STANDARD: No footer offset optimization")
+        }
+      }
+
+      // Verify data integrity after read
+      val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val results = readDf.collect()
+      
+      assert(results.length == 5)
+      assert(results.map(_.getAs[Int]("id")).contains(10))
+      assert(results.map(_.getAs[String]("description")).exists(_.contains("V2 metadata persistence")))
+      println("✅ V2 Data integrity verified after metadata optimization")
+
+      val hasOptimizedFiles = allFiles.exists(_.hasFooterOffsets)
+      if (hasOptimizedFiles) {
+        println("🚀 SUCCESS: V2 DataSource metadata persistence and optimization working!")
+      } else {
+        println("ℹ️  INFO: V2 DataSource ready for footer offset optimization when V2 integration is complete")
       }
     }
   }

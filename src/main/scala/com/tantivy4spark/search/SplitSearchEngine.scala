@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java.{SplitSearcher, SplitCacheManager, Query, SearchResult, Schema}
+import com.tantivy4java.{SplitSearcher, SplitCacheManager, Query, SplitQuery, SplitMatchAllQuery, SplitTermQuery, SplitBooleanQuery, SearchResult, Schema}
 import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import com.tantivy4spark.schema.SchemaMapping
 import org.apache.spark.sql.catalyst.InternalRow
@@ -51,9 +51,24 @@ class SplitSearchEngine(
   private val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
   
   // Create the split searcher using the shared cache
-  logger.info(s"🔧 About to call cacheManager.createSplitSearcher() for path: $splitPath")
-  protected val splitSearcher = try {
-    cacheManager.createSplitSearcher(splitPath)
+  logger.info(s"🔧 Creating SplitSearchEngine for path: $splitPath")
+  protected lazy val splitSearcher = try {
+    // Read metadata first - required for tantivy4java split reading
+    val metadata = {
+      import com.tantivy4spark.storage.SplitManager
+      SplitManager.readSplitMetadata(splitPath).getOrElse {
+        throw new RuntimeException(s"Could not read required split metadata for $splitPath. Split metadata is now required for tantivy4java operations.")
+      }
+    }
+    
+    logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
+    
+    // Check if metadata has the required footer offsets
+    if (!metadata.hasFooterOffsets()) {
+      throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. The split file may have been created with an older version of tantivy4java that didn't generate footer offset metadata. Please recreate the split file with the current version.")
+    }
+    
+    cacheManager.createSplitSearcher(splitPath, metadata)
   } catch {
     case ex: RuntimeException if ex.getMessage.contains("region must be set") =>
       logger.error(s"❌ CONFIRMED: tantivy4java region error when creating SplitSearcher for $splitPath")
@@ -79,19 +94,19 @@ class SplitSearchEngine(
   }
   
   /**
-   * Search the split using a programmatic Query object and return results as Spark InternalRows.
-   * This is the new preferred method that bypasses string parsing.
+   * Search the split using a SplitQuery object and return results as Spark InternalRows.
+   * This is the new preferred method that uses tantivy4java's efficient SplitQuery API.
    */
-  def search(query: Query, limit: Int = 10): Array[InternalRow] = {
+  def search(splitQuery: SplitQuery, limit: Int = 10): Array[InternalRow] = {
     try {
-      logger.debug(s"Searching split with Query object: ${query.getClass.getSimpleName}, limit: $limit")
-      logger.warn(s"Running query: ${query.toString()}")
+      logger.debug(s"Searching split with SplitQuery object, limit: $limit")
+      logger.warn(s"Running SplitQuery: ${splitQuery.toString()}")
       
       val tantivySchema = splitSearcher.getSchema()
       logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
       
-      // Execute the search directly with the Query object
-      val searchResult = splitSearcher.search(query, limit)
+      // Execute the search using the new SplitQuery API
+      val searchResult = splitSearcher.search(splitQuery, limit)
       
       // Convert search results to Spark InternalRows
       val results = convertSearchResultToRows(searchResult)
@@ -104,7 +119,35 @@ class SplitSearchEngine(
       
     } catch {
       case e: Exception =>
-        logger.error(s"Search failed for Query object: ${query.getClass.getSimpleName}", e)
+        logger.error(s"Search failed for SplitQuery object", e)
+        throw e
+    }
+  }
+
+  /**
+   * Search the split using a legacy Query object and return results as Spark InternalRows.
+   * This method converts the Query to a SplitQuery for compatibility.
+   */
+  def search(query: Query, limit: Int): Array[InternalRow] = {
+    try {
+      logger.debug(s"Converting legacy Query to SplitQuery: ${query.getClass.getSimpleName}, limit: $limit")
+      
+      // Simple conversion based on query type - can be enhanced later
+      val splitQuery: SplitQuery = query match {
+        case q if q.getClass.getSimpleName == "AllQuery" =>
+          new SplitMatchAllQuery()
+        case _ =>
+          // For complex queries, parse from string representation
+          logger.debug("Converting Query to string and parsing as SplitQuery")
+          splitSearcher.parseQuery(query.toString())
+      }
+      
+      // Use the SplitQuery version
+      search(splitQuery, limit)
+      
+    } catch {
+      case e: Exception =>
+        logger.error(s"Search failed for legacy Query object: ${query.getClass.getSimpleName}", e)
         throw e
     }
   }
@@ -117,12 +160,12 @@ class SplitSearchEngine(
     try {
       logger.debug(s"Searching all documents with limit: $limit")
       
-      // Create match-all query
-      val query = Query.allQuery()
-      logger.warn(s"Running query: ${query.toString()}")
+      // Create match-all query using SplitMatchAllQuery
+      val splitQuery = new SplitMatchAllQuery()
+      logger.warn(s"Running match-all SplitQuery: ${splitQuery.toString()}")
       
-      // Execute the search
-      val searchResult = splitSearcher.search(query, limit)
+      // Execute the search using SplitQuery
+      val searchResult = splitSearcher.search(splitQuery, limit)
       
       // Convert to InternalRows
       val results = convertSearchResultToRows(searchResult)
@@ -138,6 +181,22 @@ class SplitSearchEngine(
         logger.error("SearchAll failed", e)
         throw e
     }
+  }
+
+  /**
+   * Parse a query string using the split's schema and return a SplitQuery.
+   * This is the preferred way to create queries for split searching.
+   */
+  def parseQuery(queryString: String): SplitQuery = {
+    splitSearcher.parseQuery(queryString)
+  }
+
+  /**
+   * Search using a query string. The string will be parsed into a SplitQuery.
+   */
+  def searchByString(queryString: String, limit: Int = 10): Array[InternalRow] = {
+    val splitQuery = parseQuery(queryString)
+    search(splitQuery, limit)
   }
   
   /**
@@ -311,7 +370,23 @@ object SplitSearchEngine {
     
     // Create a custom engine that uses the provided cache manager
     new SplitSearchEngine(sparkSchema, splitPath) {
-      override val splitSearcher = cacheManager.createSplitSearcher(splitPath)
+      override lazy val splitSearcher = {
+        // Read metadata first - required for tantivy4java split reading
+        val metadata = {
+          import com.tantivy4spark.storage.SplitManager
+          SplitManager.readSplitMetadata(splitPath).getOrElse {
+            throw new RuntimeException(s"Could not read required split metadata for $splitPath. All 'add' entries in the transaction log must contain metadata.")
+          }
+        }
+        
+        // Check if metadata has the required footer offsets
+        if (!metadata.hasFooterOffsets()) {
+          throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+        }
+        
+        logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
+        cacheManager.createSplitSearcher(splitPath, metadata)
+      }
     }
   }
 
@@ -335,17 +410,20 @@ object SplitSearchEngine {
     
     // Create a custom engine that uses optimized loading when metadata is available
     new SplitSearchEngine(sparkSchema, splitPath, cacheConfig) {
-      override protected val splitSearcher = {
+      override protected lazy val splitSearcher = {
         // Get the global cache manager and use optimized createSplitSearcher with metadata
         val globalCacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
         
-        if (metadata != null && metadata.hasFooterOffsets()) {
-          // Use optimized loading with footer offsets (87% less network traffic)
-          globalCacheManager.createSplitSearcher(splitPath, metadata)
-        } else {
-          // Fall back to traditional loading
-          globalCacheManager.createSplitSearcher(splitPath)
+        if (metadata == null) {
+          throw new RuntimeException(s"Split metadata is required for $splitPath. All 'add' entries in the transaction log must contain metadata.")
         }
+        
+        if (!metadata.hasFooterOffsets()) {
+          throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+        }
+        
+        // Use optimized loading with footer offsets (87% less network traffic)
+        globalCacheManager.createSplitSearcher(splitPath, metadata)
       }
     }
   }

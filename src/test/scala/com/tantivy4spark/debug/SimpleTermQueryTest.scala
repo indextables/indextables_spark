@@ -19,6 +19,7 @@ package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
 import com.tantivy4java._
+import com.tantivy4java.QuickwitSplit
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
 
@@ -78,7 +79,10 @@ class SimpleTermQueryTest extends TestBase {
       val cacheConfig = new SplitCacheManager.CacheConfig("simple-test-cache")
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-      val splitSearcher = cacheManager.createSplitSearcher("file://" + splitFile.getAbsolutePath)
+      // Read metadata first - required for tantivy4java split reading
+      val splitUrl = "file://" + splitFile.getAbsolutePath
+      val metadata = QuickwitSplit.readSplitMetadata(splitUrl)
+      val splitSearcher = cacheManager.createSplitSearcher(splitUrl, metadata)
       
       try {
         val schema = splitSearcher.getSchema()
@@ -86,8 +90,9 @@ class SimpleTermQueryTest extends TestBase {
         
         // Test 1: Simple term query for "Engineering"
         println("\n🔎 Test 1: Term query for department = 'Engineering'")
-        val engineeringQuery = Query.termQuery(schema, "department", "Engineering")
-        println(s"Created query: ${engineeringQuery.getClass.getSimpleName}")
+        // Use new SplitTermQuery instead of Query.termQuery
+        val engineeringQuery = new SplitTermQuery("department", "Engineering")
+        println(s"Created SplitQuery: ${engineeringQuery.getClass.getSimpleName}")
         
         val engineeringResults = splitSearcher.search(engineeringQuery, 10)
         val engineeringResultsSize = engineeringResults.getHits().size()
@@ -105,14 +110,14 @@ class SimpleTermQueryTest extends TestBase {
         
         // Test 2: Try different case
         println("\n🔎 Test 2: Term query for department = 'engineering' (lowercase)")
-        val engineeringLowerQuery = Query.termQuery(schema, "department", "engineering")
+        val engineeringLowerQuery = new SplitTermQuery("department", "engineering")
         val engineeringLowerResults = splitSearcher.search(engineeringLowerQuery, 10)
         println(s"Found ${engineeringLowerResults.getHits().size()} results")
         engineeringLowerResults.close()
         
         // Test 3: All documents
         println("\n🔎 Test 3: All documents")
-        val allQuery = Query.allQuery()
+        val allQuery = new SplitMatchAllQuery()
         val allResults = splitSearcher.search(allQuery, 10)
         println(s"Found ${allResults.getHits().size()} total documents")
         allResults.close()

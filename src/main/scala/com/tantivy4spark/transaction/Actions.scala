@@ -72,7 +72,14 @@ case class AddAction(
   @JsonProperty("footerEndOffset") footerEndOffset: Option[Long] = None,
   @JsonProperty("hotcacheStartOffset") hotcacheStartOffset: Option[Long] = None,
   @JsonProperty("hotcacheLength") hotcacheLength: Option[Long] = None,
-  @JsonProperty("hasFooterOffsets") hasFooterOffsets: Boolean = false
+  @JsonProperty("hasFooterOffsets") hasFooterOffsets: Boolean = false,
+  // Complete tantivy4java SplitMetadata fields
+  @JsonProperty("timeRangeStart") timeRangeStart: Option[String] = None, // Instant as ISO string
+  @JsonProperty("timeRangeEnd") timeRangeEnd: Option[String] = None, // Instant as ISO string
+  @JsonProperty("splitTags") splitTags: Option[Set[String]] = None, // tantivy4java tags (distinct from Delta tags)
+  @JsonProperty("deleteOpstamp") deleteOpstamp: Option[Long] = None,
+  @JsonProperty("numMergeOps") numMergeOps: Option[Int] = None,
+  @JsonProperty("docMappingJson") docMappingJson: Option[String] = None
 ) extends Action
 
 case class RemoveAction(

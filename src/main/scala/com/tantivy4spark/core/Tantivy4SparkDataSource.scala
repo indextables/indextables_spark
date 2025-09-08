@@ -329,6 +329,73 @@ object Tantivy4SparkRelation {
     rows.toIterator
   }
 
+  // Serializable wrapper for split metadata with footer offsets
+  case class SerializableSplitMetadata(
+    numDocs: Long,
+    uncompressedSize: Long,
+    footerStartOffset: Long,
+    footerEndOffset: Long,
+    hotcacheStartOffset: Long,
+    hotcacheLength: Long,
+    // Complete tantivy4java SplitMetadata fields
+    timeRangeStart: Option[String] = None,
+    timeRangeEnd: Option[String] = None,
+    splitTags: Option[Set[String]] = None,
+    deleteOpstamp: Option[Long] = None,
+    numMergeOps: Option[Int] = None,
+    docMappingJson: Option[String] = None
+  ) extends Serializable {
+    
+    // Convert to tantivy4java SplitMetadata for use with split readers
+    def toTantivySplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+      new com.tantivy4java.QuickwitSplit.SplitMetadata(
+        footerStartOffset, // footerStartOffset
+        footerEndOffset, // footerEndOffset  
+        hotcacheStartOffset, // hotcacheStartOffset
+        hotcacheLength // hotcacheLength
+      )
+    }
+  }
+
+  // Helper function to create SerializableSplitMetadata from AddAction footer offset information
+  def createSerializableMetadataFromAddAction(addAction: com.tantivy4spark.transaction.AddAction): SerializableSplitMetadata = {
+    if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty || addAction.footerEndOffset.isEmpty) {
+      throw new RuntimeException(s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+    }
+    
+    SerializableSplitMetadata(
+      numDocs = addAction.numRecords.getOrElse(0L),
+      uncompressedSize = addAction.size,
+      footerStartOffset = (addAction.footerStartOffset.get: Any) match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case other => other.toString.toLong
+      },
+      footerEndOffset = (addAction.footerEndOffset.get: Any) match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case other => other.toString.toLong
+      },
+      hotcacheStartOffset = (addAction.hotcacheStartOffset.getOrElse(0L): Any) match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case other => other.toString.toLong
+      },
+      hotcacheLength = (addAction.hotcacheLength.getOrElse(0L): Any) match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case other => other.toString.toLong
+      },
+      // Complete tantivy4java SplitMetadata fields
+      timeRangeStart = addAction.timeRangeStart,
+      timeRangeEnd = addAction.timeRangeEnd,
+      splitTags = addAction.splitTags,
+      deleteOpstamp = addAction.deleteOpstamp,
+      numMergeOps = addAction.numMergeOps,
+      docMappingJson = addAction.docMappingJson
+    )
+  }
+
   // Enhanced processFile that can handle both Spark filters and custom IndexQuery filters
   def processFileWithCustomFilters(
       filePath: String, 
@@ -336,7 +403,8 @@ object Tantivy4SparkRelation {
       hadoopConfProps: Map[String, String],
       sparkFilters: Array[Filter] = Array.empty,
       customFilters: Array[Any] = Array.empty,
-      limit: Option[Int] = None
+      limit: Option[Int] = None,
+      splitMetadata: Option[SerializableSplitMetadata] = None
   ): Iterator[org.apache.spark.sql.Row] = {
     import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
     
@@ -402,10 +470,18 @@ object Tantivy4SparkRelation {
       // Path should already be normalized by buildScan method
       val normalizedPath = filePath
       
-      // Use SplitSearchEngine to read from split with proper cache configuration
-      val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFile(
+      // Split metadata is required for all operations
+      if (splitMetadata.isEmpty) {
+        throw new RuntimeException(s"Split metadata is required for $normalizedPath. All split processing operations must have footer offset metadata.")
+      }
+      
+      // Use SplitSearchEngine to read from split with proper cache configuration and footer offset optimization
+      executorLogger.info(s"🚀 Using footer offset optimization for $normalizedPath")
+      val tantivyMetadata = splitMetadata.get.toTantivySplitMetadata()
+      val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
         serializableSchema, 
         normalizedPath,
+        tantivyMetadata,
         cacheConfig
       )
       executorLogger.debug("Split search engine created successfully")
@@ -936,23 +1012,22 @@ class Tantivy4SparkRelation(
       }
       val tablePath = new Path(normalizedTablePath)
       
-      val serializableFiles = files.map { addAction =>
-        if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
+      // Create serializable (path, metadata) pairs from AddAction entries
+      val serializableFilesWithMetadata = files.map { addAction =>
+        val resolvedPath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
           // Already absolute path - normalize protocol if needed
-          val result = if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
+          if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
             addAction.path.replaceFirst("^s3[an]://", "s3://")
           } else {
             addAction.path
           }
-          result
         } else {
           // Relative path, resolve against normalized table path
           // Check if this is a flattened S3Mock path (contains ___) 
           if (addAction.path.contains("___")) {
             // This is a flattened key - reconstruct the S3 path directly
             val tableUri = java.net.URI.create(tablePath.toString)
-            val reconstructedPath = s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
-            reconstructedPath
+            s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
           } else {
             // Standard relative path resolution
             val fullPath = new Path(tablePath, addAction.path)
@@ -964,6 +1039,15 @@ class Tantivy4SparkRelation(
             }
           }
         }
+        
+        // Extract serializable metadata from AddAction - required for tantivy4java operations
+        val serializableMetadata = if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
+          Some(Tantivy4SparkRelation.createSerializableMetadataFromAddAction(addAction))
+        } else {
+          throw new RuntimeException(s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+        }
+        
+        (resolvedPath, serializableMetadata)
       }
       val fullSchema = schema
      
@@ -1032,8 +1116,8 @@ class Tantivy4SparkRelation(
       
       // Create RDD from file paths using standalone object method for proper serialization
       // Now with proper filter pushdown support via PrunedFilteredScan
-      spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
-        Tantivy4SparkRelation.processFile(filePath, serializableSchema, hadoopConfProps, filters, None)
+      spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap { case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
+        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, filters, Array.empty, None, splitMetadata)
       }
     }
   }
@@ -1094,23 +1178,22 @@ class Tantivy4SparkRelation(
       }
       val tablePath = new Path(normalizedTablePath)
       
-      val serializableFiles = files.map { addAction =>
-        if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
+      // Create serializable (path, metadata) pairs from AddAction entries
+      val serializableFilesWithMetadata = files.map { addAction =>
+        val resolvedPath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
           // Already absolute path - normalize protocol if needed
-          val result = if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
+          if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
             addAction.path.replaceFirst("^s3[an]://", "s3://")
           } else {
             addAction.path
           }
-          result
         } else {
           // Relative path, resolve against normalized table path
           // Check if this is a flattened S3Mock path (contains ___) 
           if (addAction.path.contains("___")) {
             // This is a flattened key - reconstruct the S3 path directly
             val tableUri = java.net.URI.create(tablePath.toString)
-            val reconstructedPath = s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
-            reconstructedPath
+            s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
           } else {
             // Standard relative path resolution
             val fullPath = new Path(tablePath, addAction.path)
@@ -1122,6 +1205,15 @@ class Tantivy4SparkRelation(
             }
           }
         }
+        
+        // Extract serializable metadata from AddAction - required for tantivy4java operations
+        val serializableMetadata = if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
+          Some(Tantivy4SparkRelation.createSerializableMetadataFromAddAction(addAction))
+        } else {
+          throw new RuntimeException(s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+        }
+        
+        (resolvedPath, serializableMetadata)
       }
       val fullSchema = schema
      
@@ -1196,8 +1288,8 @@ class Tantivy4SparkRelation(
       
       // Create RDD from file paths using standalone object method for proper serialization
       // Pass all filters to processFile method
-      spark.sparkContext.parallelize(serializableFiles).flatMap { filePath =>
-        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, sparkFilters, customFilters, None)
+      spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap { case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
+        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, sparkFilters, customFilters, None, splitMetadata)
       }
     }
   }

@@ -21,6 +21,7 @@ package com.tantivy4spark.debug
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.search.{TantivyNative, TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.SplitCacheConfig
+import com.tantivy4java.QuickwitSplit
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.apache.spark.sql.types._
@@ -177,10 +178,11 @@ class NativeLibraryTest extends TestBase {
         searchEngine.addDocument(row)
       }
       
-      // Create split using TantivySearchEngine
-      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "native-test-node")
+      // Create split using TantivySearchEngine - capture the metadata it returns!
+      val (actualSplitPath, splitMetadata) = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "native-test-node")
       
-      println(s"Split created successfully: ${tempSplitFile}")
+      println(s"Split created successfully at: ${actualSplitPath}")
+      println(s"Split metadata hasFooterOffsets: ${splitMetadata.hasFooterOffsets()}")
       
       // Close the search engine since it's write-only
       searchEngine.close()
@@ -194,8 +196,16 @@ class NativeLibraryTest extends TestBase {
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
       
-      val splitUrl = "file://" + tempSplitFile.toAbsolutePath.toString
-      val splitSearcher = cacheManager.createSplitSearcher(splitUrl)
+      // Use the metadata returned by commitAndCreateSplit (which has footer offsets)
+      val metadata = splitMetadata
+      
+      // This should now have footer offsets since it came from commitAndCreateSplit
+      if (!metadata.hasFooterOffsets()) {
+        println(s"⚠️  ERROR: Split metadata from commitAndCreateSplit does not have footer offsets!")
+        throw new RuntimeException("commitAndCreateSplit should return metadata with footer offsets")
+      }
+      
+      val splitSearcher = cacheManager.createSplitSearcher(actualSplitPath, metadata)
       
       try {
         // Test with different limits
@@ -205,8 +215,8 @@ class NativeLibraryTest extends TestBase {
           println(s"Testing split search with limit: $limit")
           
           // Search all documents
-          val query = Query.allQuery()
-          val searchResult = splitSearcher.search(query, limit)
+          val splitQuery = splitSearcher.parseQuery("*")
+          val searchResult = splitSearcher.search(splitQuery, limit)
           val hits = searchResult.getHits()
           
           val expectedHits = Math.min(structuredDocuments.length, limit)
@@ -239,7 +249,7 @@ class NativeLibraryTest extends TestBase {
           }
           
           searchResult.close()
-          query.close()
+          // SplitQuery objects don't need to be closed
         }
         
         println("Split-based search test completed successfully!")
@@ -277,11 +287,19 @@ class NativeLibraryTest extends TestBase {
     
     try {
       // Don't add any documents - commit empty index and create split
-      val (emptySplitPath, _) = emptySearchEngine.commitAndCreateSplit(tempEmptySplitFile.toString, 0L, "empty-test-node")
+      val (emptySplitPath, emptyMetadata) = emptySearchEngine.commitAndCreateSplit(tempEmptySplitFile.toString, 0L, "empty-test-node")
+      
+      println(s"Empty split metadata hasFooterOffsets: ${emptyMetadata.hasFooterOffsets()}")
+      
+      // Use the metadata returned by commitAndCreateSplit
+      if (!emptyMetadata.hasFooterOffsets()) {
+        println("⚠️  ERROR: Empty split metadata from commitAndCreateSplit does not have footer offsets!")
+        throw new RuntimeException("commitAndCreateSplit should return metadata with footer offsets even for empty splits")
+      }
       
       val uniqueId1 = System.nanoTime()
       val cacheConfig1 = SplitCacheConfig(cacheName = s"empty-test-cache-${uniqueId1}")
-      val emptySplitReader = SplitSearchEngine.fromSplitFile(sparkSchema, emptySplitPath, cacheConfig1)
+      val emptySplitReader = SplitSearchEngine.fromSplitFileWithMetadata(sparkSchema, emptySplitPath, emptyMetadata, cacheConfig1)
       
       try {
         val emptyResults = emptySplitReader.searchAll(10)
@@ -305,11 +323,19 @@ class NativeLibraryTest extends TestBase {
       val singleRow = InternalRow(1L, UTF8String.fromString("single document"))
       singleSearchEngine.addDocument(singleRow)
       
-      val (singleSplitPath, _) = singleSearchEngine.commitAndCreateSplit(tempSingleSplitFile.toString, 0L, "single-test-node")
+      val (singleSplitPath, singleMetadata) = singleSearchEngine.commitAndCreateSplit(tempSingleSplitFile.toString, 0L, "single-test-node")
+      
+      println(s"Single split metadata hasFooterOffsets: ${singleMetadata.hasFooterOffsets()}")
+      
+      // Use the metadata returned by commitAndCreateSplit
+      if (!singleMetadata.hasFooterOffsets()) {
+        println("⚠️  ERROR: Single split metadata from commitAndCreateSplit does not have footer offsets!")
+        throw new RuntimeException("commitAndCreateSplit should return metadata with footer offsets")
+      }
       
       val uniqueId2 = System.nanoTime()
       val cacheConfig2 = SplitCacheConfig(cacheName = s"single-test-cache-${uniqueId2}")
-      val singleSplitReader = SplitSearchEngine.fromSplitFile(sparkSchema, singleSplitPath, cacheConfig2)
+      val singleSplitReader = SplitSearchEngine.fromSplitFileWithMetadata(sparkSchema, singleSplitPath, singleMetadata, cacheConfig2)
       
       try {
         // Test with limit larger than document count

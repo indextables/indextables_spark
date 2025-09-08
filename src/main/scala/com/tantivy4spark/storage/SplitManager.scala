@@ -110,6 +110,22 @@ object SplitManager {
         val metadata = QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
         logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
         
+        // PROOF: Log exactly what tantivy4java returns
+        logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath returned metadata:")
+        logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")
+        logger.warn(s"🔍 PROOF:   getClass = ${metadata.getClass.getName}")
+        
+        if (metadata.hasFooterOffsets()) {
+          logger.warn(s"🔍 PROOF: Footer offsets PRESENT:")
+          logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
+          logger.warn(s"🔍 PROOF:   footerEndOffset = ${metadata.getFooterEndOffset()}")
+          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = ${metadata.getHotcacheStartOffset()}")
+          logger.warn(s"🔍 PROOF:   hotcacheLength = ${metadata.getHotcacheLength()}")
+        } else {
+          logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets!")
+          logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
+        }
+        
         // Upload to S3 using cloud storage provider
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
         try {
@@ -136,6 +152,22 @@ object SplitManager {
       try {
         val metadata = QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
         logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
+        
+        // PROOF: Log exactly what tantivy4java returns for non-S3 paths
+        logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath (non-S3) returned metadata:")
+        logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")
+        logger.warn(s"🔍 PROOF:   getClass = ${metadata.getClass.getName}")
+        
+        if (metadata.hasFooterOffsets()) {
+          logger.warn(s"🔍 PROOF: Footer offsets PRESENT (non-S3):")
+          logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
+          logger.warn(s"🔍 PROOF:   footerEndOffset = ${metadata.getFooterEndOffset()}")
+          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = ${metadata.getHotcacheStartOffset()}")
+          logger.warn(s"🔍 PROOF:   hotcacheLength = ${metadata.getHotcacheLength()}")
+        } else {
+          logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets (non-S3 path)!")
+          logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
+        }
         metadata
       } catch {
         case e: Exception =>
