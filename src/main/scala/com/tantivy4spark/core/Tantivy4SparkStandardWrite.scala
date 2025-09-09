@@ -100,6 +100,8 @@ class Tantivy4SparkStandardWrite(
     // Determine if this should be an overwrite based on existing table state and mode
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
+      println(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
+      logger.warn(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
       true
     } else {
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
