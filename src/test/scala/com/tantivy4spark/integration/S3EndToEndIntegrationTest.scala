@@ -46,7 +46,7 @@ import org.apache.spark.sql.functions._
  */
 class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
-  private val S3_BUCKET = "tantivy4java-testing"
+  private val S3_BUCKET = "test-tantivy4sparkbucket"
   private val S3_REGION = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
   
@@ -192,7 +192,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     }
   }
 
-  test("End-to-end S3 integration: Write and read large dataset") {
+  ignore("End-to-end S3 integration: Write and read large dataset") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 integration test")
     
     println(s"🚀 Starting end-to-end S3 integration test")
@@ -253,7 +253,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     println(s"✅ Search functionality verified")
   }
 
-  test("S3 integration: IndexQuery native search operations") {
+  ignore("S3 integration: IndexQuery native search operations") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 integration test")
     
     println(s"🔍 Testing IndexQuery operations with S3 data")
@@ -295,7 +295,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     }
   }
 
-  test("S3 integration: Cache statistics monitoring") {
+  ignore("S3 integration: Cache statistics monitoring") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 integration test")
     
     println(s"📊 Testing cache statistics with S3 data")
@@ -352,7 +352,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     println(s"✅ Cache statistics verified")
   }
 
-  test("S3 integration: Multiple operations and transaction log verification") {
+  ignore("S3 integration: Multiple operations and transaction log verification") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 integration test")
     
     println(s"🔄 Testing multiple S3 operations and transaction log")

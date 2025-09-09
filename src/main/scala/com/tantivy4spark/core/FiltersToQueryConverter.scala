@@ -326,11 +326,23 @@ object FiltersToQueryConverter {
   private def withTemporaryIndex[T](schema: Schema)(f: Index => T): T = {
     import java.nio.file.Files
     val tempDir = Files.createTempDirectory("tantivy4spark_parsequery_")
-    val tempIndex = new Index(schema, tempDir.toAbsolutePath.toString)
     try {
-      f(tempIndex)
+      // Check if schema is still valid before using it
+      schema.getNativePtr() // This will throw IllegalStateException if closed
+      val tempIndex = new Index(schema, tempDir.toAbsolutePath.toString)
+      try {
+        f(tempIndex)
+      } finally {
+        tempIndex.close()
+      }
+    } catch {
+      case _: IllegalStateException =>
+        logger.warn("Schema has been closed, cannot create temporary index for query parsing")
+        throw new RuntimeException("Schema is closed - cannot parse query")
+      case e: RuntimeException if e.getMessage == "Invalid Schema pointer" =>
+        logger.warn("Invalid Schema pointer detected, schema may have been garbage collected")
+        throw new RuntimeException("Schema is invalid - cannot parse query")
     } finally {
-      tempIndex.close()
       // Clean up temp directory
       try {
         import java.nio.file.{Path, Files}

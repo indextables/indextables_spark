@@ -95,25 +95,33 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
     
     // Configure endpoint (for testing with S3Mock, MinIO, etc.)
     config.awsEndpoint.foreach { endpoint =>
-      try {
-        // Ensure the endpoint has a proper scheme (http:// or https://)
-        val endpointUri = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
-          URI.create(endpoint)
-        } else {
-          // Default to https if no scheme specified
-          URI.create(s"https://$endpoint")
+      // Skip endpoint override for standard AWS S3 endpoints when region is configured
+      // Using endpoint override with s3.amazonaws.com breaks regional routing
+      val isStandardAwsEndpoint = endpoint.contains("s3.amazonaws.com") || endpoint.contains("amazonaws.com")
+      
+      if (isStandardAwsEndpoint && config.awsRegion.isDefined) {
+        logger.info(s"🔧 Skipping endpoint override for standard AWS endpoint '$endpoint' because region is configured: ${config.awsRegion.get}")
+      } else {
+        try {
+          // Ensure the endpoint has a proper scheme (http:// or https://)
+          val endpointUri = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            URI.create(endpoint)
+          } else {
+            // Default to https if no scheme specified
+            URI.create(s"https://$endpoint")
+          }
+          
+          logger.info(s"Configuring S3 client with endpoint: $endpointUri")
+          builder.endpointOverride(endpointUri)
+          
+          if (config.awsPathStyleAccess) {
+            builder.forcePathStyle(true)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to parse S3 endpoint: $endpoint", ex)
+            throw new IllegalArgumentException(s"Invalid S3 endpoint: $endpoint", ex)
         }
-        
-        logger.info(s"Configuring S3 client with endpoint: $endpointUri")
-        builder.endpointOverride(endpointUri)
-        
-        if (config.awsPathStyleAccess) {
-          builder.forcePathStyle(true)
-        }
-      } catch {
-        case ex: Exception =>
-          logger.error(s"Failed to parse S3 endpoint: $endpoint", ex)
-          throw new IllegalArgumentException(s"Invalid S3 endpoint: $endpoint", ex)
       }
     }
     
@@ -153,7 +161,6 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
     
     try {
       logger.info(s"🔍 S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")
-      
       val request = ListObjectsV2Request.builder()
         .bucket(bucket)
         .prefix(prefix)

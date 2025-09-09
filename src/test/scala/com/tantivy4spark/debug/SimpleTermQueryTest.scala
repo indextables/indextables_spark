@@ -79,12 +79,55 @@ class SimpleTermQueryTest extends TestBase {
       val cacheConfig = new SplitCacheManager.CacheConfig("simple-test-cache")
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-      // Read metadata first - required for tantivy4java split reading
-      val splitUrl = "file://" + splitFile.getAbsolutePath
-      val metadata = QuickwitSplit.readSplitMetadata(splitUrl)
-      val splitSearcher = cacheManager.createSplitSearcher(splitUrl, metadata)
+      // Read metadata from transaction log - the same way production code works
+      val splitPath = splitFile.getAbsolutePath
+      println(s"🔍 Reading metadata from transaction log for split: $splitPath")
+      println(s"🔍 File exists: ${splitFile.exists()}")
       
+      import com.tantivy4spark.transaction.TransactionLog
+      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tempPath), spark)
       try {
+        val allFiles = transactionLog.listFiles()
+        val matchingFile = allFiles.find(_.path.endsWith(splitFile.getName)).getOrElse {
+          throw new RuntimeException(s"Could not find AddAction for split ${splitFile.getName} in transaction log")
+        }
+        
+        // Create SplitMetadata from AddAction - the same way Tantivy4SparkPartitions does
+        import java.time.Instant
+        import scala.jdk.CollectionConverters._
+        
+        // Safe conversion functions for Option[Any] to Long
+        def toLongSafeOption(opt: Option[Any]): Long = opt match {
+          case Some(value) => value match {
+            case l: Long => l
+            case i: Int => i.toLong
+            case i: java.lang.Integer => i.toLong
+            case l: java.lang.Long => l
+            case _ => value.toString.toLong
+          }
+          case None => 0L
+        }
+        
+        val metadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+          matchingFile.path.split("/").last.replace(".split", ""), // splitId from filename
+          toLongSafeOption(matchingFile.numRecords), // numDocs 
+          toLongSafeOption(matchingFile.uncompressedSizeBytes), // uncompressedSizeBytes 
+          matchingFile.timeRangeStart.map(Instant.parse).orNull, // timeRangeStart
+          matchingFile.timeRangeEnd.map(Instant.parse).orNull, // timeRangeEnd
+          matchingFile.splitTags.getOrElse(Set.empty[String]).asJava, // tags
+          toLongSafeOption(matchingFile.deleteOpstamp), // deleteOpstamp
+          matchingFile.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
+          toLongSafeOption(matchingFile.footerStartOffset), // footerStartOffset
+          toLongSafeOption(matchingFile.footerEndOffset), // footerEndOffset
+          toLongSafeOption(matchingFile.hotcacheStartOffset), // hotcacheStartOffset
+          toLongSafeOption(matchingFile.hotcacheLength), // hotcacheLength
+          matchingFile.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+        )
+        println(s"✅ Retrieved metadata from transaction log with footer offsets: ${metadata.hasFooterOffsets()}")
+        
+        val splitSearcher = cacheManager.createSplitSearcher(splitPath, metadata)
+        
+        try {
         val schema = splitSearcher.getSchema()
         println(s"🔍 Schema fields: ${schema.getFieldNames()}")
         
@@ -134,9 +177,12 @@ class SimpleTermQueryTest extends TestBase {
           engineeringResultsSize should be > 0
         }
         
+        } finally {
+          splitSearcher.close()
+          cacheManager.close()
+        }
       } finally {
-        splitSearcher.close()
-        cacheManager.close()
+        transactionLog.close()
       }
     }
   }

@@ -278,9 +278,14 @@ object CloudStorageProviderFactory {
    */
   private def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageConfig = {
     // Debug logging for configuration extraction
-    logger.info(s"Extracting cloud config from options: ${options.entrySet().asScala.map(e => s"${e.getKey}=${e.getValue}").mkString(", ")}")
-    logger.info(s"Hadoop conf spark.tantivy4spark.aws.accessKey: ${hadoopConf.get("spark.tantivy4spark.aws.accessKey")}")
-    logger.info(s"Hadoop conf spark.hadoop.fs.s3a.access.key: ${hadoopConf.get("spark.hadoop.fs.s3a.access.key")}")
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Extracting cloud config from options:")
+    options.entrySet().asScala.foreach { entry =>
+      val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret")) "***" else entry.getValue
+      logger.info(s"  ${entry.getKey} = $displayValue")
+    }
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.tantivy4spark.aws.accessKey: ${hadoopConf.get("spark.tantivy4spark.aws.accessKey")}")
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.tantivy4spark.aws.region: ${hadoopConf.get("spark.tantivy4spark.aws.region")}")
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.hadoop.fs.s3a.access.key: ${hadoopConf.get("spark.hadoop.fs.s3a.access.key")}")
     
     // Trace credential extraction step by step
     val accessKeyFromOptions = Option(options.get("spark.tantivy4spark.aws.accessKey"))
@@ -347,11 +352,35 @@ object CloudStorageProviderFactory {
       awsSecretKey = finalSecretKey,
       awsSessionToken = finalSessionToken,
         
-      awsRegion = Option(options.get("spark.tantivy4spark.aws.region"))
-        .orElse(Option(hadoopConf.get("spark.tantivy4spark.aws.region")))
-        .orElse(Option(hadoopConf.get("fs.s3a.endpoint.region")))
-        .orElse(Option(System.getProperty("aws.region")))
-        .orElse(Some("us-east-1")),
+      awsRegion = {
+        val regionFromOptions = Option(options.get("spark.tantivy4spark.aws.region"))
+        val regionFromHadoopTantivy = Option(hadoopConf.get("spark.tantivy4spark.aws.region"))
+        val regionFromHadoopS3a = Option(hadoopConf.get("fs.s3a.endpoint.region"))
+        val regionFromSystemProp = Option(System.getProperty("aws.region"))
+        val regionFromAwsEnv = Option(System.getenv("AWS_DEFAULT_REGION")).orElse(Option(System.getenv("AWS_REGION")))
+        
+        val finalRegion = regionFromOptions
+          .orElse(regionFromHadoopTantivy)
+          .orElse(regionFromHadoopS3a)
+          .orElse(regionFromSystemProp)
+          .orElse(regionFromAwsEnv)
+        
+        logger.info(s"🔍 REGION RESOLUTION PRIORITY:")
+        logger.info(s"  - From options: $regionFromOptions")
+        logger.info(s"  - From Hadoop Tantivy config: $regionFromHadoopTantivy")
+        logger.info(s"  - From Hadoop S3a config: $regionFromHadoopS3a")
+        logger.info(s"  - From system properties: $regionFromSystemProp")
+        logger.info(s"  - From environment variables: $regionFromAwsEnv")
+        logger.info(s"  - Final region: $finalRegion")
+        
+        
+        if (finalRegion.isEmpty) {
+          logger.warn("No AWS region configured! S3CloudStorageProvider will use AWS SDK default region resolution")
+          logger.warn("This may cause S3 307 redirect errors if the bucket is in a different region")
+        }
+        
+        finalRegion
+      },
         
       // Support multiple ways to specify S3 service endpoint override (for S3Mock, MinIO, etc.)
       awsEndpoint = Option(options.get("spark.tantivy4spark.s3.endpoint"))

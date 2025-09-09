@@ -476,17 +476,42 @@ class MergeSplitsExecutor(
         )
       }
       
-      // Extract footer offset optimization metadata from merged split
+      // Extract ALL metadata from merged split for complete pipeline coverage
       val mergedMetadata = result.mergedSplitInfo.metadata
-      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets) = 
-        if (mergedMetadata != null && mergedMetadata.hasFooterOffsets()) {
-          (Some(mergedMetadata.getFooterStartOffset()),
-           Some(mergedMetadata.getFooterEndOffset()),
-           Some(mergedMetadata.getHotcacheStartOffset()),
-           Some(mergedMetadata.getHotcacheLength()),
-           true)
+      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets,
+           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
+        if (mergedMetadata != null) {
+          val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
+          val timeEnd = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
+          val tags = Option(mergedMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
+            import scala.jdk.CollectionConverters._
+            tagSet.asScala.toSet
+          }
+          val docMapping = Option(mergedMetadata.getDocMappingJson())
+          
+          if (mergedMetadata.hasFooterOffsets()) {
+            (Some(mergedMetadata.getFooterStartOffset()),
+             Some(mergedMetadata.getFooterEndOffset()),
+             Some(mergedMetadata.getHotcacheStartOffset()),
+             Some(mergedMetadata.getHotcacheLength()),
+             true,
+             timeStart,
+             timeEnd,
+             tags,
+             Some(mergedMetadata.getDeleteOpstamp()),
+             Some(mergedMetadata.getNumMergeOps()),
+             docMapping,
+             Some(mergedMetadata.getUncompressedSizeBytes()))
+          } else {
+            (None, None, None, None, false,
+             timeStart, timeEnd, tags,
+             Some(mergedMetadata.getDeleteOpstamp()),
+             Some(mergedMetadata.getNumMergeOps()),
+             docMapping,
+             Some(mergedMetadata.getUncompressedSizeBytes()))
+          }
         } else {
-          (None, None, None, None, false)
+          (None, None, None, None, false, None, None, None, None, None, None, None)
         }
 
       val addAction = AddAction(
@@ -502,7 +527,15 @@ class MergeSplitsExecutor(
         footerEndOffset = footerEndOffset,
         hotcacheStartOffset = hotcacheStartOffset,
         hotcacheLength = hotcacheLength,
-        hasFooterOffsets = hasFooterOffsets
+        hasFooterOffsets = hasFooterOffsets,
+        // Complete tantivy4java SplitMetadata fields preserved from merge
+        timeRangeStart = timeRangeStart,
+        timeRangeEnd = timeRangeEnd,
+        splitTags = splitTags,
+        deleteOpstamp = deleteOpstamp,
+        numMergeOps = numMergeOps,
+        docMappingJson = docMappingJson,
+        uncompressedSizeBytes = uncompressedSizeBytes
       )
       
       // Write transaction log entry using the atomic merge API
@@ -695,17 +728,42 @@ class MergeSplitsExecutor(
       // Merge statistics from input files without reading file contents
       val (mergedMinValues, mergedMaxValues, mergedNumRecords) = mergeStatistics(mergeGroup.files)
 
-      // Extract footer offset optimization metadata from merged split
+      // Extract ALL metadata from merged split for complete pipeline coverage
       val mergedMetadata = mergedSplit.metadata
-      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets) = 
-        if (mergedMetadata != null && mergedMetadata.hasFooterOffsets()) {
-          (Some(mergedMetadata.getFooterStartOffset()),
-           Some(mergedMetadata.getFooterEndOffset()),
-           Some(mergedMetadata.getHotcacheStartOffset()),
-           Some(mergedMetadata.getHotcacheLength()),
-           true)
+      val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets,
+           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
+        if (mergedMetadata != null) {
+          val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
+          val timeEnd = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
+          val tags = Option(mergedMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
+            import scala.jdk.CollectionConverters._
+            tagSet.asScala.toSet
+          }
+          val docMapping = Option(mergedMetadata.getDocMappingJson())
+          
+          if (mergedMetadata.hasFooterOffsets()) {
+            (Some(mergedMetadata.getFooterStartOffset()),
+             Some(mergedMetadata.getFooterEndOffset()),
+             Some(mergedMetadata.getHotcacheStartOffset()),
+             Some(mergedMetadata.getHotcacheLength()),
+             true,
+             timeStart,
+             timeEnd,
+             tags,
+             Some(mergedMetadata.getDeleteOpstamp()),
+             Some(mergedMetadata.getNumMergeOps()),
+             docMapping,
+             Some(mergedMetadata.getUncompressedSizeBytes()))
+          } else {
+            (None, None, None, None, false,
+             timeStart, timeEnd, tags,
+             Some(mergedMetadata.getDeleteOpstamp()),
+             Some(mergedMetadata.getNumMergeOps()),
+             docMapping,
+             Some(mergedMetadata.getUncompressedSizeBytes()))
+          }
         } else {
-          (None, None, None, None, false)
+          (None, None, None, None, false, None, None, None, None, None, None, None)
         }
 
       val addAction = AddAction(
@@ -730,7 +788,15 @@ class MergeSplitsExecutor(
         footerEndOffset = footerEndOffset,
         hotcacheStartOffset = hotcacheStartOffset,
         hotcacheLength = hotcacheLength,
-        hasFooterOffsets = hasFooterOffsets
+        hasFooterOffsets = hasFooterOffsets,
+        // Complete tantivy4java SplitMetadata fields preserved from merge
+        timeRangeStart = timeRangeStart,
+        timeRangeEnd = timeRangeEnd,
+        splitTags = splitTags,
+        deleteOpstamp = deleteOpstamp,
+        numMergeOps = numMergeOps,
+        docMappingJson = docMappingJson,
+        uncompressedSizeBytes = uncompressedSizeBytes
       )
 
       // Commit atomic REMOVE+ADD transaction using the new method

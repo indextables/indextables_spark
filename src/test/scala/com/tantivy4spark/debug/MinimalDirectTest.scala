@@ -18,11 +18,6 @@
 package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
-import com.tantivy4spark.storage.SplitCacheConfig
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.unsafe.types.UTF8String
 import java.io.File
 
 class MinimalDirectTest extends TestBase {
@@ -30,55 +25,72 @@ class MinimalDirectTest extends TestBase {
   test("minimal isolated split-based test") {
     println("=== MINIMAL ISOLATED SPLIT-BASED TEST ===")
     
-    val schema = StructType(Array(
-      StructField("test_id", LongType, nullable = false),
-      StructField("test_name", StringType, nullable = false)
-    ))
-    
-    println(s"Schema: $schema")
-    
-    val searchEngine = new TantivySearchEngine(schema)
-    val tempSplitFile = File.createTempFile("minimal_test_split", ".split")
-    tempSplitFile.deleteOnExit()
-    
-    try {
-      println("1. Adding document...")
-      val row = InternalRow(42L, UTF8String.fromString("TestDocument"))
-      searchEngine.addDocument(row)
+    withTempPath { tempPath =>
+      val indexPath = new File(tempPath, "index")
+      val splitPath = new File(tempPath, "test.split")
+      
+      println("1. Creating tantivy4java index...")
+      import com.tantivy4java._
+      val schema = new SchemaBuilder()
+        .addIntegerField("test_id", true, true, true)  // stored, indexed, fast
+        .addTextField("test_name", true, false, "default", "position")     // stored, not fast, tokenizer, record
+        .build()
+      
+      indexPath.mkdirs() // Create the index directory
+      val index = new Index(schema, indexPath.toString)
+      val writer = index.writer(50000000, 1)
+      
+      println("2. Adding document...")
+      val doc = new Document()
+      doc.addInteger("test_id", 42)
+      doc.addText("test_name", "TestDocument")
+      writer.addDocument(doc)
       println("   Document added successfully")
       
-      println("2. Committing and creating split...")
-      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.toString, 0L, "minimal-test-node")
-      println(s"   Split created at: $splitPath")
+      writer.commit()
+      writer.close()
+      index.close()
+      println("✅ Index created with test data")
       
-      println("3. Reading from split...")
-      val uniqueId = System.nanoTime()
-      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"minimal-test-cache-${uniqueId}")
-      val splitReader = SplitSearchEngine.fromSplitFile(schema, splitPath, uniqueCacheConfig)
+      println("3. Converting index to split using QuickwitSplit...")
+      val splitConfig = new QuickwitSplit.SplitConfig("minimal-test", "minimal-source", "minimal-node")
+      val metadata = QuickwitSplit.convertIndexFromPath(indexPath.toString, splitPath.toString, splitConfig)
+      println("✅ Split created successfully")
+      println(s"Split metadata hasFooterOffsets: ${metadata.hasFooterOffsets()}")
+      
+      println("4. Testing SplitSearcher...")
+      import com.tantivy4java._
+      val cacheConfig = new SplitCacheManager.CacheConfig("minimal-test-cache")
+        .withMaxCacheSize(50000000L) // 50MB
+      val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      val splitSearcher = cacheManager.createSplitSearcher(splitPath.toString, metadata)
       
       try {
-        val results = splitReader.searchAll(10)
-        println(s"   Search returned ${results.length} documents")
+        val allQuery = new SplitMatchAllQuery()
+        val searchResult = splitSearcher.search(allQuery, 10)
+        val hits = searchResult.getHits()
+        println(s"   Search returned ${hits.size()} documents")
         
-        if (results.length > 0) {
-          results.foreach { row =>
-            println(s"   Found: test_id=${row.getLong(0)}, test_name=${row.getUTF8String(1)}")
+        if (hits.size() > 0) {
+          hits.forEach { hit =>
+            val doc = splitSearcher.doc(hit.getDocAddress())
+            val testId = doc.get("test_id").get(0)
+            val testName = doc.get("test_name").get(0)
+            println(s"   Found: test_id=$testId, test_name=$testName")
+            doc.close()
           }
         }
+        searchResult.close()
         
         // This should succeed with the split-based approach
-        assert(results.length == 1, s"Expected 1 document, got ${results.length}")
-        assert(results(0).getLong(0) == 42L, "Expected test_id=42")
+        assert(hits.size() == 1, s"Expected 1 document, got ${hits.size()}")
         
         println("✅ MINIMAL SPLIT-BASED TEST PASSED!")
         
       } finally {
-        splitReader.close()
+        splitSearcher.close()
+        cacheManager.close()
       }
-      
-    } finally {
-      searchEngine.close()
-      println("   Search engine closed")
     }
   }
 }

@@ -135,6 +135,7 @@ object TantivySearchEngine {
             awsSessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken"),
             awsRegion = getConfigWithFallback("spark.tantivy4spark.aws.region"),
             awsEndpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint"),
+            awsPathStyleAccess = getConfigWithFallback("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
             // Azure configuration
             azureAccountName = getConfigWithFallback("spark.tantivy4spark.azure.accountName"),
             azureAccountKey = getConfigWithFallback("spark.tantivy4spark.azure.accountKey"),

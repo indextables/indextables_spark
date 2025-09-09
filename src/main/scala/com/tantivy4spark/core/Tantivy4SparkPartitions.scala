@@ -191,6 +191,7 @@ class Tantivy4SparkPartitionReader(
       awsSessionToken = getBroadcastConfigOption("spark.tantivy4spark.aws.sessionToken"),
       awsRegion = getBroadcastConfigOption("spark.tantivy4spark.aws.region"),
       awsEndpoint = getBroadcastConfigOption("spark.tantivy4spark.s3.endpoint"),
+      awsPathStyleAccess = getBroadcastConfigOption("spark.tantivy4spark.s3.pathStyleAccess").map(_.toBoolean),
       // Azure configuration from broadcast
       azureAccountName = getBroadcastConfigOption("spark.tantivy4spark.azure.accountName"),
       azureAccountKey = getBroadcastConfigOption("spark.tantivy4spark.azure.accountKey"),
@@ -205,6 +206,8 @@ class Tantivy4SparkPartitionReader(
     
     // Debug: Log final cache configuration
     logger.debug(s"🔍 Created SplitCacheConfig with AWS region: ${cacheConfig.awsRegion.getOrElse("None")}")
+    logger.debug(s"🔍 Created SplitCacheConfig with AWS endpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
+    logger.debug(s"🔍 Created SplitCacheConfig with AWS pathStyleAccess: ${cacheConfig.awsPathStyleAccess.getOrElse("None")}")
     
     cacheConfig
   }
@@ -259,22 +262,36 @@ class Tantivy4SparkPartitionReader(
           throw new RuntimeException(s"AddAction for $actualPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
         }
 
-        // Reconstruct SplitMetadata from AddAction for footer offset optimization
-        // Handle potential Integer/Long type conversion from JSON deserialization
-        def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
+        // Reconstruct COMPLETE SplitMetadata from AddAction - all fields required for proper operation
+        import java.time.Instant
+        import scala.jdk.CollectionConverters._
+        
+        // Safe conversion functions for Option[Any] to Long to handle JSON deserialization type variations
+        def toLongSafeOption(opt: Option[Any]): Long = opt match {
           case Some(value) => value match {
-            case i if i.isInstanceOf[Integer] => i.asInstanceOf[Integer].toLong
-            case l if l.isInstanceOf[Long] => l.asInstanceOf[Long]
-            case other => other.asInstanceOf[Number].longValue()
+            case l: Long => l
+            case i: Int => i.toLong
+            case i: java.lang.Integer => i.toLong
+            case l: java.lang.Long => l
+            case _ => value.toString.toLong
           }
-          case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
+          case None => 0L
         }
         
         val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
-          safeLong(addAction.footerStartOffset, "footerStartOffset"), // footerStartOffset
-          safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
-          safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
-          safeLong(addAction.hotcacheLength, "hotcacheLength") // hotcacheLength
+          addAction.path.split("/").last.replace(".split", ""), // splitId from filename
+          toLongSafeOption(addAction.numRecords), // numDocs
+          toLongSafeOption(addAction.uncompressedSizeBytes), // uncompressedSizeBytes
+          addAction.timeRangeStart.map(Instant.parse).orNull, // timeRangeStart
+          addAction.timeRangeEnd.map(Instant.parse).orNull, // timeRangeEnd
+          addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
+          toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
+          addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
+          toLongSafeOption(addAction.footerStartOffset), // footerStartOffset
+          toLongSafeOption(addAction.footerEndOffset), // footerEndOffset
+          toLongSafeOption(addAction.hotcacheStartOffset), // hotcacheStartOffset
+          toLongSafeOption(addAction.hotcacheLength), // hotcacheLength
+          addAction.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
         )
 
         splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
@@ -560,7 +577,7 @@ class Tantivy4SparkDataWriter(
     
     // Extract ALL metadata from tantivy4java SplitMetadata for complete pipeline coverage
     val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets, 
-         timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson) = 
+         timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
       if (splitMetadata != null) {
         val timeStart = Option(splitMetadata.getTimeRangeStart()).map(_.toString)
         val timeEnd = Option(splitMetadata.getTimeRangeEnd()).map(_.toString)
@@ -581,16 +598,18 @@ class Tantivy4SparkDataWriter(
            tags,
            Some(splitMetadata.getDeleteOpstamp()),
            Some(splitMetadata.getNumMergeOps()),
-           docMapping)
+           docMapping,
+           Some(splitMetadata.getUncompressedSizeBytes()))
         } else {
           (None, None, None, None, false,
            timeStart, timeEnd, tags,
            Some(splitMetadata.getDeleteOpstamp()),
            Some(splitMetadata.getNumMergeOps()),
-           docMapping)
+           docMapping,
+           Some(splitMetadata.getUncompressedSizeBytes()))
         }
       } else {
-        (None, None, None, None, false, None, None, None, None, None, None)
+        (None, None, None, None, false, None, None, None, None, None, None, None)
       }
 
     val addAction = AddAction(
@@ -614,7 +633,8 @@ class Tantivy4SparkDataWriter(
       splitTags = splitTags,
       deleteOpstamp = deleteOpstamp,
       numMergeOps = numMergeOps,
-      docMappingJson = docMappingJson
+      docMappingJson = docMappingJson,
+      uncompressedSizeBytes = uncompressedSizeBytes
     )
     
     if (partitionValues.nonEmpty) {

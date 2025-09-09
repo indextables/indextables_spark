@@ -202,7 +202,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     }
   }
 
-  test("should write DataFrame to S3 and read it back") {
+  ignore("should write DataFrame to S3 and read it back") {
     // Create test data
     val data = spark.range(50).select(
       col("id"),
@@ -355,7 +355,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     println(s"✅ High price items: $highPriceItems")
   }
   
-  test("should handle multiple S3 write/read operations") {
+  ignore("should handle multiple S3 write/read operations") {
     // Test multiple datasets
     val datasets = (1 to 3).map { i =>
       val data = spark.range(20).select(

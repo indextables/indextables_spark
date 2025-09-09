@@ -119,6 +119,7 @@ object Tantivy4SparkRelation {
       awsSessionToken = hadoopConfProps.get("spark.tantivy4spark.aws.sessionToken").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.sessiontoken")),
       awsRegion = hadoopConfProps.get("spark.tantivy4spark.aws.region"),
       awsEndpoint = hadoopConfProps.get("spark.tantivy4spark.s3.endpoint"),
+      awsPathStyleAccess = hadoopConfProps.get("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
       // Azure configuration
       azureAccountName = hadoopConfProps.get("spark.tantivy4spark.azure.accountName"),
       azureAccountKey = hadoopConfProps.get("spark.tantivy4spark.azure.accountKey"),
@@ -363,34 +364,38 @@ object Tantivy4SparkRelation {
       throw new RuntimeException(s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
     }
     
+    // Safe conversion functions for Option[Any] to Long to handle JSON deserialization type variations
+    def toLongSafeOption(opt: Option[Any]): Long = opt match {
+      case Some(value) => value match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case i: java.lang.Integer => i.toLong
+        case l: java.lang.Long => l
+        case _ => value.toString.toLong
+      }
+      case None => 0L
+    }
+    
     SerializableSplitMetadata(
-      numDocs = addAction.numRecords.getOrElse(0L),
-      uncompressedSize = addAction.size,
-      footerStartOffset = (addAction.footerStartOffset.get: Any) match {
-        case l: Long => l
-        case i: Int => i.toLong
-        case other => other.toString.toLong
-      },
-      footerEndOffset = (addAction.footerEndOffset.get: Any) match {
-        case l: Long => l
-        case i: Int => i.toLong
-        case other => other.toString.toLong
-      },
-      hotcacheStartOffset = (addAction.hotcacheStartOffset.getOrElse(0L): Any) match {
-        case l: Long => l
-        case i: Int => i.toLong
-        case other => other.toString.toLong
-      },
-      hotcacheLength = (addAction.hotcacheLength.getOrElse(0L): Any) match {
-        case l: Long => l
-        case i: Int => i.toLong
-        case other => other.toString.toLong
-      },
+      numDocs = toLongSafeOption(addAction.numRecords),  // Safe conversion
+      uncompressedSize = toLongSafeOption(addAction.uncompressedSizeBytes),  // Safe conversion
+      footerStartOffset = toLongSafeOption(addAction.footerStartOffset),  // Safe conversion
+      footerEndOffset = toLongSafeOption(addAction.footerEndOffset),  // Safe conversion
+      hotcacheStartOffset = toLongSafeOption(addAction.hotcacheStartOffset),  // Safe conversion
+      hotcacheLength = toLongSafeOption(addAction.hotcacheLength),  // Safe conversion
       // Complete tantivy4java SplitMetadata fields
       timeRangeStart = addAction.timeRangeStart,
       timeRangeEnd = addAction.timeRangeEnd,
       splitTags = addAction.splitTags,
-      deleteOpstamp = addAction.deleteOpstamp,
+      deleteOpstamp = addAction.deleteOpstamp.map { value: Any =>
+        value match {
+          case l: Long => l
+          case i: Int => i.toLong
+          case i: java.lang.Integer => i.toLong
+          case l: java.lang.Long => l
+          case _ => value.toString.toLong
+        }
+      },  // Safe conversion for deleteOpstamp
       numMergeOps = addAction.numMergeOps,
       docMappingJson = addAction.docMappingJson
     )
@@ -449,6 +454,7 @@ object Tantivy4SparkRelation {
       awsSessionToken = hadoopConfProps.get("spark.tantivy4spark.aws.sessionToken").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.sessiontoken")),
       awsRegion = hadoopConfProps.get("spark.tantivy4spark.aws.region"),
       awsEndpoint = hadoopConfProps.get("spark.tantivy4spark.s3.endpoint"),
+      awsPathStyleAccess = hadoopConfProps.get("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
       // Azure configuration
       azureAccountName = hadoopConfProps.get("spark.tantivy4spark.azure.accountName"),
       azureAccountKey = hadoopConfProps.get("spark.tantivy4spark.azure.accountKey"),

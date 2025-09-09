@@ -79,7 +79,8 @@ case class AddAction(
   @JsonProperty("splitTags") splitTags: Option[Set[String]] = None, // tantivy4java tags (distinct from Delta tags)
   @JsonProperty("deleteOpstamp") deleteOpstamp: Option[Long] = None,
   @JsonProperty("numMergeOps") numMergeOps: Option[Int] = None,
-  @JsonProperty("docMappingJson") docMappingJson: Option[String] = None
+  @JsonProperty("docMappingJson") docMappingJson: Option[String] = None,
+  @JsonProperty("uncompressedSizeBytes") uncompressedSizeBytes: Option[Long] = None // SplitMetadata uncompressed size
 ) extends Action
 
 case class RemoveAction(

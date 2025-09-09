@@ -280,6 +280,7 @@ object PreWarmManager {
       awsSessionToken = getConfigOption("spark.tantivy4spark.aws.sessionToken"),
       awsRegion = getConfigOption("spark.tantivy4spark.aws.region"),
       awsEndpoint = getConfigOption("spark.tantivy4spark.s3.endpoint"),
+      awsPathStyleAccess = getConfigOption("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
       azureAccountName = getConfigOption("spark.tantivy4spark.azure.accountName"),
       azureAccountKey = getConfigOption("spark.tantivy4spark.azure.accountKey"),
       azureConnectionString = getConfigOption("spark.tantivy4spark.azure.connectionString"),

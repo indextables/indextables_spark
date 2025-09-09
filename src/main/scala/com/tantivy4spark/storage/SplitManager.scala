@@ -229,6 +229,7 @@ case class SplitCacheConfig(
   awsSessionToken: Option[String] = None,
   awsRegion: Option[String] = None,
   awsEndpoint: Option[String] = None,
+  awsPathStyleAccess: Option[Boolean] = None,
   azureAccountName: Option[String] = None,
   azureAccountKey: Option[String] = None,
   azureConnectionString: Option[String] = None,
@@ -292,7 +293,14 @@ case class SplitCacheConfig(
         logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
     }
     
-    awsEndpoint.foreach(endpoint => config = config.withAwsEndpoint(endpoint))
+    awsEndpoint.foreach { endpoint => 
+      logger.info(s"🔧 Configuring AWS endpoint: $endpoint")
+      config = config.withAwsEndpoint(endpoint)
+    }
+    awsPathStyleAccess.foreach { pathStyle => 
+      logger.info(s"🔧 Configuring AWS path-style access: $pathStyle")
+      config = config.withAwsPathStyleAccess(pathStyle)
+    }
     
     // Azure configuration
     (azureAccountName, azureAccountKey) match {

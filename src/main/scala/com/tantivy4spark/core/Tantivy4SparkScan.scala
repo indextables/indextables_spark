@@ -162,8 +162,10 @@ class Tantivy4SparkScan(
     }
     
     val finalActions = if (nonPartitionFilters.nonEmpty) {
-      val skipped = partitionPrunedActions.filterNot { addAction =>
-        nonPartitionFilters.exists(filter => shouldSkipFile(addAction, filter))
+      val skipped = partitionPrunedActions.filter { addAction =>
+        nonPartitionFilters.forall { filter =>
+          !shouldSkipFile(addAction, filter) // Keep file only if ALL filters say don't skip
+        }
       }
       val skippedCount = partitionPrunedActions.length - skipped.length
       if (skippedCount > 0) {
