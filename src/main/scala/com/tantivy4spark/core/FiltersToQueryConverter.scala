@@ -28,6 +28,20 @@ import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 object FiltersToQueryConverter {
   
   private val logger = LoggerFactory.getLogger(this.getClass)
+  
+  /**
+   * Safely execute a function with a Schema copy to avoid Arc reference counting issues.
+   * This creates an independent Schema copy that can be used safely even if the original is closed.
+   */
+  private def withSchemaCopy[T](splitSearchEngine: SplitSearchEngine)(f: Schema => T): T = {
+    val originalSchema = splitSearchEngine.getSchema()
+    val schemaCopy = originalSchema.copy()
+    try {
+      f(schemaCopy)
+    } finally {
+      schemaCopy.close()
+    }
+  }
 
   /**
    * Convert Spark filters to a tantivy4java SplitQuery object using the new API.
@@ -81,8 +95,10 @@ object FiltersToQueryConverter {
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
-    // Convert filters to SplitQuery objects
-    val splitQueries = validFilters.flatMap(filter => convertFilterToSplitQuery(filter, splitSearchEngine.getSchema()))
+    // Convert filters to SplitQuery objects using safe schema copy
+    val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
+      validFilters.flatMap(filter => convertFilterToSplitQuery(filter, schema))
+    }
     
     if (splitQueries.isEmpty) {
       new SplitMatchAllQuery()
@@ -128,7 +144,9 @@ object FiltersToQueryConverter {
     }
 
     // Convert filters to SplitQuery objects
-    val splitQueries = validFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine))
+    val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
+      validFilters.flatMap(filter => convertMixedFilterToSplitQuery(filter, splitSearchEngine, schema))
+    }
     
     if (splitQueries.isEmpty) {
       new SplitMatchAllQuery()
@@ -146,7 +164,6 @@ object FiltersToQueryConverter {
    * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object with schema field validation.
    */
   def convertToQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): Query = {
-    val schema = splitSearchEngine.getSchema()
     if (filters.isEmpty) {
       return Query.allQuery()
     }
@@ -174,7 +191,9 @@ object FiltersToQueryConverter {
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
-    val queries = validFilters.flatMap(filter => Option(convertMixedFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
+    val queries = withSchemaCopy(splitSearchEngine) { schema =>
+      validFilters.flatMap(filter => Option(convertMixedFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
+    }
     
     if (queries.isEmpty) {
       Query.allQuery()
@@ -191,7 +210,6 @@ object FiltersToQueryConverter {
    * Convert Spark filters to a tantivy4java Query object with schema field validation.
    */
   def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): Query = {
-    val schema = splitSearchEngine.getSchema()
     if (filters.isEmpty) {
       return Query.allQuery()
     }
@@ -219,7 +237,9 @@ object FiltersToQueryConverter {
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
-    val queries = validFilters.flatMap(filter => Option(convertFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
+    val queries = withSchemaCopy(splitSearchEngine) { schema =>
+      validFilters.flatMap(filter => Option(convertFilterToQuery(filter, splitSearchEngine, schema))).filter(_ != null)
+    }
     
     if (queries.isEmpty) {
       Query.allQuery()
@@ -267,7 +287,7 @@ object FiltersToQueryConverter {
           Query.phraseQuery(schema, attribute, words)
         } else if (isNumericFieldType(fieldType)) {
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
-          Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+          Query.termQuery(schema, attribute, convertedValue)
         } else {
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.termQuery(schema, attribute, convertedValue)
@@ -327,21 +347,12 @@ object FiltersToQueryConverter {
     import java.nio.file.Files
     val tempDir = Files.createTempDirectory("tantivy4spark_parsequery_")
     try {
-      // Check if schema is still valid before using it
-      schema.getNativePtr() // This will throw IllegalStateException if closed
       val tempIndex = new Index(schema, tempDir.toAbsolutePath.toString)
       try {
         f(tempIndex)
       } finally {
         tempIndex.close()
       }
-    } catch {
-      case _: IllegalStateException =>
-        logger.warn("Schema has been closed, cannot create temporary index for query parsing")
-        throw new RuntimeException("Schema is closed - cannot parse query")
-      case e: RuntimeException if e.getMessage == "Invalid Schema pointer" =>
-        logger.warn("Invalid Schema pointer detected, schema may have been garbage collected")
-        throw new RuntimeException("Schema is invalid - cannot parse query")
     } finally {
       // Clean up temp directory
       try {
@@ -387,12 +398,12 @@ object FiltersToQueryConverter {
               index.parseQuery(queryString, fieldNames)
             }
           } else if (isNumericFieldType(fieldType)) {
-            // For numeric fields (INTEGER, FLOAT, DATE), use range query for equality
-            queryLog(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+            // For numeric fields (INTEGER, FLOAT, DATE), use term query for equality
+            queryLog(s"Field '$attribute' is numeric $fieldType, using termQuery for equality")
             val convertedValue = convertSparkValueToTantivy(value, fieldType)
-            logger.info(s"Creating range query for numeric equality: field='$attribute', fieldType=$fieldType, min=$convertedValue, max=$convertedValue")
-            val result = Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
-            queryLog(s"Successfully created range query: ${result.getClass.getSimpleName}")
+            logger.info(s"Creating term query for numeric equality: field='$attribute', fieldType=$fieldType, value=$convertedValue")
+            val result = Query.termQuery(schema, attribute, convertedValue)
+            queryLog(s"Successfully created term query: ${result.getClass.getSimpleName}")
             result
           } else {
             // For other non-TEXT fields (BOOLEAN, BYTES), use Index.parseQuery with field specification
@@ -419,10 +430,10 @@ object FiltersToQueryConverter {
             queryLog(s"Creating EqualNullSafe query: $attribute = $value")
             val fieldType = getFieldType(schema, attribute)
             if (isNumericFieldType(fieldType)) {
-              // For numeric fields, use range query for equality
-              queryLog(s"Field '$attribute' is numeric $fieldType, using rangeQuery for equality")
+              // For numeric fields, use term query for equality
+              queryLog(s"Field '$attribute' is numeric $fieldType, using termQuery for equality")
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
-              Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+              Query.termQuery(schema, attribute, convertedValue)
             } else {
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
               val queryString = convertedValue.toString
@@ -474,13 +485,13 @@ object FiltersToQueryConverter {
             val occurQueries = parseQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
           } else if (isNumericFieldType(fieldType)) {
-            // For numeric fields, create OR query with range queries for each value
-            queryLog(s"Field '$attribute' is numeric $fieldType, using OR of rangeQueries for IN query")
-            val rangeQueries = values.map { value =>
+            // For numeric fields, create OR query with term queries for each value
+            queryLog(s"Field '$attribute' is numeric $fieldType, using OR of termQueries for IN query")
+            val termQueries = values.map { value =>
               val convertedValue = convertSparkValueToTantivy(value, fieldType)
-              Query.rangeQuery(schema, attribute, fieldType, convertedValue, convertedValue, true, true)
+              Query.termQuery(schema, attribute, convertedValue)
             }
-            val occurQueries = rangeQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
+            val occurQueries = termQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
           } else {
             // For other fields (BOOLEAN, BYTES), use term set query with converted values
@@ -614,6 +625,9 @@ object FiltersToQueryConverter {
           Query.allQuery()
       }
     } catch {
+      case e: RuntimeException if e.getMessage != null && (e.getMessage.contains("Schema is closed") || e.getMessage.contains("Schema is invalid")) =>
+        logger.warn(s"Cannot convert filter $filter - schema unavailable: ${e.getMessage}")
+        Query.allQuery() // Fallback to match-all query when schema is closed
       case e: Exception =>
         logger.error(s"Failed to convert filter $filter to Query: ${e.getMessage}", e)
         Query.allQuery() // Fallback to match-all query
@@ -894,10 +908,10 @@ object FiltersToQueryConverter {
   /**
    * Convert a mixed filter (Spark Filter or custom filter) to a SplitQuery object.
    */
-  private def convertMixedFilterToSplitQuery(filter: Any, splitSearchEngine: SplitSearchEngine): Option[SplitQuery] = {
+  private def convertMixedFilterToSplitQuery(filter: Any, splitSearchEngine: SplitSearchEngine, schema: Schema): Option[SplitQuery] = {
     filter match {
       case sparkFilter: Filter =>
-        convertFilterToSplitQuery(sparkFilter, splitSearchEngine.getSchema())
+        convertFilterToSplitQuery(sparkFilter, schema)
       
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher

@@ -319,40 +319,33 @@ class Tantivy4SparkPartitionReader(
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
         logger.info(s"  - Combined Filters: ${allFilters.length} total filters")
         
-        // Convert filters to Tantivy Query object with schema validation
-        val query = if (allFilters.nonEmpty) {
+        // Convert filters to SplitQuery object with schema validation
+        val splitQuery = if (allFilters.nonEmpty) {
           val queryObj = if (splitFieldNames.nonEmpty) {
-            val validatedQuery = FiltersToQueryConverter.convertToQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
-            logger.info(s"  - Query (with schema validation): ${validatedQuery.getClass.getSimpleName}")
+            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
+            logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToQuery(allFilters, splitSearchEngine)
-            logger.info(s"  - Query (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
+            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None)
+            logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }
           queryObj
         } else {
-          null // Use null to indicate no filters
+          import com.tantivy4java.SplitMatchAllQuery
+          new SplitMatchAllQuery() // Use match-all query for no filters
         }
         
-        // Push down query and limit to Quickwit searcher
-        val results = if (query != null) {
-          logger.info(s"Executing search with Query object and limit: $effectiveLimit")
-          val searchResults = splitSearchEngine.search(query, limit = effectiveLimit)
-          logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
-          searchResults
-        } else {
-          // No filters, but still push down the limit
-          logger.info(s"No query filters, executing searchAll with pushed limit: $effectiveLimit")
-          val allResults = splitSearchEngine.searchAll(limit = effectiveLimit)
-          logger.info(s"SearchAll returned ${allResults.length} results (pushed limit: $effectiveLimit)")
-          allResults
-        }
+        // Push down SplitQuery and limit to split searcher
+        logger.info(s"Executing search with SplitQuery object and limit: $effectiveLimit")
+        val searchResults = splitSearchEngine.search(splitQuery, limit = effectiveLimit)
+        logger.info(s"Search returned ${searchResults.length} results (pushed limit: $effectiveLimit)")
+        val results = searchResults
         
         resultIterator = results.iterator
         initialized = true
-        logger.info(s"Pushdown complete for ${addAction.path}: query='$query', limit=$effectiveLimit, results=${results.length}")
+        logger.info(s"Pushdown complete for ${addAction.path}: splitQuery='$splitQuery', limit=$effectiveLimit, results=${results.length}")
         
       } catch {
         case ex: Exception =>

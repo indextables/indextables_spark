@@ -86,17 +86,6 @@ class TantivySearchEngine private (
 object TantivySearchEngine {
   private val logger = LoggerFactory.getLogger(TantivySearchEngine.getClass)
   
-  /**
-   * Creates a TantivySearchEngine from a split file.
-   * This replaces the previous ZIP-based component system.
-   */
-  def fromSplitFile(schema: StructType, splitPath: String): SplitSearchEngine = {
-    logger.info(s"Creating SplitSearchEngine from split file: $splitPath")
-    
-    // Try to extract configuration from active Spark session
-    val cacheConfig = extractCacheConfigFromSparkSession()
-    SplitSearchEngine.fromSplitFile(schema, splitPath, cacheConfig)
-  }
   
   /**
    * Extract SplitCacheConfig from active Spark session when available.
@@ -158,14 +147,6 @@ object TantivySearchEngine {
     }
   }
   
-  /**
-   * Creates a TantivySearchEngine from a split file with custom cache configuration.
-   */
-  def fromSplitFileWithCache(schema: StructType, splitPath: String, cacheConfig: com.tantivy4spark.storage.SplitCacheConfig): SplitSearchEngine = {
-    logger.info(s"Creating SplitSearchEngine from split file with cache: $splitPath")
-    
-    SplitSearchEngine.fromSplitFile(schema, splitPath, cacheConfig)
-  }
   
   /**
    * Creates a TantivySearchEngine from a direct interface (for write operations).

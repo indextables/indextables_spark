@@ -37,13 +37,15 @@ class Tantivy4SparkWriteBuilder(
   private var isOverwrite = false
 
   override def truncate(): WriteBuilder = {
-    logger.info("Truncate mode enabled for write operation")
+    println("🔍 DEBUG: Truncate mode enabled for write operation")
+    logger.warn("🔍 DEBUG: Truncate mode enabled for write operation")
     isOverwrite = true
     this
   }
 
   override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): WriteBuilder = {
-    logger.info(s"Overwrite mode enabled with ${filters.length} filters")
+    println(s"🔍 DEBUG: Overwrite mode enabled with ${filters.length} filters")
+    logger.warn(s"🔍 DEBUG: Overwrite mode enabled with ${filters.length} filters")
     isOverwrite = true
     // For now, ignore filters and do full table overwrite
     // TODO: Implement filter-based overwrite (replaceWhere functionality)

@@ -74,9 +74,9 @@ MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
 // Merge splits to reduce small file overhead
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600")
 
-// Target sizes support standard units
-spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100MB")
-spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1GB")
+// Target sizes support unit suffixes (M for megabytes, G for gigabytes)
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
 ```
 
 ## Schema Support

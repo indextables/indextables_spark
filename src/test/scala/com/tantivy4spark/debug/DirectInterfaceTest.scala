@@ -48,11 +48,11 @@ class DirectInterfaceTest extends TestBase {
       searchEngine.addDocument(row)
       
       // Commit and create split
-      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
+      val (splitPath, metadata) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
-      // Read from split instead of index with unique cache configuration
+      // Read from split instead of index with unique cache configuration - use metadata to avoid tantivy4java bug
       val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-minimal-${uniqueId}")
-      val splitReader = SplitSearchEngine.fromSplitFile(schema, splitPath, uniqueCacheConfig)
+      val splitReader = SplitSearchEngine.fromSplitFileWithMetadata(schema, splitPath, metadata, uniqueCacheConfig)
       
       try {
         val results = splitReader.searchAll(10)
@@ -98,11 +98,11 @@ class DirectInterfaceTest extends TestBase {
       rows.foreach(searchEngine.addDocument)
       
       // Commit and create split
-      val (splitPath, _) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
+      val (splitPath, metadata) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
       
-      // Read from split instead of index with unique cache configuration
+      // Read from split instead of index with unique cache configuration - use metadata to avoid tantivy4java bug
       val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-multi-${uniqueId}")
-      val splitReader = SplitSearchEngine.fromSplitFile(schema, splitPath, uniqueCacheConfig)
+      val splitReader = SplitSearchEngine.fromSplitFileWithMetadata(schema, splitPath, metadata, uniqueCacheConfig)
       
       try {
         val results = splitReader.searchAll(10)

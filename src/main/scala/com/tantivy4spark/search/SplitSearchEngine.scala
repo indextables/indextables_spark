@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java.{SplitSearcher, SplitCacheManager, Query, SplitQuery, SplitMatchAllQuery, SplitTermQuery, SplitBooleanQuery, SearchResult, Schema}
+import com.tantivy4java.{SplitSearcher, SplitCacheManager, SplitQuery, SplitMatchAllQuery, SplitTermQuery, SplitBooleanQuery, SearchResult, Schema}
 import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import com.tantivy4spark.schema.SchemaMapping
 import org.apache.spark.sql.catalyst.InternalRow
@@ -30,10 +30,13 @@ import scala.util.{Try}
  * 
  * This replaces the previous TantivySearchEngine which used zip-based archives.
  * The new implementation uses .split files with optimized caching and native storage access.
+ * 
+ * Private constructor - use SplitSearchEngine.fromSplitFileWithMetadata() instead.
  */
-class SplitSearchEngine(
+class SplitSearchEngine private(
   sparkSchema: StructType,
   splitPath: String,
+  metadata: com.tantivy4java.QuickwitSplit.SplitMetadata,
   cacheConfig: SplitCacheConfig = SplitCacheConfig()
 ) extends AutoCloseable {
   
@@ -52,22 +55,17 @@ class SplitSearchEngine(
   
   // Create the split searcher using the shared cache
   logger.info(s"🔧 Creating SplitSearchEngine for path: $splitPath")
+  
+  if (metadata == null) {
+    throw new RuntimeException(s"Split metadata is required for $splitPath. Use SplitSearchEngine.fromSplitFileWithMetadata()")
+  }
+  
+  if (!metadata.hasFooterOffsets()) {
+    throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. The split file may have been created with an older version of tantivy4java that didn't generate footer offset metadata. Please recreate the split file with the current version.")
+  }
+  
   protected lazy val splitSearcher = try {
-    // Read metadata first - required for tantivy4java split reading
-    val metadata = {
-      import com.tantivy4spark.storage.SplitManager
-      SplitManager.readSplitMetadata(splitPath).getOrElse {
-        throw new RuntimeException(s"Could not read required split metadata for $splitPath. Split metadata is now required for tantivy4java operations.")
-      }
-    }
-    
     logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-    
-    // Check if metadata has the required footer offsets
-    if (!metadata.hasFooterOffsets()) {
-      throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. The split file may have been created with an older version of tantivy4java that didn't generate footer offset metadata. Please recreate the split file with the current version.")
-    }
-    
     cacheManager.createSplitSearcher(splitPath, metadata)
   } catch {
     case ex: RuntimeException if ex.getMessage.contains("region must be set") =>
@@ -124,33 +122,6 @@ class SplitSearchEngine(
     }
   }
 
-  /**
-   * Search the split using a legacy Query object and return results as Spark InternalRows.
-   * This method converts the Query to a SplitQuery for compatibility.
-   */
-  def search(query: Query, limit: Int): Array[InternalRow] = {
-    try {
-      logger.debug(s"Converting legacy Query to SplitQuery: ${query.getClass.getSimpleName}, limit: $limit")
-      
-      // Simple conversion based on query type - can be enhanced later
-      val splitQuery: SplitQuery = query match {
-        case q if q.getClass.getSimpleName == "AllQuery" =>
-          new SplitMatchAllQuery()
-        case _ =>
-          // For complex queries, parse from string representation
-          logger.debug("Converting Query to string and parsing as SplitQuery")
-          splitSearcher.parseQuery(query.toString())
-      }
-      
-      // Use the SplitQuery version
-      search(splitQuery, limit)
-      
-    } catch {
-      case e: Exception =>
-        logger.error(s"Search failed for legacy Query object: ${query.getClass.getSimpleName}", e)
-        throw e
-    }
-  }
   
   
   /**
@@ -344,51 +315,7 @@ class SplitSearchEngine(
 object SplitSearchEngine {
   private val logger = LoggerFactory.getLogger(getClass)
   
-  /**
-   * Create a SplitSearchEngine from a split file path.
-   */
-  def fromSplitFile(
-    sparkSchema: StructType,
-    splitPath: String,
-    cacheConfig: SplitCacheConfig = SplitCacheConfig()
-  ): SplitSearchEngine = {
-    
-    logger.info(s"Creating SplitSearchEngine from split file: $splitPath")
-    new SplitSearchEngine(sparkSchema, splitPath, cacheConfig)
-  }
   
-  /**
-   * Create a SplitSearchEngine with a specific cache manager.
-   */
-  def fromSplitFileWithCache(
-    sparkSchema: StructType,
-    splitPath: String,
-    cacheManager: SplitCacheManager
-  ): SplitSearchEngine = {
-    
-    logger.info(s"Creating SplitSearchEngine with provided cache manager: $splitPath")
-    
-    // Create a custom engine that uses the provided cache manager
-    new SplitSearchEngine(sparkSchema, splitPath) {
-      override lazy val splitSearcher = {
-        // Read metadata first - required for tantivy4java split reading
-        val metadata = {
-          import com.tantivy4spark.storage.SplitManager
-          SplitManager.readSplitMetadata(splitPath).getOrElse {
-            throw new RuntimeException(s"Could not read required split metadata for $splitPath. All 'add' entries in the transaction log must contain metadata.")
-          }
-        }
-        
-        // Check if metadata has the required footer offsets
-        if (!metadata.hasFooterOffsets()) {
-          throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
-        }
-        
-        logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
-        cacheManager.createSplitSearcher(splitPath, metadata)
-      }
-    }
-  }
 
   /**
    * Create a SplitSearchEngine with footer offset optimization (87% network traffic reduction).
@@ -408,23 +335,6 @@ object SplitSearchEngine {
       logger.info(s"📁 STANDARD LOADING: Creating SplitSearchEngine without optimization metadata: $splitPath")
     }
     
-    // Create a custom engine that uses optimized loading when metadata is available
-    new SplitSearchEngine(sparkSchema, splitPath, cacheConfig) {
-      override protected lazy val splitSearcher = {
-        // Get the global cache manager and use optimized createSplitSearcher with metadata
-        val globalCacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
-        
-        if (metadata == null) {
-          throw new RuntimeException(s"Split metadata is required for $splitPath. All 'add' entries in the transaction log must contain metadata.")
-        }
-        
-        if (!metadata.hasFooterOffsets()) {
-          throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
-        }
-        
-        // Use optimized loading with footer offsets (87% less network traffic)
-        globalCacheManager.createSplitSearcher(splitPath, metadata)
-      }
-    }
+    new SplitSearchEngine(sparkSchema, splitPath, metadata, cacheConfig)
   }
 }

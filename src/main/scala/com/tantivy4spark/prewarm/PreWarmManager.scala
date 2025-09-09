@@ -25,7 +25,7 @@ import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, BroadcastSplitLocalityManager}
 import com.tantivy4spark.search.SplitSearchEngine
 import com.tantivy4spark.core.FiltersToQueryConverter
-import com.tantivy4java.Query
+import com.tantivy4java.{Query, SplitQuery, SplitMatchAllQuery}
 import org.slf4j.LoggerFactory
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.collection.concurrent.TrieMap
@@ -223,13 +223,17 @@ object PreWarmManager {
       // Create split search engine (this will populate the cache)
       val splitSearchEngine = createSplitSearchEngine(task.addAction, task.readSchema, cacheConfig)
       
-      // Convert filters to query
-      val query = convertFiltersToQuery(task.allFilters, splitSearchEngine)
-      
-      // Initiate async warmup using tantivy4java native API
+      // Initiate async warmup using tantivy4java component preloading
+      // This is more efficient than query-based warmup and doesn't require any query objects
       val splitSearcher = splitSearchEngine.getSplitSearcher()
-      logger.info(s"🔥 Using native tantivy4java warmupQuery API for split: ${task.addAction.path}")
-      val warmupFuture = splitSearcher.warmupQuery(query)
+      logger.info(s"🔥 Using component preloading for split warmup: ${task.addAction.path}")
+      import com.tantivy4java.SplitSearcher
+      val warmupFuture = splitSearcher.preloadComponents(
+        SplitSearcher.IndexComponent.POSTINGS,
+        SplitSearcher.IndexComponent.POSITIONS,
+        SplitSearcher.IndexComponent.FASTFIELD,
+        SplitSearcher.IndexComponent.FIELDNORM
+      )
       
       // Store the future for later joining during query execution
       val futureKey = buildFutureKey(task.addAction.path, actualHostname, task.queryHash)
@@ -329,23 +333,35 @@ object PreWarmManager {
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }
   
+  
   /**
-   * Convert filters to a tantivy4java Query object.
+   * Safely extract schema field names from SplitSearchEngine using Schema cloning.
+   * This prevents Arc reference counting issues by creating an independent Schema copy.
    */
-  private def convertFiltersToQuery(allFilters: Array[Any], splitSearchEngine: SplitSearchEngine): Query = {
-    if (allFilters.isEmpty) {
-      Query.allQuery()
-    } else {
-      // Get schema field names for validation
-      val splitSchema = splitSearchEngine.getSchema()
-      val splitFieldNames = try {
-        import scala.jdk.CollectionConverters._
-        Some(splitSchema.getFieldNames().asScala.toSet)
-      } catch {
-        case _: Exception => None
-      }
+  private def extractSchemaFieldNames(splitSearchEngine: SplitSearchEngine): Option[Set[String]] = {
+    try {
+      val originalSchema = splitSearchEngine.getSchema()
+      // Create an independent copy of the schema to avoid Arc reference counting issues
+      val schemaCopy = originalSchema.copy()
       
-      FiltersToQueryConverter.convertToQuery(allFilters, splitSearchEngine, splitFieldNames)
+      try {
+        import scala.jdk.CollectionConverters._
+        val fieldNames = schemaCopy.getFieldNames().asScala.toSet
+        Some(fieldNames)
+      } finally {
+        // Close our independent schema copy
+        schemaCopy.close()
+      }
+    } catch {
+      case _: IllegalStateException =>
+        logger.warn("Schema has been closed during field name extraction, using None for splitFieldNames")
+        None
+      case e: RuntimeException if e.getMessage == "Invalid Schema pointer" =>
+        logger.warn("Invalid Schema pointer detected during field name extraction, using None for splitFieldNames")
+        None
+      case e: Exception =>
+        logger.warn(s"Error extracting schema field names: ${e.getMessage}, using None for splitFieldNames")
+        None
     }
   }
   

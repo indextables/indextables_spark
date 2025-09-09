@@ -267,7 +267,12 @@ class Tantivy4SparkOptimizedWrite(
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    logger.info(s"Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.warn(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
+    serializedOptions.foreach { case (k, v) => 
+      println(s"🔍 DEBUG: serializedOption $k = $v")
+    }
     
     val addActions = messages.collect {
       case msg: Tantivy4SparkCommitMessage => msg.addAction
@@ -275,25 +280,42 @@ class Tantivy4SparkOptimizedWrite(
 
     // Determine if this should be an overwrite based on existing table state and mode
     val shouldOverwrite = if (isOverwrite) {
-      // Explicit overwrite flag from truncate() call
+      // Explicit overwrite flag from truncate() or overwrite() call
+      println("🔍 DEBUG: Using explicit overwrite flag (isOverwrite = true)")
+      logger.warn("🔍 DEBUG: Using explicit overwrite flag (isOverwrite = true)")
       true
     } else {
-      // Check if this is the first write to the table and we have SaveMode.Overwrite semantics
-      // For DataSource V2, SaveMode.Overwrite might not trigger truncate() but we should still
-      // check if we need to overwrite existing data
-      try {
-        val existingFiles = transactionLog.listFiles()
-        if (existingFiles.nonEmpty) {
-          logger.info(s"Table has ${existingFiles.length} existing files, checking if overwrite is needed")
-          // If the table exists with files and this is a write operation, we need to determine
-          // if this should overwrite. For now, we'll assume it's append unless explicitly truncated.
-          false
-        } else {
+      println("🔍 DEBUG: isOverwrite = false, checking other conditions")
+      logger.warn("🔍 DEBUG: isOverwrite = false, checking other conditions")
+      // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
+      // Instead, we need to detect overwrite by checking the logical write info or options
+      val saveMode = serializedOptions.get("saveMode") match {
+        case Some("Overwrite") => true
+        case Some("ErrorIfExists") => false
+        case Some("Ignore") => false  
+        case Some("Append") => false
+        case None => {
+          // Check if this looks like an initial write (no existing files) - treat as overwrite
+          try {
+            val existingFiles = transactionLog.listFiles()
+            if (existingFiles.isEmpty) {
+              logger.info("No existing files found - treating as initial write (overwrite semantics)")
+              false // Initial write doesn't need overwrite semantics, just add files
+            } else {
+              logger.info(s"Found ${existingFiles.length} existing files - need to determine write mode")
+              // Without explicit mode info, default to append to be safe
+              false
+            }
+          } catch {
+            case _: Exception => false // If we can't read transaction log, assume append
+          }
+        }
+        case Some(other) => {
+          logger.warn(s"Unknown saveMode: $other, defaulting to append")
           false
         }
-      } catch {
-        case _: Exception => false // If we can't read transaction log, assume append
       }
+      saveMode
     }
     
     // Initialize transaction log with schema if this is the first commit  
@@ -301,10 +323,12 @@ class Tantivy4SparkOptimizedWrite(
 
     // Use appropriate transaction log method based on write mode
     val version = if (shouldOverwrite) {
-      logger.info(s"Performing overwrite operation with ${addActions.length} new files")
+      println(s"🔍 DEBUG: Performing overwrite operation with ${addActions.length} new files")
+      logger.warn(s"🔍 DEBUG: Performing overwrite operation with ${addActions.length} new files")
       transactionLog.overwriteFiles(addActions)
     } else {
-      logger.info(s"Performing append operation with ${addActions.length} files")
+      println(s"🔍 DEBUG: Performing append operation with ${addActions.length} files")
+      logger.warn(s"🔍 DEBUG: Performing append operation with ${addActions.length} files")
       transactionLog.addFiles(addActions)
     }
     

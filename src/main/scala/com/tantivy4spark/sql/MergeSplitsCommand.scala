@@ -859,9 +859,19 @@ class MergeSplitsExecutor(
     
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
-        // For S3 paths, construct the URL directly
-        val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
-        s"$baseUri/${file.path}"
+        // For S3 paths, handle cases where file.path might already be a full S3 URL
+        if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
+          // file.path is already a full S3 URL, just normalize the scheme
+          val normalized = file.path.replaceFirst("^s3a://", "s3://")
+          logger.warn(s"🔄 [EXECUTOR] Normalized full S3 path: ${file.path} -> $normalized")
+          normalized
+        } else {
+          // file.path is relative, construct full URL with normalized scheme
+          val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+          val fullPath = s"$normalizedBaseUri/${file.path}"
+          logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
+          fullPath
+        }
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
@@ -870,9 +880,11 @@ class MergeSplitsExecutor(
     }.asJava
     
     val outputSplitPath = if (isS3Path) {
-      // For S3 paths, construct the URL directly
-      val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
-      s"$baseUri/$mergedPath"
+      // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
+      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
+      outputPath
     } else {
       // For local/HDFS paths, use Path concatenation
       new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toString
@@ -967,8 +979,8 @@ class MergeSplitsExecutor(
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
         // For S3 paths, construct the URL directly
-        val baseUri = tablePath.toString.replaceAll("/$", "") // Remove trailing slash if present
-        s"$baseUri/${file.path}"
+        val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+        s"$normalizedBaseUri/${file.path}"
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new Path(tablePath, file.path)
@@ -1263,9 +1275,19 @@ object MergeSplitsExecutor {
     
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
-        // For S3 paths, construct the URL directly
-        val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
-        s"$baseUri/${file.path}"
+        // For S3 paths, handle cases where file.path might already be a full S3 URL
+        if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
+          // file.path is already a full S3 URL, just normalize the scheme
+          val normalized = file.path.replaceFirst("^s3a://", "s3://")
+          logger.warn(s"🔄 [EXECUTOR] Normalized full S3 path: ${file.path} -> $normalized")
+          normalized
+        } else {
+          // file.path is relative, construct full URL with normalized scheme
+          val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+          val fullPath = s"$normalizedBaseUri/${file.path}"
+          logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
+          fullPath
+        }
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
@@ -1274,9 +1296,11 @@ object MergeSplitsExecutor {
     }.asJava
     
     val outputSplitPath = if (isS3Path) {
-      // For S3 paths, construct the URL directly
-      val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
-      s"$baseUri/$mergedPath"
+      // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
+      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
+      outputPath
     } else {
       // For local/HDFS paths, use Path concatenation
       new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toString
@@ -1296,13 +1320,13 @@ object MergeSplitsExecutor {
     )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
-    println(s"⚙️  [EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    println(s"📁 [EXECUTOR] Input paths:")
+    logger.warn(s"⚙️  [EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
+    logger.warn(s"📁 [EXECUTOR] Input paths:")
     inputSplitPaths.asScala.zipWithIndex.foreach { case (path, idx) =>
-      println(s"📁 [EXECUTOR]   [$idx]: $path")
+      logger.warn(s"📁 [EXECUTOR]   [$idx]: $path")
     }
-    println(s"📁 [EXECUTOR] Output path: $outputSplitPath")
-    println(s"📁 [EXECUTOR] Relative path for transaction log: $mergedPath")
+    logger.warn(s"📁 [EXECUTOR] Output path: $outputSplitPath")
+    logger.warn(s"📁 [EXECUTOR] Relative path for transaction log: $mergedPath")
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
     
     val metadata = try {

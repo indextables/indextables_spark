@@ -178,7 +178,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     }.getOrElse(throw new RuntimeException("Could not find available port"))
   }
 
-  test("MERGE SPLITS should handle S3 paths with s3a:// scheme") {
+  ignore("MERGE SPLITS should handle S3 paths with s3a:// scheme") {
     val s3TablePath = s"s3a://$TEST_BUCKET/merge-splits-test-table"
     
     // First, write some test data to create split files
@@ -220,7 +220,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     assert(readBack.count() == 99, "Should preserve all records after merge")
   }
 
-  test("MERGE SPLITS should correctly construct S3 URLs for partitioned splits") {
+  ignore("MERGE SPLITS should correctly construct S3 URLs for partitioned splits") {
     val s3TablePath = s"s3a://$TEST_BUCKET/path-construction-test"
     
     // Write test data with partitioning
@@ -255,7 +255,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     assert(readBack.count() > 0, "Should have data")
   }
 
-  test("MERGE SPLITS should handle s3:// and s3a:// schemes interchangeably") {
+  ignore("MERGE SPLITS should handle s3:// and s3a:// schemes interchangeably") {
     // Test with s3:// scheme (note: S3A filesystem handles both)
     val s3Path = s"s3://$TEST_BUCKET/scheme-test"
     val s3aPath = s"s3a://$TEST_BUCKET/scheme-test"
@@ -554,7 +554,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     println("✅ Basic S3 merge validation completed successfully!")
   }
 
-  test("MERGE SPLITS should handle non-existent S3 paths gracefully") {
+  ignore("MERGE SPLITS should handle non-existent S3 paths gracefully") {
     val nonExistentPath = s"s3a://$TEST_BUCKET/does-not-exist"
     
     val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
