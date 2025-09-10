@@ -278,6 +278,11 @@ class Tantivy4SparkPartitionReader(
           case None => 0L
         }
         
+        logger.warn(s"🔍 RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined) s"PRESENT (${addAction.docMappingJson.get.length} chars)" else "MISSING/NULL"}")
+        if (addAction.docMappingJson.isDefined) {
+          logger.warn(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get.take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
+        }
+        
         val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
           addAction.path.split("/").last.replace(".split", ""), // splitId from filename
           toLongSafeOption(addAction.numRecords), // numDocs
@@ -578,7 +583,35 @@ class Tantivy4SparkDataWriter(
           import scala.jdk.CollectionConverters._
           tagSet.asScala.toSet
         }
-        val docMapping = Option(splitMetadata.getDocMappingJson())
+        val originalDocMapping = Option(splitMetadata.getDocMappingJson())
+        logger.warn(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined) s"PRESENT (${originalDocMapping.get.length} chars)" else "MISSING/NULL"}")
+        
+        val docMapping = if (originalDocMapping.isDefined) {
+          logger.warn(s"🔍 docMappingJson content preview: ${originalDocMapping.get.take(200)}${if (originalDocMapping.get.length > 200) "..." else ""}")
+          originalDocMapping
+        } else {
+          // WORKAROUND: If tantivy4java didn't provide docMappingJson, create a minimal schema mapping
+          logger.warn(s"🔧 WORKAROUND: tantivy4java docMappingJson is missing - creating minimal field mapping")
+          
+          // Create a minimal field mapping that tantivy4java can understand
+          // Based on Quickwit/Tantivy schema format expectations
+          val fieldMappings = writeSchema.fields.map { field =>
+            val fieldType = field.dataType.typeName match {
+              case "string" => "text"
+              case "integer" | "long" => "i64"  
+              case "float" | "double" => "f64"
+              case "boolean" => "bool"
+              case "date" | "timestamp" => "datetime"
+              case _ => "text" // Default fallback
+            }
+            s""""${field.name}": {"type": "$fieldType", "indexed": true}"""
+          }.mkString(", ")
+          
+          val minimalSchema = s"""{"fields": {$fieldMappings}}"""
+          logger.warn(s"🔧 Using minimal field mapping as docMappingJson: ${minimalSchema.take(200)}${if (minimalSchema.length > 200) "..." else ""}")
+          
+          Some(minimalSchema)
+        }
         
         if (splitMetadata.hasFooterOffsets()) {
           (Some(splitMetadata.getFooterStartOffset()),

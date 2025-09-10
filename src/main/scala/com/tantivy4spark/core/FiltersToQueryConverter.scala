@@ -915,7 +915,19 @@ object FiltersToQueryConverter {
       
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher
-        Some(splitSearchEngine.parseQuery(s"$columnName:($queryString)"))
+        // Pass through the user's query exactly as provided - no modifications
+        queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'")
+        queryLog(s"SplitQuery passthrough syntax: '$queryString'")
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
+            // Return None to fall back to legacy Query API
+            None
+        }
       
       case IndexQueryAllFilter(queryString) =>
         // Parse the custom IndexQueryAll using the split searcher
