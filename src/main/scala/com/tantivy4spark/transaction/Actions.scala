@@ -24,7 +24,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
 import scala.util.Try
 
-sealed trait Action
+sealed trait Action extends Serializable
 
 // Custom deserializer to handle Integer -> Long conversion for numRecords
 class NumRecordsDeserializer extends JsonDeserializer[Option[Long]] {

@@ -489,7 +489,7 @@ class MergeSplitsExecutor(
           }
           val docMapping = Option(mergedMetadata.getDocMappingJson())
           
-          if (mergedMetadata.hasFooterOffsets()) {
+          if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
              Some(mergedMetadata.getHotcacheStartOffset()),
@@ -741,7 +741,7 @@ class MergeSplitsExecutor(
           }
           val docMapping = Option(mergedMetadata.getDocMappingJson())
           
-          if (mergedMetadata.hasFooterOffsets()) {
+          if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
              Some(mergedMetadata.getHotcacheStartOffset()),
@@ -910,7 +910,7 @@ class MergeSplitsExecutor(
     logger.info(s"[EXECUTOR] Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
     logger.debug(s"[EXECUTOR] Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata))
   }
   
   /**
@@ -1051,7 +1051,7 @@ class MergeSplitsExecutor(
         logger.warn(s"[DRIVER] File existence check failed", ex)
     }
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata))
   }
 
   /**
@@ -1361,7 +1361,7 @@ object MergeSplitsExecutor {
         logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
     
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, metadata)
+    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata))
   }
 }
 
@@ -1371,7 +1371,7 @@ object MergeSplitsExecutor {
 case class MergeGroup(
     partitionValues: Map[String, String],
     files: Seq[AddAction]
-)
+) extends Serializable
 
 /**
  * Result of merging a group of splits.
@@ -1383,7 +1383,7 @@ case class MergeResult(
     originalSize: Long,
     mergedSize: Long,
     executionTimeMs: Long
-) {
+) extends Serializable {
   // Provide backward compatibility
   def mergedPath: String = mergedSplitInfo.path
 }
@@ -1391,7 +1391,74 @@ case class MergeResult(
 /**
  * Information about a newly created merged split.
  */
-case class MergedSplitInfo(path: String, size: Long, metadata: com.tantivy4java.QuickwitSplit.SplitMetadata)
+/**
+ * Serializable wrapper for QuickwitSplit.SplitMetadata
+ */
+case class SerializableSplitMetadata(
+  footerStartOffset: Long,
+  footerEndOffset: Long, 
+  hotcacheStartOffset: Long,
+  hotcacheLength: Long,
+  hasFooterOffsets: Boolean,
+  timeRangeStart: Option[String], 
+  timeRangeEnd: Option[String],
+  tags: Option[Map[String, String]],
+  deleteOpstamp: Option[Long],
+  numMergeOps: Option[Int],
+  docMappingJson: Option[String],
+  uncompressedSizeBytes: Long
+) extends Serializable {
+  
+  def getFooterStartOffset(): Long = footerStartOffset
+  def getFooterEndOffset(): Long = footerEndOffset
+  def getHotcacheStartOffset(): Long = hotcacheStartOffset
+  def getHotcacheLength(): Long = hotcacheLength
+  def getTimeRangeStart(): String = timeRangeStart.orNull
+  def getTimeRangeEnd(): String = timeRangeEnd.orNull
+  def getTags(): java.util.Set[String] = {
+    tags.map { tagMap =>
+      import scala.jdk.CollectionConverters._
+      tagMap.keySet.asJava
+    }.getOrElse(java.util.Collections.emptySet())
+  }
+  def getDeleteOpstamp(): Long = deleteOpstamp.getOrElse(0L)
+  def getNumMergeOps(): Int = numMergeOps.getOrElse(0)
+  def getDocMappingJson(): String = docMappingJson.orNull
+  def getUncompressedSizeBytes(): Long = uncompressedSizeBytes
+  
+  def toQuickwitSplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+    new com.tantivy4java.QuickwitSplit.SplitMetadata(footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength)
+  }
+}
+
+object SerializableSplitMetadata {
+  def fromQuickwitSplitMetadata(metadata: com.tantivy4java.QuickwitSplit.SplitMetadata): SerializableSplitMetadata = {
+    val timeStart = Option(metadata.getTimeRangeStart()).map(_.toString)
+    val timeEnd = Option(metadata.getTimeRangeEnd()).map(_.toString)
+    val tags = Option(metadata.getTags()).filter(!_.isEmpty).map { tagSet =>
+      import scala.jdk.CollectionConverters._
+      tagSet.asScala.map(_ -> "").toMap // Convert Set to Map with empty values
+    }
+    val docMapping = Option(metadata.getDocMappingJson())
+    
+    SerializableSplitMetadata(
+      metadata.getFooterStartOffset(),
+      metadata.getFooterEndOffset(), 
+      metadata.getHotcacheStartOffset(),
+      metadata.getHotcacheLength(),
+      metadata.hasFooterOffsets(),
+      timeStart,
+      timeEnd,
+      tags,
+      Some(metadata.getDeleteOpstamp()),
+      Some(metadata.getNumMergeOps().toInt),
+      docMapping,
+      metadata.getUncompressedSizeBytes()
+    )
+  }
+}
+
+case class MergedSplitInfo(path: String, size: Long, metadata: SerializableSplitMetadata) extends Serializable
 
 /**
  * Placeholder for unresolved table path or identifier.
