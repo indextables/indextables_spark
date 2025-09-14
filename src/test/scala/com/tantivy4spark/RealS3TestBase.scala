@@ -37,6 +37,18 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
 
   protected var spark: SparkSession = _
 
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+    // Clear global split cache before each test to avoid schema pollution
+    try {
+      import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+      GlobalSplitCacheManager.flushAllCaches()
+      SplitLocationRegistry.clearAllLocations()
+    } catch {
+      case _: Exception => // Ignore if cache clearing fails
+    }
+  }
+
   override def beforeAll(): Unit = {
     super.beforeAll()
     

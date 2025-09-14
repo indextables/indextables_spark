@@ -72,9 +72,14 @@ class V2IndexQueryPushdownTest extends AnyFunSuite with TestBase with BeforeAndA
     val columnRef = col("review_text").expr
     val queryLiteral = Literal(UTF8String.fromString("engine"), StringType)
     val indexQueryExpr = IndexQueryExpression(columnRef, queryLiteral)
-    val filtered = tantivyDF.filter(new Column(indexQueryExpr))
-    
     println(s"IndexQueryExpression: $indexQueryExpr")
+    println(s"Before filter - logical plan:")
+    println(tantivyDF.queryExecution.logical.toString)
+
+    val filtered = tantivyDF.filter(new Column(indexQueryExpr))
+
+    println(s"After filter - logical plan:")
+    println(filtered.queryExecution.logical.toString)
     println("Results with V2 programmatic IndexQueryExpression:")
     val resultCount = filtered.collect().length
     filtered.show(truncate = false)

@@ -90,12 +90,22 @@ object Tantivy4SparkRelation {
   ) extends Serializable {
     
     // Convert to tantivy4java SplitMetadata for use with split readers
-    def toTantivySplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+    def toTantivySplitMetadata(splitPath: String): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+      import scala.jdk.CollectionConverters._
       new com.tantivy4java.QuickwitSplit.SplitMetadata(
+        splitPath.split("/").last.replace(".split", ""), // splitId from filename
+        numDocs, // numDocs
+        uncompressedSize, // uncompressedSizeBytes
+        timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
+        timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+        splitTags.getOrElse(Set.empty[String]).asJava, // tags
+        deleteOpstamp.getOrElse(0L), // deleteOpstamp
+        numMergeOps.getOrElse(0), // numMergeOps
         footerStartOffset, // footerStartOffset
         footerEndOffset, // footerEndOffset  
         hotcacheStartOffset, // hotcacheStartOffset
-        hotcacheLength // hotcacheLength
+        hotcacheLength, // hotcacheLength
+        docMappingJson.orNull // docMappingJson - critical for SplitSearcher
       )
     }
   }
@@ -225,7 +235,7 @@ object Tantivy4SparkRelation {
       
       // Use SplitSearchEngine to read from split with proper cache configuration and footer offset optimization
       executorLogger.info(s"🚀 Using footer offset optimization for $normalizedPath")
-      val tantivyMetadata = splitMetadata.get.toTantivySplitMetadata()
+      val tantivyMetadata = splitMetadata.get.toTantivySplitMetadata(normalizedPath)
       val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
         serializableSchema, 
         normalizedPath,
@@ -1122,11 +1132,12 @@ class Tantivy4SparkTable(
     val hadoopTantivyConfigs = hadoopConf.iterator().asScala
       .filter(_.getKey.startsWith("spark.tantivy4spark."))
       .map(entry => entry.getKey -> entry.getValue)
+      .filter(_._2 != null)  // Filter out null values
       .toMap
     
     // Extract configurations from Spark session config (middle precedence)
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
     } catch {
       case _: Exception => Map.empty[String, String]
     }
@@ -1135,6 +1146,7 @@ class Tantivy4SparkTable(
     println(s"🔧 V2 Read: ALL options received: ${options.asScala.keys.mkString(", ")}")
     val readTantivyConfigs = options.asScala
       .filter(_._1.startsWith("spark.tantivy4spark."))
+      .filter(_._2 != null)  // Filter out null values
       .toMap
     
     // Debug: Log all configurations being merged with values
@@ -1287,16 +1299,18 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val hadoopTantivyConfigs = hadoopConf.iterator().asScala
       .filter(_.getKey.startsWith("spark.tantivy4spark."))
       .map(entry => entry.getKey -> entry.getValue)
+      .filter(_._2 != null)  // Filter out null values
       .toMap
     
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
     } catch {
       case _: Exception => Map.empty[String, String]
     }
     
     val readTantivyConfigs = options.asScala
       .filter(_._1.startsWith("spark.tantivy4spark."))
+      .filter(_._2 != null)  // Filter out null values
       .toMap
     
     // Merge with proper precedence: Hadoop < Spark config < read options
@@ -1336,10 +1350,11 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val hadoopTantivyConfigs = hadoopConf.iterator().asScala
       .filter(_.getKey.startsWith("spark.tantivy4spark."))
       .map(entry => entry.getKey -> entry.getValue)
+      .filter(_._2 != null)  // Filter out null values
       .toMap
     
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
     } catch {
       case _: Exception => Map.empty[String, String]
     }

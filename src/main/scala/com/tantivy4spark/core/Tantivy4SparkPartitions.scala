@@ -137,14 +137,16 @@ class Tantivy4SparkPartitionReader(
     // Debug: Log broadcast configuration received in executor
     logger.error(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
     broadcasted.foreach { case (k, v) =>
-      logger.error(s"🔍 Broadcast config: $k -> $v")
+      val safeValue = Option(v).getOrElse("null")
+      logger.error(s"🔍 Broadcast config: $k -> $safeValue")
     }
     
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
       val value = broadcasted.getOrElse(configKey, default)
-      logger.error(s"🔍 PartitionReader broadcast config for $configKey: ${value}")
-      value
+      val safeValue = Option(value).getOrElse(default)
+      logger.error(s"🔍 PartitionReader broadcast config for $configKey: ${Option(safeValue).getOrElse("null")}")
+      safeValue
     }
     
     def getBroadcastConfigOption(configKey: String): Option[String] = {
@@ -161,7 +163,8 @@ class Tantivy4SparkPartitionReader(
           configName.trim()
         } else {
           // Use table path as cache name for table-specific caching
-          s"tantivy4spark-${tablePath.toString.replaceAll("[^a-zA-Z0-9]", "_")}"
+          val safeTablePath = Option(tablePath).map(_.toString).getOrElse("unknown")
+          s"tantivy4spark-${safeTablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
         }
       },
       maxCacheSize = {
@@ -355,18 +358,40 @@ class Tantivy4SparkPartitionReader(
       } catch {
         case ex: Exception =>
           logger.error(s"Failed to initialize reader for ${addAction.path}", ex)
+          // Set safe default for resultIterator to prevent NPE in next() calls
+          resultIterator = Iterator.empty
+          initialized = true
+          // Still throw the exception to signal the failure
           throw new IOException(s"Failed to read Tantivy index: ${ex.getMessage}", ex)
       }
     }
   }
 
   override def next(): Boolean = {
-    initialize()
-    resultIterator.hasNext
+    try {
+      initialize()
+      if (resultIterator != null) {
+        resultIterator.hasNext
+      } else {
+        false
+      }
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Error in next() for ${addAction.path}", ex)
+        // Ensure resultIterator is set to avoid repeated failures
+        if (resultIterator == null) {
+          resultIterator = Iterator.empty
+        }
+        false
+    }
   }
 
   override def get(): InternalRow = {
-    resultIterator.next()
+    if (resultIterator != null) {
+      resultIterator.next()
+    } else {
+      throw new IllegalStateException(s"No data available for ${addAction.path}")
+    }
   }
 
   override def close(): Unit = {

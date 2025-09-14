@@ -38,8 +38,12 @@ case class IndexQueryExpression(
 ) extends BinaryExpression with Predicate {
 
   override def dataType: DataType = BooleanType
-  
+
   override def nullable: Boolean = false // Predicates are typically not nullable
+
+  // Mark as non-deterministic to prevent Spark from optimizing away the filter
+  // This ensures the V2IndexQueryExpressionRule gets a chance to process it
+  override lazy val deterministic: Boolean = false
   
   override def prettyName: String = "indexquery"
   

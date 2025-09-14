@@ -220,72 +220,59 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
   }
   
   test("End-to-end SQL integration test with indexquery operator") {
-    val spark = this.spark
-    import spark.implicits._
-    
-    // Create test data
-    val testData = Seq(
-      (1, "Apache Spark documentation", "technology", "spark AND sql"),
-      (2, "Machine learning algorithms", "ai", "machine learning"),  
-      (3, "Big data processing", "technology", "big data"),
-      (4, "Natural language processing", "ai", "nlp processing"),
-      (5, "Distributed computing systems", "technology", "distributed AND computing")
-    ).toDF("id", "title", "category", "tags")
-    
-    val tempPath = java.nio.file.Files.createTempDirectory("tantivy4spark_indexquery_test").toString
-    
-    try {
+    withTempPath { tempPath =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Create test data
+      val testData = Seq(
+        (1, "Apache Spark documentation", "technology", "spark AND sql"),
+        (2, "Machine learning algorithms", "ai", "machine learning"),
+        (3, "Big data processing", "technology", "big data"),
+        (4, "Natural language processing", "ai", "nlp processing"),
+        (5, "Distributed computing systems", "technology", "distributed AND computing")
+      ).toDF("id", "title", "category", "tags")
       // Write test data using Tantivy4Spark V2 DataSource
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
-      
+
       // Read data back using V2 DataSource API
       val df = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tempPath)
-      
+
       // Create temporary view
       df.createOrReplaceTempView("test_documents")
-      
+
       // Test SQL query with indexquery operator - should use our custom parser
       val sqlResult = spark.sql("""
-        SELECT id, title, category 
-        FROM test_documents 
+        SELECT id, title, category
+        FROM test_documents
         WHERE title indexquery 'spark AND documentation'
         ORDER BY id
       """)
-      
+
       val results = sqlResult.collect()
-      
+
       // Verify that the query executed and returned results
       assert(results.length > 0, "SQL query with indexquery operator should return results")
-      
+
       // Verify the SQL plan shows our custom expression
       val planString = sqlResult.queryExecution.executedPlan.toString()
-      assert(planString.contains("indexquery") || planString.contains("IndexQuery"), 
+      assert(planString.contains("indexquery") || planString.contains("IndexQuery"),
         "Query plan should contain evidence of indexquery processing")
-      
+
       // Test another query pattern
       val sqlResult2 = spark.sql("""
-        SELECT id, title 
-        FROM test_documents 
+        SELECT id, title
+        FROM test_documents
         WHERE category indexquery 'technology'
       """)
-      
+
       val results2 = sqlResult2.collect()
       assert(results2.length >= 1, "Technology category query should return at least one result")
-      
-    } finally {
-      // Cleanup
-      import java.nio.file._
-      import scala.util.Try
-      Try {
-        Files.walk(Paths.get(tempPath))
-          .sorted(java.util.Comparator.reverseOrder())
-          .forEach(Files.delete)
-      }
     }
   }
 }

@@ -268,6 +268,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
           } else {
             val indexQueryFilter = IndexQueryFilter(columnName, queryString)
             extractedFilters += indexQueryFilter
+            println(s"🔍 V2IndexQueryExpressionRule: Extracted IndexQueryFilter($columnName, $queryString)")
           }
         }
         
@@ -281,6 +282,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
             IsNotNull(attr)
           case _ =>
             // Fallback - create a marker expression
+            println(s"🔍 V2IndexQueryExpressionRule: Using IndexQueryV2Filter fallback for $indexQuery")
             IndexQueryV2Filter(indexQuery)
         }
         

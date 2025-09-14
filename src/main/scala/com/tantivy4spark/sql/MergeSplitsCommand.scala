@@ -1406,7 +1406,10 @@ case class SerializableSplitMetadata(
   deleteOpstamp: Option[Long],
   numMergeOps: Option[Int],
   docMappingJson: Option[String],
-  uncompressedSizeBytes: Long
+  uncompressedSizeBytes: Long,
+  // Additional fields needed for complete SplitMetadata
+  splitId: Option[String] = None,
+  numDocs: Option[Long] = None
 ) extends Serializable {
   
   def getFooterStartOffset(): Long = footerStartOffset
@@ -1425,9 +1428,26 @@ case class SerializableSplitMetadata(
   def getNumMergeOps(): Int = numMergeOps.getOrElse(0)
   def getDocMappingJson(): String = docMappingJson.orNull
   def getUncompressedSizeBytes(): Long = uncompressedSizeBytes
+  def getSplitId(): String = splitId.orNull
+  def getNumDocs(): Long = numDocs.getOrElse(0L)
   
   def toQuickwitSplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
-    new com.tantivy4java.QuickwitSplit.SplitMetadata(footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength)
+    import scala.jdk.CollectionConverters._
+    new com.tantivy4java.QuickwitSplit.SplitMetadata(
+      splitId.getOrElse("unknown"), // splitId
+      numDocs.getOrElse(0L), // numDocs
+      uncompressedSizeBytes, // uncompressedSizeBytes
+      timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
+      timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+      tags.map(_.keySet.asJava).getOrElse(java.util.Collections.emptySet()), // tags
+      deleteOpstamp.getOrElse(0L), // deleteOpstamp
+      numMergeOps.getOrElse(0), // numMergeOps
+      footerStartOffset, // footerStartOffset
+      footerEndOffset, // footerEndOffset
+      hotcacheStartOffset, // hotcacheStartOffset
+      hotcacheLength, // hotcacheLength
+      docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+    )
   }
 }
 
@@ -1453,7 +1473,9 @@ object SerializableSplitMetadata {
       Some(metadata.getDeleteOpstamp()),
       Some(metadata.getNumMergeOps().toInt),
       docMapping,
-      metadata.getUncompressedSizeBytes()
+      metadata.getUncompressedSizeBytes(),
+      splitId = Option(metadata.getSplitId()).filter(_.nonEmpty),
+      numDocs = Some(metadata.getNumDocs())
     )
   }
 }

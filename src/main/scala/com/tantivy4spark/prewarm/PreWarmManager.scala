@@ -31,6 +31,7 @@ import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.collection.concurrent.TrieMap
 import scala.util.{Try, Success, Failure}
 import java.net.InetAddress
+import scala.jdk.CollectionConverters._
 
 /**
  * Manages pre-warming of split caches across the Spark cluster to optimize query performance.
@@ -324,11 +325,32 @@ object PreWarmManager {
       case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
     }
     
+    // Safe conversion functions for Option[Any] to Long
+    def toLongSafeOption(opt: Option[Any]): Long = opt match {
+      case Some(value) => value match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case i: java.lang.Integer => i.toLong
+        case l: java.lang.Long => l
+        case _ => value.toString.toLong
+      }
+      case None => 0L
+    }
+    
     val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+      addAction.path.split("/").last.replace(".split", ""), // splitId from filename
+      toLongSafeOption(addAction.numRecords), // numDocs
+      toLongSafeOption(addAction.uncompressedSizeBytes), // uncompressedSizeBytes
+      addAction.timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
+      addAction.timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+      addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
+      toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
+      addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
       safeLong(addAction.footerStartOffset, "footerStartOffset"), // footerStartOffset
       safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
       safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
-      safeLong(addAction.hotcacheLength, "hotcacheLength") // hotcacheLength
+      safeLong(addAction.hotcacheLength, "hotcacheLength"), // hotcacheLength
+      addAction.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }
