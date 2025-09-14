@@ -35,9 +35,20 @@ import scala.util.{Try}
  * Bypasses Hadoop filesystem for better performance and reliability.
  */
 class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStorageProvider {
-  
+
   private val logger = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
   private val executor = Executors.newCachedThreadPool()
+
+  // Configurable multipart upload threshold (default 100MB)
+  private val multipartThreshold = config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)
+
+  // Multipart uploader for large files
+  private lazy val multipartUploader = new S3MultipartUploader(s3Client, S3MultipartConfig(
+    multipartThreshold = multipartThreshold,
+    partSize = math.min(64L * 1024 * 1024, multipartThreshold / 4), // 64MB or 1/4 of threshold
+    maxConcurrency = config.maxConcurrency.getOrElse(4),
+    maxRetries = config.maxRetries.getOrElse(3)
+  ))
   
   logger.debug(s"S3CloudStorageProvider CONFIG:")
   logger.debug(s"  - accessKey: ${config.awsAccessKey.map(_.take(4) + "...")}")
@@ -325,29 +336,42 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   
   override def writeFile(path: String, content: Array[Byte]): Unit = {
     val (bucket, originalKey) = parseS3Path(path)
-    
+
     // Apply uniform path flattening for S3Mock compatibility
     val key = flattenPathForS3Mock(originalKey)
-    
+    val contentLength = content.length.toLong
+
     try {
       logger.info(s"🔧 S3 WRITE DEBUG - Path: $path")
       logger.info(s"🔧 S3 WRITE DEBUG - Bucket: '$bucket', Key: '$key' (original: '$originalKey')")
-      logger.info(s"🔧 S3 WRITE DEBUG - Content length: ${content.length} bytes")
+      logger.info(s"🔧 S3 WRITE DEBUG - Content length: ${formatBytes(contentLength)}")
       logger.info(s"🔧 S3 WRITE DEBUG - S3Mock mode: $isS3Mock")
-      
+
       // Ensure bucket exists first
       ensureBucketExists(bucket)
-      
-      val request = PutObjectRequest.builder()
-        .bucket(bucket)
-        .key(key)
-        .contentLength(content.length.toLong)
-        .build()
-      
-      val requestBody = RequestBody.fromBytes(content)
-      s3Client.putObject(request, requestBody)
-      
-      logger.info(s"✅ Successfully wrote S3 file: s3://$bucket/$key")
+
+      // Use multipart upload for files larger than threshold
+      if (contentLength >= multipartThreshold) {
+        logger.info(s"🚀 Using multipart upload for large file: s3://$bucket/$key (${formatBytes(contentLength)})")
+
+        val result = multipartUploader.uploadFile(bucket, key, content)
+        logger.info(s"✅ Multipart upload completed: ${result.strategy}, ${result.partCount} parts, ${result.uploadRateMBps}%.2f MB/s")
+
+      } else {
+        logger.info(s"📄 Using single-part upload for file: s3://$bucket/$key (${formatBytes(contentLength)})")
+
+        val request = PutObjectRequest.builder()
+          .bucket(bucket)
+          .key(key)
+          .contentLength(contentLength)
+          .build()
+
+        val requestBody = RequestBody.fromBytes(content)
+        s3Client.putObject(request, requestBody)
+
+        logger.info(s"✅ Successfully wrote S3 file: s3://$bucket/$key")
+      }
+
     } catch {
       case ex: Exception =>
         logger.error(s"❌ Failed to write S3 file: s3://$bucket/$key", ex)
@@ -491,9 +515,29 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   override def getProviderType: String = "s3"
   
   override def close(): Unit = {
+    multipartUploader.shutdown()
     executor.shutdown()
     s3Client.close()
     logger.debug("Closed S3 storage provider")
+  }
+
+  /**
+   * Format bytes for human-readable output
+   */
+  private def formatBytes(bytes: Long): String = {
+    val kb = 1024L
+    val mb = kb * 1024
+    val gb = mb * 1024
+
+    if (bytes >= gb) {
+      f"${bytes.toDouble / gb}%.2f GB"
+    } else if (bytes >= mb) {
+      f"${bytes.toDouble / mb}%.2f MB"
+    } else if (bytes >= kb) {
+      f"${bytes.toDouble / kb}%.2f KB"
+    } else {
+      s"$bytes bytes"
+    }
   }
   
   /**
@@ -524,31 +568,34 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
   }
   
   /**
-   * Custom OutputStream for S3 that buffers content and uploads on close
+   * Custom OutputStream for S3 that buffers content and uploads on close.
+   * Uses multipart upload for large files (>100MB) for better reliability.
    */
   private class S3OutputStream(path: String) extends OutputStream {
     private val buffer = new ByteArrayOutputStream()
     private var closed = false
-    
+
     override def write(b: Int): Unit = {
       if (closed) throw new IllegalStateException("Stream is closed")
       buffer.write(b)
     }
-    
+
     override def write(b: Array[Byte]): Unit = {
       if (closed) throw new IllegalStateException("Stream is closed")
       buffer.write(b)
     }
-    
+
     override def write(b: Array[Byte], off: Int, len: Int): Unit = {
       if (closed) throw new IllegalStateException("Stream is closed")
       buffer.write(b, off, len)
     }
-    
+
     override def close(): Unit = {
       if (!closed) {
         try {
-          writeFile(path, buffer.toByteArray)
+          val content = buffer.toByteArray
+          logger.debug(s"S3OutputStream closing with ${formatBytes(content.length)} buffered")
+          writeFile(path, content)
         } finally {
           buffer.close()
           closed = true

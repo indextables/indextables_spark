@@ -144,8 +144,12 @@ case class CloudStorageConfig(
   maxConnections: Int = 50,
   connectionTimeout: Int = 10000,
   readTimeout: Int = 30000,
-  maxRetries: Int = 3,
-  bufferSize: Int = 16 * 1024 * 1024 // 16MB default
+  maxRetries: Option[Int] = None,
+  bufferSize: Int = 16 * 1024 * 1024, // 16MB default
+
+  // Multipart upload configuration
+  multipartUploadThreshold: Option[Long] = None, // Defaults to 100MB if not specified
+  maxConcurrency: Option[Int] = None             // Defaults to 4 if not specified
 )
 
 /**
@@ -459,8 +463,15 @@ object CloudStorageProviderFactory {
       maxConnections = options.getInt("spark.tantivy4spark.cloud.maxConnections", 50),
       connectionTimeout = options.getInt("spark.tantivy4spark.cloud.connectionTimeout", 10000),
       readTimeout = options.getInt("spark.tantivy4spark.cloud.readTimeout", 30000),
-      maxRetries = options.getInt("spark.tantivy4spark.cloud.maxRetries", 3),
-      bufferSize = options.getInt("spark.tantivy4spark.cloud.bufferSize", 16 * 1024 * 1024)
+      maxRetries = if (options.containsKey("spark.tantivy4spark.cloud.maxRetries"))
+        Some(options.getInt("spark.tantivy4spark.cloud.maxRetries", 3)) else None,
+      bufferSize = options.getInt("spark.tantivy4spark.cloud.bufferSize", 16 * 1024 * 1024),
+
+      // Multipart upload configuration
+      multipartUploadThreshold = if (options.containsKey("spark.tantivy4spark.s3.multipartThreshold"))
+        Some(options.getLong("spark.tantivy4spark.s3.multipartThreshold", 100L * 1024 * 1024)) else None,
+      maxConcurrency = if (options.containsKey("spark.tantivy4spark.s3.maxConcurrency"))
+        Some(options.getInt("spark.tantivy4spark.s3.maxConcurrency", 4)) else None
     )
   }
   
