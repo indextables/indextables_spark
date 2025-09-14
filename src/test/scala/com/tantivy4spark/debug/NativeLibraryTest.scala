@@ -228,7 +228,10 @@ class NativeLibraryTest extends TestBase {
           // Verify each hit contains expected document data
           for (i <- 0 until hits.size()) {
             val hit = hits.get(i)
-            val document = splitSearcher.doc(hit.getDocAddress())
+            // Use docBatch for efficient document retrieval
+            import scala.jdk.CollectionConverters._
+            val documents = splitSearcher.docBatch(List(hit.getDocAddress()).asJava).asScala
+            val document = if (documents.nonEmpty) documents.head else null
             
             assert(document != null, s"Document $i should not be null")
             

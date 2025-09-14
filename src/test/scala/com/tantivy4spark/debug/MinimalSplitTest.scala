@@ -114,8 +114,11 @@ class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
           println(s"Hit score: ${hit.getScore()}")
           println(s"Doc address: ${hit.getDocAddress()}")
           
-          // Get the document using the doc() method
-          val document = splitSearcher.doc(hit.getDocAddress())
+          // Get the document using the docBatch() method for efficiency
+          // For single document, we still use docBatch for consistency
+          import scala.jdk.CollectionConverters._
+          val documents = splitSearcher.docBatch(List(hit.getDocAddress()).asJava).asScala
+          val document = if (documents.nonEmpty) documents.head else null
           
           if (document != null) {
             // Test field value extraction

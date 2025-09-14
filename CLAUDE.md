@@ -26,6 +26,8 @@ Key settings with defaults:
 - `spark.tantivy4spark.indexWriter.threads`: `2`
 - `spark.tantivy4spark.cache.maxSize`: `200000000` (200MB)
 - `spark.tantivy4spark.cache.prewarm.enabled`: `true` (Enable proactive cache warming)
+- `spark.tantivy4spark.docBatch.enabled`: `true` (Enable batch document retrieval for better performance)
+- `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
 
 ## Usage Examples

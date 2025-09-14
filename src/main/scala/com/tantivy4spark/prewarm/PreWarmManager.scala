@@ -280,6 +280,8 @@ object PreWarmManager {
       maxCacheSize = getConfig("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
       maxConcurrentLoads = getConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
       enableQueryCache = getConfig("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+      enableDocBatch = getConfig("spark.tantivy4spark.docBatch.enabled", "true").toBoolean,
+      docBatchMaxSize = getConfig("spark.tantivy4spark.docBatch.maxSize", "1000").toInt,
       awsAccessKey = getConfigOption("spark.tantivy4spark.aws.accessKey"),
       awsSecretKey = getConfigOption("spark.tantivy4spark.aws.secretKey"),
       awsSessionToken = getConfigOption("spark.tantivy4spark.aws.sessionToken"),

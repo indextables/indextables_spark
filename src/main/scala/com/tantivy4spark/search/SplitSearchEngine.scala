@@ -55,14 +55,44 @@ class SplitSearchEngine private(
   
   // Create the split searcher using the shared cache
   logger.info(s"🔧 Creating SplitSearchEngine for path: $splitPath")
-  
+
+  // Validate metadata is provided and non-null
   if (metadata == null) {
-    throw new RuntimeException(s"Split metadata is required for $splitPath. Use SplitSearchEngine.fromSplitFileWithMetadata()")
+    throw new IllegalArgumentException(s"Split metadata cannot be null for createSplitSearcher. Path: $splitPath. Use SplitSearchEngine.fromSplitFileWithMetadata() to create with proper metadata.")
   }
-  
+
+  // Validate footer offsets are present and non-zero
   if (!metadata.hasFooterOffsets()) {
-    throw new RuntimeException(s"Split metadata for $splitPath does not contain required footer offsets. The split file may have been created with an older version of tantivy4java that didn't generate footer offset metadata. Please recreate the split file with the current version.")
+    throw new IllegalArgumentException(s"Split metadata for $splitPath does not contain required footer offsets. The split file may have been created with an older version of tantivy4java that didn't generate footer offset metadata. Please recreate the split file with the current version.")
   }
+
+  // Validate footer offsets are non-zero (meaningful)
+  val footerStartOffset = metadata.getFooterStartOffset()
+  val footerEndOffset = metadata.getFooterEndOffset()
+  val hotcacheStartOffset = metadata.getHotcacheStartOffset()
+  val hotcacheLength = metadata.getHotcacheLength()
+
+  if (footerStartOffset <= 0 || footerEndOffset <= 0) {
+    throw new IllegalArgumentException(s"Split metadata has invalid footer offsets. footerStartOffset: $footerStartOffset, footerEndOffset: $footerEndOffset. These must be positive non-zero values.")
+  }
+
+  if (footerEndOffset <= footerStartOffset) {
+    throw new IllegalArgumentException(s"Split metadata has invalid footer offsets. footerEndOffset ($footerEndOffset) must be greater than footerStartOffset ($footerStartOffset).")
+  }
+
+  if (hotcacheStartOffset <= 0 || hotcacheLength <= 0) {
+    throw new IllegalArgumentException(s"Split metadata has invalid hotcache offsets. hotcacheStartOffset: $hotcacheStartOffset, hotcacheLength: $hotcacheLength. These must be positive non-zero values.")
+  }
+
+  // Validate document mapping is available
+  if (metadata.getDocMappingJson() == null || metadata.getDocMappingJson().trim.isEmpty) {
+    throw new IllegalArgumentException(s"Split metadata must contain valid document mapping JSON for $splitPath. Document mapping is required for proper field extraction.")
+  }
+
+  logger.info(s"✅ Split metadata validation passed for $splitPath:")
+  logger.info(s"   Footer offsets: $footerStartOffset - $footerEndOffset")
+  logger.info(s"   Hotcache: $hotcacheStartOffset + $hotcacheLength")
+  logger.info(s"   Document mapping: ${metadata.getDocMappingJson().length} chars")
   
   protected lazy val splitSearcher = try {
     logger.info(s"📋 Using metadata for $splitPath with footer offsets: ${metadata.hasFooterOffsets()}")
@@ -235,15 +265,55 @@ class SplitSearchEngine private(
       logger.debug(s"Split schema from file: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
       logger.debug(s"Expected Spark schema: ${sparkSchema.fields.map(_.name).mkString(", ")}")
       
-      // Convert each hit using the new schema mapping
-      val rows = hits.zipWithIndex.map { case (hit, index) =>
-        var document: com.tantivy4java.Document = null
+      // Collect all DocAddresses first
+      val docAddresses = hits.map(hit => hit.getDocAddress())
+
+      // Use configurable document retrieval strategy
+      val documents: Array[com.tantivy4java.Document] = if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
+        logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
+
+        // Process in batches to respect maximum batch size
+        val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
+        logger.debug(s"Processing ${batches.length} batch(es) of documents")
+
+        batches.flatMap { batchAddresses =>
+          try {
+            import scala.jdk.CollectionConverters._
+            val javaAddresses = batchAddresses.toList.asJava
+            val javaDocuments = splitSearcher.docBatch(javaAddresses)
+            javaDocuments.asScala
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval", e)
+              // Fallback to individual doc calls for this batch
+              batchAddresses.map { address =>
+                try {
+                  splitSearcher.doc(address)
+                } catch {
+                  case ex: Exception =>
+                    logger.warn(s"Error retrieving individual document for address: $address", ex)
+                    null
+                }
+              }
+          }
+        }
+      } else {
+        logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
+        // Use individual doc calls when batch is disabled or only one document
+        hits.map { hit =>
+          try {
+            splitSearcher.doc(hit.getDocAddress())
+          } catch {
+            case ex: Exception =>
+              logger.warn(s"Error retrieving individual document for address: ${hit.getDocAddress()}", ex)
+              null
+          }
+        }
+      }
+
+      // Convert documents to InternalRows
+      val rows = documents.zipWithIndex.map { case (document, index) =>
         try {
-          // Retrieve the document
-          val docAddress = hit.getDocAddress()
-          logger.debug(s"Hit $index: DocAddress = ${docAddress}")
-          document = splitSearcher.doc(docAddress)
-          
           if (document != null) {
             // Use the new SchemaMapping.Read.convertDocument method
             val values = SchemaMapping.Read.convertDocument(document, splitSchema, sparkSchema)
@@ -254,7 +324,7 @@ class SplitSearchEngine private(
           }
         } catch {
           case e: Exception =>
-            logger.warn(s"Error converting document for hit: ${hit.getDocAddress()}", e)
+            logger.warn(s"Error converting document at index $index", e)
             createEmptyRow()
         } finally {
           // Always close the document to free resources

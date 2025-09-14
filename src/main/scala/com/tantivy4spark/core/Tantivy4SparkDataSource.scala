@@ -200,6 +200,8 @@ object Tantivy4SparkRelation {
       maxCacheSize = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
       maxConcurrentLoads = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
       enableQueryCache = hadoopConfProps.getOrElse("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+      enableDocBatch = hadoopConfProps.getOrElse("spark.tantivy4spark.docBatch.enabled", "true").toBoolean,
+      docBatchMaxSize = hadoopConfProps.getOrElse("spark.tantivy4spark.docBatch.maxSize", "1000").toInt,
       // AWS configuration with session token support (handle both camelCase and lowercase keys)
       awsAccessKey = hadoopConfProps.get("spark.tantivy4spark.aws.accessKey").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.accesskey")),
       awsSecretKey = hadoopConfProps.get("spark.tantivy4spark.aws.secretKey").orElse(hadoopConfProps.get("spark.tantivy4spark.aws.secretkey")),

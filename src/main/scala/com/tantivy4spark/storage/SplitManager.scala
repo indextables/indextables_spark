@@ -224,6 +224,8 @@ case class SplitCacheConfig(
   maxCacheSize: Long = 200000000L, // 200MB default
   maxConcurrentLoads: Int = 8,
   enableQueryCache: Boolean = true,
+  enableDocBatch: Boolean = true, // Default to true for better performance
+  docBatchMaxSize: Int = 1000, // Maximum documents per batch when enabled
   awsAccessKey: Option[String] = None,
   awsSecretKey: Option[String] = None,
   awsSessionToken: Option[String] = None,

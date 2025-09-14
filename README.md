@@ -74,21 +74,21 @@ val spark = SparkSession.builder()
   .appName("Tantivy4Spark Example")
   .getOrCreate()
 
-// Write data with optimized writes (enabled by default)
+// Write data
 df.write
-  .format("tantivy4spark")
+  .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .mode("overwrite")
   .save("s3://bucket/path/table")
 
 // Write with custom split sizing
 df.write
-  .format("tantivy4spark")
+  .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("targetRecordsPerSplit", "500000")  // 500K records per split
   .save("s3://bucket/path/table")
 
 // Read data
 val df = spark.read
-  .format("tantivy4spark")
+  .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .load("s3://bucket/path/table")
 
 // Query with filters (automatically converted to Tantivy queries)
@@ -156,7 +156,7 @@ Control the automatic split sizing behavior (similar to Delta Lake optimizedWrit
 
 ```scala
 // Enable optimized writes with default 1M records per split
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("optimizeWrite", "true")
   .save("s3://bucket/path")
 
@@ -165,12 +165,12 @@ spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "true")
 spark.conf.set("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "2000000")
 
 // Configure per write operation (overrides session config)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("targetRecordsPerSplit", "500000")  // 500K records per split
   .save("s3://bucket/path")
 
 // Disable optimized writes (use Spark's default partitioning)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("optimizeWrite", "false")
   .save("s3://bucket/path")
 ```
@@ -181,16 +181,16 @@ The system automatically detects storage protocol and uses appropriate I/O strat
 
 ```scala
 // S3-optimized I/O (default for s3:// protocols)
-df.write.format("tantivy4spark").save("s3://bucket/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
 
 // Force standard Hadoop operations
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.storage.force.standard", "true")
   .save("s3://bucket/path")
 
 // Standard operations (automatic for other protocols)
-df.write.format("tantivy4spark").save("hdfs://namenode/path")
-df.write.format("tantivy4spark").save("file:///local/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("hdfs://namenode/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("file:///local/path")
 ```
 
 #### IndexWriter Performance Configuration
@@ -205,14 +205,14 @@ spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "20000") // 20,000 d
 spark.conf.set("spark.tantivy4spark.indexWriter.useBatch", "true") // Enable batch writing
 
 // Configure per DataFrame write operation (overrides session config)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.indexWriter.heapSize", "150000000") // 150MB heap
   .option("spark.tantivy4spark.indexWriter.threads", "3") // 3 indexing threads
   .option("spark.tantivy4spark.indexWriter.batchSize", "15000") // 15,000 documents per batch
   .save("s3://bucket/path")
 
 // Disable batch writing for debugging (use individual document indexing)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.indexWriter.useBatch", "false")
   .save("s3://bucket/path")
 
@@ -220,7 +220,7 @@ df.write.format("tantivy4spark")
 spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "500000000") // 500MB heap
 spark.conf.set("spark.tantivy4spark.indexWriter.threads", "8") // 8 indexing threads
 spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "50000") // 50,000 documents per batch
-df.write.format("tantivy4spark").save("s3://bucket/large-dataset")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/large-dataset")
 ```
 
 #### AWS Configuration
@@ -242,10 +242,10 @@ spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
 // Custom S3 endpoint (for S3-compatible services like MinIO, LocalStack)
 spark.conf.set("spark.tantivy4spark.aws.endpoint", "https://s3.custom-provider.com")
 
-df.write.format("tantivy4spark").save("s3://bucket/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
 
 // Alternative: Pass credentials via write options (automatically propagated to executors)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.aws.accessKey", "your-access-key")
   .option("spark.tantivy4spark.aws.secretKey", "your-secret-key")
   .option("spark.tantivy4spark.aws.sessionToken", "your-session-token")
@@ -264,7 +264,7 @@ spark.conf.set("spark.tantivy4spark.cache.maxConcurrentLoads", "16") // More con
 spark.conf.set("spark.tantivy4spark.cache.queryCache", "true") // Enable query caching
 
 // Configure per DataFrame write (overrides session config)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.cache.maxSize", "1000000000") // 1GB cache for this operation
   .save("s3://bucket/path")
 ```
@@ -486,7 +486,7 @@ Tantivy4Spark provides comprehensive verification that both predicate and limit 
 
 ```scala
 // Create a temporary view
-spark.read.format("tantivy4spark").load("s3://bucket/path").createOrReplaceTempView("my_table")
+spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load("s3://bucket/path").createOrReplaceTempView("my_table")
 
 // SQL queries with pushdown (filters are pushed to the data source)
 val query = spark.sql("SELECT * FROM my_table WHERE category = 'fruit' AND active = true LIMIT 5")
@@ -522,8 +522,8 @@ spark.conf.set("spark.tantivy4spark.gcp.projectId", "your-project-id")
 spark.conf.set("spark.tantivy4spark.gcp.credentialsFile", "/path/to/service-account.json")
 
 // Write to different cloud providers
-df.write.format("tantivy4spark").save("abfss://container@account.dfs.core.windows.net/path")
-df.write.format("tantivy4spark").save("gs://bucket/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("abfss://container@account.dfs.core.windows.net/path")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("gs://bucket/path")
 ```
 
 
@@ -670,7 +670,7 @@ spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
 spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
 
 // Or set via DataFrame options (automatically propagated)
-df.write.format("tantivy4spark")
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.aws.region", "us-west-2")
   .save("s3://bucket/path")
 ```
