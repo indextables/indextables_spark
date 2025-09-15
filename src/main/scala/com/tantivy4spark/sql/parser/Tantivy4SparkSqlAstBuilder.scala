@@ -50,7 +50,7 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
   override def visitMergeSplitsTable(ctx: MergeSplitsTableContext): LogicalPlan = {
     logger.debug(s"visitMergeSplitsTable called with context: $ctx")
     logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
-    
+
     try {
       // Extract table path or identifier
       val (pathOption, tableIdOption) = if (ctx.path != null) {
@@ -91,7 +91,7 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
       val targetSize = if (ctx.targetSize != null) {
         logger.debug(s"Found TARGET SIZE: ${ctx.targetSize.getText}")
         try {
-          Some(visitSizeValue(ctx.targetSize).asInstanceOf[Long])
+          Some(parseAlphanumericSize(ctx.targetSize.getText))
         } catch {
           case _: NumberFormatException =>
             throw new NumberFormatException(s"Invalid target size: ${ctx.targetSize.getText}")
@@ -101,17 +101,36 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
         None
       }
 
+      // Extract MAX GROUPS
+      val maxGroups = if (ctx.maxGroups != null) {
+        logger.debug(s"Found MAX GROUPS: ${ctx.maxGroups.getText}")
+        try {
+          val maxGroupsValue = parseAlphanumericInt(ctx.maxGroups.getText)
+          if (maxGroupsValue <= 0) {
+            throw new IllegalArgumentException(s"MAX GROUPS must be positive, got: $maxGroupsValue")
+          }
+          Some(maxGroupsValue)
+        } catch {
+          case _: NumberFormatException =>
+            throw new NumberFormatException(s"Invalid MAX GROUPS value: ${ctx.maxGroups.getText}")
+        }
+      } else {
+        logger.debug("No MAX GROUPS")
+        None
+      }
+
       // Extract PRECOMMIT flag
       val preCommit = ctx.PRECOMMIT() != null
       logger.debug(s"PRECOMMIT flag: $preCommit")
 
       // Create command
-      logger.debug(s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption")
+      logger.debug(s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, maxGroups=$maxGroups")
       val result = MergeSplitsCommand.apply(
         pathOption,
         tableIdOption,
         wherePredicates,
         targetSize,
+        maxGroups,
         preCommit
       )
       logger.debug(s"Created MergeSplitsCommand: $result")
@@ -160,31 +179,52 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     ctx.identifier().asScala.map(_.getText).toSeq
   }
 
-  override def visitSizeValue(ctx: SizeValueContext): AnyRef = {
-    logger.debug(s"visitSizeValue called with context: $ctx")
-    
+  /**
+   * Parse alphanumeric size value (e.g., "100M", "5G", "1024", "-500M")
+   */
+  private def parseAlphanumericSize(value: String): Long = {
+    val trimmed = value.trim.stripPrefix("'").stripSuffix("'") // Remove quotes if present
+
     // Handle negative sign
-    val isNegative = ctx.getText.startsWith("-")
-    val baseValue = ctx.INTEGER_VALUE().getText.toLong
-    val signedValue = if (isNegative) -baseValue else baseValue
-    logger.debug(s"Base integer value: $signedValue")
-    
-    val multiplier = if (ctx.sizeSuffix() != null) {
-      val suffixText = ctx.sizeSuffix().getText
-      logger.debug(s"Found size suffix: $suffixText")
-      suffixText match {
-        case "M" => 1024L * 1024L      // Megabytes
-        case "G" => 1024L * 1024L * 1024L  // Gigabytes
-        case other => throw new IllegalArgumentException(s"Unsupported size suffix: $other")
-      }
+    val isNegative = trimmed.startsWith("-")
+    val absoluteValue = if (isNegative) trimmed.substring(1) else trimmed
+
+    // Extract number and suffix
+    val (numStr, suffix) = if (absoluteValue.matches("\\d+[MmGg]")) {
+      (absoluteValue.init, absoluteValue.last.toString.toUpperCase)
+    } else if (absoluteValue.matches("\\d+")) {
+      (absoluteValue, "")
     } else {
-      logger.debug("No size suffix, using base value")
-      1L
+      throw new NumberFormatException(s"Invalid size format: $value")
     }
-    
-    val result = signedValue * multiplier
-    logger.debug(s"Final size value: $result bytes")
-    java.lang.Long.valueOf(result)
+
+    val baseValue = try {
+      numStr.toLong
+    } catch {
+      case _: NumberFormatException => throw new NumberFormatException(s"Invalid numeric value: $numStr")
+    }
+
+    val multiplier = suffix match {
+      case "" => 1L
+      case "M" => 1024L * 1024L      // Megabytes
+      case "G" => 1024L * 1024L * 1024L  // Gigabytes
+      case other => throw new IllegalArgumentException(s"Unsupported size suffix: $other")
+    }
+
+    val result = baseValue * multiplier
+    if (isNegative) -result else result
+  }
+
+  /**
+   * Parse alphanumeric integer value (e.g., "5", "-10")
+   */
+  private def parseAlphanumericInt(value: String): Int = {
+    val trimmed = value.trim.stripPrefix("'").stripSuffix("'") // Remove quotes if present
+    try {
+      trimmed.toInt
+    } catch {
+      case _: NumberFormatException => throw new NumberFormatException(s"Invalid integer format: $value")
+    }
   }
 
   /**

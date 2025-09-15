@@ -508,6 +508,79 @@ query.collect() // Returns exactly 5 filtered rows
 
 The system includes comprehensive tests (`SqlPushdownTest.scala`) that verify pushdown is working by examining query execution plans and confirming that filters appear in the `PushedFilters` section of the Spark physical plan.
 
+#### Split Optimization with MERGE SPLITS
+
+Tantivy4Spark provides SQL-based split consolidation to reduce small file overhead and optimize query performance:
+
+##### SQL Syntax
+
+```sql
+-- Register Tantivy4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+
+-- Basic merge splits command
+MERGE SPLITS 's3://bucket/path';
+
+-- With target size constraint (consolidate to specific size)
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M;       -- 100MB with suffix
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G;         -- 1GB with suffix
+
+-- With group limit constraint (limit number of merge operations)
+MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;          -- Limit to 10 merge groups
+
+-- Combined constraints for fine-grained control
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5;
+
+-- With WHERE clause for partition filtering
+MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M;
+```
+
+##### Scala/DataFrame API
+
+```scala
+// Basic merge splits operation
+spark.sql("MERGE SPLITS 's3://bucket/path'")
+
+// With target size constraints
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
+
+// Limit the number of merge groups created
+spark.sql("MERGE SPLITS 's3://bucket/path' MAX GROUPS 10")
+
+// Combined size and group constraints
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5")
+
+// With partition filtering
+spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
+```
+
+##### Key Features
+
+- **Intelligent Bin Packing**: Automatically groups small files within target size limits
+- **Group Limiting**: `MAX GROUPS` parameter constrains the number of merge operations per command
+- **Size Suffixes**: Supports `M` (megabytes) and `G` (gigabytes) for readable size specifications
+- **Partition Filtering**: `WHERE` clauses allow selective merging of specific partitions
+- **Transaction Safety**: Uses Delta Lake-style REMOVE+ADD transaction patterns
+- **Data Integrity**: Preserves all data while consolidating storage files
+- **S3 Optimized**: Efficient merge operations for object storage environments
+
+##### Use Cases
+
+```sql
+-- Consolidate daily partitions to 1GB files, max 10 operations
+MERGE SPLITS 's3://data-lake/events' WHERE date >= '2023-12-01' TARGET SIZE 1G MAX GROUPS 10;
+
+-- Quick cleanup of small files with group limit to avoid overwhelming the cluster
+MERGE SPLITS 's3://data-lake/logs' MAX GROUPS 5;
+
+-- Size-based consolidation for optimal query performance
+MERGE SPLITS 's3://data-lake/analytics' TARGET SIZE 500M;
+```
+
+The `MAX GROUPS` parameter is particularly useful for limiting resource usage when merging large datasets, ensuring that a single merge command doesn't create too many concurrent operations.
+
 #### Multi-Cloud Support
 
 The system supports multiple cloud storage providers:

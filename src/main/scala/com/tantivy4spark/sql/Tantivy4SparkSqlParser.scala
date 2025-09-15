@@ -55,16 +55,16 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
         val result = astBuilder.visit(parser.singleStatement())
         logger.debug(s"AST Builder result: $result, type: ${if (result != null) result.getClass.getName else "null"}")
         result match {
-          case plan: LogicalPlan => 
+          case plan: LogicalPlan =>
             logger.debug(s"Successfully parsed Tantivy4Spark command: $plan")
             // Successfully parsed a Tantivy4Spark command
             plan
-          case null => 
+          case null =>
             logger.debug("ANTLR didn't match any patterns, delegating to Spark parser")
             // ANTLR didn't match any of our patterns, delegate to Spark parser
             val preprocessedSql = preprocessIndexQueryOperators(sqlText)
             delegate.parsePlan(preprocessedSql)
-          case _ => 
+          case _ =>
             logger.debug(s"Unexpected result type: ${result.getClass.getName}, delegating to Spark parser")
             // Unexpected result type, delegate to Spark parser
             val preprocessedSql = preprocessIndexQueryOperators(sqlText)
@@ -72,33 +72,19 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
         }
       }
     } catch {
+      case e: IllegalArgumentException =>
+        // Re-throw business logic exceptions (these are intended to be thrown)
+        throw e
+      case e: NumberFormatException =>
+        // Re-throw validation exceptions (these are intended to be thrown)
+        throw e
+      case e: ParseException =>
+        // Re-throw ANTLR parse exceptions (these are intended to be thrown)
+        throw e
       case e: Exception =>
-        logger.debug(s"ANTLR parsing failed with exception: ${e.getMessage}")
-        
-        // Check for specific MERGE SPLITS error cases before delegating
-        val trimmedSql = sqlText.trim
-        if (trimmedSql.equals("MERGE SPLITS")) {
-          throw new IllegalArgumentException("MERGE SPLITS requires either a path or table identifier")
-        } else if (trimmedSql.startsWith("MERGE SPLITS") && trimmedSql.contains("TARGET SIZE")) {
-          // Check for invalid TARGET SIZE format - only catch non-numeric values
-          val targetSizePattern = "TARGET\\s+SIZE\\s+(\\S+)".r
-          targetSizePattern.findFirstMatchIn(trimmedSql) match {
-            case Some(m) => 
-              val sizeValue = m.group(1)
-              // Only throw NumberFormatException for non-numeric values like "invalid"
-              // Let negative numbers and other numeric values through to be validated in the command
-              try {
-                if (!sizeValue.matches("-?\\d+[MG]?")) {
-                  throw new NumberFormatException(s"Invalid target size format: $sizeValue")
-                }
-              } catch {
-                case _: NumberFormatException => throw new NumberFormatException(s"Invalid target size format: $sizeValue")
-              }
-            case None => // No TARGET SIZE found, continue with normal delegation
-          }
-        }
-        
-        // If ANTLR parsing fails completely, fall back to delegate parser
+        logger.debug(s"ANTLR parsing failed for '$sqlText': ${e.getClass.getSimpleName}: ${e.getMessage}")
+
+        // Only delegate to Spark for genuine parsing failures
         val preprocessedSql = preprocessIndexQueryOperators(sqlText)
         delegate.parsePlan(preprocessedSql)
     }

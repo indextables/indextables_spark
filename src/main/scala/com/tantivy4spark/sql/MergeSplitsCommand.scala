@@ -40,14 +40,16 @@ import scala.jdk.CollectionConverters._
  * SQL command to merge small split files into larger ones.
  * Modeled after Delta Lake's OPTIMIZE command structure and behavior.
  * 
- * Syntax: MERGE SPLITS ('/path/to/table' | table_name) [WHERE partition_predicates] 
- *         [TARGET SIZE target_size] [PRECOMMIT]
+ * Syntax: MERGE SPLITS ('/path/to/table' | table_name) [WHERE partition_predicates]
+ *         [TARGET SIZE target_size] [MAX GROUPS max_groups] [PRECOMMIT]
  * 
  * Examples:
  * - MERGE SPLITS '/path/to/table'
  * - MERGE SPLITS my_table WHERE partition_col = 'value'
  * - MERGE SPLITS my_table TARGET SIZE 5368709120  -- 5GB in bytes
  * - MERGE SPLITS '/path/to/table' WHERE year = 2023 TARGET SIZE 2147483648  -- 2GB
+ * - MERGE SPLITS my_table MAX GROUPS 5  -- Limit to 5 oldest merge groups
+ * - MERGE SPLITS '/path/to/table' TARGET SIZE 1G MAX GROUPS 3  -- 1GB target, max 3 groups
  * - MERGE SPLITS events PRECOMMIT  -- Pre-commit merge (framework complete, core implementation pending)
  * 
  * This command:
@@ -58,7 +60,8 @@ import scala.jdk.CollectionConverters._
  * 5. Does not merge splits already at target size
  * 6. Uses atomic REMOVE+ADD operations in transaction log
  * 7. Ensures queries after merge only read merged splits
- * 8. PRECOMMIT option: Merges splits during write process before transaction log commit
+ * 8. MAX GROUPS option: Limits merge operation to N oldest destination merge groups
+ * 9. PRECOMMIT option: Merges splits during write process before transaction log commit
  *    (eliminates small file problems at source - framework complete, core logic pending)
  */
 abstract class MergeSplitsCommandBase extends RunnableCommand {
@@ -90,6 +93,7 @@ case class MergeSplitsCommand(
     override val child: LogicalPlan,
     userPartitionPredicates: Seq[String],
     targetSize: Option[Long],
+    maxGroups: Option[Int],
     preCommitMerge: Boolean = false
 ) extends MergeSplitsCommandBase with UnaryNode {
 
@@ -154,6 +158,7 @@ case class MergeSplitsCommand(
         tablePath,
         userPartitionPredicates,
         actualTargetSize,
+        maxGroups,
         preCommitMerge
       ).merge()
     } finally {
@@ -200,10 +205,11 @@ object MergeSplitsCommand {
       tableIdentifier: Option[org.apache.spark.sql.catalyst.TableIdentifier],
       userPartitionPredicates: Seq[String],
       targetSize: Option[Long],
+      maxGroups: Option[Int],
       preCommitMerge: Boolean
   ): MergeSplitsCommand = {
     val plan = UnresolvedDeltaPathOrIdentifier(path, tableIdentifier, "MERGE SPLITS")
-    MergeSplitsCommand(plan, userPartitionPredicates, targetSize, preCommitMerge)
+    MergeSplitsCommand(plan, userPartitionPredicates, targetSize, maxGroups, preCommitMerge)
   }
 }
 
@@ -244,6 +250,7 @@ class MergeSplitsExecutor(
     tablePath: Path,
     partitionPredicates: Seq[String],
     targetSize: Long,
+    maxGroups: Option[Int],
     preCommitMerge: Boolean = false
 ) {
   
@@ -389,9 +396,31 @@ class MergeSplitsExecutor(
     }
 
     logger.info(s"Found ${mergeGroups.length} merge groups containing ${mergeGroups.map(_.files.length).sum} files")
-    
+
+    // Apply MAX GROUPS limit if specified
+    val limitedMergeGroups = maxGroups match {
+      case Some(maxLimit) if mergeGroups.length > maxLimit =>
+        logger.info(s"Limiting merge operation to $maxLimit oldest merge groups (out of ${mergeGroups.length} total)")
+
+        // Sort merge groups by the oldest file in each group to get the N oldest groups
+        val sortedGroups = mergeGroups.sortBy(_.files.map(_.modificationTime).min)
+        val limitedGroups = sortedGroups.take(maxLimit)
+
+        val limitedFilesCount = limitedGroups.map(_.files.length).sum
+        val totalFilesCount = mergeGroups.map(_.files.length).sum
+        logger.info(s"MAX GROUPS limit applied: processing $limitedFilesCount files from $maxLimit oldest groups (skipping ${totalFilesCount - limitedFilesCount} files from ${mergeGroups.length - maxLimit} newer groups)")
+
+        limitedGroups
+      case Some(maxLimit) =>
+        logger.info(s"MAX GROUPS limit of $maxLimit not reached (found ${mergeGroups.length} groups)")
+        mergeGroups
+      case None =>
+        logger.debug("No MAX GROUPS limit specified")
+        mergeGroups
+    }
+
     // Final safety check: ensure no single-file groups exist
-    val singleFileGroups = mergeGroups.filter(_.files.length < 2)
+    val singleFileGroups = limitedMergeGroups.filter(_.files.length < 2)
     if (singleFileGroups.nonEmpty) {
       logger.error(s"CRITICAL: Found ${singleFileGroups.length} single-file groups that should have been filtered out!")
       singleFileGroups.foreach { group =>
@@ -400,14 +429,14 @@ class MergeSplitsExecutor(
       throw new IllegalStateException(s"Internal error: Found ${singleFileGroups.length} single-file merge groups")
     }
 
-    if (mergeGroups.isEmpty) {
+    if (limitedMergeGroups.isEmpty) {
       logger.info("No splits require merging")
       return Seq(Row(tablePath.toString, "No splits merged - all splits are already optimal size"))
     }
 
     // Execute merges in parallel across Spark executors
-    println(s"🏗️  [DRIVER] Distributing ${mergeGroups.length} merge operations across Spark executors")
-    logger.info(s"Distributing ${mergeGroups.length} merge operations across Spark executors")
+    println(s"🏗️  [DRIVER] Distributing ${limitedMergeGroups.length} merge operations across Spark executors")
+    logger.info(s"Distributing ${limitedMergeGroups.length} merge operations across Spark executors")
     
     // Broadcast AWS configuration to executors
     val awsConfig = extractAwsConfig()
@@ -415,16 +444,16 @@ class MergeSplitsExecutor(
     val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
     
     // Set descriptive names for Spark UI
-    val totalSplits = mergeGroups.map(_.files.length).sum
-    val totalSizeGB = mergeGroups.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
+    val totalSplits = limitedMergeGroups.map(_.files.length).sum
+    val totalSizeGB = limitedMergeGroups.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
     val jobGroup = s"tantivy4spark-merge-splits"
-    val jobDescription = f"MERGE SPLITS: Consolidating $totalSplits splits (${totalSizeGB}%.2f GB) across ${mergeGroups.length} groups"
-    val stageName = f"Merge Splits: ${mergeGroups.length} groups, $totalSplits splits (${totalSizeGB}%.2f GB)"
+    val jobDescription = f"MERGE SPLITS: Consolidating $totalSplits splits (${totalSizeGB}%.2f GB) across ${limitedMergeGroups.length} groups"
+    val stageName = f"Merge Splits: ${limitedMergeGroups.length} groups, $totalSplits splits (${totalSizeGB}%.2f GB)"
     
     sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
     
     val physicalMergeResults = try {
-      val mergeGroupsRDD = sparkSession.sparkContext.parallelize(mergeGroups, mergeGroups.length)
+      val mergeGroupsRDD = sparkSession.sparkContext.parallelize(limitedMergeGroups, limitedMergeGroups.length)
         .setName(stageName)
       mergeGroupsRDD.map(group => MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value))
         .setName("Merge Split Results")

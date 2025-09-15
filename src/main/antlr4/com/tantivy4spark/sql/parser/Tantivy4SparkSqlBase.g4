@@ -42,22 +42,19 @@ singleStatement
     ;
 
 statement
-    : MERGE SPLITS (path=STRING | table=qualifiedName)
+    : MERGE SPLITS (path=STRING | table=qualifiedName)?
         (WHERE whereClause=predicateToken)?
-        (TARGET SIZE targetSize=sizeValue)?
+        (TARGET SIZE targetSize=alphanumericValue)?
+        (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
     | FLUSH TANTIVY4SPARK SEARCHER CACHE                        #flushTantivyCache
-    | INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE 
+    | INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateTantivyTransactionLogCache
     | .*?                                                       #passThrough
     ;
 
-sizeValue
-    : '-'? INTEGER_VALUE sizeSuffix?
-    ;
-
-sizeSuffix
-    : 'M' | 'G'
+alphanumericValue
+    : IDENTIFIER | INTEGER_VALUE | STRING
     ;
 
 predicateToken
@@ -79,7 +76,7 @@ quotedIdentifier
     ;
 
 nonReserved
-    : CACHE | SEARCHER | TANTIVY4SPARK | FOR | TRANSACTION | LOG
+    : CACHE | SEARCHER | TANTIVY4SPARK | FOR | TRANSACTION | LOG | MAX | GROUPS
     ;
 
 // Keywords (case-insensitive)
@@ -97,6 +94,8 @@ FOR: [Ff][Oo][Rr];
 TANTIVY4SPARK: [Tt][Aa][Nn][Tt][Ii][Vv][Yy]'4'[Ss][Pp][Aa][Rr][Kk];
 SEARCHER: [Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr];
 CACHE: [Cc][Aa][Cc][Hh][Ee];
+MAX: [Mm][Aa][Xx];
+GROUPS: [Gg][Rr][Oo][Uu][Pp][Ss];
 
 // Literals
 STRING

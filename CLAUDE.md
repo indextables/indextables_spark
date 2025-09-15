@@ -5,7 +5,7 @@
 ## Key Features
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
 - **Transaction log**: Delta Lake-style with atomic operations  
-- **Merge splits optimization**: SQL-based split consolidation with intelligent bin packing
+- **Merge splits optimization**: SQL-based split consolidation with intelligent bin packing and configurable limits
 - **Broadcast locality management**: Cluster-wide cache locality tracking for optimal task scheduling
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'` and `_indexall indexquery 'query'`)
 - **Optimized writes**: Automatic split sizing with adaptive shuffle
@@ -122,6 +122,8 @@ SELECT * FROM documents WHERE _indexall indexquery 'spark AND sql';
 
 -- Split optimization
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
+MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;          -- Limit to 10 merge groups
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5;  -- Both constraints
 ```
 
 ### Split Optimization
@@ -132,6 +134,12 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600")
 // Target sizes support unit suffixes (M for megabytes, G for gigabytes)
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
+
+// Limit the number of split groups created by a single command
+spark.sql("MERGE SPLITS 's3://bucket/path' MAX GROUPS 10")
+
+// Combine TARGET SIZE and MAX GROUPS for fine-grained control
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5")
 ```
 
 ## Schema Support
