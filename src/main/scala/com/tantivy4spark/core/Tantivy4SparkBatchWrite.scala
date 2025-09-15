@@ -73,8 +73,27 @@ class Tantivy4SparkBatchWrite(
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logger.info(s"Committing ${messages.length} writer messages")
     
-    // Initialize transaction log with schema if this is the first commit
-    transactionLog.initialize(writeInfo.schema())
+    // Extract partition columns from write options (same fix as StandardWrite)
+    val partitionColumns = Option(options.get("__partition_columns")) match {
+      case Some(partitionColumnsJson) =>
+        try {
+          import com.fasterxml.jackson.module.scala.DefaultScalaModule
+          import com.fasterxml.jackson.databind.ObjectMapper
+          val mapper = new ObjectMapper()
+          mapper.registerModule(DefaultScalaModule)
+          val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
+          logger.info(s"🔍 V2 BATCH DEBUG: Extracted partition columns: $partitionCols")
+          partitionCols
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to parse partition columns in BatchWrite: $partitionColumnsJson", e)
+            Seq.empty
+        }
+      case None => Seq.empty
+    }
+
+    // Initialize transaction log with schema and partition columns
+    transactionLog.initialize(writeInfo.schema(), partitionColumns)
     
     val addActions = messages.collect {
       case msg: Tantivy4SparkCommitMessage => msg.addAction

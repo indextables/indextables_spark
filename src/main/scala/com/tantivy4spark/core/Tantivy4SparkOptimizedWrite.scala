@@ -318,8 +318,27 @@ class Tantivy4SparkOptimizedWrite(
       saveMode
     }
     
-    // Initialize transaction log with schema if this is the first commit  
-    transactionLog.initialize(writeInfo.schema())
+    // Extract partition columns from write options (same fix as StandardWrite)
+    val partitionColumns = serializedOptions.get("__partition_columns") match {
+      case Some(partitionColumnsJson) =>
+        try {
+          import com.fasterxml.jackson.module.scala.DefaultScalaModule
+          import com.fasterxml.jackson.databind.ObjectMapper
+          val mapper = new ObjectMapper()
+          mapper.registerModule(DefaultScalaModule)
+          val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
+          logger.info(s"🔍 V2 OPTIMIZED DEBUG: Extracted partition columns: $partitionCols")
+          partitionCols
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to parse partition columns in OptimizedWrite: $partitionColumnsJson", e)
+            Seq.empty
+        }
+      case None => Seq.empty
+    }
+
+    // Initialize transaction log with schema and partition columns
+    transactionLog.initialize(writeInfo.schema(), partitionColumns)
 
     // Use appropriate transaction log method based on write mode
     val version = if (shouldOverwrite) {

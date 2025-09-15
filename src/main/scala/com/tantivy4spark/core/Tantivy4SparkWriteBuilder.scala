@@ -37,15 +37,13 @@ class Tantivy4SparkWriteBuilder(
   private var isOverwrite = false
 
   override def truncate(): WriteBuilder = {
-    println("🔍 DEBUG: Truncate mode enabled for write operation")
-    logger.warn("🔍 DEBUG: Truncate mode enabled for write operation")
+    logger.info("Truncate mode enabled for write operation")
     isOverwrite = true
     this
   }
 
   override def overwrite(filters: Array[org.apache.spark.sql.sources.Filter]): WriteBuilder = {
-    println(s"🔍 DEBUG: Overwrite mode enabled with ${filters.length} filters")
-    logger.warn(s"🔍 DEBUG: Overwrite mode enabled with ${filters.length} filters")
+    logger.info(s"Overwrite mode enabled with ${filters.length} filters")
     isOverwrite = true
     // For now, ignore filters and do full table overwrite
     // TODO: Implement filter-based overwrite (replaceWhere functionality)
@@ -56,13 +54,14 @@ class Tantivy4SparkWriteBuilder(
     logger.info(s"Building write for table at: $tablePath (overwrite mode: $isOverwrite)")
     
     // Serialize options to Map[String, String] to avoid CaseInsensitiveStringMap serialization issues
+    // Use the enhanced options that may contain partition information, not info.options()
     import scala.jdk.CollectionConverters._
-    val serializedOptions = info.options().entrySet().asScala.map { entry =>
+    val serializedOptions = options.entrySet().asScala.map { entry =>
       entry.getKey -> entry.getValue
     }.toMap
     
     // Check if optimized write is enabled
-    val tantivyOptions = Tantivy4SparkOptions(info.options())
+    val tantivyOptions = Tantivy4SparkOptions(options)
     val spark = org.apache.spark.sql.SparkSession.active
     
     // Check DataFrame write options first

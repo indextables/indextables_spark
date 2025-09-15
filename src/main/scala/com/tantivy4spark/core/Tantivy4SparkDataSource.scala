@@ -1093,7 +1093,8 @@ class Tantivy4SparkRelation(
 class Tantivy4SparkTable(
     path: String,
     schema: StructType,
-    options: CaseInsensitiveStringMap
+    options: CaseInsensitiveStringMap,
+    tablePartitioning: Array[Transform] = Array.empty
 ) extends SupportsRead with SupportsWrite with org.apache.spark.sql.connector.catalog.SupportsMetadataColumns {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkTable])
@@ -1253,7 +1254,83 @@ class Tantivy4SparkTable(
       logger.info(s"  ${entry.getKey} = $value")
     }
     
-    new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, options, hadoopConf)
+    // Inject partition information into write options for V2 compatibility
+    val enhancedOptions = if (tablePartitioning.nonEmpty) {
+      // Extract partition column names from Transform objects
+      val partitionColumnNames = tablePartitioning.map { transform =>
+        // For identity transforms, extract the column name
+        transform match {
+          case identityTransform =>
+            // Access the field reference and get the name
+            try {
+              // Use reflection to get the field reference from the identity transform
+              val field = identityTransform.getClass.getDeclaredField("ref")
+              field.setAccessible(true)
+              val fieldRef = field.get(identityTransform)
+              // Get the field names from the reference
+              val fieldNames = fieldRef.getClass.getDeclaredField("fieldNames")
+              fieldNames.setAccessible(true)
+              val names = fieldNames.get(fieldRef).asInstanceOf[Array[String]]
+              names.head // Take the first (and likely only) field name
+            } catch {
+              case _: Exception =>
+                // Fallback: try to extract from toString
+                val transformStr = transform.toString
+                if (transformStr.contains("identity(") && transformStr.contains(")")) {
+                  transformStr.substring(transformStr.indexOf("identity(") + 9, transformStr.lastIndexOf(")"))
+                } else {
+                  "unknown_column"
+                }
+            }
+        }
+      }
+
+      logger.info(s"V2 Write: Injecting partition columns into options: ${partitionColumnNames.mkString(", ")}")
+
+      // Create enhanced options with partition information
+      import scala.jdk.CollectionConverters._
+      val optionsMap = options.asScala.toMap
+
+      // Serialize partition columns as JSON array (same format as V1)
+      import com.fasterxml.jackson.databind.ObjectMapper
+      import com.fasterxml.jackson.module.scala.DefaultScalaModule
+      val mapper = new ObjectMapper()
+      mapper.registerModule(DefaultScalaModule)
+      val partitionColumnsJson = mapper.writeValueAsString(partitionColumnNames.toArray)
+
+      val enhancedOptionsMap = optionsMap + ("__partition_columns" -> partitionColumnsJson)
+      new org.apache.spark.sql.util.CaseInsensitiveStringMap(enhancedOptionsMap.asJava)
+    } else {
+      options
+    }
+
+    new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, hadoopConf)
+  }
+
+  override def partitioning(): Array[org.apache.spark.sql.connector.expressions.Transform] = {
+    if (tablePartitioning.nonEmpty) {
+      logger.info(s"Table partitioned by: ${tablePartitioning.mkString(", ")}")
+      tablePartitioning
+    } else {
+      // Fallback: try to read from transaction log if it exists
+      try {
+        val partitionColumns = transactionLog.getPartitionColumns()
+        if (partitionColumns.nonEmpty) {
+          logger.info(s"Table partitioned by (from transaction log): ${partitionColumns.mkString(", ")}")
+          // Convert partition column names to identity transforms
+          partitionColumns.map(col =>
+            org.apache.spark.sql.connector.expressions.Expressions.identity(col)
+          ).toArray
+        } else {
+          logger.info("Table is not partitioned")
+          Array.empty
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Could not read partition columns: ${e.getMessage}")
+          Array.empty
+      }
+    }
   }
 
 }
@@ -1374,7 +1451,7 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val mergedOptions = new CaseInsensitiveStringMap(mergedConfigMap.asJava)
 
     // Use the first path as the primary table path (support for multiple paths can be added later)
-    new Tantivy4SparkTable(paths.head, schema, mergedOptions)
+    new Tantivy4SparkTable(paths.head, schema, mergedOptions, partitioning)
   }
 
   override def supportsExternalMetadata(): Boolean = true

@@ -335,12 +335,30 @@ class MergeSplitsExecutor(
 
     // Get current metadata to understand partition schema
     val metadata = transactionLog.getMetadata()
-    val partitionSchema = StructType(metadata.partitionColumns.map(name => 
+
+    // DEBUG: Log the metadata details
+    println(s"🔍 MERGE DEBUG: Retrieved metadata from transaction log:")
+    println(s"🔍 MERGE DEBUG:   Metadata ID: ${metadata.id}")
+    println(s"🔍 MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
+    println(s"🔍 MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
+    println(s"🔍 MERGE DEBUG:   Configuration: ${metadata.configuration}")
+    logger.info(s"🔍 MERGE DEBUG: Retrieved metadata from transaction log:")
+    logger.info(s"🔍 MERGE DEBUG:   Metadata ID: ${metadata.id}")
+    logger.info(s"🔍 MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
+    logger.info(s"🔍 MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
+    logger.info(s"🔍 MERGE DEBUG:   Configuration: ${metadata.configuration}")
+
+    val partitionSchema = StructType(metadata.partitionColumns.map(name =>
       StructField(name, StringType, nullable = true)))
-      
+
+    println(s"🔍 MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
+    logger.info(s"🔍 MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
+
     // If no partition columns are defined in metadata, skip partition validation
     if (metadata.partitionColumns.isEmpty) {
       logger.info("No partition columns defined in metadata - treating table as non-partitioned")
+    } else {
+      logger.info(s"Found ${metadata.partitionColumns.size} partition columns: ${metadata.partitionColumns.mkString(", ")}")
     }
 
     // Get current files from transaction log (in order they were added)

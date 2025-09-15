@@ -54,12 +54,43 @@ class Tantivy4SparkStandardWrite(
     }
     props.toMap
   }
-  private val partitionColumns = try {
-    transactionLog.getPartitionColumns()
-  } catch {
-    case ex: Exception =>
-      logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
-      Seq.empty[String]
+  private val partitionColumns = {
+    // Extract partition columns from write options (set by .partitionBy())
+    // Spark sets this as a JSON array string like ["col1","col2"]
+    serializedOptions.get("__partition_columns") match {
+      case Some(partitionColumnsJson) =>
+        try {
+          // Parse JSON array to extract column names
+          import com.fasterxml.jackson.module.scala.DefaultScalaModule
+          import com.fasterxml.jackson.databind.ObjectMapper
+
+          val mapper = new ObjectMapper()
+          mapper.registerModule(DefaultScalaModule)
+          val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
+
+          println(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          logger.info(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          partitionCols
+        } catch {
+          case e: Exception =>
+            println(s"🔍 PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
+            logger.warn(s"Failed to parse partition columns from options: $partitionColumnsJson", e)
+            Seq.empty
+        }
+      case None =>
+        // Fallback: try to read from existing transaction log
+        try {
+          val cols = transactionLog.getPartitionColumns()
+          println(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          logger.info(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          cols
+        } catch {
+          case ex: Exception =>
+            println(s"🔍 PARTITION DEBUG: No partition columns found")
+            logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
+            Seq.empty[String]
+        }
+    }
   }
 
   override def toBatch: BatchWrite = this
