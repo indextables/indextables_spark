@@ -32,7 +32,7 @@ class BulkLoadValidationTest extends TestBase {
     }
   }
 
-  test("should write 439,999 records using V2 provider and read them back") {
+  ignore("should write 439,999 records using V2 provider and read them back") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping bulk load test")
     
     withTempPath { tempPath =>

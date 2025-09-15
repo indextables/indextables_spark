@@ -119,8 +119,8 @@ class Tantivy4SparkScanBuilder(
       case _: And => true
       case _: Or => true
       case _: Not => true
-      case _: StringStartsWith => true
-      case _: StringEndsWith => true
+      case _: StringStartsWith => false  // Reject pushdown, let Tantivy handle first pass, Spark final filter
+      case _: StringEndsWith => false   // Reject pushdown, let Tantivy handle first pass, Spark final filter
       case _: StringContains => true
       case _: IndexQueryFilter => true  // Add support for IndexQueryFilter
       case _: IndexQueryAllFilter => true  // Add support for IndexQueryAllFilter

@@ -30,12 +30,59 @@ Key settings with defaults:
 - `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
 
+## Field Indexing Configuration
+
+**New in v1.1**: Advanced field indexing configuration with support for string, text, and JSON field types.
+
+### Field Type Configuration
+- `spark.tantivy4spark.indexing.typemap.<field_name>`: Set field indexing type
+  - **`string`** (default): Exact string matching, not tokenized
+  - **`text`**: Full-text search with tokenization
+  - **`json`**: JSON field indexing with tokenization
+
+### Field Behavior Configuration
+- `spark.tantivy4spark.indexing.fastfields`: Comma-separated list of fields for fast access (e.g., `"id,score,timestamp"`)
+- `spark.tantivy4spark.indexing.storeonlyfields`: Fields stored but not indexed (e.g., `"metadata,description"`)
+- `spark.tantivy4spark.indexing.indexonlyfields`: Fields indexed but not stored (e.g., `"searchterms,keywords"`)
+
+### Tokenizer Configuration
+- `spark.tantivy4spark.indexing.tokenizer.<field_name>`: Custom tokenizer for text fields
+  - **`default`**: Standard tokenizer
+  - **`whitespace`**: Whitespace-only tokenization
+  - **`raw`**: No tokenization
+
+### Configuration Examples
+```scala
+// Configure field types and behavior
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.indexing.typemap.title", "string")        // Exact matching
+  .option("spark.tantivy4spark.indexing.typemap.content", "text")        // Full-text search
+  .option("spark.tantivy4spark.indexing.typemap.metadata", "json")       // JSON indexing
+  .option("spark.tantivy4spark.indexing.fastfields", "score,timestamp")  // Fast fields
+  .option("spark.tantivy4spark.indexing.storeonlyfields", "raw_data")     // Store only
+  .option("spark.tantivy4spark.indexing.tokenizer.content", "default")   // Custom tokenizer
+  .save("s3://bucket/path")
+```
+
+### Field Type Behavior
+- **String fields**: Exact matching, support all filter pushdown operations
+- **Text fields**: Tokenized search with AND logic for multiple terms
+- **JSON fields**: Tokenized JSON content search
+- **Configuration persistence**: Settings are automatically stored and validated on subsequent writes
+
 ## Usage Examples
 
 ### Write
 ```scala
-// Basic write
+// Basic write (string fields by default)
 df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// With field type configuration
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.indexing.typemap.title", "string")     // Exact matching
+  .option("spark.tantivy4spark.indexing.typemap.content", "text")     // Full-text search
+  .option("spark.tantivy4spark.indexing.fastfields", "score")         // Fast field access
+  .save("s3://bucket/path")
 
 // With custom configuration
 df.write.format("tantivy4spark")
@@ -47,6 +94,12 @@ df.write.format("tantivy4spark")
 ### Read & Search
 ```scala
 val df = spark.read.format("tantivy4spark").load("s3://bucket/path")
+
+// String field exact matching (default behavior)
+df.filter($"title" === "exact title").show()
+
+// Text field tokenized search (if configured as text type)
+df.filter($"content" === "machine learning").show()  // Matches docs with both "machine" AND "learning"
 
 // Standard DataFrame operations
 df.filter($"title".contains("Spark")).show()
@@ -113,6 +166,29 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
 3. `add4(append)` → visible: add3+add4
 4. `merge()` → consolidates add3+add4 into single split
 5. `add5(append)` → visible: merged(add3+add4)+add5
+
+## Breaking Changes & Migration
+
+### v1.1 Field Type Changes
+- **Default string field type changed from `text` to `string`** for exact matching behavior
+- **Existing tables**: Continue to work with their original field type configuration
+- **New tables**: Use `string` fields by default unless explicitly configured
+
+### Migration Guide
+```scala
+// Pre-v1.1 behavior (text fields by default)
+// No configuration needed - was automatic
+
+// v1.1+ equivalent behavior
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.indexing.typemap.content", "text")  // Explicit text type
+  .save("path")
+
+// v1.1+ recommended (new default)
+df.write.format("tantivy4spark")
+  // No configuration - defaults to string fields for exact matching
+  .save("path")
+```
 
 ## Important Notes
 - **tantivy4java integration**: Pure Java bindings, no Rust compilation needed

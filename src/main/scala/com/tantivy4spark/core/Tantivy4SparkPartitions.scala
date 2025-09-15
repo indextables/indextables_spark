@@ -329,13 +329,20 @@ class Tantivy4SparkPartitionReader(
         
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
+          // Create options map from broadcast config for field configuration
+          import scala.jdk.CollectionConverters._
+          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(broadcastConfig.value.asJava)
+
           val queryObj = if (splitFieldNames.nonEmpty) {
-            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
+            // Convert mixed filters, but we need to get just the Spark filters for the type-safe call
+            val sparkFilters = allFilters.collect { case f: org.apache.spark.sql.sources.Filter => f }
+            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(sparkFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast))
             logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None)
+            val sparkFilters = allFilters.collect { case f: org.apache.spark.sql.sources.Filter => f }
+            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(sparkFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
             logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }
@@ -612,7 +619,7 @@ class Tantivy4SparkDataWriter(
         logger.warn(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined) s"PRESENT (${originalDocMapping.get.length} chars)" else "MISSING/NULL"}")
         
         val docMapping = if (originalDocMapping.isDefined) {
-          logger.warn(s"🔍 docMappingJson content preview: ${originalDocMapping.get.take(200)}${if (originalDocMapping.get.length > 200) "..." else ""}")
+          logger.warn(s"🔍 docMappingJson FULL CONTENT: ${originalDocMapping.get}")
           originalDocMapping
         } else {
           // WORKAROUND: If tantivy4java didn't provide docMappingJson, create a minimal schema mapping

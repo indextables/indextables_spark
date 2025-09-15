@@ -183,7 +183,18 @@ class Tantivy4SparkScan(
 
     finalActions
   }
-  
+
+  // TODO: Fix options flow from read operations to scan for proper field type detection
+  // /**
+  //  * Check if a field is configured as a text field (tokenized) for data skipping purposes.
+  //  * Uses the indexing configuration to determine field type.
+  //  * Currently disabled due to options flow issues.
+  //  */
+  // private def isTextFieldForTokenization(fieldName: String): Boolean = {
+  //   // Implementation commented out - options don't flow correctly from read to scan
+  //   false
+  // }
+
   private def getFilterReferencedColumns(filter: Filter): Set[String] = {
     import org.apache.spark.sql.sources._
     filter match {
@@ -221,11 +232,15 @@ class Tantivy4SparkScan(
             (minVal, maxVal) match {
               case (Some(min), Some(max)) =>
                 val (convertedValue, convertedMin, convertedMax) = convertValuesForComparison(attribute, value, min, max)
+
+                // Simple lexicographic comparison: skip if value is outside [min, max] range
+                // EqualTo should always be exact equality regardless of field type
                 val shouldSkip = convertedValue.compareTo(convertedMin) < 0 || convertedValue.compareTo(convertedMax) > 0
+
                 logger.warn(s"🔍 DATA SKIPPING DEBUG: convertedValue=$convertedValue, convertedMin=$convertedMin, convertedMax=$convertedMax")
-                logger.warn(s"🔍 DATA SKIPPING DEBUG: shouldSkip=$shouldSkip")
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: Lexicographic comparison, shouldSkip=$shouldSkip")
                 shouldSkip
-              case _ => 
+              case _ =>
                 logger.warn(s"🔍 DATA SKIPPING DEBUG: No min/max values found, not skipping")
                 false
             }

@@ -47,7 +47,14 @@ object FiltersToQueryConverter {
    * Convert Spark filters to a tantivy4java SplitQuery object using the new API.
    */
   def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): SplitQuery = {
-    convertToSplitQuery(filters, splitSearchEngine, None)
+    convertToSplitQuery(filters, splitSearchEngine, None, None)
+  }
+
+  /**
+   * Convert Spark filters to a tantivy4java SplitQuery object with field configuration.
+   */
+  def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, options: org.apache.spark.sql.util.CaseInsensitiveStringMap): SplitQuery = {
+    convertToSplitQuery(filters, splitSearchEngine, None, Some(options))
   }
 
   /**
@@ -68,6 +75,13 @@ object FiltersToQueryConverter {
    * Convert Spark filters to a tantivy4java SplitQuery object with schema field validation.
    */
   def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): SplitQuery = {
+    convertToSplitQuery(filters, splitSearchEngine, schemaFieldNames, None)
+  }
+
+  /**
+   * Convert Spark filters to a tantivy4java SplitQuery object with schema field validation and field configuration.
+   */
+  def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]], options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]): SplitQuery = {
     if (filters.isEmpty) {
       return new SplitMatchAllQuery()  // Match-all query using object type
     }
@@ -97,7 +111,7 @@ object FiltersToQueryConverter {
 
     // Convert filters to SplitQuery objects using safe schema copy
     val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
-      validFilters.flatMap(filter => convertFilterToSplitQuery(filter, schema))
+      validFilters.flatMap(filter => convertFilterToSplitQuery(filter, schema, splitSearchEngine, options))
     }
     
     if (splitQueries.isEmpty) {
@@ -845,17 +859,29 @@ object FiltersToQueryConverter {
   /**
    * Convert a Spark Filter to a SplitQuery object.
    */
-  private def convertFilterToSplitQuery(filter: Filter, schema: Schema): Option[SplitQuery] = {
+  private def convertFilterToSplitQuery(filter: Filter, schema: Schema, splitSearchEngine: SplitSearchEngine, options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None): Option[SplitQuery] = {
     import org.apache.spark.sql.sources._
-    
+
     filter match {
       case EqualTo(attribute, value) =>
         val fieldType = getFieldType(schema, attribute)
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
-        Some(new SplitTermQuery(attribute, convertedValue.toString))
+
+        // EqualTo should always use exact matching regardless of field type
+        // For text fields, use phrase query syntax with quotes to ensure exact phrase matching
+        // For other fields, use term queries
+        if (fieldType == FieldType.TEXT) {
+          // Use parseQuery with quoted syntax for exact phrase matching on tokenized text fields
+          val quotedValue = "\"" + convertedValue.toString.replace("\"", "\\\"") + "\""
+          val queryString = s"$attribute:$quotedValue"
+          Some(splitSearchEngine.parseQuery(queryString))
+        } else {
+          // For string fields and other types, use exact term matching
+          Some(new SplitTermQuery(attribute, convertedValue.toString))
+        }
       
       case EqualNullSafe(attribute, value) if value != null =>
-        convertFilterToSplitQuery(EqualTo(attribute, value), schema)
+        convertFilterToSplitQuery(EqualTo(attribute, value), schema, splitSearchEngine, options)
       
       case In(attribute, values) if values.nonEmpty =>
         val fieldType = getFieldType(schema, attribute)
@@ -911,7 +937,7 @@ object FiltersToQueryConverter {
   private def convertMixedFilterToSplitQuery(filter: Any, splitSearchEngine: SplitSearchEngine, schema: Schema): Option[SplitQuery] = {
     filter match {
       case sparkFilter: Filter =>
-        convertFilterToSplitQuery(sparkFilter, schema)
+        convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine)
       
       case IndexQueryFilter(columnName, queryString) =>
         // Parse the custom IndexQuery using the split searcher
@@ -936,6 +962,67 @@ object FiltersToQueryConverter {
       case _ =>
         queryLog(s"Unsupported mixed filter type for SplitQuery conversion: $filter")
         None
+    }
+  }
+
+  /**
+   * Determine whether a field should use tokenized queries based on its indexing configuration.
+   * Uses the field type configuration to distinguish between exact (string) and tokenized (text) matching.
+   */
+  private def shouldUseTokenizedQuery(fieldName: String, options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]): Boolean = {
+    try {
+      options match {
+        case Some(opts) =>
+          val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(opts)
+          val fieldConfig = tantivyOptions.getFieldIndexingConfig(fieldName)
+
+          // According to tantivy4java team:
+          // - TEXT fields use "default" tokenizer (tokenized/split)
+          // - STRING fields use "raw" tokenizer (exact preservation)
+          val fieldType = fieldConfig.fieldType.getOrElse("string") // Default to string type
+
+          fieldType == "text" // Only use tokenized queries for "text" type fields
+        case None =>
+          // No options available - default to exact matching for backward compatibility
+          false
+      }
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to determine field configuration for '$fieldName', defaulting to exact matching: ${ex.getMessage}")
+        false // Default to exact matching on error
+    }
+  }
+
+  /**
+   * Create a tokenized text query for text fields.
+   * This tokenizes the input string and creates a boolean query where all tokens must be present.
+   */
+  private def createTokenizedTextQuery(fieldName: String, inputString: String, splitSearchEngine: SplitSearchEngine): Option[SplitQuery] = {
+    try {
+      // Use tantivy4java's tokenize method to tokenize the input string
+      import scala.jdk.CollectionConverters._
+      val tokens = splitSearchEngine.getSplitSearcher().tokenize(fieldName, inputString).asScala.toList
+
+      if (tokens.isEmpty) {
+        logger.warn(s"Tokenization of '$inputString' for field '$fieldName' resulted in no tokens")
+        Some(new SplitMatchAllQuery()) // Return match-all if no tokens
+      } else if (tokens.length == 1) {
+        // Single token - use a simple term query
+        Some(new SplitTermQuery(fieldName, tokens.head))
+      } else {
+        // Multiple tokens - create a boolean query where all tokens must be present (AND logic)
+        val boolQuery = new SplitBooleanQuery()
+        tokens.foreach { token =>
+          val termQuery = new SplitTermQuery(fieldName, token)
+          boolQuery.addMust(termQuery)
+        }
+        Some(boolQuery)
+      }
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to tokenize '$inputString' for field '$fieldName': ${ex.getMessage}", ex)
+        // Fall back to exact term matching if tokenization fails
+        Some(new SplitTermQuery(fieldName, inputString))
     }
   }
 }

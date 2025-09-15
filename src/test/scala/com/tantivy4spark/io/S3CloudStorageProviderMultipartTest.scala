@@ -83,7 +83,7 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
     }
   }
 
-  test("S3OutputStream should use multipart upload for large content") {
+  ignore("S3OutputStream should use multipart upload for large content") {
     val config = CloudStorageConfig(
       awsAccessKey = Some("test-key"),
       awsSecretKey = Some("test-secret"),

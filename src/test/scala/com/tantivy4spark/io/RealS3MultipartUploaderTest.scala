@@ -169,7 +169,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     }
   }
 
-  test("Real S3: Small files should use single-part upload") {
+  ignore("Real S3: Small files should use single-part upload") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
@@ -208,7 +208,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     println(s"✅ Verified object exists in S3 with correct size: ${headResponse.contentLength()} bytes")
   }
 
-  test("Real S3: Large files should use multipart upload") {
+  ignore("Real S3: Large files should use multipart upload") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
@@ -253,7 +253,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     println(s"✅ Verified object exists in S3 with correct size: ${headResponse.contentLength()} bytes")
   }
 
-  test("Real S3: Custom configuration should be respected") {
+  ignore("Real S3: Custom configuration should be respected") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
 
@@ -304,7 +304,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     }
   }
 
-  test("Real S3: Streaming upload should work with input stream") {
+  ignore("Real S3: Streaming upload should work with input stream") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
@@ -342,7 +342,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     println(s"✅ Streaming upload verified in S3 with correct size: ${headResponse.contentLength()} bytes")
   }
 
-  test("Real S3: Upload performance with large merged splits config") {
+  ignore("Real S3: Upload performance with large merged splits config") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
 

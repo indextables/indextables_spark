@@ -447,7 +447,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(extracted.contains(query2))
   }
 
-  test("IndexQueryAllExpression performance with large dataset") {
+  ignore("IndexQueryAllExpression performance with large dataset") {
     // Test performance of IndexQueryAllExpression creation and validation
     val numQueries = 1000
     

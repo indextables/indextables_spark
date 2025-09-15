@@ -50,41 +50,69 @@ object TantivyDirectInterface {
   }
   
   // Thread-safe schema creation to prevent "Field already exists in schema id" race conditions
-  private def createSchemaThreadSafe(sparkSchema: StructType): (com.tantivy4java.Schema, SchemaBuilder) = {
+  private def createSchemaThreadSafe(sparkSchema: StructType, options: org.apache.spark.sql.util.CaseInsensitiveStringMap): (com.tantivy4java.Schema, SchemaBuilder) = {
     schemaCreationLock.synchronized {
       logger.debug(s"Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
-      
+
       val builder = new SchemaBuilder()
-      
+      val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(options)
+
       sparkSchema.fields.foreach { field =>
         val fieldName = field.name
         val fieldType = field.dataType
-        
-        logger.debug(s"Adding field: $fieldName of type: $fieldType")
-        
+        val indexingConfig = tantivyOptions.getFieldIndexingConfig(fieldName)
+
+        logger.debug(s"Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
+
+        // Validate conflicting configurations
+        if (indexingConfig.isStoreOnly && indexingConfig.isIndexOnly) {
+          throw new IllegalArgumentException(s"Field $fieldName cannot be both store-only and index-only")
+        }
+
+        // Determine storage and indexing flags
+        val stored = !indexingConfig.isIndexOnly
+        val indexed = !indexingConfig.isStoreOnly
+        val fast = indexingConfig.isFast
+
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            builder.addTextField(fieldName, true, false, "default", "position")
+            // Use new field type configuration: default to "string" instead of "text"
+            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("string")
+
+            // Store-only fields: tantivy4java now properly supports store-only string fields
+            // after the "keyword" type bug was fixed in the schema conversion logic
+            fieldTypeOverride match {
+              case "string" =>
+                builder.addStringField(fieldName, stored, indexed, fast)
+              case "text" =>
+                  val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
+                  builder.addTextField(fieldName, stored, fast, tokenizer, "position")
+                case "json" =>
+                  val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
+                  builder.addJsonField(fieldName, stored, tokenizer, "position")
+              case other =>
+                throw new IllegalArgumentException(s"Unsupported field type override for field $fieldName: $other. Supported types: string, text, json")
+            }
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
-            builder.addIntegerField(fieldName, true, true, true)
+            builder.addIntegerField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
-            builder.addFloatField(fieldName, true, true, true)
+            builder.addFloatField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.BooleanType =>
-            builder.addBooleanField(fieldName, true, true, true)
+            builder.addBooleanField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.BinaryType =>
-            builder.addBytesField(fieldName, true, true, false, "position")
+            builder.addBytesField(fieldName, stored, indexed, fast, "position")
           case org.apache.spark.sql.types.TimestampType =>
-            builder.addIntegerField(fieldName, true, true, true) // Store as epoch millis
+            builder.addIntegerField(fieldName, stored, indexed, fast) // Store as epoch millis
           case org.apache.spark.sql.types.DateType =>
-            builder.addDateField(fieldName, true, true, true) // Use proper date field
+            builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
           case _ =>
             throw new UnsupportedOperationException(s"Unsupported field type for field $fieldName: $fieldType. Tantivy4Spark does not support complex types like arrays, maps, or structs.")
         }
       }
-      
+
       val tantivySchema = builder.build()
-      logger.debug(s"Successfully built schema with ${sparkSchema.fields.length} fields")
-      
+      logger.info(s"Successfully built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
+
       (tantivySchema, builder)
     }
   }
@@ -93,22 +121,114 @@ object TantivyDirectInterface {
 }
 
 class TantivyDirectInterface(
-    val schema: StructType, 
+    val schema: StructType,
     restoredIndexPath: Option[Path] = None,
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-    hadoopConf: org.apache.hadoop.conf.Configuration = new org.apache.hadoop.conf.Configuration()
+    hadoopConf: org.apache.hadoop.conf.Configuration = new org.apache.hadoop.conf.Configuration(),
+    existingDocMappingJson: Option[String] = None
 ) extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivyDirectInterface])
   
   // Initialize tantivy4java library only once
   TantivyDirectInterface.ensureInitialized()
+
+  // Validate indexing configuration against existing table if provided
+  if (existingDocMappingJson.isDefined) {
+    logger.warn(s"🔍 VALIDATION DEBUG: Running indexing configuration validation")
+    validateIndexingConfiguration(existingDocMappingJson.get)
+  } else {
+    logger.warn(s"🔍 VALIDATION DEBUG: Skipping validation - no existing doc mapping provided")
+  }
   
   // Keep schemaBuilder alive for the lifetime of this interface
   private var schemaBuilder: Option[SchemaBuilder] = None
   
   // Flag to prevent cleanup until split is created
   @volatile private var delayCleanup = false
-  
+
+  /**
+   * Validate that the current indexing configuration matches the existing table configuration.
+   * This prevents schema mismatches when writing to existing tables.
+   */
+  private def validateIndexingConfiguration(existingDocMapping: String): Unit = {
+    try {
+      import com.fasterxml.jackson.databind.JsonNode
+      import com.tantivy4spark.util.JsonUtil
+      import scala.jdk.CollectionConverters._
+
+      // Parse existing doc mapping JSON to extract field configurations
+      val existingMapping = JsonUtil.mapper.readTree(existingDocMapping)
+      val existingFields = Option(existingMapping.get("fields")).map(_.asInstanceOf[JsonNode])
+
+      if (existingFields.isEmpty) {
+        logger.warn("Existing docMappingJson does not contain 'fields' section - skipping validation")
+        return
+      }
+
+      val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(options)
+      val errors = scala.collection.mutable.ListBuffer[String]()
+
+      // For each field in the current schema, check if configuration matches existing
+      schema.fields.foreach { field =>
+        val fieldName = field.name
+        val currentConfig = tantivyOptions.getFieldIndexingConfig(fieldName)
+        val existingFieldConfig = Option(existingFields.get.get(fieldName))
+
+        if (existingFieldConfig.isDefined) {
+          val existing = existingFieldConfig.get
+          val existingType = Option(existing.get("type")).map(_.asText())
+          val existingIndexed = Option(existing.get("indexed")).exists(_.asBoolean())
+          val existingStored = Option(existing.get("stored")).exists(_.asBoolean())
+          val existingFast = Option(existing.get("fast")).exists(_.asBoolean())
+
+          // Check field type configuration
+          if (currentConfig.fieldType.isDefined) {
+            val expectedTantivyType = currentConfig.fieldType.get match {
+              case "string" => "text" // String fields map to text in tantivy
+              case "text" => "text"
+              case "json" => "json"
+              case other => other
+            }
+            if (existingType.contains(expectedTantivyType) == false) {
+              errors += s"Field '$fieldName' type mismatch: configured as '${currentConfig.fieldType.get}' but existing table has '${existingType.getOrElse("unknown")}'"
+            }
+          }
+
+          // Check storage/indexing configuration
+          val expectedStored = !currentConfig.isIndexOnly
+          val expectedIndexed = !currentConfig.isStoreOnly
+          if (existingStored != expectedStored) {
+            errors += s"Field '$fieldName' storage mismatch: configured stored=$expectedStored but existing table has stored=$existingStored"
+          }
+          if (existingIndexed != expectedIndexed) {
+            errors += s"Field '$fieldName' indexing mismatch: configured indexed=$expectedIndexed but existing table has indexed=$existingIndexed"
+          }
+
+          // Check fast fields configuration
+          if (currentConfig.isFast != existingFast) {
+            errors += s"Field '$fieldName' fast field mismatch: configured fast=${currentConfig.isFast} but existing table has fast=$existingFast"
+          }
+        }
+      }
+
+      if (errors.nonEmpty) {
+        val errorMessage = s"Indexing configuration mismatch with existing table:\n${errors.mkString("\n")}\n\n" +
+          "To fix this, either:\n" +
+          "1. Remove the conflicting indexing options to use the existing table configuration, or\n" +
+          "2. Create a new table with the desired indexing configuration"
+        throw new IllegalArgumentException(errorMessage)
+      }
+
+      logger.info("Indexing configuration validation passed - matches existing table configuration")
+
+    } catch {
+      case ex: IllegalArgumentException => throw ex // Re-throw validation errors
+      case ex: Exception =>
+        logger.warn(s"Failed to validate indexing configuration against existing table: ${ex.getMessage}", ex)
+        // Don't fail the operation for parsing errors - just log warning
+    }
+  }
+
   // Configuration resolution with proper hierarchy: options -> table props -> spark props -> defaults
   private def getConfigValue(key: String, defaultValue: String): String = {
     import com.tantivy4spark.config.Tantivy4SparkSQLConf._
@@ -196,7 +316,7 @@ class TantivyDirectInterface(
       logger.info(s"Creating new tantivy index at: ${tempDir.toAbsolutePath}")
       
       // Synchronize schema creation to prevent race conditions in field ID generation
-      val (tantivySchema, builder) = TantivyDirectInterface.createSchemaThreadSafe(schema)
+      val (tantivySchema, builder) = TantivyDirectInterface.createSchemaThreadSafe(schema, options)
       schemaBuilder = Some(builder)  // Store for cleanup later
       
       val idx = new Index(tantivySchema, tempDir.toAbsolutePath.toString, false)
@@ -555,6 +675,15 @@ class TantivyDirectInterface(
     }
   }
   
+  /**
+   * Get the field indexing configuration for a specific field.
+   * This is used by the query converter to determine whether to use tokenized or exact matching.
+   */
+  def getFieldIndexingConfig(fieldName: String): com.tantivy4spark.core.FieldIndexingConfig = {
+    val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(options)
+    tantivyOptions.getFieldIndexingConfig(fieldName)
+  }
+
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)

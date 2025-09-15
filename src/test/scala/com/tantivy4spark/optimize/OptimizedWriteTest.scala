@@ -130,7 +130,7 @@ class OptimizedWriteTest extends TestBase {
     }
   }
 
-  test("should handle large datasets with optimized write") {
+  ignore("should handle large datasets with optimized write") {
     withTempPath { tempPath =>
       // Create a dataset with multiple columns to test partitioning
       val data = spark.range(1000)

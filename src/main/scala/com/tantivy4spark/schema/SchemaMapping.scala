@@ -306,7 +306,58 @@ object SchemaMapping {
             case s: String => s.getBytes("UTF-8")
             case other => throw new IllegalArgumentException(s"Cannot convert $other to Binary")
           }
-          
+
+        // TEXT -> DateType (for tantivy4java addDateField that creates TEXT fields)
+        case (FieldType.TEXT, DateType) =>
+          rawValue match {
+            case ldt: java.time.LocalDateTime =>
+              // Convert LocalDateTime back to days since epoch for Spark DateType
+              val localDate = ldt.toLocalDate()
+              val epochDate = java.time.LocalDate.of(1970, 1, 1)
+              java.time.temporal.ChronoUnit.DAYS.between(epochDate, localDate).toInt
+            case ld: java.time.LocalDate =>
+              // Convert LocalDate back to days since epoch for Spark DateType
+              val epochDate = java.time.LocalDate.of(1970, 1, 1)
+              java.time.temporal.ChronoUnit.DAYS.between(epochDate, ld).toInt
+            case s: String =>
+              // Parse date string and convert to days since epoch
+              try {
+                val localDate = java.time.LocalDate.parse(s)
+                val epochDate = java.time.LocalDate.of(1970, 1, 1)
+                java.time.temporal.ChronoUnit.DAYS.between(epochDate, localDate).toInt
+              } catch {
+                case _: Exception => throw new IllegalArgumentException(s"Cannot parse date string: $s")
+              }
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Date from TEXT field")
+          }
+
+        // TEXT -> TimestampType (for tantivy4java addDateField that creates TEXT fields)
+        case (FieldType.TEXT, TimestampType) =>
+          rawValue match {
+            case ldt: java.time.LocalDateTime =>
+              // Convert LocalDateTime to microseconds since epoch
+              ldt.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+            case ld: java.time.LocalDate =>
+              // Convert LocalDate to microseconds since epoch (start of day)
+              ld.atStartOfDay(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+            case s: String =>
+              // Parse date/timestamp string and convert to microseconds since epoch
+              try {
+                if (s.contains("T")) {
+                  // Parse as LocalDateTime
+                  val localDateTime = java.time.LocalDateTime.parse(s)
+                  localDateTime.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+                } else {
+                  // Parse as LocalDate
+                  val localDate = java.time.LocalDate.parse(s)
+                  localDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+                }
+              } catch {
+                case _: Exception => throw new IllegalArgumentException(s"Cannot parse timestamp string: $s")
+              }
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp from TEXT field")
+          }
+
         // Unsupported conversion
         case (fromType, toType) =>
           throw new IllegalArgumentException(

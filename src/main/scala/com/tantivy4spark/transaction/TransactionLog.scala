@@ -61,7 +61,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   def initialize(schema: StructType): Unit = {
     initialize(schema, Seq.empty)
   }
-  
+
   def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = {
         if (!cloudProvider.exists(transactionLogPathStr)) {
           cloudProvider.createDirectory(transactionLogPathStr)
