@@ -27,8 +27,6 @@ import com.tantivy4spark.io.{ProtocolBasedIOFactory, CloudStorageProviderFactory
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
-import java.io.ByteArrayInputStream
-import scala.jdk.CollectionConverters._
 
 class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) extends AutoCloseable {
   
@@ -51,10 +49,15 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private val cacheExpirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
   private val cache = if (cacheEnabled) Some(new TransactionLogCache(cacheExpirationSeconds)) else None
 
+  // Checkpoint configuration and initialization
+  private val checkpointEnabled = options.getBoolean("spark.tantivy4spark.checkpoint.enabled", true)
+  private val checkpoint = if (checkpointEnabled) Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)) else None
+
   def getTablePath(): Path = tablePath
 
   override def close(): Unit = {
     cache.foreach(_.shutdown())
+    checkpoint.foreach(_.close())
     cloudProvider.close()
   }
 
@@ -157,19 +160,72 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
             logger.debug(s"Using cached files list: ${cachedFiles.length} files")
             cachedFiles
           case None =>
-            // Compute from transaction log
+            // Use optimized checkpoint + parallel retrieval approach
             val files = ListBuffer[AddAction]()
-            val versions = getVersions()
-            
-            for (version <- versions) {
-              val actions = readVersion(version)
-              actions.foreach {
-                case add: AddAction => files += add
-                case remove: RemoveAction => files --= files.filter(_.path == remove.path)
-                case _ => // Ignore other actions for file listing
-              }
+
+            // Try to get base state from checkpoint first
+            checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+              case Some(checkpointActions) =>
+                // Apply checkpoint actions first
+                checkpointActions.foreach {
+                  case add: AddAction => files += add
+                  case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                  case _ => // Ignore other actions for file listing
+                }
+
+                // Then apply incremental changes since checkpoint
+                val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+                val allVersions = getVersions()
+                val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
+
+                if (versionsAfterCheckpoint.nonEmpty) {
+                  logger.debug(s"Reading ${versionsAfterCheckpoint.length} versions after checkpoint $checkpointVersion in parallel")
+                  val parallelResults = checkpoint.get.readVersionsInParallel(versionsAfterCheckpoint)
+
+                  // Apply changes in version order
+                  for (version <- versionsAfterCheckpoint.sorted) {
+                    parallelResults.get(version).foreach { actions =>
+                      actions.foreach {
+                        case add: AddAction => files += add
+                        case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                        case _ => // Ignore other actions for file listing
+                      }
+                    }
+                  }
+                }
+              case None =>
+                // No checkpoint available - use parallel retrieval for all versions
+                val versions = getVersions()
+                if (versions.nonEmpty) {
+                  logger.debug(s"No checkpoint available, reading ${versions.length} versions in parallel")
+
+                  checkpoint match {
+                    case Some(cp) =>
+                      val parallelResults = cp.readVersionsInParallel(versions)
+                      // Apply changes in version order
+                      for (version <- versions.sorted) {
+                        parallelResults.get(version).foreach { actions =>
+                          actions.foreach {
+                            case add: AddAction => files += add
+                            case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                            case _ => // Ignore other actions for file listing
+                          }
+                        }
+                      }
+                    case None =>
+                      // Fallback to sequential reading (original behavior)
+                      for (version <- versions) {
+                        val actions = readVersion(version)
+                        actions.foreach {
+                          case add: AddAction => files += add
+                          case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                          case _ => // Ignore other actions for file listing
+                        }
+                      }
+                  }
+                }
             }
-            
+
             val result = files.toSeq
             // Cache the result
             cache.foreach(_.cacheFiles(result))
@@ -256,7 +312,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
-    
+
     val content = new StringBuilder()
     actions.foreach { action =>
       // Wrap actions in the appropriate delta log format
@@ -265,17 +321,69 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         case add: AddAction => Map("add" -> add)
         case remove: RemoveAction => Map("remove" -> remove)
       }
-      
+
       val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
       content.append(actionJson).append("\n")
     }
-    
+
     cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
-    
+
     // Invalidate caches after any write operation since the transaction log state has changed
     cache.foreach(_.invalidateVersionDependentCaches())
-    
+
     logger.info(s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
+
+    // Check if we should create a checkpoint
+    checkpoint.foreach { cp =>
+      if (cp.shouldCreateCheckpoint(version)) {
+        try {
+          // Get all current actions to create checkpoint
+          val allCurrentActions = getAllCurrentActions(version)
+          cp.createCheckpoint(version, allCurrentActions)
+
+          // Clean up old transaction log files after successful checkpoint
+          cp.cleanupOldVersions(version)
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to create checkpoint at version $version", e)
+            // Continue - checkpoint failure shouldn't fail the write operation
+        }
+      }
+    }
+  }
+
+  /**
+   * Get all current actions up to the specified version for checkpoint creation.
+   */
+  private def getAllCurrentActions(upToVersion: Long): Seq[Action] = {
+    val allActions = ListBuffer[Action]()
+    var latestMetadata: Option[MetadataAction] = None
+    val activeFiles = ListBuffer[AddAction]()
+
+    val versions = getVersions().filter(_ <= upToVersion)
+
+    // Process all versions to get the current state
+    for (version <- versions.sorted) {
+      val actions = readVersion(version)
+      actions.foreach {
+        case metadata: MetadataAction =>
+          latestMetadata = Some(metadata)
+        case add: AddAction =>
+          // Remove any existing file with the same path and add the new one
+          activeFiles --= activeFiles.filter(_.path == add.path)
+          activeFiles += add
+        case remove: RemoveAction =>
+          activeFiles --= activeFiles.filter(_.path == remove.path)
+      }
+    }
+
+    // Add metadata first
+    latestMetadata.foreach(allActions += _)
+
+    // Add all active files
+    allActions ++= activeFiles
+
+    allActions.toSeq
   }
 
   /**
@@ -328,7 +436,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     }
   }
 
-  private def readVersion(version: Long): Seq[Action] = {
+  def readVersion(version: Long): Seq[Action] = {
     // Check cache first
     cache.flatMap(_.getCachedVersion(version)) match {
       case Some(cachedActions) =>
@@ -376,7 +484,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
     }
   }
 
-  private def getVersions(): Seq[Long] = {
+  def getVersions(): Seq[Long] = {
     // Check cache first
     cache.flatMap(_.getCachedVersions()) match {
       case Some(cachedVersions) =>
@@ -393,6 +501,8 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
               path.getName
             }
             .filter(_.endsWith(".json"))
+            .filterNot(_.contains("checkpoint")) // Exclude checkpoint files
+            .filterNot(_.startsWith("_")) // Exclude metadata files like _last_checkpoint
             .map(_.replace(".json", "").toLong)
             .sorted
           
@@ -429,5 +539,12 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   def invalidateCache(): Unit = {
     cache.foreach(_.invalidateAll())
     logger.info("Transaction log cache invalidated manually")
+  }
+
+  /**
+   * Get the current checkpoint version for debugging.
+   */
+  def getLastCheckpointVersion(): Option[Long] = {
+    checkpoint.flatMap(_.getLastCheckpointVersion())
   }
 }

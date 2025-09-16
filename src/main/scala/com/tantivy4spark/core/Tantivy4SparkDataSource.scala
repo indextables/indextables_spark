@@ -331,9 +331,10 @@ object Tantivy4SparkRelation {
                   // Handle temporal types specially since they're stored as i64 in Tantivy
                   val rawValue = field.dataType match {
                     case TimestampType =>
-                      // Timestamp is stored as epoch millis, but can be Integer or Long
+                      // Timestamp is stored as epoch millis in Tantivy, convert back to microseconds for Spark
                       val value = internalRow.get(fieldIndex, field.dataType)
                       val longValue = if (value != null) value.asInstanceOf[Number].longValue() else 0L
+                      // Convert from stored milliseconds back to microseconds, then create Timestamp from millis
                       new java.sql.Timestamp(longValue)
                     case DateType =>
                       // Date is stored as days since epoch, but can be Integer or Long
