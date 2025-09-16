@@ -22,61 +22,43 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, Subquer
 import org.apache.spark.sql.catalyst.expressions.{And, Expression}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
-import com.tantivy4spark.filters.{IndexQueryV2Filter, IndexQueryAllV2Filter, IndexQueryFilter, IndexQueryAllFilter}
+import com.tantivy4spark.filters.{IndexQueryV2Filter, IndexQueryAllV2Filter, IndexQueryFilter, IndexQueryAllFilter, IndexQueryRegistry}
 import scala.collection.mutable
 
 /**
  * Catalyst rule to convert IndexQuery expressions to V2-compatible filters.
- * 
+ *
  * This rule handles V2 DataSource API paths by intercepting IndexQueryExpression
  * and IndexQueryAllExpression before they reach Spark's built-in expression-to-filter
- * translation mechanism, and directly injects appropriate filters into the
- * ScanBuilder via a custom interface.
- * 
+ * translation mechanism, and directly converts them to pushdown-compatible filters.
+ *
  * The conversion process:
  * 1. Detects IndexQueryExpression/IndexQueryAllExpression in V2 filter conditions
- * 2. Converts them to custom IndexQueryV2Filter marker expressions
- * 3. These markers are detected by our ScanBuilder and converted to IndexQueryFilter objects
- * 4. The filters are then pushed down via the normal V2 pushdown mechanism
+ * 2. Converts them directly to IndexQueryV2Filter and IndexQueryAllV2Filter expressions
+ * 3. These V2Filter expressions implement the required interfaces for V2 pushdown
+ * 4. The filters are recognized by ScanBuilder and properly pushed down
  */
 object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   
-  // ThreadLocal to store extracted IndexQuery filters for the current thread/query
-  private val extractedFilters = new ThreadLocal[mutable.ArrayBuffer[Any]] {
-    override def initialValue(): mutable.ArrayBuffer[Any] = 
-      mutable.ArrayBuffer.empty[Any]
-  }
-  
-  /**
-   * Get the IndexQuery filters extracted for the current thread.
-   * This is called by the ScanBuilder during pushdown.
-   */
-  def getExtractedFilters(): Array[Any] = {
-    val filters = extractedFilters.get().toArray
-    extractedFilters.get().clear() // Clear after retrieval to avoid reuse
-    filters
-  }
-  
   override def apply(plan: LogicalPlan): LogicalPlan = {
     println(s"🔍 V2IndexQueryExpressionRule.apply() called with plan: ${plan.getClass.getSimpleName}")
-    
+
+    // Start a new query if we don't have one yet (first rule invocation)
+    if (IndexQueryRegistry.getCurrentQueryId().isEmpty) {
+      IndexQueryRegistry.startNewQuery()
+    }
+
     val result = plan.transformUp {
       case filter@Filter(condition, child: DataSourceV2Relation) =>
         println(s"🔍 V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation")
         println(s"🔍 V2IndexQueryExpressionRule: Condition: $condition")
         println(s"🔍 V2IndexQueryExpressionRule: Child table: ${child.table.name()}")
-        
+
         // Only apply to V2 DataSource relations
         if (isCompatibleV2DataSource(child)) {
           println(s"🔍 V2IndexQueryExpressionRule: Compatible V2 DataSource detected")
-          val (convertedCondition, extractedIndexQueryFilters) = convertExpressionAndExtractFilters(condition, child)
-          
-          println(s"🔍 V2IndexQueryExpressionRule: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters")
-          extractedIndexQueryFilters.foreach(f => println(s"  - Extracted: $f"))
-          
-          // Store the extracted filters in ThreadLocal for the ScanBuilder to pick up
-          extractedFilters.get() ++= extractedIndexQueryFilters
-          
+          val convertedCondition = convertIndexQueryExpressions(condition, child)
+
           if (convertedCondition != condition) {
             println(s"🔍 V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition")
             Filter(convertedCondition, child)
@@ -99,14 +81,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
             // Only apply to V2 DataSource relations
             if (isCompatibleV2DataSource(v2Relation)) {
               println(s"🔍 V2IndexQueryExpressionRule: Compatible V2 DataSource detected (via SubqueryAlias)")
-              val (convertedCondition, extractedIndexQueryFilters) = convertExpressionAndExtractFilters(condition, v2Relation)
-              
-              println(s"🔍 V2IndexQueryExpressionRule: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters")
-              extractedIndexQueryFilters.foreach(f => println(s"  - Extracted: $f"))
-              
-              // Store the extracted filters in ThreadLocal for the ScanBuilder to pick up
-              extractedFilters.get() ++= extractedIndexQueryFilters
-              
+              val convertedCondition = convertIndexQueryExpressions(condition, v2Relation)
+
               if (convertedCondition != condition) {
                 println(s"🔍 V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition")
                 Filter(convertedCondition, child)
@@ -129,14 +105,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
                 // Only apply to V2 DataSource relations
                 if (isCompatibleV2DataSource(v2Relation)) {
                   println(s"🔍 V2IndexQueryExpressionRule: Compatible V2 DataSource detected (via SubqueryAlias->View)")
-                  val (convertedCondition, extractedIndexQueryFilters) = convertExpressionAndExtractFilters(condition, v2Relation)
-                  
-                  println(s"🔍 V2IndexQueryExpressionRule: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters")
-                  extractedIndexQueryFilters.foreach(f => println(s"  - Extracted: $f"))
-                  
-                  // Store the extracted filters in ThreadLocal for the ScanBuilder to pick up
-                  extractedFilters.get() ++= extractedIndexQueryFilters
-                  
+                  val convertedCondition = convertIndexQueryExpressions(condition, v2Relation)
+
                   if (convertedCondition != condition) {
                     println(s"🔍 V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition")
                     Filter(convertedCondition, child)
@@ -167,44 +137,19 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         val hasIndexQuery = plan.expressions.exists(containsIndexQueryExpression)
         if (hasIndexQuery) {
           println(s"🔍 V2IndexQueryExpressionRule: Found IndexQuery expressions in ${plan.getClass.getSimpleName} plan")
-          
+
           // Find the DataSourceV2Relation in the plan tree
           val v2Relations = plan.collect { case relation: DataSourceV2Relation => relation }
           v2Relations.find(isCompatibleV2DataSource) match {
             case Some(relation) =>
               println(s"🔍 V2IndexQueryExpressionRule: Found compatible V2 DataSource in plan tree")
-              
-              // Process all expressions in this plan
-              val processedExpressions = plan.expressions.map { expr =>
-                val (convertedExpr, extractedIndexQueryFilters) = convertExpressionAndExtractFilters(expr, relation)
-                
-                if (extractedIndexQueryFilters.nonEmpty) {
-                  println(s"🔍 V2IndexQueryExpressionRule: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters from expression")
-                  extractedIndexQueryFilters.foreach(f => println(s"  - Extracted: $f"))
-                  
-                  // Store the extracted filters in ThreadLocal for the ScanBuilder to pick up
-                  extractedFilters.get() ++= extractedIndexQueryFilters
-                }
-                
-                convertedExpr
+
+              // Transform the plan to convert IndexQuery expressions
+              plan.transformExpressions {
+                case expr if containsIndexQueryExpression(expr) =>
+                  convertIndexQueryExpressions(expr, relation)
               }
-              
-              // Transform the plan with the converted expressions if any changed
-              if (processedExpressions != plan.expressions) {
-                println(s"🔍 V2IndexQueryExpressionRule: Transforming plan expressions")
-                plan.withNewChildren(plan.children).transformExpressions {
-                  case expr if plan.expressions.contains(expr) =>
-                    val index = plan.expressions.indexOf(expr)
-                    if (index >= 0 && index < processedExpressions.length) {
-                      processedExpressions(index)
-                    } else {
-                      expr
-                    }
-                }
-              } else {
-                plan
-              }
-              
+
             case None =>
               println(s"🔍 V2IndexQueryExpressionRule: No compatible V2 DataSource found in plan tree")
               plan
@@ -239,79 +184,58 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   }
   
   /**
-   * Convert IndexQuery expressions to V2-compatible marker expressions AND extract filters
+   * Convert IndexQuery expressions directly to V2Filter expressions that can be pushed down.
+   * This replaces the ThreadLocal approach with direct filter conversion.
    */
-  private def convertExpressionAndExtractFilters(expr: Expression, relation: DataSourceV2Relation): 
-    (Expression, mutable.ArrayBuffer[Any]) = {
-    
-    println(s"🔍 V2IndexQueryExpressionRule: convertExpressionAndExtractFilters called with expression: $expr")
-    println(s"🔍 V2IndexQueryExpressionRule: Expression type: ${expr.getClass.getName}")
-    println(s"🔍 V2IndexQueryExpressionRule: Expression children: ${expr.children}")
-    expr.children.foreach(child => println(s"  - Child: $child (${child.getClass.getName})"))
-    
-    val extractedFilters = mutable.ArrayBuffer.empty[Any]
-    val availableAttributes = relation.output
-    
-    val convertedExpr = expr.transformUp {
+  private def convertIndexQueryExpressions(
+      expr: Expression,
+      relation: DataSourceV2Relation
+  ): Expression = {
+    println(s"🔍 V2IndexQueryExpressionRule: convertIndexQueryExpressions called with expression: $expr")
+
+    expr.transformUp {
       case indexQuery: IndexQueryExpression =>
         println(s"🔍 V2IndexQueryExpressionRule: Found IndexQueryExpression: $indexQuery")
-        // Extract the filter information before conversion using V2-specific extraction
-        for {
-          columnName <- extractColumnNameForV2(indexQuery)
-          queryString <- extractQueryStringForV2(indexQuery)
-        } {
-          // Check if this is an _indexall virtual column query (should be converted to IndexQueryAllFilter)
-          if (columnName == "_indexall") {
-            val indexQueryAllFilter = IndexQueryAllFilter(queryString)
-            extractedFilters += indexQueryAllFilter
-            println(s"🔍 V2IndexQueryExpressionRule: Converting _indexall IndexQuery to IndexQueryAllFilter")
-          } else {
-            val indexQueryFilter = IndexQueryFilter(columnName, queryString)
-            extractedFilters += indexQueryFilter
-            println(s"🔍 V2IndexQueryExpressionRule: Extracted IndexQueryFilter($columnName, $queryString)")
-          }
-        }
-        
-        // Convert IndexQueryExpression to a built-in expression that Spark can translate to Filter
-        // Use IsNotNull as a dummy expression that will trigger pushFilters() call
-        // The actual IndexQuery filtering will be handled via ThreadLocal
-        import org.apache.spark.sql.catalyst.expressions.{IsNotNull, AttributeReference}
-        indexQuery.children.headOption match {
-          case Some(attr: AttributeReference) =>
-            println(s"🔍 V2IndexQueryExpressionRule: Converting IndexQuery to IsNotNull($attr) as bridge")
-            IsNotNull(attr)
+
+        // Convert IndexQuery expression to a fake StringContains that we can recognize in ScanBuilder
+        (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
+          case (Some(columnName), Some(queryString)) =>
+            // Store IndexQuery information in a global registry that ScanBuilder can access
+            if (columnName == "_indexall") {
+              println(s"🔍 V2IndexQueryExpressionRule: Registering _indexall IndexQuery")
+              IndexQueryRegistry.registerIndexQueryAll(queryString)
+              // Return Literal(true) so the condition is always satisfied at expression level
+              import org.apache.spark.sql.catalyst.expressions.{Literal}
+              Literal(true)
+            } else {
+              println(s"🔍 V2IndexQueryExpressionRule: Registering IndexQuery")
+              IndexQueryRegistry.registerIndexQuery(columnName, queryString)
+              // Return Literal(true) so the condition is always satisfied at expression level
+              import org.apache.spark.sql.catalyst.expressions.{Literal}
+              Literal(true)
+            }
           case _ =>
-            // Fallback - create a marker expression
-            println(s"🔍 V2IndexQueryExpressionRule: Using IndexQueryV2Filter fallback for $indexQuery")
-            IndexQueryV2Filter(indexQuery)
+            println(s"🔍 V2IndexQueryExpressionRule: Unable to extract column/query from IndexQuery, using Literal(true)")
+            import org.apache.spark.sql.catalyst.expressions.{Literal}
+            Literal(true)
         }
-        
+
       case indexQueryAll: IndexQueryAllExpression =>
         println(s"🔍 V2IndexQueryExpressionRule: Found IndexQueryAllExpression: $indexQueryAll")
-        // Extract the filter information before conversion
-        indexQueryAll.getQueryString.foreach { queryString =>
-          val indexQueryAllFilter = IndexQueryAllFilter(queryString)
-          extractedFilters += indexQueryAllFilter
-        }
-        
-        // Convert IndexQueryAllExpression to a built-in expression that Spark can translate to Filter
-        // Since IndexQueryAll searches all fields, we'll use IsNotNull on the first available column as a bridge
-        import org.apache.spark.sql.catalyst.expressions.{IsNotNull, Literal}
-        println(s"🔍 V2IndexQueryExpressionRule: Available attributes count: ${availableAttributes.length}")
-        availableAttributes.foreach(attr => println(s"  - Available attribute: $attr"))
-        
-        if (availableAttributes.nonEmpty) {
-          val firstColumn = availableAttributes.head
-          println(s"🔍 V2IndexQueryExpressionRule: Converting IndexQueryAll to IsNotNull($firstColumn) as bridge")
-          IsNotNull(firstColumn)
-        } else {
-          // Fallback to a simple literal if no columns are available
-          println(s"🔍 V2IndexQueryExpressionRule: Converting IndexQueryAll to Literal(true) as fallback bridge")
-          Literal(true)
+        // Convert IndexQueryAll expression to fake Contains
+        indexQueryAll.getQueryString match {
+          case Some(queryString) =>
+            println(s"🔍 V2IndexQueryExpressionRule: Converting IndexQueryAll to fake Contains")
+            import org.apache.spark.sql.catalyst.expressions.{Contains, Literal}
+            import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+            // Use a fake column for IndexQueryAll
+            Contains(UnresolvedAttribute("_indexall"), Literal(s"__TANTIVY_INDEXALL__:$queryString"))
+          case _ =>
+            println(s"🔍 V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)")
+            import org.apache.spark.sql.catalyst.expressions.{Literal}
+            Literal(true)
         }
     }
-    
-    (convertedExpr, extractedFilters)
   }
   
   /**

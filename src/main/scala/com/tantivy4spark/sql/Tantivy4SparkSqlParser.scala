@@ -63,6 +63,14 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
             logger.debug("ANTLR didn't match any patterns, delegating to Spark parser")
             // ANTLR didn't match any of our patterns, delegate to Spark parser
             val preprocessedSql = preprocessIndexQueryOperators(sqlText)
+
+            // Debug: Log the SQL preprocessing
+            if (sqlText != preprocessedSql) {
+              println(s"🔍 SQL PARSER: Converting indexquery syntax")
+              println(s"🔍 SQL PARSER: Original: $sqlText")
+              println(s"🔍 SQL PARSER: Preprocessed: $preprocessedSql")
+            }
+
             delegate.parsePlan(preprocessedSql)
           case _ =>
             logger.debug(s"Unexpected result type: ${result.getClass.getName}, delegating to Spark parser")
@@ -201,30 +209,50 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
   }
   
   /**
-   * Preprocess SQL text to convert indexquery operators and indexqueryall functions 
-   * to function calls that Spark can parse. This allows us to inject our custom 
+   * Preprocess SQL text to convert indexquery operators and indexqueryall functions
+   * to function calls that Spark can parse. This allows us to inject our custom
    * expressions into the logical plan.
    */
   private def preprocessIndexQueryOperators(sqlText: String): String = {
+    logger.debug(s"Preprocessing SQL: $sqlText")
+
     // Pattern to match: column_name indexquery 'query_string'
-    val indexQueryPattern = """(\w+)\s+indexquery\s+'([^']*)'""".r
-    
-    // Pattern to match: indexqueryall('query_string')
-    val indexQueryAllPattern = """indexqueryall\s*\(\s*'([^']*)'\s*\)""".r
-    
-    // First replace indexquery operators
-    val afterIndexQuery = indexQueryPattern.replaceAllIn(sqlText, m => {
-      val columnName = m.group(1)
-      val queryString = m.group(2)
-      // Convert to a function call that we can intercept later
-      s"tantivy4spark_indexquery('$columnName', '$queryString')"
-    })
-    
-    // Then replace indexqueryall functions  
-    indexQueryAllPattern.replaceAllIn(afterIndexQuery, m => {
+    // Enhanced pattern to handle column names with backticks, dots, and complex expressions
+    val indexQueryPattern = """([`]?[\w.]+[`]?)\s+indexquery\s+'([^']*)'""".r
+
+    // Pattern to match: _indexall indexquery 'query_string' (special case for cross-field search)
+    val indexAllQueryPattern = """_indexall\s+indexquery\s+'([^']*)'""".r
+
+    // Pattern to match: indexqueryall('query_string') but NOT tantivy4spark_indexqueryall
+    val indexQueryAllPattern = """(?<!tantivy4spark_)indexqueryall\s*\(\s*'([^']*)'\s*\)""".r
+
+    // First handle _indexall special case
+    val afterIndexAll = indexAllQueryPattern.replaceAllIn(sqlText, m => {
       val queryString = m.group(1)
-      // Convert to a function call using the registered function name
+      logger.debug(s"Converting _indexall indexquery '$queryString' to function call")
       s"tantivy4spark_indexqueryall('$queryString')"
     })
+
+    // Then replace regular indexquery operators
+    val afterIndexQuery = indexQueryPattern.replaceAllIn(afterIndexAll, m => {
+      val columnName = m.group(1).replace("`", "") // Remove backticks for function call
+      val queryString = m.group(2)
+      logger.debug(s"Converting $columnName indexquery '$queryString' to function call")
+      s"tantivy4spark_indexquery('$columnName', '$queryString')"
+    })
+
+    // Finally replace remaining indexqueryall functions (but not ones we already converted)
+    // The negative lookbehind (?<!tantivy4spark_) prevents double conversion
+    val result = indexQueryAllPattern.replaceAllIn(afterIndexQuery, m => {
+      val queryString = m.group(1)
+      logger.debug(s"Converting indexqueryall('$queryString') to function call")
+      s"tantivy4spark_indexqueryall('$queryString')"
+    })
+
+    if (result != sqlText) {
+      logger.debug(s"Preprocessed SQL: $result")
+    }
+
+    result
   }
 }

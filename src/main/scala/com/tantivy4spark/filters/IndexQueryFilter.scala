@@ -18,19 +18,20 @@
 package com.tantivy4spark.filters
 
 import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.connector.expressions.filter.Predicate
 
 /**
  * Custom filter representing an indexquery operation for pushdown to Tantivy data source.
- * 
+ *
  * Since Filter is sealed in Spark, we create this as a wrapper that contains filter information.
  * The actual filter pushdown logic will pattern match on this type.
- * 
+ *
  * This filter encapsulates:
  * - The column name to query against
  * - The raw Tantivy query string to execute
- * 
+ *
  * Usage: IndexQueryFilter("title", "machine learning AND (spark OR hadoop)")
- * 
+ *
  * The query string follows Tantivy's query syntax:
  * - Boolean operations: AND, OR, NOT
  * - Phrase queries: "exact phrase"

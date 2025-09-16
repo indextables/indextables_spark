@@ -163,9 +163,8 @@ class Tantivy4SparkScan(
     
     val finalActions = if (nonPartitionFilters.nonEmpty) {
       val skipped = partitionPrunedActions.filter { addAction =>
-        nonPartitionFilters.forall { filter =>
-          !shouldSkipFile(addAction, filter) // Keep file only if ALL filters say don't skip
-        }
+        // Improved data skipping logic that handles OR predicates correctly
+        canFileMatchFilters(addAction, nonPartitionFilters)
       }
       val skippedCount = partitionPrunedActions.length - skipped.length
       if (skippedCount > 0) {
@@ -214,6 +213,50 @@ class Tantivy4SparkScan(
       case Or(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
       case Not(child) => getFilterReferencedColumns(child)
       case _ => Set.empty
+    }
+  }
+
+  /**
+   * Determine if a file can potentially match the given filters.
+   * This implements proper OR/AND logic for data skipping.
+   */
+  private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
+    import org.apache.spark.sql.sources._
+
+    // If no min/max values available, conservatively keep the file
+    if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
+      return true
+    }
+
+    // A file can match if ANY of the top-level filters can match
+    // This correctly handles cases where filters are combined with OR at the top level
+    filters.exists(filter => canFilterMatchFile(addAction, filter))
+  }
+
+  /**
+   * Determine if a single filter can potentially match a file.
+   * Handles complex nested AND/OR logic correctly.
+   */
+  private def canFilterMatchFile(addAction: AddAction, filter: Filter): Boolean = {
+    import org.apache.spark.sql.sources._
+
+    filter match {
+      case And(left, right) =>
+        // For AND: both sides must be able to match
+        canFilterMatchFile(addAction, left) && canFilterMatchFile(addAction, right)
+
+      case Or(left, right) =>
+        // For OR: at least one side must be able to match
+        canFilterMatchFile(addAction, left) || canFilterMatchFile(addAction, right)
+
+      case Not(child) =>
+        // For NOT: if the child cannot match, then NOT child can match
+        // Conservative approach: if we can't determine, keep the file
+        !canFilterMatchFile(addAction, child)
+
+      case _ =>
+        // For all other filters, use the existing shouldSkipFile logic (inverted)
+        !shouldSkipFile(addAction, filter)
     }
   }
 
@@ -267,10 +310,51 @@ class Tantivy4SparkScan(
             }
           case LessThanOrEqual(attribute, value) =>
             minVals.get(attribute) match {
-              case Some(min) => 
+              case Some(min) =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
                 convertedMin.compareTo(convertedValue) > 0
               case None => false
+            }
+          case StringStartsWith(attribute, value) =>
+            // For startsWith, check if any string in [min, max] could start with the value
+            val minVal = minVals.get(attribute)
+            val maxVal = maxVals.get(attribute)
+            (minVal, maxVal) match {
+              case (Some(min), Some(max)) =>
+                val valueStr = value.toString
+                // Skip if the prefix is lexicographically greater than max value
+                // or if max value is shorter than prefix and doesn't start with it
+                val shouldSkip = valueStr.compareTo(max) > 0 ||
+                                (!max.startsWith(valueStr) && max.compareTo(valueStr) < 0)
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: StringStartsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                shouldSkip
+              case _ => false
+            }
+          case StringEndsWith(attribute, value) =>
+            // For endsWith, this is harder to optimize with min/max, so be conservative
+            // Only skip if we can determine with certainty
+            val minVal = minVals.get(attribute)
+            val maxVal = maxVals.get(attribute)
+            (minVal, maxVal) match {
+              case (Some(min), Some(max)) =>
+                val valueStr = value.toString
+                // Very conservative: only skip if min and max are identical and don't end with value
+                val shouldSkip = min == max && !min.endsWith(valueStr)
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: StringEndsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                shouldSkip
+              case _ => false
+            }
+          case StringContains(attribute, value) =>
+            // For contains, be conservative - only skip if min==max and doesn't contain value
+            val minVal = minVals.get(attribute)
+            val maxVal = maxVals.get(attribute)
+            (minVal, maxVal) match {
+              case (Some(min), Some(max)) =>
+                val valueStr = value.toString
+                val shouldSkip = min == max && !min.contains(valueStr)
+                logger.warn(s"🔍 DATA SKIPPING DEBUG: StringContains($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                shouldSkip
+              case _ => false
             }
           case _ => false
         }

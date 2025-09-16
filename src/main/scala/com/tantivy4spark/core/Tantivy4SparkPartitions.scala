@@ -320,12 +320,12 @@ class Tantivy4SparkPartitionReader(
         // Log the filters and limit for debugging
         logger.info(s"Pushdown configuration for ${addAction.path}:")
         logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
-        logger.info(s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}")
+        logger.error(s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}")
         logger.info(s"  - Limit: $effectiveLimit")
         
         // Combine regular Spark filters with IndexQuery filters
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.info(s"  - Combined Filters: ${allFilters.length} total filters")
+        logger.error(s"  - Combined Filters: ${allFilters.length} total filters")
         
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
@@ -334,15 +334,13 @@ class Tantivy4SparkPartitionReader(
           val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(broadcastConfig.value.asJava)
 
           val queryObj = if (splitFieldNames.nonEmpty) {
-            // Convert mixed filters, but we need to get just the Spark filters for the type-safe call
-            val sparkFilters = allFilters.collect { case f: org.apache.spark.sql.sources.Filter => f }
-            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(sparkFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast))
+            // Use mixed filter converter to handle both Spark filters and IndexQuery filters
+            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
             logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val sparkFilters = allFilters.collect { case f: org.apache.spark.sql.sources.Filter => f }
-            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(sparkFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
+            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None)
             logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }

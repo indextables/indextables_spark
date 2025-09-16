@@ -19,14 +19,14 @@ package com.tantivy4spark.filters
 
 /**
  * Custom filter for IndexQueryAll pushdown operations.
- * 
+ *
  * This filter represents a query that should search across all fields in a Tantivy index
  * without requiring explicit column specification. It's designed to be pushed down to
  * the native Tantivy search engine for optimal performance.
- * 
+ *
  * Note: This does not extend Spark's sealed Filter class to avoid inheritance restrictions.
  * Instead, it provides the necessary methods for integration with the pushdown system.
- * 
+ *
  * @param queryString The Tantivy query string to search across all fields
  */
 case class IndexQueryAllFilter(queryString: String) {

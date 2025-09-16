@@ -193,6 +193,24 @@ class SplitSearchEngine private(
   }
 
   /**
+   * Parse a query string with field-specific search using the enhanced SplitSearcher API.
+   * This constrains the search to the specified field using the new parseQuery methods.
+   */
+  def parseQuery(queryString: String, fieldName: String): SplitQuery = {
+    // Use the enhanced SplitSearcher parseQuery method with single field
+    splitSearcher.parseQuery(queryString, fieldName)
+  }
+
+  /**
+   * Parse a query string with multi-field search using the enhanced SplitSearcher API.
+   * This constrains the search to the specified fields using the new parseQuery methods.
+   */
+  def parseQuery(queryString: String, fieldNames: java.util.List[String]): SplitQuery = {
+    // Use the enhanced SplitSearcher parseQuery method with multiple fields
+    splitSearcher.parseQuery(queryString, fieldNames)
+  }
+
+  /**
    * Search using a query string. The string will be parsed into a SplitQuery.
    */
   def searchByString(queryString: String, limit: Int = 10): Array[InternalRow] = {

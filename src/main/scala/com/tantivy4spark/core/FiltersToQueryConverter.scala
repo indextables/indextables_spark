@@ -900,21 +900,132 @@ object FiltersToQueryConverter {
       
       // For complex operations like range queries, wildcard queries, etc., fall back to string parsing
       case GreaterThan(attribute, value) =>
-        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
-        // For now, use string parsing for complex queries - can be enhanced with SplitRangeQuery later
-        None // Will fall back to legacy Query conversion or string parsing
+        val fieldType = getFieldType(schema, attribute)
+        val convertedValue = convertSparkValueToTantivy(value, fieldType)
+
+        // Use SplitRangeQuery for range operations
+        val tantivyFieldType = fieldType match {
+          case FieldType.INTEGER => "i64"
+          case FieldType.FLOAT => "f64"
+          case FieldType.DATE => "date"
+          case _ =>
+            queryLog(s"Unsupported field type for range query: $fieldType")
+            return None
+        }
+
+        // Use query string parsing for range queries - parseQuery can handle range syntax
+        try {
+          val queryString = s"$attribute:>$convertedValue"
+          queryLog(s"Creating GreaterThan query using parseQuery: $queryString")
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create range query using parseQuery for GreaterThan: ${e.getMessage}")
+            None // Fall back completely if parsing fails
+        }
       
       case GreaterThanOrEqual(attribute, value) =>
-        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
-        None // Will fall back to legacy Query conversion
+        val fieldType = getFieldType(schema, attribute)
+        val convertedValue = convertSparkValueToTantivy(value, fieldType)
+
+        // Use SplitRangeQuery for range operations
+        val tantivyFieldType = fieldType match {
+          case FieldType.INTEGER => "i64"
+          case FieldType.FLOAT => "f64"
+          case FieldType.DATE => "date"
+          case _ =>
+            queryLog(s"Unsupported field type for range query: $fieldType")
+            return None
+        }
+
+        // Use query string parsing for range queries - parseQuery can handle range syntax
+        try {
+          val queryString = s"$attribute:>=$convertedValue"
+          queryLog(s"Creating GreaterThanOrEqual query using parseQuery: $queryString")
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create range query using parseQuery for GreaterThanOrEqual: ${e.getMessage}")
+            None // Fall back completely if parsing fails
+        }
       
       case LessThan(attribute, value) =>
-        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
-        None // Will fall back to legacy Query conversion
+        val fieldType = getFieldType(schema, attribute)
+        val convertedValue = convertSparkValueToTantivy(value, fieldType)
+
+        // Check if field is configured as a fast field - range queries only work on fast fields
+        val isFastField = options.map { opts =>
+          Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+            .map(_.split(",").map(_.trim).contains(attribute))
+            .getOrElse(false)
+        }.getOrElse(false)
+
+        if (!isFastField) {
+          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          return None
+        }
+
+        // Use SplitRangeQuery for range operations
+        val tantivyFieldType = fieldType match {
+          case FieldType.INTEGER => "i64"
+          case FieldType.FLOAT => "f64"
+          case FieldType.DATE => "date"
+          case _ =>
+            queryLog(s"Unsupported field type for range query: $fieldType")
+            return None
+        }
+
+        // Use query string parsing for range queries - parseQuery can handle range syntax
+        try {
+          val queryString = s"$attribute:<$convertedValue"
+          queryLog(s"Creating LessThan query using parseQuery: $queryString")
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create range query using parseQuery for LessThan: ${e.getMessage}")
+            None // Fall back completely if parsing fails
+        }
       
       case LessThanOrEqual(attribute, value) =>
-        val convertedValue = convertSparkValueToTantivy(value, getFieldType(schema, attribute))
-        None // Will fall back to legacy Query conversion
+        val fieldType = getFieldType(schema, attribute)
+        val convertedValue = convertSparkValueToTantivy(value, fieldType)
+
+        // Check if field is configured as a fast field - range queries only work on fast fields
+        val isFastField = options.map { opts =>
+          Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+            .map(_.split(",").map(_.trim).contains(attribute))
+            .getOrElse(false)
+        }.getOrElse(false)
+
+        if (!isFastField) {
+          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          return None
+        }
+
+        // Use SplitRangeQuery for range operations
+        val tantivyFieldType = fieldType match {
+          case FieldType.INTEGER => "i64"
+          case FieldType.FLOAT => "f64"
+          case FieldType.DATE => "date"
+          case _ =>
+            queryLog(s"Unsupported field type for range query: $fieldType")
+            return None
+        }
+
+        // Use query string parsing for range queries - parseQuery can handle range syntax
+        try {
+          val queryString = s"$attribute:<=$convertedValue"
+          queryLog(s"Creating LessThanOrEqual query using parseQuery: $queryString")
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create range query using parseQuery for LessThanOrEqual: ${e.getMessage}")
+            None // Fall back completely if parsing fails
+        }
       
       case StringStartsWith(attribute, value) =>
         None // Will fall back to string parsing for wildcard queries
@@ -924,7 +1035,51 @@ object FiltersToQueryConverter {
       
       case StringContains(attribute, value) =>
         None // Will fall back to string parsing for wildcard queries
-      
+
+      case And(left, right) =>
+        // Handle AND by combining both sides with MUST logic
+        val leftQuery = convertFilterToSplitQuery(left, schema, splitSearchEngine, options)
+        val rightQuery = convertFilterToSplitQuery(right, schema, splitSearchEngine, options)
+
+        (leftQuery, rightQuery) match {
+          case (Some(lq), Some(rq)) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addMust(lq)
+            boolQuery.addMust(rq)
+            Some(boolQuery)
+          case _ =>
+            None // Fall back to Query conversion if either side can't be converted
+        }
+
+      case Or(left, right) =>
+        // Handle OR by combining both sides with SHOULD logic
+        val leftQuery = convertFilterToSplitQuery(left, schema, splitSearchEngine, options)
+        val rightQuery = convertFilterToSplitQuery(right, schema, splitSearchEngine, options)
+
+        (leftQuery, rightQuery) match {
+          case (Some(lq), Some(rq)) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addShould(lq)
+            boolQuery.addShould(rq)
+            Some(boolQuery)
+          case _ =>
+            None // Fall back to Query conversion if either side can't be converted
+        }
+
+      case Not(child) =>
+        // Handle NOT by using MUST_NOT logic with match-all
+        val childQuery = convertFilterToSplitQuery(child, schema, splitSearchEngine, options)
+
+        childQuery match {
+          case Some(cq) =>
+            val boolQuery = new SplitBooleanQuery()
+            boolQuery.addMust(new SplitMatchAllQuery()) // Must match all documents
+            boolQuery.addMustNot(cq) // But must not match the child condition
+            Some(boolQuery)
+          case None =>
+            None // Fall back to Query conversion if child can't be converted
+        }
+
       case _ =>
         queryLog(s"Unsupported filter type for SplitQuery conversion: $filter")
         None
@@ -940,12 +1095,11 @@ object FiltersToQueryConverter {
         convertFilterToSplitQuery(sparkFilter, schema, splitSearchEngine)
       
       case IndexQueryFilter(columnName, queryString) =>
-        // Parse the custom IndexQuery using the split searcher
-        // Pass through the user's query exactly as provided - no modifications
+        // Parse the custom IndexQuery using the split searcher with field-specific parsing
         queryLog(s"Converting IndexQueryFilter to SplitQuery: field='$columnName', query='$queryString'")
-        queryLog(s"SplitQuery passthrough syntax: '$queryString'")
         try {
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          // Use the field-specific parseQuery method that takes field names list
+          val parsedQuery = splitSearchEngine.parseQuery(queryString, columnName)
           queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
           Some(parsedQuery)
         } catch {
@@ -958,7 +1112,35 @@ object FiltersToQueryConverter {
       case IndexQueryAllFilter(queryString) =>
         // Parse the custom IndexQueryAll using the split searcher
         Some(splitSearchEngine.parseQuery(queryString))
-      
+
+      case indexQueryV2: com.tantivy4spark.filters.IndexQueryV2Filter =>
+        // Handle V2 IndexQuery expressions from temp views
+        queryLog(s"Converting IndexQueryV2Filter to SplitQuery: field='${indexQueryV2.columnName}', query='${indexQueryV2.queryString}'")
+        try {
+          // Use the field-specific parseQuery method that takes field names list
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryV2.queryString, indexQueryV2.columnName)
+          queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
+            // Return None to fall back to legacy Query API
+            None
+        }
+
+      case indexQueryAllV2: com.tantivy4spark.filters.IndexQueryAllV2Filter =>
+        // Handle V2 IndexQueryAll expressions from temp views
+        queryLog(s"Converting IndexQueryAllV2Filter to SplitQuery: query='${indexQueryAllV2.queryString}'")
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(indexQueryAllV2.queryString)
+          queryLog(s"SplitQuery parsing result: ${parsedQuery.getClass.getSimpleName}")
+          Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"SplitQuery parsing failed: ${e.getMessage}")
+            None
+        }
+
       case _ =>
         queryLog(s"Unsupported mixed filter type for SplitQuery conversion: $filter")
         None
