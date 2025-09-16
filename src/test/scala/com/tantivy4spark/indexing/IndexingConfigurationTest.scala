@@ -68,6 +68,8 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Partial phrase search with === should return no results (exact matching)
       val partialResults = df.filter(df("content") === "machine learning").collect()
+      println(s"🔍 DEBUG: Partial results for 'machine learning': ${partialResults.length}")
+      partialResults.foreach(row => println(s"  - Found: ${row.getString(0)} -> '${row.getString(1)}'"))
       partialResults should have length 0
     }
   }

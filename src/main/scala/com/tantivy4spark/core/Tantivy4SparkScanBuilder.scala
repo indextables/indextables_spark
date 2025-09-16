@@ -125,8 +125,8 @@ class Tantivy4SparkScanBuilder(
     import org.apache.spark.sql.sources._
 
     filter match {
-      case _: EqualTo => true
-      case _: EqualNullSafe => true
+      case EqualTo(attribute, _) => isFieldSuitableForExactMatching(attribute)
+      case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
       case _: GreaterThan => false  // Range queries require fast fields - defer to Spark
       case _: GreaterThanOrEqual => false  // Range queries require fast fields - defer to Spark
       case _: LessThan => false  // Range queries require fast fields - defer to Spark
@@ -151,6 +151,34 @@ class Tantivy4SparkScanBuilder(
 
     // TODO: Implement proper predicate type checking based on Spark's V2 Predicate types
     true  // Accept all for now to see what comes through
+  }
+
+  /**
+   * Check if a field is suitable for exact matching at the data source level.
+   * String fields (raw tokenizer) support exact matching.
+   * Text fields (default tokenizer) should be filtered by Spark for exact matches.
+   */
+  private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
+    // Check the field type configuration from broadcast options
+    val broadcastConfigMap = broadcastConfig.value
+    val fieldTypeKey = s"spark.tantivy4spark.indexing.typemap.$attribute"
+    val fieldType = broadcastConfigMap.get(fieldTypeKey)
+
+    fieldType match {
+      case Some("string") =>
+        logger.info(s"🔍 Field '$attribute' configured as 'string' - supporting exact matching")
+        true
+      case Some("text") =>
+        logger.info(s"🔍 Field '$attribute' configured as 'text' - deferring exact matching to Spark")
+        false
+      case Some(other) =>
+        logger.info(s"🔍 Field '$attribute' configured as '$other' - supporting exact matching")
+        true
+      case None =>
+        // No explicit configuration - assume string type (new default)
+        logger.info(s"🔍 Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
+        true
+    }
   }
 
 

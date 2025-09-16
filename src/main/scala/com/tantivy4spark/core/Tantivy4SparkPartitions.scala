@@ -318,10 +318,10 @@ class Tantivy4SparkPartitionReader(
         }
         
         // Log the filters and limit for debugging
-        logger.info(s"Pushdown configuration for ${addAction.path}:")
-        logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
+        logger.error(s"🔍 PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
+        logger.error(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
         logger.error(s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}")
-        logger.info(s"  - Limit: $effectiveLimit")
+        logger.error(s"  - Limit: $effectiveLimit")
         
         // Combine regular Spark filters with IndexQuery filters
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
