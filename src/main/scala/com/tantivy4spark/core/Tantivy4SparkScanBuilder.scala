@@ -24,7 +24,6 @@ import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import scala.collection.mutable
 import com.tantivy4spark.transaction.TransactionLog
 import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
@@ -44,48 +43,37 @@ class Tantivy4SparkScanBuilder(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters = Array.empty[Filter]
-  // Store IndexQuery filters separately since they don't extend Filter
-  private var _pushedIndexQueryFilters = Array.empty[Any]
   private var requiredSchema = schema
   private var _limit: Option[Int] = None
 
-  // Check for IndexQuery information stored in session state during initialization
-  checkForIndexQueryInContext()
+  // Generate instance key for this ScanBuilder to retrieve IndexQueries
+  private val instanceKey = {
+    val tablePath = transactionLog.getTablePath().toString
+    val executionId = Option(sparkSession.sparkContext.getLocalProperty("spark.sql.execution.id"))
+    Tantivy4SparkScanBuilder.generateInstanceKey(tablePath, executionId)
+  }
+
 
   override def build(): Scan = {
-    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, _pushedIndexQueryFilters)
+    // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
+    val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+
+    logger.error(s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan")
+    extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
+
+    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     logger.error(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
     filters.foreach(filter => logger.error(s"  - Input filter: $filter (${filter.getClass.getSimpleName})"))
 
-    // Convert fake StringContains filters to IndexQueryFilter objects
-    val convertedFilters = mutable.ArrayBuffer.empty[Any]
-    val regularFilters = mutable.ArrayBuffer.empty[Filter]
+    // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
+    // we only need to handle regular Spark filters here.
+    val (supported, unsupported) = filters.partition(isSupportedFilter)
 
-    filters.foreach { filter =>
-      convertTantivyFilter(filter) match {
-        case Some(indexQueryFilter) =>
-          logger.error(s"🔍 PUSHFILTERS DEBUG: Converted fake filter to IndexQueryFilter: $indexQueryFilter")
-          convertedFilters += indexQueryFilter
-        case None =>
-          regularFilters += filter
-      }
-    }
-
-    // Combine regular filters with converted IndexQuery filters
-    val allFilters: Array[Any] = (regularFilters ++ convertedFilters).toArray
-
-    val (supported, unsupported) = allFilters.partition(isSupportedFilter)
-
-    // Store regular Spark filters and IndexQuery filters separately
-    val supportedFilters = supported.collect { case f: Filter => f }
-    val supportedIndexQueryFilters = supported.filterNot(_.isInstanceOf[Filter])
-
-    // Store them in separate fields to avoid type casting issues
-    _pushedFilters = supportedFilters
-    _pushedIndexQueryFilters = supportedIndexQueryFilters
+    // Store supported filters
+    _pushedFilters = supported
 
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
@@ -94,10 +82,8 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"  - ${unsupported.length} filters NOT SUPPORTED (will be re-evaluated by Spark after reading)")
     unsupported.foreach(filter => logger.info(s"    ✗ NOT PUSHED: $filter"))
 
-    // Critical: Return ONLY unsupported filters (and filter out any that aren't actually Spark Filters)
-    // This tells Spark that supported filters are FULLY HANDLED by the data source
-    // and Spark should NOT re-apply them after reading data
-    unsupported.collect { case f: Filter => f }
+    // Return only unsupported filters - Spark will re-evaluate these after reading data
+    unsupported
   }
 
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
@@ -134,48 +120,9 @@ class Tantivy4SparkScanBuilder(
     true // We support limit pushdown
   }
 
-  private def convertTantivyFilter(filter: Filter): Option[Any] = {
-    import org.apache.spark.sql.sources.StringContains
-    import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
-    logger.error(s"🔍 convertTantivyFilter: Checking filter: $filter (class: ${filter.getClass.getSimpleName})")
-
-    filter match {
-      case StringContains(attribute, value) =>
-        logger.error(s"🔍 convertTantivyFilter: StringContains detected - attribute: $attribute, value: $value")
-
-        if (value.startsWith("__TANTIVY_INDEXQUERY__:")) {
-          // Extract IndexQuery information from fake StringContains
-          val parts = value.stripPrefix("__TANTIVY_INDEXQUERY__:").split(":", 2)
-          if (parts.length == 2) {
-            val columnName = parts(0)
-            val queryString = parts(1)
-            logger.error(s"🔍 convertTantivyFilter: SUCCESS - Detected IndexQuery fake filter - column: $columnName, query: $queryString")
-            Some(IndexQueryFilter(columnName, queryString))
-          } else {
-            logger.warn(s"🔍 convertTantivyFilter: FAIL - Invalid IndexQuery fake filter format: $value")
-            None
-          }
-        } else if (value.startsWith("__TANTIVY_INDEXALL__:")) {
-          // Extract IndexQueryAll information from fake StringContains
-          val queryString = value.stripPrefix("__TANTIVY_INDEXALL__:")
-          logger.error(s"🔍 convertTantivyFilter: SUCCESS - Detected IndexQueryAll fake filter - query: $queryString")
-          Some(IndexQueryAllFilter(queryString))
-        } else {
-          logger.error(s"🔍 convertTantivyFilter: Regular StringContains, not a fake filter")
-          None
-        }
-
-      case _ =>
-        // Regular filter, not a fake Tantivy filter
-        logger.error(s"🔍 convertTantivyFilter: Not a StringContains filter, ignoring")
-        None
-    }
-  }
-
-  private def isSupportedFilter(filter: Any): Boolean = {
+  private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
-    import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
     filter match {
       case _: EqualTo => true
@@ -187,14 +134,12 @@ class Tantivy4SparkScanBuilder(
       case _: In => true
       case _: IsNull => true
       case _: IsNotNull => true
-      case _: And => true
-      case _: Or => true
-      case _: Not => true  // NOW SUPPORTED - NOT operators are fully handled
+      case And(left, right) => isSupportedFilter(left) && isSupportedFilter(right)
+      case Or(left, right) => isSupportedFilter(left) && isSupportedFilter(right)
+      case Not(child) => isSupportedFilter(child)  // NOT is supported only if child is supported
       case _: StringStartsWith => false  // Tantivy does best-effort, Spark applies final filtering
       case _: StringEndsWith => false   // Tantivy does best-effort, Spark applies final filtering
       case _: StringContains => true
-      case _: IndexQueryFilter => true  // Add support for IndexQueryFilter
-      case _: IndexQueryAllFilter => true  // Add support for IndexQueryAllFilter
       case _ => false
     }
   }
@@ -208,25 +153,86 @@ class Tantivy4SparkScanBuilder(
     true  // Accept all for now to see what comes through
   }
 
-  private def checkForIndexQueryInContext(): Unit = {
-    logger.error(s"🔍 SCANBUILDER DEBUG: checkForIndexQueryInContext called")
 
-    // Check the IndexQueryRegistry for any stored IndexQuery information
+  /**
+   * Extract IndexQuery expressions directly using the companion object storage.
+   * This eliminates the need for global registry by using instance-scoped storage.
+   */
+  private def extractIndexQueriesFromCurrentPlan(): Array[Any] = {
+    logger.error(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction using instance key: $instanceKey")
+
+    // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this instance
+    val storedQueries = Tantivy4SparkScanBuilder.getIndexQueries(instanceKey)
+    if (storedQueries.nonEmpty) {
+      logger.error(s"🔍 EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from instance storage")
+      storedQueries.foreach(q => logger.error(s"  - Instance IndexQuery: $q"))
+      return storedQueries.toArray
+    }
+
+    // Method 2: Fall back to registry (temporary until we fully eliminate it)
     import com.tantivy4spark.filters.IndexQueryRegistry
-
     IndexQueryRegistry.getCurrentQueryId() match {
       case Some(queryId) =>
-        logger.error(s"🔍 SCANBUILDER DEBUG: Found current query ID: $queryId")
-        val storedIndexQueries = IndexQueryRegistry.getIndexQueriesForQuery(queryId)
-        if (storedIndexQueries.nonEmpty) {
-          _pushedIndexQueryFilters = storedIndexQueries.toArray
-          logger.error(s"🔍 SCANBUILDER DEBUG: Retrieved ${storedIndexQueries.length} IndexQuery filters from registry")
-          storedIndexQueries.foreach(filter => logger.error(s"  - Retrieved IndexQuery: $filter"))
-        } else {
-          logger.error(s"🔍 SCANBUILDER DEBUG: No IndexQuery filters found for query $queryId")
+        val registryQueries = IndexQueryRegistry.getIndexQueriesForQuery(queryId)
+        if (registryQueries.nonEmpty) {
+          logger.error(s"🔍 EXTRACT DEBUG: Found ${registryQueries.length} IndexQuery filters from registry as fallback")
+          registryQueries.foreach(q => logger.error(s"  - Registry IndexQuery: $q"))
+          return registryQueries.toArray
         }
       case None =>
-        logger.error(s"🔍 SCANBUILDER DEBUG: No current query ID found in IndexQueryRegistry")
+        logger.error(s"🔍 EXTRACT DEBUG: No query ID available in registry")
     }
+
+    logger.error(s"🔍 EXTRACT DEBUG: No IndexQuery filters found using any method")
+    Array.empty[Any]
+  }
+}
+
+/**
+ * Companion object for ScanBuilder to store IndexQuery information.
+ * This provides a clean mechanism for V2IndexQueryExpressionRule to pass
+ * IndexQuery expressions directly to the ScanBuilder without a global registry.
+ */
+object Tantivy4SparkScanBuilder {
+  import scala.collection.concurrent
+
+  // Thread-safe storage for IndexQuery expressions scoped by DataSource instance
+  private val instanceIndexQueries = concurrent.TrieMap[String, scala.collection.mutable.Buffer[Any]]()
+
+  /**
+   * Store IndexQuery expressions for a specific DataSource instance.
+   * The key should be unique per query execution to avoid conflicts.
+   */
+  def storeIndexQueries(instanceKey: String, indexQueries: Seq[Any]): Unit = {
+    val buffer = instanceIndexQueries.getOrElseUpdate(instanceKey, scala.collection.mutable.Buffer.empty)
+    buffer.clear()
+    buffer ++= indexQueries
+    println(s"🔍 ScanBuilder: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey")
+  }
+
+  /**
+   * Retrieve IndexQuery expressions for a specific DataSource instance.
+   */
+  def getIndexQueries(instanceKey: String): Seq[Any] = {
+    val queries = instanceIndexQueries.getOrElse(instanceKey, scala.collection.mutable.Buffer.empty).toSeq
+    println(s"🔍 ScanBuilder: Retrieved ${queries.length} IndexQuery expressions for instance $instanceKey")
+    queries
+  }
+
+  /**
+   * Clear IndexQuery expressions for a specific DataSource instance.
+   */
+  def clearIndexQueries(instanceKey: String): Unit = {
+    instanceIndexQueries.remove(instanceKey)
+    println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for instance $instanceKey")
+  }
+
+  /**
+   * Generate a unique instance key for a DataSource relation.
+   */
+  def generateInstanceKey(tablePath: String, executionId: Option[String]): String = {
+    // Use a more deterministic key based only on table path to avoid timing issues
+    val cleanPath = tablePath.replace('/', '_').replace('\\', '_')
+    cleanPath // Remove execution ID dependency for now
   }
 }

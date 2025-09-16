@@ -19,11 +19,9 @@ package com.tantivy4spark.catalyst
 
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, SubqueryAlias, View}
-import org.apache.spark.sql.catalyst.expressions.{And, Expression}
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
-import com.tantivy4spark.filters.{IndexQueryV2Filter, IndexQueryAllV2Filter, IndexQueryFilter, IndexQueryAllFilter, IndexQueryRegistry}
-import scala.collection.mutable
 
 /**
  * Catalyst rule to convert IndexQuery expressions to V2-compatible filters.
@@ -42,11 +40,6 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   
   override def apply(plan: LogicalPlan): LogicalPlan = {
     println(s"🔍 V2IndexQueryExpressionRule.apply() called with plan: ${plan.getClass.getSimpleName}")
-
-    // Start a new query if we don't have one yet (first rule invocation)
-    if (IndexQueryRegistry.getCurrentQueryId().isEmpty) {
-      IndexQueryRegistry.startNewQuery()
-    }
 
     val result = plan.transformUp {
       case filter@Filter(condition, child: DataSourceV2Relation) =>
@@ -184,8 +177,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   }
   
   /**
-   * Convert IndexQuery expressions directly to V2Filter expressions that can be pushed down.
-   * This replaces the ThreadLocal approach with direct filter conversion.
+   * Convert IndexQuery expressions and store them for the ScanBuilder to retrieve.
+   * This eliminates the fake filter mechanism in favor of direct storage.
    */
   private def convertIndexQueryExpressions(
       expr: Expression,
@@ -193,27 +186,31 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   ): Expression = {
     println(s"🔍 V2IndexQueryExpressionRule: convertIndexQueryExpressions called with expression: $expr")
 
-    expr.transformUp {
+    // Generate instance key for this relation to match ScanBuilder
+    val instanceKey = generateInstanceKeyForRelation(relation)
+    println(s"🔍 V2IndexQueryExpressionRule: Using instance key: $instanceKey")
+
+    val indexQueries = scala.collection.mutable.Buffer[Any]()
+
+    val transformedExpr = expr.transformUp {
       case indexQuery: IndexQueryExpression =>
         println(s"🔍 V2IndexQueryExpressionRule: Found IndexQueryExpression: $indexQuery")
 
-        // Convert IndexQuery expression to a fake StringContains that we can recognize in ScanBuilder
         (extractColumnNameForV2(indexQuery), extractQueryStringForV2(indexQuery)) match {
           case (Some(columnName), Some(queryString)) =>
-            // Store IndexQuery information in a global registry that ScanBuilder can access
+            import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
+
             if (columnName == "_indexall") {
-              println(s"🔍 V2IndexQueryExpressionRule: Registering _indexall IndexQuery")
-              IndexQueryRegistry.registerIndexQueryAll(queryString)
-              // Return Literal(true) so the condition is always satisfied at expression level
-              import org.apache.spark.sql.catalyst.expressions.{Literal}
-              Literal(true)
+              println(s"🔍 V2IndexQueryExpressionRule: Storing _indexall IndexQuery")
+              indexQueries += IndexQueryAllFilter(queryString)
             } else {
-              println(s"🔍 V2IndexQueryExpressionRule: Registering IndexQuery")
-              IndexQueryRegistry.registerIndexQuery(columnName, queryString)
-              // Return Literal(true) so the condition is always satisfied at expression level
-              import org.apache.spark.sql.catalyst.expressions.{Literal}
-              Literal(true)
+              println(s"🔍 V2IndexQueryExpressionRule: Storing IndexQuery")
+              indexQueries += IndexQueryFilter(columnName, queryString)
             }
+
+            // Return Literal(true) so the condition is always satisfied at expression level
+            import org.apache.spark.sql.catalyst.expressions.{Literal}
+            Literal(true)
           case _ =>
             println(s"🔍 V2IndexQueryExpressionRule: Unable to extract column/query from IndexQuery, using Literal(true)")
             import org.apache.spark.sql.catalyst.expressions.{Literal}
@@ -222,20 +219,31 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
       case indexQueryAll: IndexQueryAllExpression =>
         println(s"🔍 V2IndexQueryExpressionRule: Found IndexQueryAllExpression: $indexQueryAll")
-        // Convert IndexQueryAll expression to fake Contains
+
         indexQueryAll.getQueryString match {
           case Some(queryString) =>
-            println(s"🔍 V2IndexQueryExpressionRule: Converting IndexQueryAll to fake Contains")
-            import org.apache.spark.sql.catalyst.expressions.{Contains, Literal}
-            import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-            // Use a fake column for IndexQueryAll
-            Contains(UnresolvedAttribute("_indexall"), Literal(s"__TANTIVY_INDEXALL__:$queryString"))
+            println(s"🔍 V2IndexQueryExpressionRule: Storing IndexQueryAll")
+            import com.tantivy4spark.filters.IndexQueryAllFilter
+            indexQueries += IndexQueryAllFilter(queryString)
+
+            // Return Literal(true) so the condition is always satisfied at expression level
+            import org.apache.spark.sql.catalyst.expressions.{Literal}
+            Literal(true)
           case _ =>
             println(s"🔍 V2IndexQueryExpressionRule: Unable to extract query from IndexQueryAll, using Literal(true)")
             import org.apache.spark.sql.catalyst.expressions.{Literal}
             Literal(true)
         }
     }
+
+    // Store the collected IndexQueries for this instance
+    if (indexQueries.nonEmpty) {
+      import com.tantivy4spark.core.Tantivy4SparkScanBuilder
+      Tantivy4SparkScanBuilder.storeIndexQueries(instanceKey, indexQueries.toSeq)
+      println(s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey")
+    }
+
+    transformedExpr
   }
   
   /**
@@ -268,4 +276,47 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     // Use the base implementation which already handles Literal expressions correctly
     indexQuery.getQueryString
   }
+
+  /**
+   * Generate an instance key for a DataSourceV2Relation that matches the ScanBuilder's key.
+   */
+  private def generateInstanceKeyForRelation(relation: DataSourceV2Relation): String = {
+    // Extract the actual path from the Tantivy4Spark table
+    val tablePath = try {
+      val table = relation.table
+
+      // For Tantivy4Spark tables, extract path from table name which is in format: tantivy4spark.`/actual/path`
+      val tableName = table.name()
+      if (tableName.startsWith("tantivy4spark.`") && tableName.endsWith("`")) {
+        // Remove "tantivy4spark.`" prefix and "`" suffix to get the actual path
+        tableName.substring("tantivy4spark.`".length, tableName.length - 1)
+      } else {
+        // Fallback - try direct access to Tantivy4SparkTable path field
+        table match {
+          case t4sTable: com.tantivy4spark.core.Tantivy4SparkTable =>
+            // Use reflection to get the private path field
+            val field = t4sTable.getClass.getDeclaredField("path")
+            field.setAccessible(true)
+            field.get(t4sTable).asInstanceOf[String]
+          case _ =>
+            tableName // Last resort fallback
+        }
+      }
+    } catch {
+      case _: Exception => "unknown"
+    }
+
+    // Try to get execution ID from current thread context
+    val executionIdOpt = try {
+      import org.apache.spark.sql.SparkSession
+      val currentSession = SparkSession.active
+      Option(currentSession.sparkContext.getLocalProperty("spark.sql.execution.id"))
+    } catch {
+      case _: Exception => None
+    }
+
+    import com.tantivy4spark.core.Tantivy4SparkScanBuilder
+    Tantivy4SparkScanBuilder.generateInstanceKey(tablePath, executionIdOpt)
+  }
+
 }

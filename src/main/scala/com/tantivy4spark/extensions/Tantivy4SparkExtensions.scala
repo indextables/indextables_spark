@@ -87,9 +87,9 @@ class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
       }
     ))
     
-    // Register V2 IndexQuery expression conversion rule in post-hoc resolution phase
-    // This runs after function resolution but before optimization
-    extensions.injectPostHocResolutionRule { session =>
+    // Register V2 IndexQuery expression conversion rule in resolution phase
+    // This runs during analysis, before scan planning
+    extensions.injectResolutionRule { session =>
       V2IndexQueryExpressionRule
     }
     
