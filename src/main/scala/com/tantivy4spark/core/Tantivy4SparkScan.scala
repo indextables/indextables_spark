@@ -19,9 +19,9 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory, Scan}
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory, Scan, SupportsReportStatistics, Statistics}
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{StructType, DateType}
+import org.apache.spark.sql.types.{StructType, DateType, IntegerType, LongType, FloatType, DoubleType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction, PartitionPruning}
 import com.tantivy4spark.storage.{SplitLocationRegistry, BroadcastSplitLocalityManager}
@@ -39,7 +39,7 @@ class Tantivy4SparkScan(
     limit: Option[Int] = None,
     broadcastConfig: Broadcast[Map[String, String]],
     indexQueryFilters: Array[Any] = Array.empty
-) extends Scan with Batch {
+) extends Scan with Batch with SupportsReportStatistics {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScan])
 
@@ -129,6 +129,28 @@ class Tantivy4SparkScan(
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
     new Tantivy4SparkReaderFactory(readSchema, limit, broadcastConfig, tablePath)
+  }
+
+  override def estimateStatistics(): Statistics = {
+    try {
+      logger.info("Estimating statistics for Tantivy4Spark table")
+      val addActions = transactionLog.listFiles()
+
+      // Apply the same data skipping logic used in planInputPartitions to get accurate statistics
+      // for the filtered dataset that will actually be read
+      val filteredActions = applyDataSkipping(addActions, pushedFilters)
+
+      val statistics = Tantivy4SparkStatistics.fromAddActions(filteredActions)
+
+      logger.info(s"Table statistics: ${statistics.sizeInBytes().orElse(0L)} bytes, ${statistics.numRows().orElse(0L)} rows")
+
+      statistics
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to estimate statistics: ${ex.getMessage}", ex)
+        // Return unknown statistics rather than failing the query
+        Tantivy4SparkStatistics.unknown()
+    }
   }
 
   private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
@@ -365,7 +387,6 @@ class Tantivy4SparkScan(
   private def convertValuesForComparison(attribute: String, filterValue: Any, minValue: String, maxValue: String): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
     import java.time.LocalDate
     import java.sql.Date
-    import org.apache.spark.sql.types._
     
     // Find the field data type in the schema
     val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
