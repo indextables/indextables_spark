@@ -36,6 +36,16 @@ Key settings with defaults:
 - `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
 
+### Large File Upload Configuration
+
+**New in v1.3**: Memory-efficient streaming uploads for large splits (4GB+) to prevent OOM errors.
+
+#### Upload Performance Settings
+- `spark.tantivy4spark.s3.streamingThreshold`: `104857600` (100MB - files larger than this use streaming upload)
+- `spark.tantivy4spark.s3.multipartThreshold`: `104857600` (100MB - threshold for S3 multipart upload)
+- `spark.tantivy4spark.s3.maxConcurrency`: `4` (Number of parallel upload threads)
+- `spark.tantivy4spark.s3.partSize`: `67108864` (64MB - size of each multipart upload part)
+
 ### Transaction Log Performance & Compaction
 
 **New in v1.2**: High-performance transaction log with Delta Lake-style checkpoint compaction and parallel S3 retrieval.

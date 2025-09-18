@@ -152,14 +152,37 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   
   override def writeFile(path: String, content: Array[Byte]): Unit = {
     val output = createOutputStream(path)
-    
+
     try {
       output.write(content)
     } finally {
       output.close()
     }
   }
-  
+
+  override def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long] = None): Unit = {
+    val output = createOutputStream(path)
+
+    try {
+      logger.info(s"🔧 HADOOP STREAMING WRITE - Path: $path")
+      contentLength.foreach(length => logger.info(s"🔧 HADOOP STREAMING WRITE - Content length: ${length / (1024 * 1024)} MB"))
+
+      // Use a buffer to stream data efficiently without loading everything into memory
+      val buffer = new Array[Byte](64 * 1024) // 64KB buffer
+      var totalBytesWritten = 0L
+      var bytesRead = 0
+
+      while ({ bytesRead = inputStream.read(buffer); bytesRead > 0 }) {
+        output.write(buffer, 0, bytesRead)
+        totalBytesWritten += bytesRead
+      }
+
+      logger.info(s"✅ Hadoop streaming write completed: $path (${totalBytesWritten / (1024 * 1024)} MB)")
+    } finally {
+      output.close()
+    }
+  }
+
   override def deleteFile(path: String): Boolean = {
     val hadoopPath = new Path(path)
     

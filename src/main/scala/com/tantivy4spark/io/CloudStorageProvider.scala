@@ -70,6 +70,11 @@ trait CloudStorageProvider extends Closeable {
    * Write content to a file
    */
   def writeFile(path: String, content: Array[Byte]): Unit
+
+  /**
+   * Write content to a file from an input stream (memory-efficient for large files)
+   */
+  def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long] = None): Unit
   
   /**
    * Delete a file

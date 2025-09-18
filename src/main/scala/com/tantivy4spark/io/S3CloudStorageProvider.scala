@@ -403,7 +403,33 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
         // Continue anyway - the putObject call will fail if bucket really doesn't exist
     }
   }
-  
+
+  override def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long] = None): Unit = {
+    val (bucket, originalKey) = parseS3Path(path)
+    // Apply uniform path flattening for S3Mock compatibility
+    val key = flattenPathForS3Mock(originalKey)
+
+    try {
+      logger.info(s"🔧 S3 STREAMING WRITE - Path: $path")
+      logger.info(s"🔧 S3 STREAMING WRITE - Bucket: '$bucket', Key: '$key' (original: '$originalKey')")
+      contentLength.foreach(length => logger.info(s"🔧 S3 STREAMING WRITE - Content length: ${formatBytes(length)}"))
+      logger.info(s"🔧 S3 STREAMING WRITE - S3Mock mode: $isS3Mock")
+
+      // Ensure bucket exists first
+      ensureBucketExists(bucket)
+
+      // Use streaming multipart upload - this is memory efficient for large files
+      logger.info(s"🚀 Using streaming multipart upload for file: s3://$bucket/$key")
+      val result = multipartUploader.uploadStream(bucket, key, inputStream, contentLength)
+      logger.info(s"✅ Streaming upload completed: ${result.strategy}, ${result.partCount} parts, ${result.uploadRateMBps}%.2f MB/s")
+
+    } catch {
+      case ex: Exception =>
+        logger.error(s"❌ Failed to write S3 file from stream: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Failed to write S3 file from stream: ${ex.getMessage}", ex)
+    }
+  }
+
   override def deleteFile(path: String): Boolean = {
     val (bucket, key) = parseS3Path(path)
     

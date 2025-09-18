@@ -126,12 +126,32 @@ object SplitManager {
           logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
         }
         
-        // Upload to S3 using cloud storage provider
+        // Upload to S3 using cloud storage provider with streaming for memory efficiency
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
         try {
-          val splitContent = Files.readAllBytes(Paths.get(tempSplitPath))
-          cloudProvider.writeFile(outputPath, splitContent)
-          logger.info(s"Split uploaded to S3: $outputPath (${splitContent.length} bytes)")
+          val splitFile = Paths.get(tempSplitPath)
+          val fileSize = Files.size(splitFile)
+
+          // Configurable threshold for streaming uploads (default 100MB)
+          val streamingThreshold = options.getLong("spark.tantivy4spark.s3.streamingThreshold", 100L * 1024 * 1024)
+
+          if (fileSize > streamingThreshold) {
+            logger.info(s"🚀 Using streaming upload for large split: $outputPath (${fileSize / (1024 * 1024)} MB)")
+            // Use streaming upload for large files to avoid OOM
+            val inputStream = Files.newInputStream(splitFile)
+            try {
+              cloudProvider.writeFileFromStream(outputPath, inputStream, Some(fileSize))
+              logger.info(s"✅ Streaming upload completed: $outputPath (${fileSize / (1024 * 1024)} MB)")
+            } finally {
+              inputStream.close()
+            }
+          } else {
+            logger.info(s"📄 Using traditional upload for small split: $outputPath (${fileSize / (1024 * 1024)} MB)")
+            // Use traditional method for smaller files
+            val splitContent = Files.readAllBytes(splitFile)
+            cloudProvider.writeFile(outputPath, splitContent)
+            logger.info(s"Split uploaded: $outputPath (${splitContent.length} bytes)")
+          }
         } finally {
           cloudProvider.close()
         }
