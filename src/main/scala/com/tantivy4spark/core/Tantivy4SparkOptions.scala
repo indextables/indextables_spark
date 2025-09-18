@@ -69,6 +69,36 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   }
 
   /**
+   * Whether to enable auto-sizing based on historical split data.
+   */
+  def autoSizeEnabled: Option[Boolean] = {
+    Option(options.get("spark.tantivy4spark.autoSize.enabled")).filter(_.trim.nonEmpty).map { valueStr =>
+      val trimmedValue = valueStr.trim.toLowerCase
+      trimmedValue match {
+        case "true" | "1" | "yes" | "on" => true
+        case "false" | "0" | "no" | "off" => false
+        case _ => throw new IllegalArgumentException(s"Invalid boolean value for autoSize.enabled: '$valueStr'. Valid values are: true, false, 1, 0, yes, no, on, off")
+      }
+    }
+  }
+
+  /**
+   * Target split size for auto-sizing feature.
+   * Supports formats: "123456" (bytes), "1M" (megabytes), "1G" (gigabytes).
+   */
+  def autoSizeTargetSplitSize: Option[String] = {
+    Option(options.get("spark.tantivy4spark.autoSize.targetSplitSize")).filter(_.trim.nonEmpty)
+  }
+
+  /**
+   * Input row count for auto-sizing feature.
+   * When provided, this exact count will be used for partitioning calculations.
+   */
+  def autoSizeInputRowCount: Option[Long] = {
+    Option(options.get("spark.tantivy4spark.autoSize.inputRowCount")).filter(_.trim.nonEmpty).map(_.toLong)
+  }
+
+  /**
    * Get field type mapping configuration.
    * Maps field names to their indexing types: "string", "text", or "json".
    */
@@ -176,6 +206,11 @@ object Tantivy4SparkOptions {
   val TARGET_RECORDS_PER_SPLIT = "targetRecordsPerSplit"
   val BLOOM_FILTERS_ENABLED = "bloomFiltersEnabled"
   val FORCE_STANDARD_STORAGE = "forceStandardStorage"
+
+  // Auto-sizing option keys
+  val AUTO_SIZE_ENABLED = "spark.tantivy4spark.autoSize.enabled"
+  val AUTO_SIZE_TARGET_SPLIT_SIZE = "spark.tantivy4spark.autoSize.targetSplitSize"
+  val AUTO_SIZE_INPUT_ROW_COUNT = "spark.tantivy4spark.autoSize.inputRowCount"
 
   // Indexing configuration keys
   val INDEXING_TYPEMAP_PREFIX = "spark.tantivy4spark.indexing.typemap."

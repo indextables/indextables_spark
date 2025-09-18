@@ -123,15 +123,64 @@ class Tantivy4SparkOptimizedWrite(
 
   /**
    * Get the target records per split from configuration hierarchy:
-   * 1. DataFrame write options
-   * 2. Spark session configuration
-   * 3. Table properties  
-   * 4. Default (1M records)
+   * 1. Auto-sizing based on historical data (if enabled)
+   * 2. DataFrame write options
+   * 3. Spark session configuration
+   * 4. Table properties
+   * 5. Default (1M records)
    */
   private def getTargetRecordsPerSplit(): Long = {
     val spark = SparkSession.active
 
-    // Check DataFrame write options first
+    // Check if auto-sizing is enabled first
+    val autoSizeEnabled = tantivyOptions.autoSizeEnabled.getOrElse {
+      spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+        .map(_.toBoolean)
+        .getOrElse(false) // Auto-sizing is disabled by default
+    }
+
+    if (autoSizeEnabled) {
+      // Try to get target split size for auto-sizing
+      val targetSplitSizeStr = tantivyOptions.autoSizeTargetSplitSize.orElse {
+        spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE)
+      }
+
+      targetSplitSizeStr match {
+        case Some(sizeStr) =>
+          try {
+            import com.tantivy4spark.util.{SizeParser, SplitSizeAnalyzer}
+
+            val targetSizeBytes = SizeParser.parseSize(sizeStr)
+            logger.info(s"Auto-sizing enabled with target split size: ${SizeParser.formatBytes(targetSizeBytes)}")
+
+            // Analyze historical data to calculate target rows
+            val analyzer = SplitSizeAnalyzer(tablePath, spark, {
+              import scala.jdk.CollectionConverters._
+              val optionsMap = new java.util.HashMap[String, String]()
+              serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
+              new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
+            })
+
+            analyzer.calculateTargetRows(targetSizeBytes) match {
+              case Some(calculatedRows) =>
+                logger.info(s"Auto-sizing calculated target rows per split: $calculatedRows")
+                return calculatedRows
+              case None =>
+                logger.warn("Auto-sizing failed to calculate target rows from historical data, falling back to manual configuration")
+                // Fall through to manual configuration
+            }
+          } catch {
+            case ex: Exception =>
+              logger.error(s"Auto-sizing failed due to error: ${ex.getMessage}", ex)
+              // Fall through to manual configuration
+          }
+        case None =>
+          logger.warn("Auto-sizing enabled but no target split size specified, falling back to manual configuration")
+          // Fall through to manual configuration
+      }
+    }
+
+    // Check DataFrame write options
     val writeOptionValue = tantivyOptions.targetRecordsPerSplit
     if (writeOptionValue.isDefined) {
       logger.debug(s"Using write option targetRecordsPerSplit = ${writeOptionValue.get}")
@@ -222,17 +271,51 @@ class Tantivy4SparkOptimizedWrite(
   /**
    * Return the number of partitions required for optimized writes.
    * This is the key method that actually controls partitioning in V2.
-   * Returns 0 to indicate no specific requirement.
+   * For auto-sizing, this method will attempt to count the input DataFrame.
    */
   override def requiredNumPartitions(): Int = {
-    // Since this is Tantivy4SparkOptimizedWrite, always optimize
     val targetRecords = getTargetRecordsPerSplit()
-    
-    // Use the estimated row count passed from the write builder
-    val numPartitions = math.ceil(estimatedRowCount.toDouble / targetRecords).toInt
+
+    // Check if auto-sizing is enabled
+    val spark = SparkSession.active
+    val autoSizeEnabled = tantivyOptions.autoSizeEnabled.getOrElse {
+      spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+        .map(_.toBoolean)
+        .getOrElse(false)
+    }
+
+    val actualRowCount = if (autoSizeEnabled) {
+      logger.info("V2 Auto-sizing enabled for partitioning")
+
+      // Check if explicit row count was provided in options
+      val explicitRowCount = tantivyOptions.autoSizeInputRowCount
+
+      explicitRowCount match {
+        case Some(rowCount) =>
+          logger.info(s"V2 Auto-sizing: using explicit row count = $rowCount")
+          rowCount
+        case None =>
+          logger.warn("V2 Auto-sizing: enabled but no explicit row count provided. " +
+                     "Using estimated row count for partitioning. " +
+                     "For accurate auto-sizing with V2 API, call df.count() first and pass as option: " +
+                     ".option(\"spark.tantivy4spark.autoSize.inputRowCount\", rowCount.toString)")
+          logger.warn("V2 Auto-sizing: Falling back to estimated row count, partitioning may not be optimal")
+          estimatedRowCount
+      }
+    } else {
+      estimatedRowCount
+    }
+
+    // Calculate number of partitions based on row count and target records per split
+    val numPartitions = math.ceil(actualRowCount.toDouble / targetRecords).toInt
     val finalPartitions = math.max(1, numPartitions)
-    
-    logger.info(s"V2 optimized write: Requesting $finalPartitions partitions for ~$estimatedRowCount records with target $targetRecords per split")
+
+    if (autoSizeEnabled) {
+      logger.info(s"Auto-sizing: Requesting $finalPartitions partitions for $actualRowCount records with target $targetRecords per split")
+    } else {
+      logger.info(s"Standard partitioning: Requesting $finalPartitions partitions for ~$actualRowCount records with target $targetRecords per split")
+    }
+
     finalPartitions
   }
   

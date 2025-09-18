@@ -44,6 +44,30 @@ object Tantivy4SparkSQLConf {
   val TANTIVY4SPARK_S3_ENDPOINT = "spark.tantivy4spark.s3.endpoint"
 
   /////////////////////
+  // S3 Upload Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_S3_STREAMING_THRESHOLD = "spark.tantivy4spark.s3.streamingThreshold"
+  val TANTIVY4SPARK_S3_MULTIPART_THRESHOLD = "spark.tantivy4spark.s3.multipartThreshold"
+  val TANTIVY4SPARK_S3_MAX_CONCURRENCY = "spark.tantivy4spark.s3.maxConcurrency"
+  val TANTIVY4SPARK_S3_PART_SIZE = "spark.tantivy4spark.s3.partSize"
+
+  /////////////////////
+  // Working Directory Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_MERGE_TEMP_DIRECTORY_PATH = "spark.tantivy4spark.merge.tempDirectoryPath"
+  val TANTIVY4SPARK_INDEX_WRITER_TEMP_DIRECTORY_PATH = "spark.tantivy4spark.indexWriter.tempDirectoryPath"
+
+  /////////////////////
+  // Auto-Sizing Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_AUTO_SIZE_ENABLED = "spark.tantivy4spark.autoSize.enabled"
+  val TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE = "spark.tantivy4spark.autoSize.targetSplitSize"
+  val TANTIVY4SPARK_AUTO_SIZE_INPUT_ROW_COUNT = "spark.tantivy4spark.autoSize.inputRowCount"
+
+  /////////////////////
   // Index Writer Configuration
   /////////////////////
 

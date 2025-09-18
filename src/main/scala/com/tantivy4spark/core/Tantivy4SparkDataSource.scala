@@ -561,22 +561,64 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       import scala.jdk.CollectionConverters._
       val optionsMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(enrichedOptions.asJava)
       val tantivyOptions = Tantivy4SparkOptions(optionsMap)
-      val targetRecords = tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
-      
-      // Estimate total records to determine optimal partitions
-      val totalRecords = try {
-        data.count()
-      } catch {
-        case _: Exception => 
-          // Fallback if count fails: use current partitions * estimate
-          data.rdd.getNumPartitions * 50000L // Assume 50k records per partition
+
+      // Determine target records per split with auto-sizing support
+      val (targetRecords, totalRecords) = if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
+        // Auto-sizing is enabled - count DataFrame for accurate partitioning and calculate optimal target
+        val actualRecordCount = try {
+          data.count()
+        } catch {
+          case _: Exception =>
+            // Fallback if count fails: use current partitions * estimate
+            data.rdd.getNumPartitions * 50000L // Assume 50k records per partition
+        }
+
+        val calculatedTarget = tantivyOptions.autoSizeTargetSplitSize match {
+          case Some(sizeStr) =>
+            try {
+              import com.tantivy4spark.util.{SizeParser, SplitSizeAnalyzer}
+
+              val targetSizeBytes = SizeParser.parseSize(sizeStr)
+              logger.info(s"V1 Auto-sizing: target split size = ${SizeParser.formatBytes(targetSizeBytes)}")
+
+              // Analyze historical data to calculate target rows
+              val analyzer = SplitSizeAnalyzer(new Path(path), spark, optionsMap)
+              analyzer.calculateTargetRows(targetSizeBytes) match {
+                case Some(calculatedRows) =>
+                  logger.info(s"V1 Auto-sizing: calculated target rows per split = $calculatedRows based on historical data")
+                  calculatedRows
+                case None =>
+                  logger.warn("V1 Auto-sizing: failed to calculate target rows from historical data, using manual configuration")
+                  tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+              }
+            } catch {
+              case ex: Exception =>
+                logger.error(s"V1 Auto-sizing failed: ${ex.getMessage}", ex)
+                tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+            }
+          case None =>
+            logger.warn("V1 Auto-sizing: enabled but no target split size specified, using manual configuration")
+            tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+        }
+
+        (calculatedTarget, actualRecordCount)
+      } else {
+        // Standard optimization - use manual target and estimate records to avoid expensive count()
+        val manualTarget = tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+        val estimatedRecords = data.rdd.getNumPartitions * 50000L // Estimate without counting
+        (manualTarget, estimatedRecords)
       }
-      
+
       val optimalPartitions = Math.max(1, Math.ceil(totalRecords.toDouble / targetRecords.toDouble).toInt)
       val currentPartitions = data.rdd.getNumPartitions
-      
-      logger.info(s"OptimizedWrite: total records ~$totalRecords, target $targetRecords per split")
-      logger.info(s"OptimizedWrite: current partitions $currentPartitions, optimal partitions $optimalPartitions")
+
+      if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
+        logger.info(s"V1 Auto-sizing: actual records = $totalRecords (counted), calculated target = $targetRecords per split")
+        logger.info(s"V1 Auto-sizing: current partitions = $currentPartitions, optimal partitions = $optimalPartitions")
+      } else {
+        logger.info(s"V1 OptimizedWrite: estimated records = $totalRecords (no count), target = $targetRecords per split")
+        logger.info(s"V1 OptimizedWrite: current partitions = $currentPartitions, optimal partitions = $optimalPartitions")
+      }
       
       // Only repartition if the optimal partitions are different from current
       // Allow any difference for proper split file count control

@@ -218,11 +218,12 @@ object MergeSplitsCommand {
  */
 case class SerializableAwsConfig(
     accessKey: String,
-    secretKey: String, 
+    secretKey: String,
     sessionToken: Option[String],
     region: String,
     endpoint: Option[String],
-    pathStyleAccess: Boolean
+    pathStyleAccess: Boolean,
+    tempDirectoryPath: Option[String] = None
 ) extends Serializable {
   
   /**
@@ -283,26 +284,51 @@ class MergeSplitsExecutor(
       val endpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint")
       val pathStyleAccess = sparkConf.getOption("spark.tantivy4spark.s3.pathStyleAccess")
         .map(_.toLowerCase == "true").getOrElse(false)
-      
+
+      // Extract temporary directory configuration for merge operations
+      val tempDirectoryPath = getConfigWithFallback("spark.tantivy4spark.merge.tempDirectoryPath")
+
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
+      println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
-      
-      // Create SerializableAwsConfig with the extracted credentials
+      logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
+
+      // Validate temp directory path if specified
+      tempDirectoryPath.foreach { path =>
+        try {
+          val dir = new java.io.File(path)
+          if (!dir.exists()) {
+            logger.warn(s"⚠️ Custom temp directory does not exist: $path - will fall back to system temp directory")
+          } else if (!dir.isDirectory()) {
+            logger.warn(s"⚠️ Custom temp directory path is not a directory: $path - will fall back to system temp directory")
+          } else if (!dir.canWrite()) {
+            logger.warn(s"⚠️ Custom temp directory is not writable: $path - will fall back to system temp directory")
+          } else {
+            logger.info(s"✅ Custom temp directory validated: $path")
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"⚠️ Failed to validate custom temp directory '$path': ${ex.getMessage} - will fall back to system temp directory")
+        }
+      }
+
+      // Create SerializableAwsConfig with the extracted credentials and temp directory
       SerializableAwsConfig(
         accessKey.getOrElse(""),
         secretKey.getOrElse(""),
         sessionToken, // Can be None for permanent credentials
         region.getOrElse("us-east-1"),
         endpoint, // Can be None for default AWS endpoint
-        pathStyleAccess
+        pathStyleAccess,
+        tempDirectoryPath // Custom temp directory path for merge operations
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None)
     }
   }
   
@@ -638,16 +664,28 @@ class MergeSplitsExecutor(
    * Find groups of files that should be merged within a partition.
    * Follows bin packing approach similar to Delta Lake's OPTIMIZE.
    * Only creates groups with 2+ files to satisfy tantivy4java merge requirements.
+   * CRITICAL: Ensures all files in each group have identical partition values.
    */
   private def findMergeableGroups(
-      partitionValues: Map[String, String], 
+      partitionValues: Map[String, String],
       files: Seq[AddAction]
   ): Seq[MergeGroup] = {
-    
+
     val groups = ArrayBuffer[MergeGroup]()
     val currentGroup = ArrayBuffer[AddAction]()
     var currentGroupSize = 0L
-    
+
+    // CRITICAL: Validate all input files belong to the expected partition
+    val invalidFiles = files.filterNot(_.partitionValues == partitionValues)
+    if (invalidFiles.nonEmpty) {
+      val errorMsg = s"findMergeableGroups received files from wrong partitions! Expected: $partitionValues\n" +
+        "Invalid files:\n" + invalidFiles.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n")
+      logger.error(errorMsg)
+      throw new IllegalStateException(errorMsg)
+    }
+
+    logger.debug(s"✅ Partition validation passed: All ${files.length} input files belong to partition $partitionValues")
+
     // Filter out files that are already at or above target size
     val mergeableFiles = files.filter { file =>
       if (file.size >= targetSize) {
@@ -676,7 +714,17 @@ class MergeSplitsExecutor(
         // Current group is full, save it if it has multiple files
         println(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
         if (currentGroup.length > 1) {
-          groups += MergeGroup(partitionValues, currentGroup.clone().toSeq)
+          // VALIDATION: Ensure all files in the group have identical partition values
+          val groupFiles = currentGroup.clone().toSeq
+          val inconsistentFiles = groupFiles.filterNot(_.partitionValues == partitionValues)
+          if (inconsistentFiles.nonEmpty) {
+            val errorMsg = s"CRITICAL: Group validation failed during creation! Found files with inconsistent partitions:\n" +
+              inconsistentFiles.map(f => s"  - ${f.path}: ${f.partitionValues} (expected: $partitionValues)").mkString("\n")
+            logger.error(errorMsg)
+            throw new IllegalStateException(errorMsg)
+          }
+
+          groups += MergeGroup(partitionValues, groupFiles)
           println(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files (${currentGroupSize} bytes): ${currentGroup.map(_.path).mkString(", ")}")
         } else {
           println(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} (${currentGroupSize} bytes)")
@@ -697,7 +745,17 @@ class MergeSplitsExecutor(
 
     // Handle remaining group - only save if it has multiple files
     if (currentGroup.length > 1) {
-      groups += MergeGroup(partitionValues, currentGroup.clone().toSeq)
+      // FINAL VALIDATION: Ensure all files in the group have identical partition values
+      val groupFiles = currentGroup.toSeq
+      val inconsistentFiles = groupFiles.filterNot(_.partitionValues == partitionValues)
+      if (inconsistentFiles.nonEmpty) {
+        val errorMsg = s"CRITICAL: Final group validation failed! Found files with inconsistent partitions:\n" +
+          inconsistentFiles.map(f => s"  - ${f.path}: ${f.partitionValues} (expected: $partitionValues)").mkString("\n")
+        logger.error(errorMsg)
+        throw new IllegalStateException(errorMsg)
+      }
+
+      groups += MergeGroup(partitionValues, groupFiles)
       logger.debug(s"✓ Created final merge group with ${currentGroup.length} files (${currentGroupSize} bytes): ${currentGroup.map(_.path).mkString(", ")}")
     } else if (currentGroup.length == 1) {
       logger.debug(s"✗ Discarding final single-file group: ${currentGroup.head.path} (${currentGroupSize} bytes)")
@@ -705,7 +763,20 @@ class MergeSplitsExecutor(
       logger.debug(s"No remaining group to process")
     }
 
+    // CRITICAL: Final validation of all created groups
+    groups.foreach { group =>
+      val inconsistentFiles = group.files.filterNot(_.partitionValues == group.partitionValues)
+      if (inconsistentFiles.nonEmpty) {
+        val errorMsg = s"CRITICAL: Created group with inconsistent partition values!\n" +
+          s"Group partition: ${group.partitionValues}\n" +
+          "Inconsistent files:\n" + inconsistentFiles.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n")
+        logger.error(errorMsg)
+        throw new IllegalStateException(errorMsg)
+      }
+    }
+
     println(s"MERGE DEBUG: Created ${groups.length} merge groups from ${mergeableFiles.length} mergeable files")
+    logger.info(s"✅ All ${groups.length} merge groups passed partition consistency validation")
     groups.toSeq
   }
 
@@ -942,13 +1013,28 @@ class MergeSplitsExecutor(
     
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
     
-    // Create merge configuration with broadcast AWS credentials
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid", // indexUid
-      "tantivy4spark",   // sourceId  
-      "merge-node",      // nodeId
-      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
-    )
+    // Create merge configuration with broadcast AWS credentials and temp directory
+    val mergeConfig = awsConfig.tempDirectoryPath match {
+      case Some(tempDir) =>
+        // Use 7-parameter constructor with custom temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          tempDir,           // tempDirectoryPath
+          0L,                // targetSplitNumDocs (0 = use default)
+          java.util.Collections.emptyList[String](), // splitIdsToDelete
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+      case None =>
+        // Use 4-parameter constructor with system default temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+    }
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
@@ -1011,6 +1097,20 @@ class MergeSplitsExecutor(
     if (mergeGroup.files.length < 2) {
       throw new IllegalArgumentException(s"Cannot merge group with ${mergeGroup.files.length} files - at least 2 required")
     }
+
+    // CRITICAL: Validate all files in the merge group are from the same partition
+    val groupPartitionValues = mergeGroup.partitionValues
+    val invalidFiles = mergeGroup.files.filterNot(_.partitionValues == groupPartitionValues)
+    if (invalidFiles.nonEmpty) {
+      val errorMsg = s"Cross-partition merge detected! Group expects partition ${groupPartitionValues} but found files from different partitions:\n" +
+        invalidFiles.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n") +
+        s"\nAll files in group:\n" +
+        mergeGroup.files.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n")
+      logger.error(errorMsg)
+      throw new IllegalStateException(errorMsg)
+    }
+
+    logger.info(s"✅ Partition validation passed: All ${mergeGroup.files.length} files belong to partition ${groupPartitionValues}")
     
     // Generate new split path with UUID for uniqueness
     val uuid = java.util.UUID.randomUUID().toString
@@ -1051,14 +1151,29 @@ class MergeSplitsExecutor(
     
     // Extract AWS configuration from SparkSession
     val awsConfig = extractAwsConfig()
-    
-    // Create merge configuration with AWS credentials
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid", // indexUid
-      "tantivy4spark",   // sourceId  
-      "merge-node",      // nodeId
-      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
-    )
+
+    // Create merge configuration with AWS credentials and temp directory
+    val mergeConfig = awsConfig.tempDirectoryPath match {
+      case Some(tempDir) =>
+        // Use 7-parameter constructor with custom temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          tempDir,           // tempDirectoryPath
+          0L,                // targetSplitNumDocs (0 = use default)
+          java.util.Collections.emptyList[String](), // splitIdsToDelete
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+      case None =>
+        // Use 4-parameter constructor with system default temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+    }
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
     println(s"⚙️  [DRIVER] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
@@ -1303,11 +1418,25 @@ object MergeSplitsExecutor {
    */
   private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
-    
+
     // Validate group has at least 2 files (required by tantivy4java)
     if (mergeGroup.files.length < 2) {
       throw new IllegalArgumentException(s"Cannot merge group with ${mergeGroup.files.length} files - at least 2 required")
     }
+
+    // CRITICAL: Validate all files in the merge group are from the same partition
+    val groupPartitionValues = mergeGroup.partitionValues
+    val invalidFiles = mergeGroup.files.filterNot(_.partitionValues == groupPartitionValues)
+    if (invalidFiles.nonEmpty) {
+      val errorMsg = s"Cross-partition merge detected! Group expects partition ${groupPartitionValues} but found files from different partitions:\n" +
+        invalidFiles.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n") +
+        s"\nAll files in group:\n" +
+        mergeGroup.files.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n")
+      logger.error(errorMsg)
+      throw new IllegalStateException(errorMsg)
+    }
+
+    logger.info(s"✅ Partition validation passed: All ${mergeGroup.files.length} files belong to partition ${groupPartitionValues}")
     
     // Generate new split path with UUID for uniqueness
     val uuid = java.util.UUID.randomUUID().toString
@@ -1358,13 +1487,28 @@ object MergeSplitsExecutor {
     
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
     
-    // Create merge configuration with broadcast AWS credentials
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid", // indexUid
-      "tantivy4spark",   // sourceId  
-      "merge-node",      // nodeId
-      awsConfig.toQuickwitSplitAwsConfig()          // AWS configuration for S3 access
-    )
+    // Create merge configuration with broadcast AWS credentials and temp directory
+    val mergeConfig = awsConfig.tempDirectoryPath match {
+      case Some(tempDir) =>
+        // Use 7-parameter constructor with custom temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          tempDir,           // tempDirectoryPath
+          0L,                // targetSplitNumDocs (0 = use default)
+          java.util.Collections.emptyList[String](), // splitIdsToDelete
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+      case None =>
+        // Use 4-parameter constructor with system default temp directory
+        new QuickwitSplit.MergeConfig(
+          "merged-index-uid", // indexUid
+          "tantivy4spark",   // sourceId
+          "merge-node",      // nodeId
+          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+        )
+    }
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
     logger.warn(s"⚙️  [EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")

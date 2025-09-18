@@ -35,8 +35,14 @@ class TantivySearchEngine private (
   def this(schema: StructType) = this(new TantivyDirectInterface(schema))
   
   // Constructor with cloud storage support
-  def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) = 
-    this(new TantivyDirectInterface(schema, None, options, hadoopConf), options, hadoopConf)
+  def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) =
+    this({
+      // Extract working directory from configuration hierarchy
+      val workingDirectory = Option(options.get("spark.tantivy4spark.indexWriter.tempDirectoryPath"))
+        .orElse(Option(hadoopConf.get("spark.tantivy4spark.indexWriter.tempDirectoryPath")))
+
+      new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
+    }, options, hadoopConf)
 
   def addDocument(row: InternalRow): Unit = {
     directInterface.addDocument(row)

@@ -20,7 +20,7 @@ package com.tantivy4spark.search
 import com.tantivy4java._
 import org.slf4j.LoggerFactory
 import java.nio.file.{Path, Files}
-import java.io.{File}
+import java.io.File
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
 import scala.util.Using
@@ -125,7 +125,8 @@ class TantivyDirectInterface(
     restoredIndexPath: Option[Path] = None,
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
     hadoopConf: org.apache.hadoop.conf.Configuration = new org.apache.hadoop.conf.Configuration(),
-    existingDocMappingJson: Option[String] = None
+    existingDocMappingJson: Option[String] = None,
+    workingDirectory: Option[String] = None
 ) extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivyDirectInterface])
   
@@ -312,13 +313,34 @@ class TantivyDirectInterface(
     
     case None =>
       // Create new index in temporary directory following tantivy4java exact pattern
-      val tempDir = Files.createTempDirectory("tantivy4spark_idx_")
+      val tempDir = workingDirectory match {
+        case Some(customWorkDir) =>
+          // Use custom working directory if specified
+          val workDir = new File(customWorkDir)
+          if (!workDir.exists()) {
+            logger.warn(s"Custom working directory does not exist: $customWorkDir - falling back to system temp directory")
+            Files.createTempDirectory("tantivy4spark_idx_")
+          } else if (!workDir.isDirectory()) {
+            logger.warn(s"Custom working directory path is not a directory: $customWorkDir - falling back to system temp directory")
+            Files.createTempDirectory("tantivy4spark_idx_")
+          } else if (!workDir.canWrite()) {
+            logger.warn(s"Custom working directory is not writable: $customWorkDir - falling back to system temp directory")
+            Files.createTempDirectory("tantivy4spark_idx_")
+          } else {
+            logger.info(s"Using custom working directory: $customWorkDir")
+            Files.createTempDirectory(workDir.toPath, "tantivy4spark_idx_")
+          }
+        case None =>
+          // Use system default temporary directory
+          Files.createTempDirectory("tantivy4spark_idx_")
+      }
+
       logger.info(s"Creating new tantivy index at: ${tempDir.toAbsolutePath}")
-      
+
       // Synchronize schema creation to prevent race conditions in field ID generation
       val (tantivySchema, builder) = TantivyDirectInterface.createSchemaThreadSafe(schema, options)
       schemaBuilder = Some(builder)  // Store for cleanup later
-      
+
       val idx = new Index(tantivySchema, tempDir.toAbsolutePath.toString, false)
       (idx, tempDir, true, tantivySchema)
   }
