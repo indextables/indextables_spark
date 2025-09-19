@@ -110,8 +110,8 @@ class SimpleTermQueryTest extends TestBase {
         
         val metadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
           matchingFile.path.split("/").last.replace(".split", ""), // splitId from filename
-          toLongSafeOption(matchingFile.numRecords), // numDocs 
-          toLongSafeOption(matchingFile.uncompressedSizeBytes), // uncompressedSizeBytes 
+          toLongSafeOption(matchingFile.numRecords), // numDocs
+          toLongSafeOption(matchingFile.uncompressedSizeBytes), // uncompressedSizeBytes
           matchingFile.timeRangeStart.map(Instant.parse).orNull, // timeRangeStart
           matchingFile.timeRangeEnd.map(Instant.parse).orNull, // timeRangeEnd
           matchingFile.splitTags.getOrElse(Set.empty[String]).asJava, // tags
@@ -121,7 +121,8 @@ class SimpleTermQueryTest extends TestBase {
           toLongSafeOption(matchingFile.footerEndOffset), // footerEndOffset
           toLongSafeOption(matchingFile.hotcacheStartOffset), // hotcacheStartOffset
           toLongSafeOption(matchingFile.hotcacheLength), // hotcacheLength
-          matchingFile.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+          matchingFile.docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
+          java.util.Collections.emptyList[String]() // skippedSplits - new parameter
         )
         println(s"✅ Retrieved metadata from transaction log with footer offsets: ${metadata.hasFooterOffsets()}")
         

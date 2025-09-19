@@ -299,7 +299,8 @@ class Tantivy4SparkPartitionReader(
           toLongSafeOption(addAction.footerEndOffset), // footerEndOffset
           toLongSafeOption(addAction.hotcacheStartOffset), // hotcacheStartOffset
           toLongSafeOption(addAction.hotcacheLength), // hotcacheLength
-          addAction.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+          addAction.docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
+          java.util.Collections.emptyList[String]() // skippedSplits - new parameter
         )
 
         splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)

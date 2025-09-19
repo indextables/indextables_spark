@@ -102,10 +102,11 @@ object Tantivy4SparkRelation {
         deleteOpstamp.getOrElse(0L), // deleteOpstamp
         numMergeOps.getOrElse(0), // numMergeOps
         footerStartOffset, // footerStartOffset
-        footerEndOffset, // footerEndOffset  
+        footerEndOffset, // footerEndOffset
         hotcacheStartOffset, // hotcacheStartOffset
         hotcacheLength, // hotcacheLength
-        docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+        docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
+        java.util.Collections.emptyList[String]() // Additional metadata field (new in tantivy4java)
       )
     }
   }

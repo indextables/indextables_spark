@@ -352,7 +352,8 @@ object PreWarmManager {
       safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
       safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
       safeLong(addAction.hotcacheLength, "hotcacheLength"), // hotcacheLength
-      addAction.docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+      addAction.docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
+      java.util.Collections.emptyList[String]() // skippedSplits - new parameter
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }

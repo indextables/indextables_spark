@@ -1637,7 +1637,8 @@ case class SerializableSplitMetadata(
       footerEndOffset, // footerEndOffset
       hotcacheStartOffset, // hotcacheStartOffset
       hotcacheLength, // hotcacheLength
-      docMappingJson.orNull // docMappingJson - critical for SplitSearcher
+      docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
+      java.util.Collections.emptyList[String]() // skippedSplits - new parameter
     )
   }
 }
