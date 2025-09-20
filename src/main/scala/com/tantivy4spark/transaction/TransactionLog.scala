@@ -320,6 +320,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         case metadata: MetadataAction => Map("metaData" -> metadata)
         case add: AddAction => Map("add" -> add)
         case remove: RemoveAction => Map("remove" -> remove)
+        case skip: SkipAction => Map("mergeskip" -> skip)
       }
 
       val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
@@ -457,7 +458,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
             
             lines.map { line =>
               val jsonNode = JsonUtil.mapper.readTree(line)
-              
+
               if (jsonNode.has("metaData")) {
                 val metadataNode = jsonNode.get("metaData")
                 JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
@@ -467,6 +468,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
               } else if (jsonNode.has("remove")) {
                 val removeNode = jsonNode.get("remove")
                 JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
+              } else if (jsonNode.has("mergeskip")) {
+                val skipNode = jsonNode.get("mergeskip")
+                JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction])
               } else {
                 throw new IllegalArgumentException(s"Unknown action type in line: $line")
               }
@@ -546,5 +550,148 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
    */
   def getLastCheckpointVersion(): Option[Long] = {
     checkpoint.flatMap(_.getLastCheckpointVersion())
+  }
+
+  /**
+   * Record a skipped file in the transaction log with timestamp and reason.
+   * This allows tracking of files that couldn't be processed due to corruption or other issues.
+   */
+  def recordSkippedFile(
+    filePath: String,
+    reason: String,
+    operation: String,
+    partitionValues: Option[Map[String, String]] = None,
+    size: Option[Long] = None,
+    cooldownHours: Int = 24
+  ): Long = {
+    val timestamp = System.currentTimeMillis()
+    val retryAfter = timestamp + (cooldownHours * 60 * 60 * 1000L) // Convert hours to milliseconds
+
+    // Check if this file was already skipped recently and increment skip count
+    val existingSkips = getSkippedFiles().filter(_.path == filePath)
+    val skipCount = if (existingSkips.nonEmpty) {
+      existingSkips.map(_.skipCount).max + 1
+    } else {
+      1
+    }
+
+    val skipAction = SkipAction(
+      path = filePath,
+      skipTimestamp = timestamp,
+      reason = reason,
+      operation = operation,
+      partitionValues = partitionValues,
+      size = size,
+      retryAfter = Some(retryAfter),
+      skipCount = skipCount
+    )
+
+    val version = getLatestVersion() + 1
+    writeActions(version, Seq(skipAction))
+
+    logger.info(s"Recorded skipped file: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
+    version
+  }
+
+  /**
+   * Record a skipped file with custom timestamps (for testing purposes).
+   * This overloaded version allows specifying custom timestamps to test cooldown expiration logic.
+   */
+  def recordSkippedFileWithTimestamp(
+    filePath: String,
+    reason: String,
+    operation: String,
+    skipTimestamp: Long,
+    cooldownHours: Int,
+    partitionValues: Option[Map[String, String]] = None,
+    size: Option[Long] = None
+  ): Long = {
+    val retryAfter = skipTimestamp + (cooldownHours * 60 * 60 * 1000L) // Convert hours to milliseconds
+
+    // Check if this file was already skipped recently and increment skip count
+    val existingSkips = getSkippedFiles().filter(_.path == filePath)
+    val skipCount = if (existingSkips.nonEmpty) {
+      existingSkips.map(_.skipCount).max + 1
+    } else {
+      1
+    }
+
+    val skipAction = SkipAction(
+      path = filePath,
+      skipTimestamp = skipTimestamp,
+      reason = reason,
+      operation = operation,
+      partitionValues = partitionValues,
+      size = size,
+      retryAfter = Some(retryAfter),
+      skipCount = skipCount
+    )
+
+    val version = getLatestVersion() + 1
+    writeActions(version, Seq(skipAction))
+
+    logger.info(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
+    version
+  }
+
+  /**
+   * Read all actions from all transaction log versions.
+   */
+  private def readAllActions(): Seq[Action] = {
+    val versions = getVersions()
+    versions.flatMap(readVersion)
+  }
+
+  /**
+   * Get all skipped files from the transaction log.
+   */
+  def getSkippedFiles(): Seq[SkipAction] = {
+    readAllActions().collect { case skip: SkipAction => skip }
+  }
+
+  /**
+   * Check if a file is currently in cooldown (should not be retried yet).
+   */
+  def isFileInCooldown(filePath: String): Boolean = {
+    val now = System.currentTimeMillis()
+    val recentSkips = getSkippedFiles()
+      .filter(_.path == filePath)
+      .filter(skip => skip.retryAfter.exists(_ > now))
+
+    recentSkips.nonEmpty
+  }
+
+  /**
+   * Get files that are currently in cooldown with their retry timestamps.
+   */
+  def getFilesInCooldown(): Map[String, Long] = {
+    val now = System.currentTimeMillis()
+    getSkippedFiles()
+      .filter(skip => skip.retryAfter.exists(_ > now))
+      .groupBy(_.path)
+      .map { case (path, skips) =>
+        // Get the latest retry time for this path
+        val latestRetryAfter = skips.flatMap(_.retryAfter).max
+        path -> latestRetryAfter
+      }
+  }
+
+  /**
+   * Filter out files that are in cooldown from a list of candidate files for merge.
+   */
+  def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] = {
+    val filesInCooldown = getFilesInCooldown().keySet
+    val filtered = candidateFiles.filterNot(file => filesInCooldown.contains(file.path))
+
+    val filteredCount = candidateFiles.length - filtered.length
+    if (filteredCount > 0) {
+      logger.info(s"Filtered out $filteredCount files currently in cooldown period")
+      filesInCooldown.foreach { path =>
+        val retryTime = getFilesInCooldown().get(path)
+        logger.debug(s"File in cooldown: $path (retry after: ${retryTime.map(java.time.Instant.ofEpochMilli)})")
+      }
+    }
+
+    filtered
   }
 }

@@ -83,4 +83,11 @@ object Tantivy4SparkSQLConf {
 
   val TANTIVY4SPARK_STORAGE_FORCE_STANDARD = "spark.tantivy4spark.storage.force.standard"
   val TANTIVY4SPARK_BLOOM_FILTERS_ENABLED = "spark.tantivy4spark.bloom.filters.enabled"
+
+  /////////////////////
+  // Skipped Files Configuration
+  /////////////////////
+
+  val TANTIVY4SPARK_SKIPPED_FILES_COOLDOWN_DURATION = "spark.tantivy4spark.skippedFiles.cooldownDuration"
+  val TANTIVY4SPARK_SKIPPED_FILES_TRACKING_ENABLED = "spark.tantivy4spark.skippedFiles.trackingEnabled"
 }

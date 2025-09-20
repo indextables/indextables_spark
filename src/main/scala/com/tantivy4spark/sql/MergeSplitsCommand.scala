@@ -389,8 +389,24 @@ class MergeSplitsExecutor(
     }
 
     // Get current files from transaction log (in order they were added)
-    val currentFiles = transactionLog.listFiles().sortBy(_.modificationTime)
-    logger.info(s"Found ${currentFiles.length} split files in transaction log")
+    val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
+    logger.info(s"Found ${allFiles.length} split files in transaction log")
+
+    // Filter out files that are currently in cooldown period
+    val trackingEnabled = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.trackingEnabled", "true").toBoolean
+    val currentFiles = if (trackingEnabled) {
+      val filtered = transactionLog.filterFilesInCooldown(allFiles)
+      val filteredCount = allFiles.length - filtered.length
+      if (filteredCount > 0) {
+        logger.info(s"Filtered out $filteredCount files in cooldown period")
+        println(s"📝 [DRIVER] Skipping $filteredCount files currently in cooldown period")
+      }
+      filtered
+    } else {
+      allFiles
+    }
+
+    logger.info(s"Processing ${currentFiles.length} files for merge (after cooldown filtering)")
     currentFiles.foreach { file =>
       logger.info(s"  File: ${file.path} (${file.size} bytes, partition: ${file.partitionValues})")
     }
@@ -537,8 +553,87 @@ class MergeSplitsExecutor(
       
       logger.info(s"Processing transaction log for merge group with ${result.mergeGroup.files.length} files")
       
+      // Check if merge was actually performed by examining indexUid in metadata
+      val mergedMetadata = result.mergedSplitInfo.metadata
+      val indexUid = mergedMetadata.indexUid
+
+      // Extract skipped splits from the merge result to avoid marking them as removed
+      val skippedSplitPaths = Option(result.mergedSplitInfo.metadata.getSkippedSplits())
+        .map(_.asScala.toSet)
+        .getOrElse(Set.empty[String])
+
+      // Always record skipped files regardless of whether merge was performed
+      if (skippedSplitPaths.nonEmpty) {
+        logger.warn(s"⚠️  Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
+        println(s"⚠️  [DRIVER] Merge operation skipped ${skippedSplitPaths.size} files: ${skippedSplitPaths.mkString(", ")}")
+
+        // Record skipped files in transaction log with cooldown period
+        val cooldownHours = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.cooldownDuration", "24").toInt
+        val trackingEnabled = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.trackingEnabled", "true").toBoolean
+
+        if (trackingEnabled) {
+          skippedSplitPaths.foreach { skippedPath =>
+            logger.warn(s"⚠️  Recording skipped file in transaction log: $skippedPath")
+
+            // Find the corresponding file in merge group to get partition info and size
+            val correspondingFile = result.mergeGroup.files.find { file =>
+              val fullPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+                val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+                s"$normalizedBaseUri/${file.path}"
+              } else {
+                new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
+              }
+              fullPath == skippedPath || file.path == skippedPath
+            }
+
+            val reason = "Merge operation failed - possibly corrupted file or read error"
+            transactionLog.recordSkippedFile(
+              filePath = correspondingFile.map(_.path).getOrElse(skippedPath),
+              reason = reason,
+              operation = "merge",
+              partitionValues = correspondingFile.map(_.partitionValues),
+              size = correspondingFile.map(_.size),
+              cooldownHours = cooldownHours
+            )
+            logger.warn(s"⚠️  Recorded skipped file with ${cooldownHours}h cooldown: ${correspondingFile.map(_.path).getOrElse(skippedPath)}")
+          }
+        }
+      }
+
+      // Check if no merge was performed (null indexUid indicates this)
+      if (indexUid.isEmpty || indexUid.contains(null)) {
+        logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
+        println(s"⚠️  [DRIVER] No merge performed (null indexUid) - skipping transaction log ADD/REMOVE operations")
+
+        // Return without performing ADD/REMOVE operations
+        // Note: We still recorded the skipped files above, which is the desired behavior
+        result.copy(
+          mergedFiles = 0, // No files were actually merged
+          mergedSize = 0L, // No merged split was created
+          originalSize = result.mergeGroup.files.map(_.size).sum,
+          executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime)
+        )
+      } else {
+
       // Prepare transaction actions (REMOVE + ADD pattern from Delta Lake)
-      val removeActions = result.mergeGroup.files.map { file =>
+      // CRITICAL: Only remove files that were actually merged, not skipped files
+      val removeActions = result.mergeGroup.files.filter { file =>
+        val fullPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+          // For S3 paths, construct full URL to match what tantivy4java reports
+          val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+          s"$normalizedBaseUri/${file.path}"
+        } else {
+          // For local paths, use absolute path
+          new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
+        }
+
+        val wasSkipped = skippedSplitPaths.contains(fullPath) || skippedSplitPaths.contains(file.path)
+        if (wasSkipped) {
+          logger.info(s"Preserving skipped file in transaction log (not marking as removed): ${file.path}")
+          println(s"📝 [DRIVER] Preserving skipped file: ${file.path}")
+        }
+        !wasSkipped
+      }.map { file =>
         RemoveAction(
           path = file.path,
           deletionTimestamp = Some(startTime),
@@ -549,9 +644,9 @@ class MergeSplitsExecutor(
           tags = file.tags
         )
       }
-      
+
       // Extract ALL metadata from merged split for complete pipeline coverage
-      val mergedMetadata = result.mergedSplitInfo.metadata
+      // (mergedMetadata already extracted above for indexUid check)
       val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets,
            timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
         if (mergedMetadata != null) {
@@ -620,6 +715,7 @@ class MergeSplitsExecutor(
       
       // Return the merge result with updated timing
       result.copy(executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime))
+      } // End of else block for indexUid check
     }
     
     val totalMergedFiles = results.map(_.mergedFiles).sum
@@ -1588,11 +1684,11 @@ case class MergeResult(
  */
 case class SerializableSplitMetadata(
   footerStartOffset: Long,
-  footerEndOffset: Long, 
+  footerEndOffset: Long,
   hotcacheStartOffset: Long,
   hotcacheLength: Long,
   hasFooterOffsets: Boolean,
-  timeRangeStart: Option[String], 
+  timeRangeStart: Option[String],
   timeRangeEnd: Option[String],
   tags: Option[Map[String, String]],
   deleteOpstamp: Option[Long],
@@ -1601,7 +1697,9 @@ case class SerializableSplitMetadata(
   uncompressedSizeBytes: Long,
   // Additional fields needed for complete SplitMetadata
   splitId: Option[String] = None,
-  numDocs: Option[Long] = None
+  numDocs: Option[Long] = None,
+  skippedSplits: List[String] = List.empty,
+  indexUid: Option[String] = None // Store indexUid to detect if merge was performed
 ) extends Serializable {
   
   def getFooterStartOffset(): Long = footerStartOffset
@@ -1622,7 +1720,12 @@ case class SerializableSplitMetadata(
   def getUncompressedSizeBytes(): Long = uncompressedSizeBytes
   def getSplitId(): String = splitId.orNull
   def getNumDocs(): Long = numDocs.getOrElse(0L)
-  
+  def getSkippedSplits(): java.util.List[String] = {
+    import scala.jdk.CollectionConverters._
+    skippedSplits.asJava
+  }
+  def getIndexUid(): String = indexUid.orNull
+
   def toQuickwitSplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
     import scala.jdk.CollectionConverters._
     new com.tantivy4java.QuickwitSplit.SplitMetadata(
@@ -1644,7 +1747,7 @@ case class SerializableSplitMetadata(
       numMergeOps.getOrElse(0), // numMergeOps
       "doc-mapping-uid", // docMappingUid (NEW - required)
       docMappingJson.orNull, // docMappingJson (MOVED - for performance)
-      java.util.Collections.emptyList[String]() // skippedSplits
+      skippedSplits.asJava // skippedSplits
     )
   }
 }
@@ -1658,7 +1761,13 @@ object SerializableSplitMetadata {
       tagSet.asScala.map(_ -> "").toMap // Convert Set to Map with empty values
     }
     val docMapping = Option(metadata.getDocMappingJson())
-    
+    val skippedSplitsList = Option(metadata.getSkippedSplits()) match {
+      case Some(splits) =>
+        import scala.jdk.CollectionConverters._
+        splits.asScala.toList
+      case None => List.empty[String]
+    }
+
     SerializableSplitMetadata(
       metadata.getFooterStartOffset(),
       metadata.getFooterEndOffset(),
@@ -1673,7 +1782,9 @@ object SerializableSplitMetadata {
       docMapping,
       metadata.getUncompressedSizeBytes(),
       splitId = Option(metadata.getSplitId()).filter(_.nonEmpty),
-      numDocs = Some(metadata.getNumDocs())
+      numDocs = Some(metadata.getNumDocs()),
+      skippedSplits = skippedSplitsList,
+      indexUid = Option(metadata.getIndexUid()).filter(_.nonEmpty) // Extract indexUid to detect successful merge
     )
   }
 }

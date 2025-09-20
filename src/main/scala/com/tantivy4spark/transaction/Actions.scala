@@ -93,6 +93,17 @@ case class RemoveAction(
   tags: Option[Map[String, String]] = None
 ) extends Action
 
+case class SkipAction(
+  path: String,
+  skipTimestamp: Long,
+  reason: String,
+  operation: String, // "merge", "read", etc.
+  partitionValues: Option[Map[String, String]] = None,
+  size: Option[Long] = None,
+  retryAfter: Option[Long] = None, // Timestamp when file can be retried
+  skipCount: Int = 1 // Number of times this file has been skipped
+) extends Action
+
 case class FileStats(
   numRecords: Long,
   minValues: Map[String, String],
