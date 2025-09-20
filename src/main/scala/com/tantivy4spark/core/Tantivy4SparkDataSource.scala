@@ -94,19 +94,24 @@ object Tantivy4SparkRelation {
       import scala.jdk.CollectionConverters._
       new com.tantivy4java.QuickwitSplit.SplitMetadata(
         splitPath.split("/").last.replace(".split", ""), // splitId from filename
+        "tantivy4spark-index", // indexUid (NEW - required)
+        0L, // partitionId (NEW - required)
+        "tantivy4spark-source", // sourceId (NEW - required)
+        "tantivy4spark-node", // nodeId (NEW - required)
         numDocs, // numDocs
         uncompressedSize, // uncompressedSizeBytes
         timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
         timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+        System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+        "Mature", // maturity (NEW - required)
         splitTags.getOrElse(Set.empty[String]).asJava, // tags
-        deleteOpstamp.getOrElse(0L), // deleteOpstamp
-        numMergeOps.getOrElse(0), // numMergeOps
         footerStartOffset, // footerStartOffset
         footerEndOffset, // footerEndOffset
-        hotcacheStartOffset, // hotcacheStartOffset
-        hotcacheLength, // hotcacheLength
-        docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
-        java.util.Collections.emptyList[String]() // Additional metadata field (new in tantivy4java)
+        deleteOpstamp.getOrElse(0L), // deleteOpstamp
+        numMergeOps.getOrElse(0), // numMergeOps
+        "doc-mapping-uid", // docMappingUid (NEW - required)
+        docMappingJson.orNull, // docMappingJson (MOVED - for performance)
+        java.util.Collections.emptyList[String]() // skippedSplits
       )
     }
   }
@@ -606,12 +611,32 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       } else {
         // Standard optimization - use manual target and estimate records to avoid expensive count()
         val manualTarget = tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
-        val estimatedRecords = data.rdd.getNumPartitions * 50000L // Estimate without counting
+
+        // For small datasets (few partitions), count actual rows for accuracy
+        val estimatedRecords = if (data.rdd.getNumPartitions <= 20) {
+          try {
+            val actualCount = data.count()
+            logger.info(s"V1 OptimizedWrite: Actual row count for small dataset: $actualCount")
+            actualCount
+          } catch {
+            case e: Exception =>
+              logger.warn(s"V1 OptimizedWrite: Failed to count rows, using estimate: ${e.getMessage}")
+              data.rdd.getNumPartitions * 50000L // Fallback estimate
+          }
+        } else {
+          // For larger datasets, use heuristic to avoid expensive count()
+          val estimate = data.rdd.getNumPartitions * 50000L
+          logger.info(s"V1 OptimizedWrite: Using estimate for large dataset: $estimate")
+          estimate
+        }
+
         (manualTarget, estimatedRecords)
       }
 
       val optimalPartitions = Math.max(1, Math.ceil(totalRecords.toDouble / targetRecords.toDouble).toInt)
       val currentPartitions = data.rdd.getNumPartitions
+
+      logger.warn(s"🔍 V1 OPTIMIZED WRITE: totalRecords=$totalRecords, targetRecords=$targetRecords, optimalPartitions=$optimalPartitions, currentPartitions=$currentPartitions")
 
       if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
         logger.info(s"V1 Auto-sizing: actual records = $totalRecords (counted), calculated target = $targetRecords per split")

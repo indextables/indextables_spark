@@ -288,19 +288,24 @@ class Tantivy4SparkPartitionReader(
         
         val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
           addAction.path.split("/").last.replace(".split", ""), // splitId from filename
+          "tantivy4spark-index", // indexUid (NEW - required)
+          0L, // partitionId (NEW - required)
+          "tantivy4spark-source", // sourceId (NEW - required)
+          "tantivy4spark-node", // nodeId (NEW - required)
           toLongSafeOption(addAction.numRecords), // numDocs
           toLongSafeOption(addAction.uncompressedSizeBytes), // uncompressedSizeBytes
           addAction.timeRangeStart.map(Instant.parse).orNull, // timeRangeStart
           addAction.timeRangeEnd.map(Instant.parse).orNull, // timeRangeEnd
+          System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+          "Mature", // maturity (NEW - required)
           addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
-          toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
-          addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
           toLongSafeOption(addAction.footerStartOffset), // footerStartOffset
           toLongSafeOption(addAction.footerEndOffset), // footerEndOffset
-          toLongSafeOption(addAction.hotcacheStartOffset), // hotcacheStartOffset
-          toLongSafeOption(addAction.hotcacheLength), // hotcacheLength
-          addAction.docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
-          java.util.Collections.emptyList[String]() // skippedSplits - new parameter
+          toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
+          addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
+          "doc-mapping-uid", // docMappingUid (NEW - required)
+          addAction.docMappingJson.orNull, // docMappingJson (MOVED - for performance)
+          java.util.Collections.emptyList[String]() // skippedSplits
         )
 
         splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
@@ -605,7 +610,7 @@ class Tantivy4SparkDataWriter(
     }
     
     // Extract ALL metadata from tantivy4java SplitMetadata for complete pipeline coverage
-    val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets, 
+    val (footerStartOffset, footerEndOffset, hasFooterOffsets,
          timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
       if (splitMetadata != null) {
         val timeStart = Option(splitMetadata.getTimeRangeStart()).map(_.toString)
@@ -647,8 +652,6 @@ class Tantivy4SparkDataWriter(
         if (splitMetadata.hasFooterOffsets()) {
           (Some(splitMetadata.getFooterStartOffset()),
            Some(splitMetadata.getFooterEndOffset()),
-           Some(splitMetadata.getHotcacheStartOffset()),
-           Some(splitMetadata.getHotcacheLength()),
            true,
            timeStart,
            timeEnd,
@@ -658,7 +661,7 @@ class Tantivy4SparkDataWriter(
            docMapping,
            Some(splitMetadata.getUncompressedSizeBytes()))
         } else {
-          (None, None, None, None, false,
+          (None, None, false,
            timeStart, timeEnd, tags,
            Some(splitMetadata.getDeleteOpstamp()),
            Some(splitMetadata.getNumMergeOps()),
@@ -666,7 +669,7 @@ class Tantivy4SparkDataWriter(
            Some(splitMetadata.getUncompressedSizeBytes()))
         }
       } else {
-        (None, None, None, None, false, None, None, None, None, None, None, None)
+        (None, None, false, None, None, None, None, None, None, None)
       }
 
     val addAction = AddAction(
@@ -681,8 +684,9 @@ class Tantivy4SparkDataWriter(
       // Footer offset optimization metadata for 87% network traffic reduction
       footerStartOffset = footerStartOffset,
       footerEndOffset = footerEndOffset,
-      hotcacheStartOffset = hotcacheStartOffset,
-      hotcacheLength = hotcacheLength,
+      // Hotcache fields deprecated in v0.24.1 - no longer stored in transaction log
+      hotcacheStartOffset = None,
+      hotcacheLength = None,
       hasFooterOffsets = hasFooterOffsets,
       // Complete tantivy4java SplitMetadata fields for full pipeline coverage
       timeRangeStart = timeRangeStart,
@@ -702,7 +706,7 @@ class Tantivy4SparkDataWriter(
     if (hasFooterOffsets) {
       logger.info(s"🚀 FOOTER OFFSET OPTIMIZATION: Split created with metadata for 87% network traffic reduction")
       logger.debug(s"   Footer offsets: ${footerStartOffset.get}-${footerEndOffset.get}")
-      logger.debug(s"   Hotcache: ${hotcacheStartOffset.get}+${hotcacheLength.get}")
+      logger.debug(s"   Hotcache: deprecated (using footer offsets instead)")
     } else {
       logger.debug(s"📁 STANDARD: Split created without footer offset optimization")
     }

@@ -85,8 +85,9 @@ class Tantivy4SparkOptimizedWrite(
    * 4. Default (enabled)
    */
   private def shouldOptimizeWrite(): Boolean = {
+    logger.warn(s"🔍 OPTIMIZED WRITE: shouldOptimizeWrite called")
     val spark = SparkSession.active
-    
+
     // Check DataFrame write options first
     val writeOptionValue = tantivyOptions.optimizeWrite
     if (writeOptionValue.isDefined) {
@@ -219,8 +220,9 @@ class Tantivy4SparkOptimizedWrite(
    * This is similar to Delta Lake's TransactionalWrite.writeFiles method.
    */
   def createOptimizedWritePlan(queryExecution: org.apache.spark.sql.execution.QueryExecution): org.apache.spark.sql.execution.SparkPlan = {
+    logger.warn(s"🔍 OPTIMIZED WRITE: createOptimizedWritePlan called")
     val originalPlan = queryExecution.executedPlan
-    
+
     if (shouldOptimizeWrite()) {
       val targetRecords = getTargetRecordsPerSplit()
       logger.info(s"Enabling optimized write with target $targetRecords records per split")
@@ -239,7 +241,10 @@ class Tantivy4SparkOptimizedWrite(
     }
   }
 
-  override def toBatch: BatchWrite = this
+  override def toBatch: BatchWrite = {
+    logger.warn(s"🔍 OPTIMIZED WRITE: toBatch called")
+    this
+  }
   
   /**
    * RequiresDistributionAndOrdering implementation for V2 optimized writes.
@@ -274,6 +279,7 @@ class Tantivy4SparkOptimizedWrite(
    * For auto-sizing, this method will attempt to count the input DataFrame.
    */
   override def requiredNumPartitions(): Int = {
+    logger.warn(s"🔍 OPTIMIZED WRITE: requiredNumPartitions called")
     val targetRecords = getTargetRecordsPerSplit()
 
     // Check if auto-sizing is enabled
@@ -325,8 +331,9 @@ class Tantivy4SparkOptimizedWrite(
   override def requiredOrdering(): Array[SortOrder] = Array.empty
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
+    logger.warn(s"🔍 OPTIMIZED WRITE: createBatchWriterFactory called with ${info.numPartitions} partitions")
     val targetRecords = getTargetRecordsPerSplit()
-    
+
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
     logger.info(s"V2 optimized write enabled, target records per split: $targetRecords")
     logger.info(s"V2 optimized write: Using RequiresDistributionAndOrdering to control partitioning")

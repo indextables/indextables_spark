@@ -119,8 +119,8 @@ object SplitManager {
           logger.warn(s"🔍 PROOF: Footer offsets PRESENT:")
           logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
           logger.warn(s"🔍 PROOF:   footerEndOffset = ${metadata.getFooterEndOffset()}")
-          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = ${metadata.getHotcacheStartOffset()}")
-          logger.warn(s"🔍 PROOF:   hotcacheLength = ${metadata.getHotcacheLength()}")
+          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = deprecated (using footer offsets)")
+          logger.warn(s"🔍 PROOF:   hotcacheLength = deprecated (using footer offsets)")
         } else {
           logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets!")
           logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
@@ -182,8 +182,8 @@ object SplitManager {
           logger.warn(s"🔍 PROOF: Footer offsets PRESENT (non-S3):")
           logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
           logger.warn(s"🔍 PROOF:   footerEndOffset = ${metadata.getFooterEndOffset()}")
-          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = ${metadata.getHotcacheStartOffset()}")
-          logger.warn(s"🔍 PROOF:   hotcacheLength = ${metadata.getHotcacheLength()}")
+          logger.warn(s"🔍 PROOF:   hotcacheStartOffset = deprecated (using footer offsets)")
+          logger.warn(s"🔍 PROOF:   hotcacheLength = deprecated (using footer offsets)")
         } else {
           logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets (non-S3 path)!")
           logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")

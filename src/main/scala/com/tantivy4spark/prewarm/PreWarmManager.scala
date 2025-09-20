@@ -341,19 +341,24 @@ object PreWarmManager {
     
     val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
       addAction.path.split("/").last.replace(".split", ""), // splitId from filename
+      "tantivy4spark-index", // indexUid (NEW - required)
+      0L, // partitionId (NEW - required)
+      "tantivy4spark-source", // sourceId (NEW - required)
+      "tantivy4spark-node", // nodeId (NEW - required)
       toLongSafeOption(addAction.numRecords), // numDocs
       toLongSafeOption(addAction.uncompressedSizeBytes), // uncompressedSizeBytes
       addAction.timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
       addAction.timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+      System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+      "Mature", // maturity (NEW - required)
       addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
-      toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
-      addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
       safeLong(addAction.footerStartOffset, "footerStartOffset"), // footerStartOffset
       safeLong(addAction.footerEndOffset, "footerEndOffset"), // footerEndOffset
-      safeLong(addAction.hotcacheStartOffset, "hotcacheStartOffset"), // hotcacheStartOffset
-      safeLong(addAction.hotcacheLength, "hotcacheLength"), // hotcacheLength
-      addAction.docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
-      java.util.Collections.emptyList[String]() // skippedSplits - new parameter
+      toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
+      addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
+      "doc-mapping-uid", // docMappingUid (NEW - required)
+      addAction.docMappingJson.orNull, // docMappingJson (MOVED - for performance)
+      java.util.Collections.emptyList[String]() // skippedSplits
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }

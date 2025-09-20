@@ -517,19 +517,31 @@ class PartitionedDatasetTest extends TestBase {
   }
 
   private def countSplitFiles(path: String): Int = {
-    def countRecursively(dir: File): Int = {
-      if (!dir.exists() || !dir.isDirectory) return 0
+    // Count logically active files using transaction log, not physical files on disk
+    // This is important because RemoveActions don't delete files, they just mark them as removed
+    try {
+      import com.tantivy4spark.transaction.TransactionLog
+      import org.apache.hadoop.fs.Path
 
-      val splitFiles = dir.listFiles().filter(_.getName.endsWith(".split")).length
-      val subDirFiles = dir.listFiles()
-        .filter(_.isDirectory)
-        .map(countRecursively)
-        .sum
+      val transactionLog = new TransactionLog(new Path(path), spark)
+      val activeFiles = transactionLog.listFiles()
+      activeFiles.length
+    } catch {
+      case _: Exception =>
+        // Fallback to physical file count if transaction log is not available
+        def countRecursively(dir: File): Int = {
+          if (!dir.exists() || !dir.isDirectory) return 0
 
-      splitFiles + subDirFiles
+          val splitFiles = dir.listFiles().filter(_.getName.endsWith(".split")).length
+          val subDirFiles = dir.listFiles()
+            .filter(_.isDirectory)
+            .map(countRecursively)
+            .sum
+
+          splitFiles + subDirFiles
+        }
+        countRecursively(new File(path))
     }
-
-    countRecursively(new File(path))
   }
 
   private def countSplitFilesInDir(dirPath: String): Int = {

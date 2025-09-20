@@ -114,27 +114,8 @@ class SplitSearchEngineValidationTest extends AnyFunSuite {
     println(s"✅ Invalid footer offset order validation: ${exception.getMessage}")
   }
 
-  test("should throw IllegalArgumentException when hotcache offsets are invalid") {
-    val mockMetadata = mock(classOf[QuickwitSplit.SplitMetadata])
-    when(mockMetadata.hasFooterOffsets()).thenReturn(true)
-    when(mockMetadata.getFooterStartOffset()).thenReturn(10L)
-    when(mockMetadata.getFooterEndOffset()).thenReturn(100L)
-    when(mockMetadata.getHotcacheStartOffset()).thenReturn(0L) // Invalid: should be > 0
-    when(mockMetadata.getHotcacheLength()).thenReturn(25L)
-    when(mockMetadata.getDocMappingJson()).thenReturn("{\"fields\":[]}")
-
-    val exception = intercept[IllegalArgumentException] {
-      SplitSearchEngine.fromSplitFileWithMetadata(
-        testSchema,
-        "s3://test-bucket/test.split",
-        mockMetadata,
-        SplitCacheConfig()
-      )
-    }
-
-    assert(exception.getMessage.contains("invalid hotcache offsets"))
-    println(s"✅ Invalid hotcache offsets validation: ${exception.getMessage}")
-  }
+  // NOTE: Hotcache functionality was deprecated in tantivy4java v0.24.1
+  // The previous test for invalid hotcache offsets is no longer applicable
 
   test("should throw IllegalArgumentException when document mapping JSON is null or empty") {
     val mockMetadata = mock(classOf[QuickwitSplit.SplitMetadata])
@@ -213,7 +194,6 @@ class SplitSearchEngineValidationTest extends AnyFunSuite {
       case e: IllegalArgumentException if e.getMessage.contains("Split metadata cannot be null") ||
                                         e.getMessage.contains("does not contain required footer offsets") ||
                                         e.getMessage.contains("invalid footer offsets") ||
-                                        e.getMessage.contains("invalid hotcache offsets") ||
                                         e.getMessage.contains("must contain valid document mapping JSON") =>
         // These are our validation exceptions - should not happen with valid metadata
         fail(s"Valid metadata should not trigger validation errors: ${e.getMessage}")

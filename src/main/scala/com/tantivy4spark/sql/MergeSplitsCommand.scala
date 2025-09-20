@@ -565,8 +565,8 @@ class MergeSplitsExecutor(
           if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
-             Some(mergedMetadata.getHotcacheStartOffset()),
-             Some(mergedMetadata.getHotcacheLength()),
+             None, // hotcacheStartOffset - deprecated, use footer offsets instead
+             None, // hotcacheLength - deprecated, use footer offsets instead
              true,
              timeStart,
              timeEnd,
@@ -862,8 +862,8 @@ class MergeSplitsExecutor(
           if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
-             Some(mergedMetadata.getHotcacheStartOffset()),
-             Some(mergedMetadata.getHotcacheLength()),
+             None, // hotcacheStartOffset - deprecated, use footer offsets instead
+             None, // hotcacheLength - deprecated, use footer offsets instead
              true,
              timeStart,
              timeEnd,
@@ -1626,19 +1626,24 @@ case class SerializableSplitMetadata(
     import scala.jdk.CollectionConverters._
     new com.tantivy4java.QuickwitSplit.SplitMetadata(
       splitId.getOrElse("unknown"), // splitId
+      "tantivy4spark-index", // indexUid (NEW - required)
+      0L, // partitionId (NEW - required)
+      "tantivy4spark-source", // sourceId (NEW - required)
+      "tantivy4spark-node", // nodeId (NEW - required)
       numDocs.getOrElse(0L), // numDocs
       uncompressedSizeBytes, // uncompressedSizeBytes
       timeRangeStart.map(java.time.Instant.parse).orNull, // timeRangeStart
       timeRangeEnd.map(java.time.Instant.parse).orNull, // timeRangeEnd
+      System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+      "Mature", // maturity (NEW - required)
       tags.map(_.keySet.asJava).getOrElse(java.util.Collections.emptySet()), // tags
-      deleteOpstamp.getOrElse(0L), // deleteOpstamp
-      numMergeOps.getOrElse(0), // numMergeOps
       footerStartOffset, // footerStartOffset
       footerEndOffset, // footerEndOffset
-      hotcacheStartOffset, // hotcacheStartOffset
-      hotcacheLength, // hotcacheLength
-      docMappingJson.orNull, // docMappingJson - critical for SplitSearcher
-      java.util.Collections.emptyList[String]() // skippedSplits - new parameter
+      deleteOpstamp.getOrElse(0L), // deleteOpstamp
+      numMergeOps.getOrElse(0), // numMergeOps
+      "doc-mapping-uid", // docMappingUid (NEW - required)
+      docMappingJson.orNull, // docMappingJson (MOVED - for performance)
+      java.util.Collections.emptyList[String]() // skippedSplits
     )
   }
 }
@@ -1655,9 +1660,9 @@ object SerializableSplitMetadata {
     
     SerializableSplitMetadata(
       metadata.getFooterStartOffset(),
-      metadata.getFooterEndOffset(), 
-      metadata.getHotcacheStartOffset(),
-      metadata.getHotcacheLength(),
+      metadata.getFooterEndOffset(),
+      0L, // hotcacheStartOffset - deprecated, using footer offsets instead
+      0L, // hotcacheLength - deprecated, using footer offsets instead
       metadata.hasFooterOffsets(),
       timeStart,
       timeEnd,

@@ -361,8 +361,9 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         addAction.hasFooterOffsets shouldBe true
         addAction.footerStartOffset shouldBe defined
         addAction.footerEndOffset shouldBe defined
-        addAction.hotcacheStartOffset shouldBe defined
-        addAction.hotcacheLength shouldBe defined
+        // Hotcache fields are deprecated in v0.24.1 and set to None
+        addAction.hotcacheStartOffset shouldBe None
+        addAction.hotcacheLength shouldBe None
         addAction.docMappingJson shouldBe defined
 
         // Additional metadata
@@ -374,8 +375,6 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           "size" -> addAction.size,
           "footerStart" -> addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
           "footerEnd" -> addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
-          "hotcacheStart" -> addAction.hotcacheStartOffset.get.asInstanceOf[Number].longValue(),
-          "hotcacheLength" -> addAction.hotcacheLength.get.asInstanceOf[Number].longValue(),
           "docMappingLength" -> addAction.docMappingJson.get.length,
           "numRecords" -> addAction.numRecords.get.asInstanceOf[Number].longValue(),
           "uncompressedSize" -> addAction.uncompressedSizeBytes.get.asInstanceOf[Number].longValue()
@@ -399,10 +398,9 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         val finalDeserializedFooterEnd = deserializedAction.footerEndOffset.get.asInstanceOf[Number].longValue()
         finalDeserializedFooterStart shouldBe originalMetadata("footerStart")
         finalDeserializedFooterEnd shouldBe originalMetadata("footerEnd")
-        val deserializedHotcacheStart = deserializedAction.hotcacheStartOffset.get.asInstanceOf[Number].longValue()
-        val deserializedHotcacheLength = deserializedAction.hotcacheLength.get.asInstanceOf[Number].longValue()
-        deserializedHotcacheStart shouldBe originalMetadata("hotcacheStart")
-        deserializedHotcacheLength shouldBe originalMetadata("hotcacheLength")
+        // Validate hotcache fields remain None after serialization (deprecated in v0.24.1)
+        deserializedAction.hotcacheStartOffset shouldBe None
+        deserializedAction.hotcacheLength shouldBe None
         deserializedAction.docMappingJson.get.length shouldBe originalMetadata("docMappingLength")
         val deserializedNumRecords = deserializedAction.numRecords.get.asInstanceOf[Number].longValue()
         val deserializedUncompressedSize = deserializedAction.uncompressedSizeBytes.get.asInstanceOf[Number].longValue()

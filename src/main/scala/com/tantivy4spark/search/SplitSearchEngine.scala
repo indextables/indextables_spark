@@ -69,8 +69,9 @@ class SplitSearchEngine private(
   // Validate footer offsets are non-zero (meaningful)
   val footerStartOffset = metadata.getFooterStartOffset()
   val footerEndOffset = metadata.getFooterEndOffset()
-  val hotcacheStartOffset = metadata.getHotcacheStartOffset()
-  val hotcacheLength = metadata.getHotcacheLength()
+  // Hotcache methods deprecated in v0.24.1 - using footer offsets instead
+  val hotcacheStartOffset = footerStartOffset // Fallback to footer offset
+  val hotcacheLength = footerEndOffset - footerStartOffset // Calculate from footer range
 
   if (footerStartOffset <= 0 || footerEndOffset <= 0) {
     throw new IllegalArgumentException(s"Split metadata has invalid footer offsets. footerStartOffset: $footerStartOffset, footerEndOffset: $footerEndOffset. These must be positive non-zero values.")

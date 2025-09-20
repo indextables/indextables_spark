@@ -209,18 +209,23 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
         // This simulates the SplitMetadata reconstruction in Tantivy4SparkPartitions.scala
         new com.tantivy4java.QuickwitSplit.SplitMetadata(
           addAction.path,                               // splitId
+          "tantivy4spark-index", // indexUid (NEW - required)
+          0L, // partitionId (NEW - required)
+          "tantivy4spark-source", // sourceId (NEW - required)
+          "tantivy4spark-node", // nodeId (NEW - required)
           addAction.numRecords.getOrElse(0L),          // numDocs
           addAction.size,                              // uncompressedSizeBytes
           null, null,                                  // timeRange
+          System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+          "Mature", // maturity (NEW - required)
           java.util.Collections.emptySet(),           // tags
-          0L, 0,                                       // deleteOpstamp, numMergeOps
           // Footer offset optimization fields with type conversion
           addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
           addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
-          addAction.hotcacheStartOffset.get.asInstanceOf[Number].longValue(),
-          addAction.hotcacheLength.get.asInstanceOf[Number].longValue(),
-          addAction.docMappingJson.getOrElse(""),      // docMappingJson
-          java.util.Collections.emptyList[String]()    // skippedSplits - new parameter
+          0L, 0,                                       // deleteOpstamp, numMergeOps
+          "doc-mapping-uid", // docMappingUid (NEW - required)
+          addAction.docMappingJson.getOrElse(""),      // docMappingJson (MOVED - for performance)
+          java.util.Collections.emptyList[String]()    // skippedSplits
         )
       } catch {
         case ex: Exception =>
@@ -235,9 +240,8 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
         assert(reconstructedMetadata.hasFooterOffsets())
         assert(reconstructedMetadata.getFooterStartOffset == 72000L)
         assert(reconstructedMetadata.getFooterEndOffset == 74500L)
-        assert(reconstructedMetadata.getHotcacheStartOffset == 3000L)
-        assert(reconstructedMetadata.getHotcacheLength == 69000L)
-        println("✅ SplitMetadata reconstructed correctly from AddAction")
+        // Hotcache methods deprecated in v0.24.1 - no longer tested
+        println("✅ SplitMetadata reconstructed correctly from AddAction (footer offsets only)")
       } else {
         // If reconstruction failed, that's expected if tantivy4java doesn't have the optimization yet
         println("ℹ️  SplitMetadata reconstruction failed - tantivy4java may not have footer offset support yet")
@@ -464,16 +468,13 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
           }
           
           val footerStart = safeLong(file.footerStartOffset, "footerStartOffset")
-          val footerEnd = safeLong(file.footerEndOffset, "footerEndOffset") 
-          val hotcacheStart = safeLong(file.hotcacheStartOffset, "hotcacheStartOffset")
-          val hotcacheLength = safeLong(file.hotcacheLength, "hotcacheLength")
-          
-          println(s"   🚀 V2 OPTIMIZED: Footer($footerStart-$footerEnd) Hotcache($hotcacheStart+$hotcacheLength)")
-          
-          // Validate metadata integrity - no need for non-negative checks since we throw on None
+          val footerEnd = safeLong(file.footerEndOffset, "footerEndOffset")
+          // Hotcache fields deprecated in v0.24.1 - no longer validated
+
+          println(s"   🚀 V2 OPTIMIZED: Footer($footerStart-$footerEnd) Hotcache(deprecated)")
+
+          // Validate metadata integrity - footer offsets only
           assert(footerEnd > footerStart, s"Footer end ($footerEnd) should be greater than start ($footerStart)")
-          assert(hotcacheStart >= 0, s"Hotcache start ($hotcacheStart) should be non-negative") 
-          assert(hotcacheLength > 0, s"Hotcache length ($hotcacheLength) should be positive")
           assert(footerEnd <= file.size, s"Footer end ($footerEnd) should not exceed file size (${file.size})")
         } else {
           println(s"   📁 V2 STANDARD: No footer offset optimization")

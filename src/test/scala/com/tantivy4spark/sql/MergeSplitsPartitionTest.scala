@@ -286,12 +286,15 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     logger.info("Test 2: Invalid case - files from different partitions")
     val mixedFiles = filesPartition1 ++ filesPartition2 // Mix files from different partitions
 
-    val exception = intercept[IllegalStateException] {
+    val exception = intercept[java.lang.reflect.InvocationTargetException] {
       findMergeableGroupsMethod.invoke(executor, partition2023Q1, mixedFiles)
     }
 
-    assert(exception.getMessage.contains("findMergeableGroups received files from wrong partitions"),
-      s"Should detect cross-partition files, got: ${exception.getMessage}")
+    val cause = exception.getCause
+    assert(cause.isInstanceOf[IllegalStateException],
+      s"Should throw IllegalStateException, got: ${cause.getClass.getSimpleName}")
+    assert(cause.getMessage.contains("findMergeableGroups received files from wrong partitions"),
+      s"Should detect cross-partition files, got: ${cause.getMessage}")
     logger.info("✅ Cross-partition detection works correctly")
 
     // Test 3: Edge case - single file (should not create groups)

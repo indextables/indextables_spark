@@ -82,7 +82,7 @@ class Tantivy4SparkWriteBuilder(
         }
     }
     
-    logger.info(s"WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled")
+    logger.warn(s"🔍 WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled, options = ${tantivyOptions.optimizeWrite}")
     
     if (optimizeWriteEnabled) {
       logger.info("Using Tantivy4SparkOptimizedWrite with RequiresDistributionAndOrdering")

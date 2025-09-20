@@ -57,14 +57,27 @@ case class Tantivy4SparkOptimizedWriterExec(
    * Calculate the optimal number of shuffle partitions based on the target records per split.
    */
   private def calculateOptimalPartitions(): Int = {
+    logger.warn(s"🔍 CALCULATE PARTITIONS DEBUG: Starting with targetRecordsPerSplit=$targetRecordsPerSplit")
     val spark = SparkSession.active
-    
-    // Try to estimate the total number of records - use a simple heuristic
+
+    // Try to get actual row count for better accuracy
     val estimatedRows = try {
-      // Use the number of current partitions as a rough estimate
+      // For small datasets, we can afford to count the actual rows
       val currentPartitions = child.execute().getNumPartitions
-      val estimatePerPartition = 10000L // Assume 10k records per partition as baseline
-      currentPartitions * estimatePerPartition
+
+      // If dataset is small (few partitions), count actual rows for accuracy
+      if (currentPartitions <= 20) {
+        val rdd = child.execute()
+        val actualCount = rdd.count()
+        logger.info(s"Actual row count for small dataset: $actualCount")
+        actualCount
+      } else {
+        // For larger datasets, use improved heuristic based on statistics
+        val estimatePerPartition = 50000L // More reasonable baseline for larger datasets
+        val estimate = currentPartitions * estimatePerPartition
+        logger.info(s"Estimated row count for large dataset: $estimate (${currentPartitions} partitions)")
+        estimate
+      }
     } catch {
       case e: Exception =>
         logger.warn("Could not estimate row count from plan", e)
@@ -90,6 +103,7 @@ case class Tantivy4SparkOptimizedWriterExec(
   }
 
   override protected def doExecute() = {
+    logger.warn(s"🔍 OPTIMIZED WRITE DEBUG: doExecute() called with targetRecordsPerSplit=$targetRecordsPerSplit")
     val optimalPartitions = calculateOptimalPartitions()
     
     // Update metrics
