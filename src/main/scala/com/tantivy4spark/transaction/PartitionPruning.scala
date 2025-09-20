@@ -43,8 +43,9 @@ object PartitionPruning {
     }
     
     // Extract partition filters from the filter array
-    val partitionFilters = filters.filter(isPartitionFilter(_, partitionColumns))
-    
+    // Use enhanced extraction to handle mixed partition/non-partition filters
+    val partitionFilters = filters.flatMap(extractPartitionFilter(_, partitionColumns))
+
     if (partitionFilters.isEmpty) {
       logger.debug("No partition filters found, returning all splits")
       return addActions
@@ -66,10 +67,61 @@ object PartitionPruning {
   
   /**
    * Check if a filter applies to partition columns.
+   * A filter is considered a partition filter if ALL referenced columns are partition columns.
+   * This ensures we don't try to apply filters that reference non-partition columns.
    */
   private def isPartitionFilter(filter: Filter, partitionColumns: Seq[String]): Boolean = {
     val referencedColumns = getReferencedColumns(filter)
-    referencedColumns.exists(partitionColumns.contains)
+    referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)
+  }
+
+  /**
+   * Extract the partition-filterable parts of a complex filter.
+   * This handles cases where a filter contains both partition and non-partition column references.
+   */
+  private def extractPartitionFilter(filter: Filter, partitionColumns: Seq[String]): Option[Filter] = {
+    filter match {
+      // Simple filters - check if they reference only partition columns
+      case f @ EqualTo(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ EqualNullSafe(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ GreaterThan(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ GreaterThanOrEqual(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ LessThan(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ LessThanOrEqual(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ In(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ IsNull(attribute) if partitionColumns.contains(attribute) => Some(f)
+      case f @ IsNotNull(attribute) if partitionColumns.contains(attribute) => Some(f)
+      case f @ StringStartsWith(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ StringEndsWith(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+      case f @ StringContains(attribute, _) if partitionColumns.contains(attribute) => Some(f)
+
+      // Complex filters - recursively extract partition parts
+      case And(left, right) =>
+        val leftPartition = extractPartitionFilter(left, partitionColumns)
+        val rightPartition = extractPartitionFilter(right, partitionColumns)
+        (leftPartition, rightPartition) match {
+          case (Some(l), Some(r)) => Some(And(l, r))
+          case (Some(l), None) => Some(l)
+          case (None, Some(r)) => Some(r)
+          case (None, None) => None
+        }
+
+      case Or(left, right) =>
+        val leftPartition = extractPartitionFilter(left, partitionColumns)
+        val rightPartition = extractPartitionFilter(right, partitionColumns)
+        (leftPartition, rightPartition) match {
+          case (Some(l), Some(r)) => Some(Or(l, r))
+          case (Some(l), None) => Some(l)  // Conservative: if either side can't be evaluated, we can't prune
+          case (None, Some(r)) => Some(r)  // Conservative: if either side can't be evaluated, we can't prune
+          case (None, None) => None
+        }
+
+      case Not(child) =>
+        extractPartitionFilter(child, partitionColumns).map(Not(_))
+
+      // Non-partition column references
+      case _ => None
+    }
   }
   
   /**
@@ -105,8 +157,9 @@ object PartitionPruning {
   
   /**
    * Evaluate a single filter against partition values.
+   * Package-private for testing.
    */
-  private def evaluateFilter(partitionValues: Map[String, String], filter: Filter): Boolean = {
+  private[transaction] def evaluateFilter(partitionValues: Map[String, String], filter: Filter): Boolean = {
     filter match {
       case EqualTo(attribute, value) =>
         partitionValues.get(attribute) match {
@@ -119,7 +172,25 @@ object PartitionPruning {
           case Some(partitionValue) => compareValues(partitionValue, value) > 0
           case None => false
         }
-        
+
+      case GreaterThanOrEqual(attribute, value) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => compareValues(partitionValue, value) >= 0
+          case None => false
+        }
+
+      case LessThan(attribute, value) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => compareValues(partitionValue, value) < 0
+          case None => false
+        }
+
+      case LessThanOrEqual(attribute, value) =>
+        partitionValues.get(attribute) match {
+          case Some(partitionValue) => compareValues(partitionValue, value) <= 0
+          case None => false
+        }
+
       case In(attribute, values) =>
         partitionValues.get(attribute) match {
           case Some(partitionValue) => values.exists(value => compareValues(partitionValue, value) == 0)
@@ -154,6 +225,36 @@ object PartitionPruning {
         case f: Float => partitionValue.toFloat.compareTo(f)
         case d: Double => partitionValue.toDouble.compareTo(d)
         case b: Boolean => partitionValue.toBoolean.compareTo(b)
+
+        // Date type support - partitionValue is stored as YYYY-MM-DD string format
+        case date: java.sql.Date =>
+          partitionValue.compareTo(date.toString) // Date.toString() returns YYYY-MM-DD format
+
+        // Timestamp type support - convert both to comparable format
+        case timestamp: java.sql.Timestamp =>
+          // For timestamp partitions, partitionValue might be stored as ISO string or epoch millis
+          try {
+            // Try parsing as ISO timestamp first
+            val partitionTimestamp = java.sql.Timestamp.valueOf(partitionValue)
+            partitionTimestamp.compareTo(timestamp)
+          } catch {
+            case _: Exception =>
+              // Fallback to epoch millis comparison if stored as long
+              val partitionMillis = partitionValue.toLong
+              val filterMillis = timestamp.getTime
+              partitionMillis.compareTo(filterMillis)
+          }
+
+        // BigDecimal type support - for precise numeric comparisons
+        case bd: java.math.BigDecimal =>
+          val partitionDecimal = new java.math.BigDecimal(partitionValue)
+          partitionDecimal.compareTo(bd)
+
+        // Scala BigDecimal support
+        case bd: scala.math.BigDecimal =>
+          val partitionDecimal = scala.math.BigDecimal(partitionValue)
+          partitionDecimal.compareTo(bd)
+
         case _ => partitionValue.compareTo(filterValue.toString)
       }
     } catch {
