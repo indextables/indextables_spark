@@ -600,10 +600,10 @@ class MergeSplitsExecutor(
         }
       }
 
-      // Check if no merge was performed (null indexUid indicates this)
-      if (indexUid.isEmpty || indexUid.contains(null)) {
-        logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
-        println(s"⚠️  [DRIVER] No merge performed (null indexUid) - skipping transaction log ADD/REMOVE operations")
+      // Check if no merge was performed (null or empty indexUid indicates this)
+      if (indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)) {
+        logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
+        println(s"⚠️  [DRIVER] No merge performed (null/empty indexUid) - skipping transaction log ADD/REMOVE operations")
 
         // Return without performing ADD/REMOVE operations
         // Note: We still recorded the skipped files above, which is the desired behavior

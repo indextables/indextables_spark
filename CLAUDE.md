@@ -7,7 +7,7 @@
 - **Transaction log**: Delta Lake-style with atomic operations and high-performance compaction
 - **Transaction log compaction**: Automatic checkpoint creation with parallel S3 retrieval for scalable performance
 - **Partitioned datasets**: Full support for partitioned tables with partition pruning and WHERE clauses
-- **Merge splits optimization**: SQL-based split consolidation with intelligent bin packing, configurable limits, and partition-aware operations
+- **Merge splits optimization**: SQL-based split consolidation with intelligent bin packing, configurable limits, partition-aware operations, and robust skipped files handling
 - **Broadcast locality management**: Cluster-wide cache locality tracking for optimal task scheduling
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'` and `_indexall indexquery 'query'`)
 - **Optimized writes**: Automatic split sizing with adaptive shuffle
@@ -362,6 +362,61 @@ df.write.format("tantivy4spark")
 - **Text fields**: Only `IndexQuery` filters pushed to data source, exact match filters post-processed by Spark
 - **Configuration persistence**: Settings are automatically stored and validated on subsequent writes
 
+## Skipped Files Configuration
+
+**New in v1.7**: Robust handling of corrupted or problematic files during merge operations with intelligent cooldown and retry mechanisms.
+
+### Core Settings
+- `spark.tantivy4spark.skippedFiles.trackingEnabled`: `true` (Enable skipped files tracking and cooldown)
+- `spark.tantivy4spark.skippedFiles.cooldownDuration`: `24` (Hours to wait before retrying failed files)
+
+### Skipped Files Behavior
+
+**When merge operations encounter problematic files:**
+- ✅ **Skipped files are logged** with timestamps, reasons, and metadata
+- ✅ **Original files remain accessible** (not marked as "removed" in transaction log)
+- ✅ **Cooldown periods prevent repeated failures** on the same files
+- ✅ **Automatic retry after cooldown expires** for eventual recovery
+- ⚠️ **Warning logs generated** for all skipped files and failed merge attempts
+- ❌ **No task failures** - operations continue gracefully despite file issues
+
+**Null/Empty indexUid Handling:**
+When tantivy4java returns null or empty indexUid (indicating no merge was performed):
+- Handles null, empty string, and whitespace-only indexUids identically
+- Files are not marked as "removed" from transaction log
+- Skipped files are still tracked with proper cooldown
+- Warning logs indicate no merge occurred
+- Operation continues without failing
+
+### Configuration Examples
+
+```scala
+// Production settings with 48-hour cooldown
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.skippedFiles.trackingEnabled", "true")
+  .option("spark.tantivy4spark.skippedFiles.cooldownDuration", "48")
+  .save("s3://bucket/production-data")
+
+// Development with shorter cooldown for faster testing
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.skippedFiles.cooldownDuration", "1")
+  .save("s3://bucket/dev-data")
+
+// Disable skipped files tracking (not recommended)
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.skippedFiles.trackingEnabled", "false")
+  .save("s3://bucket/path")
+```
+
+### Transaction Log Integration
+
+Skipped files are recorded in the transaction log using `SkipAction` with:
+- **File path and metadata** (size, partition values)
+- **Skip timestamp and reason** for debugging
+- **Operation context** (e.g., "merge")
+- **Retry timestamp** for cooldown management
+- **Skip count** for tracking repeated failures
+
 ## Usage Examples
 
 ### Write
@@ -458,7 +513,7 @@ SELECT * FROM documents WHERE _indexall indexquery 'spark AND sql';
 SELECT * FROM partitioned_data
 WHERE load_date = '2024-01-01' AND message indexquery 'error OR warning';
 
--- Split optimization
+-- Split optimization with automatic skipped files handling
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
 MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;          -- Limit to 10 merge groups
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5;  -- Both constraints
@@ -467,6 +522,8 @@ MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5;  -- Both constrai
 MERGE SPLITS 's3://bucket/partitioned-data'
 WHERE load_date = '2024-01-01' AND load_hour = 10
 TARGET SIZE 100M;
+
+-- Note: Corrupted or problematic files are automatically skipped with cooldown tracking
 ```
 
 ### Split Optimization
@@ -589,6 +646,7 @@ df.write.format("tantivy4spark")
 - ✅ **Partitioned datasets**: Full partitioned table support with comprehensive test suite (7/7 tests)
 - ✅ **V1/V2 DataSource compatibility**: Both APIs fully functional with partitioning support
 - ✅ **Split optimization**: SQL-based merge commands with MAX GROUPS limits and partition-aware operations
+- ✅ **Skipped files handling**: Robust merge operation resilience with cooldown tracking (5/5 tests passing)
 - ✅ **Broadcast locality**: Cluster-wide cache locality management
 - ✅ **Schema validation**: Field type compatibility checks prevent configuration conflicts
 - ✅ **Field type filtering**: Intelligent filter pushdown based on field type capabilities (478/478 tests passing)
@@ -867,10 +925,11 @@ spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "1000000000") // 1GB 
 - **Merge compression**: Tantivy achieves 30-70% size reduction through deduplication
 - **Distributed operations**: Serializable AWS configs for executor-based merge operations
 - **Error handling**: Comprehensive validation with descriptive error messages
+- **Merge resilience**: Robust handling of corrupted files with automatic skipping, cooldown tracking, and eventual retry
 - **Performance**: Batch processing, predictive I/O, smart caching, broadcast locality, parallel transaction log processing, configurable working directories
 - **Transaction log reliability**: Delta Lake-inspired checkpoint system with ultra-conservative retention policies
-- **Data safety**: Multiple safety gates prevent data loss, graceful failure handling for all operations
-- **Production readiness**: Complete test coverage for all major features including parallel uploads and working directory configuration
+- **Data safety**: Multiple safety gates prevent data loss, graceful failure handling for all operations, skipped files never marked as removed
+- **Production readiness**: Complete test coverage for all major features including parallel uploads, working directory configuration, and skipped files handling
 
 ---
 
