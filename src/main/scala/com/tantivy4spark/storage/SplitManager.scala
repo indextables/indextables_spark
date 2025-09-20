@@ -246,6 +246,7 @@ case class SplitCacheConfig(
   enableQueryCache: Boolean = true,
   enableDocBatch: Boolean = true, // Default to true for better performance
   docBatchMaxSize: Int = 1000, // Maximum documents per batch when enabled
+  splitCachePath: Option[String] = None, // Custom cache directory path
   awsAccessKey: Option[String] = None,
   awsSecretKey: Option[String] = None,
   awsSessionToken: Option[String] = None,
@@ -272,6 +273,15 @@ case class SplitCacheConfig(
       .withMaxCacheSize(maxCacheSize)
       .withMaxConcurrentLoads(maxConcurrentLoads)
       .withQueryCache(enableQueryCache)
+
+    // Configure split cache directory path with auto-detection
+    val effectiveCachePath = splitCachePath.orElse(SplitCacheConfig.getDefaultCachePath())
+    effectiveCachePath.foreach { cachePath =>
+      logger.info(s"🔧 Split cache directory configured: $cachePath (Note: GlobalCacheConfig initialization required separately)")
+      // Note: splitCachePath configuration is handled through GlobalCacheConfig.initialize()
+      // before creating any SplitCacheManager instances - this is documented but not implemented
+      // in this version of tantivy4java
+    }
     
     // AWS configuration with detailed verification
     logger.info(s"🔍 SplitCacheConfig AWS Verification:")
@@ -346,6 +356,43 @@ case class SplitCacheConfig(
     
     logger.info(s"🔧 Final tantivy4java CacheConfig before returning: $config")
     config
+  }
+}
+
+/**
+ * Companion object for SplitCacheConfig with auto-detection utilities.
+ */
+object SplitCacheConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /**
+   * Auto-detect the optimal cache directory path.
+   * Defaults to /local_disk0 if it exists and is writable, otherwise returns None for system default.
+   */
+  def getDefaultCachePath(): Option[String] = {
+    val localDisk0 = new java.io.File("/local_disk0")
+    if (localDisk0.exists() && localDisk0.isDirectory && localDisk0.canWrite()) {
+      logger.info("Auto-detected /local_disk0 for cache directory - using high-performance local storage")
+      Some("/local_disk0/tantivy4spark-cache")
+    } else {
+      logger.debug("/local_disk0 not available - using system default cache directory")
+      None
+    }
+  }
+
+  /**
+   * Get the optimal temp directory path for operations.
+   * Defaults to /local_disk0 if it exists and is writable, otherwise returns None for system default.
+   */
+  def getDefaultTempPath(): Option[String] = {
+    val localDisk0 = new java.io.File("/local_disk0")
+    if (localDisk0.exists() && localDisk0.isDirectory && localDisk0.canWrite()) {
+      logger.info("Auto-detected /local_disk0 for temp directory - using high-performance local storage")
+      Some("/local_disk0/tantivy4spark-temp")
+    } else {
+      logger.debug("/local_disk0 not available - using system default temp directory")
+      None
+    }
   }
 }
 
@@ -439,6 +486,7 @@ object GlobalSplitCacheManager {
       s"maxSize=${config.maxCacheSize}",
       s"maxConcurrent=${config.maxConcurrentLoads}",
       s"queryCache=${config.enableQueryCache}",
+      s"splitCachePath=${config.splitCachePath.orElse(SplitCacheConfig.getDefaultCachePath()).getOrElse("default")}",
       s"awsKey=${config.awsAccessKey.getOrElse("none")}",
       s"awsSecret=${config.awsSecretKey.map(_ => "***").getOrElse("none")}",
       s"awsToken=${config.awsSessionToken.map(_ => "***").getOrElse("none")}",

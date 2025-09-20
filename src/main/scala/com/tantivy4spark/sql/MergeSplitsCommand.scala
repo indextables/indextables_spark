@@ -285,8 +285,9 @@ class MergeSplitsExecutor(
       val pathStyleAccess = sparkConf.getOption("spark.tantivy4spark.s3.pathStyleAccess")
         .map(_.toLowerCase == "true").getOrElse(false)
 
-      // Extract temporary directory configuration for merge operations
+      // Extract temporary directory configuration for merge operations with auto-detection
       val tempDirectoryPath = getConfigWithFallback("spark.tantivy4spark.merge.tempDirectoryPath")
+        .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")

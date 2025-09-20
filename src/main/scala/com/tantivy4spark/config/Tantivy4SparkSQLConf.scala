@@ -58,6 +58,7 @@ object Tantivy4SparkSQLConf {
 
   val TANTIVY4SPARK_MERGE_TEMP_DIRECTORY_PATH = "spark.tantivy4spark.merge.tempDirectoryPath"
   val TANTIVY4SPARK_INDEX_WRITER_TEMP_DIRECTORY_PATH = "spark.tantivy4spark.indexWriter.tempDirectoryPath"
+  val TANTIVY4SPARK_CACHE_DIRECTORY_PATH = "spark.tantivy4spark.cache.directoryPath"
 
   /////////////////////
   // Auto-Sizing Configuration

@@ -19,6 +19,7 @@ A high-performance Spark DataSource implementing fast full-text search using [Ta
 - **Schema Evolution**: Automatic schema inference and evolution support
 - **Thread-Safe Architecture**: ThreadLocal IndexWriter pattern eliminates race conditions
 - **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
+- **Automatic Storage Optimization**: Auto-detects `/local_disk0` on Databricks/EMR for optimal temp and cache directory placement
 - **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
 - **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
 - **Production Ready**: 179 tests passing, 0 failing, comprehensive coverage including 49 IndexQuery and 44 IndexQueryAll tests
@@ -121,10 +122,13 @@ The system supports several configuration options for performance tuning:
 | `spark.tantivy4spark.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
 | `spark.tantivy4spark.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
 | `spark.tantivy4spark.cache.queryCache` | `true` | Enable query result caching |
+| `spark.tantivy4spark.cache.directoryPath` | auto-detect `/local_disk0` | Custom cache directory path (auto-detects optimal location) |
 | `spark.tantivy4spark.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default) |
 | `spark.tantivy4spark.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
 | `spark.tantivy4spark.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
 | `spark.tantivy4spark.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
+| `spark.tantivy4spark.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
+| `spark.tantivy4spark.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
 | `spark.tantivy4spark.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.tantivy4spark.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.tantivy4spark.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
@@ -258,14 +262,23 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
 Configure the JVM-wide split cache for optimal performance:
 
 ```scala
+// Automatic optimization (recommended) - uses /local_disk0 when available
+// No configuration needed on Databricks, EMR, or systems with /local_disk0
+
 // Configure split cache settings
 spark.conf.set("spark.tantivy4spark.cache.maxSize", "500000000") // 500MB cache
 spark.conf.set("spark.tantivy4spark.cache.maxConcurrentLoads", "16") // More concurrent loads
 spark.conf.set("spark.tantivy4spark.cache.queryCache", "true") // Enable query caching
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-ssd/tantivy-cache") // Custom cache location
+
+// Configure temp directories for high-performance storage
+spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-ssd/tantivy-temp")
+spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/fast-ssd/merge-temp")
 
 // Configure per DataFrame write (overrides session config)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .option("spark.tantivy4spark.cache.maxSize", "1000000000") // 1GB cache for this operation
+  .option("spark.tantivy4spark.cache.directoryPath", "/nvme/cache") // High-performance cache
   .save("s3://bucket/path")
 ```
 

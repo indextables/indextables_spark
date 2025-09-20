@@ -188,6 +188,8 @@ class Tantivy4SparkPartitionReader(
         }
       },
       enableQueryCache = getBroadcastConfig("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+      splitCachePath = getBroadcastConfigOption("spark.tantivy4spark.cache.directoryPath")
+        .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultCachePath()),
       // AWS configuration from broadcast
       awsAccessKey = getBroadcastConfigOption("spark.tantivy4spark.aws.accessKey"),
       awsSecretKey = getBroadcastConfigOption("spark.tantivy4spark.aws.secretKey"),

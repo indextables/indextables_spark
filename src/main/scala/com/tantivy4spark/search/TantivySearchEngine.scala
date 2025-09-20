@@ -37,9 +37,10 @@ class TantivySearchEngine private (
   // Constructor with cloud storage support
   def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) =
     this({
-      // Extract working directory from configuration hierarchy
+      // Extract working directory from configuration hierarchy with auto-detection
       val workingDirectory = Option(options.get("spark.tantivy4spark.indexWriter.tempDirectoryPath"))
         .orElse(Option(hadoopConf.get("spark.tantivy4spark.indexWriter.tempDirectoryPath")))
+        .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
       new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
     }, options, hadoopConf)
@@ -124,6 +125,8 @@ object TantivySearchEngine {
             maxCacheSize = sparkConf.get("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
             maxConcurrentLoads = sparkConf.get("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
             enableQueryCache = sparkConf.get("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
+            splitCachePath = getConfigWithFallback("spark.tantivy4spark.cache.directoryPath")
+              .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultCachePath()),
             // AWS configuration with session token support - use Hadoop fallback for executor context
             awsAccessKey = getConfigWithFallback("spark.tantivy4spark.aws.accessKey"),
             awsSecretKey = getConfigWithFallback("spark.tantivy4spark.aws.secretKey"), 

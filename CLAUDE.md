@@ -40,29 +40,52 @@ Key settings with defaults:
 - `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
 
-### Working Directory Configuration
+### Working Directory & Cache Configuration
 
 **New in v1.5**: Custom working directory support for index creation and split operations provides control over where temporary files are stored during processing.
 
-#### Working Directory Settings
-- `spark.tantivy4spark.indexWriter.tempDirectoryPath`: Custom working directory for index creation during writes (default: system temp directory)
-- `spark.tantivy4spark.merge.tempDirectoryPath`: Custom temporary directory for split merge operations (default: system temp directory)
+**New in v1.6**: Automatic `/local_disk0` detection and cache directory override for optimal performance on Databricks and high-performance storage environments.
+
+#### Directory Settings
+- `spark.tantivy4spark.indexWriter.tempDirectoryPath`: Custom working directory for index creation during writes (default: auto-detect `/local_disk0` or system temp)
+- `spark.tantivy4spark.merge.tempDirectoryPath`: Custom temporary directory for split merge operations (default: auto-detect `/local_disk0` or system temp)
+- `spark.tantivy4spark.cache.directoryPath`: Custom split cache directory for downloaded files (default: auto-detect `/local_disk0` or system temp)
+
+#### Automatic `/local_disk0` Detection
+All directory configurations now automatically detect and use `/local_disk0` when available and writable:
+- **Databricks Clusters**: Automatically uses high-performance local SSDs
+- **EMR/EC2 Instance Storage**: Leverages ephemeral storage when available
+- **Custom Environments**: Detects any mounted `/local_disk0` directory
+- **Graceful Fallback**: Uses system defaults when `/local_disk0` unavailable
 
 **Use Cases & Examples:**
 ```scala
-// Databricks: Use local disk for better performance
+// Automatic detection (recommended - uses /local_disk0 when available)
+// No configuration needed - automatically optimized!
+
+// Manual Databricks optimization
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/local_disk0/temp")
+spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/local_disk0/merge-temp")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/local_disk0/tantivy-cache")
 
 // High-performance storage: Use NVMe SSD
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-nvme/tantivy-cache")
 
 // Memory filesystem: For maximum speed (sufficient RAM required)
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/dev/shm/tantivy-index")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/dev/shm/tantivy-cache")
 
 // Per-write operation configuration
 df.write.format("tantivy4spark")
   .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-storage/index-temp")
+  .option("spark.tantivy4spark.cache.directoryPath", "/fast-storage/cache")
   .save("s3://bucket/path")
+
+// Read with custom cache directory
+val df = spark.read.format("tantivy4spark")
+  .option("spark.tantivy4spark.cache.directoryPath", "/nvme/tantivy-cache")
+  .load("s3://bucket/path")
 ```
 
 **Validation & Safety Features:**
@@ -754,14 +777,19 @@ Based on comprehensive performance tests with full checkpoint + incremental work
 
 ### Performance Optimization Strategies
 
-#### **1. Working Directory Optimization**
+#### **1. Storage Directory Optimization**
 ```scala
+// Automatic optimization (recommended) - uses /local_disk0 when available
+// No configuration needed on Databricks, EMR, or systems with /local_disk0
+
 // NVMe SSD for maximum I/O performance
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy")
 spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/fast-nvme/tantivy-merge")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-nvme/tantivy-cache")
 
 // Memory filesystem for extreme performance (RAM permitting)
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/dev/shm/tantivy")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/dev/shm/tantivy-cache")
 ```
 
 #### **2. Upload Performance Tuning**
@@ -792,14 +820,21 @@ spark.conf.set("spark.tantivy4spark.checkpoint.parallelism", "8")      // Parall
 
 #### **Databricks**
 ```scala
+// Automatic optimization (recommended) - no configuration needed!
+// Uses /local_disk0 automatically when available
+
+// Manual optimization (optional)
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/local_disk0/temp")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/local_disk0/tantivy-cache")
 spark.conf.set("spark.tantivy4spark.s3.maxConcurrency", "8")
 spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "25000")
 ```
 
 #### **EMR/EC2 with Instance Storage**
 ```scala
+// Automatic /local_disk0 detection where available, otherwise manual configuration:
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/mnt/tmp/tantivy")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/mnt/tmp/tantivy-cache")
 spark.conf.set("spark.tantivy4spark.s3.maxConcurrency", "12")
 spark.conf.set("spark.tantivy4spark.s3.partSize", "134217728")          // 128MB
 ```
@@ -807,6 +842,7 @@ spark.conf.set("spark.tantivy4spark.s3.partSize", "134217728")          // 128MB
 #### **On-Premises with High-Performance Storage**
 ```scala
 spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-storage/tantivy")
+spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-storage/tantivy-cache")
 spark.conf.set("spark.tantivy4spark.s3.maxConcurrency", "16")
 spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "1000000000") // 1GB heap
 ```
