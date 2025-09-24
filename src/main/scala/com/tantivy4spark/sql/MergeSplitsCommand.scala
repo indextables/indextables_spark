@@ -33,7 +33,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.ThreadLocalRandom
-import com.tantivy4java.QuickwitSplit
+import com.tantivy4java.{QuickwitSplit, MergeBinaryExtractor, Index}
 import scala.jdk.CollectionConverters._
 
 /**
@@ -223,7 +223,9 @@ case class SerializableAwsConfig(
     region: String,
     endpoint: Option[String],
     pathStyleAccess: Boolean,
-    tempDirectoryPath: Option[String] = None
+    tempDirectoryPath: Option[String] = None,
+    mergeMode: String = "direct",
+    heapSize: Long = 50L * 1024L * 1024L // 50MB default
 ) extends Serializable {
   
   /**
@@ -238,6 +240,33 @@ case class SerializableAwsConfig(
       endpoint.orNull,
       pathStyleAccess
     )
+  }
+
+  /**
+   * Execute merge operation using the configured merge mode.
+   * Returns the result as SerializableSplitMetadata for consistency.
+   */
+  def executeMerge(
+      inputSplitPaths: java.util.List[String],
+      outputSplitPath: String,
+      mergeConfig: QuickwitSplit.MergeConfig
+  ): SerializableSplitMetadata = {
+    mergeMode.toLowerCase match {
+      case "process" =>
+        // Use process-based merging with MergeBinaryExtractor
+        // Note: Heap size and temp directory should be configured in the mergeConfig
+        val result = MergeBinaryExtractor.executeMerge(
+          inputSplitPaths,
+          outputSplitPath,
+          mergeConfig
+        )
+        SerializableSplitMetadata.fromQuickwitSplitMetadata(result.toSplitMetadata())
+
+      case "direct" | _ =>
+        // Fallback to direct merging using QuickwitSplit.mergeSplits
+        val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+        SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
+    }
   }
 }
 
@@ -289,12 +318,19 @@ class MergeSplitsExecutor(
       val tempDirectoryPath = getConfigWithFallback("spark.tantivy4spark.merge.tempDirectoryPath")
         .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
+      // Extract merge mode configuration (process-based vs direct)
+      val mergeMode = getConfigWithFallback("spark.tantivy4spark.merge.mode").getOrElse("process")
+      val heapSize = getConfigWithFallback("spark.tantivy4spark.merge.heapSize")
+        .map(_.toLong).getOrElse(50L * 1024L * 1024L) // Default 50MB
+
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
+      println(s"🔍 [DRIVER] Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB)")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
+      logger.info(s"🔍 Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB)")
 
       // Validate temp directory path if specified
       tempDirectoryPath.foreach { path =>
@@ -323,13 +359,15 @@ class MergeSplitsExecutor(
         region.getOrElse("us-east-1"),
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
-        tempDirectoryPath // Custom temp directory path for merge operations
+        tempDirectoryPath, // Custom temp directory path for merge operations
+        mergeMode, // Merge mode: "process" or "direct"
+        heapSize // Heap size for process-based merging
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "process", 50L * 1024L * 1024L)
     }
   }
   
@@ -648,7 +686,7 @@ class MergeSplitsExecutor(
       // Extract ALL metadata from merged split for complete pipeline coverage
       // (mergedMetadata already extracted above for indexUid check)
       val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets,
-           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
+           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes, numDocs) =
         if (mergedMetadata != null) {
           val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
           val timeEnd = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
@@ -657,7 +695,7 @@ class MergeSplitsExecutor(
             tagSet.asScala.toSet
           }
           val docMapping = Option(mergedMetadata.getDocMappingJson())
-          
+
           if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
@@ -670,17 +708,13 @@ class MergeSplitsExecutor(
              Some(mergedMetadata.getDeleteOpstamp()),
              Some(mergedMetadata.getNumMergeOps()),
              docMapping,
-             Some(mergedMetadata.getUncompressedSizeBytes()))
+             Some(mergedMetadata.getUncompressedSizeBytes()),
+             Some(mergedMetadata.getNumDocs()))
           } else {
-            (None, None, None, None, false,
-             timeStart, timeEnd, tags,
-             Some(mergedMetadata.getDeleteOpstamp()),
-             Some(mergedMetadata.getNumMergeOps()),
-             docMapping,
-             Some(mergedMetadata.getUncompressedSizeBytes()))
+            throw new IllegalStateException(s"Merged split ${result.mergedSplitInfo.path} does not have footer offsets. This indicates a problem with the merge operation or tantivy4java library.")
           }
         } else {
-          (None, None, None, None, false, None, None, None, None, None, None, None)
+          throw new IllegalStateException(s"Failed to extract metadata from merged split ${result.mergedSplitInfo.path}. This indicates a problem with the merge operation or tantivy4java library.")
         }
 
       val addAction = AddAction(
@@ -691,6 +725,7 @@ class MergeSplitsExecutor(
         dataChange = false, // This is compaction, not data change
         stats = None,
         tags = None,
+        numRecords = numDocs, // Number of documents in the merged split
         // Footer offset optimization metadata preserved from merge operation
         footerStartOffset = footerStartOffset,
         footerEndOffset = footerEndOffset,
@@ -946,7 +981,7 @@ class MergeSplitsExecutor(
       // Extract ALL metadata from merged split for complete pipeline coverage
       val mergedMetadata = mergedSplit.metadata
       val (footerStartOffset, footerEndOffset, hotcacheStartOffset, hotcacheLength, hasFooterOffsets,
-           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) = 
+           timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes, numDocs) =
         if (mergedMetadata != null) {
           val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
           val timeEnd = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
@@ -968,17 +1003,19 @@ class MergeSplitsExecutor(
              Some(mergedMetadata.getDeleteOpstamp()),
              Some(mergedMetadata.getNumMergeOps()),
              docMapping,
-             Some(mergedMetadata.getUncompressedSizeBytes()))
+             Some(mergedMetadata.getUncompressedSizeBytes()),
+             Some(mergedMetadata.getNumDocs()))
           } else {
             (None, None, None, None, false,
              timeStart, timeEnd, tags,
              Some(mergedMetadata.getDeleteOpstamp()),
              Some(mergedMetadata.getNumMergeOps()),
              docMapping,
-             Some(mergedMetadata.getUncompressedSizeBytes()))
+             Some(mergedMetadata.getUncompressedSizeBytes()),
+             Some(mergedMetadata.getNumDocs()))
           }
         } else {
-          (None, None, None, None, false, None, None, None, None, None, None, None)
+          (None, None, None, None, false, None, None, None, None, None, None, None, None)
         }
 
       val addAction = AddAction(
@@ -997,7 +1034,7 @@ class MergeSplitsExecutor(
         )),
         minValues = mergedMinValues,
         maxValues = mergedMaxValues,
-        numRecords = mergedNumRecords,
+        numRecords = numDocs.orElse(mergedNumRecords), // Prefer tantivy4java metadata over aggregated stats
         // Footer offset optimization metadata preserved from merge operation
         footerStartOffset = footerStartOffset,
         footerEndOffset = footerEndOffset,
@@ -1272,24 +1309,26 @@ class MergeSplitsExecutor(
         )
     }
     
-    // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
-    println(s"⚙️  [DRIVER] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    println(s"📁 [DRIVER] Output path: $outputSplitPath") 
+    // Perform the actual merge using configured merge mode (process-based by default)
+    println(s"⚙️  [DRIVER] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+    println(s"📁 [DRIVER] Output path: $outputSplitPath")
     println(s"📁 [DRIVER] Relative path for transaction log: $mergedPath")
-    logger.info(s"Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    
-    val metadata = try {
-      QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+    println(s"📁 [DRIVER] Heap size: ${awsConfig.heapSize / (1024 * 1024)}MB")
+    logger.info(s"Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+
+    val serializedMetadata = try {
+      awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
     } catch {
       case ex: Exception =>
-        println(s"💥 [DRIVER] CRITICAL: QuickwitSplit.mergeSplits() threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        println(s"💥 [DRIVER] CRITICAL: ${awsConfig.mergeMode} merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        logger.error(s"[DRIVER] ${awsConfig.mergeMode} merge failed", ex)
         ex.printStackTrace()
-        throw new RuntimeException(s"Merge operation failed: ${ex.getMessage}", ex)
+        throw new RuntimeException(s"${awsConfig.mergeMode} merge operation failed: ${ex.getMessage}", ex)
     }
     
-    println(s"📊 [DRIVER] Physical merge completed: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-    logger.info(s"Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-    logger.debug(s"Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
+    println(s"📊 [DRIVER] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+    logger.info(s"Successfully merged splits: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+    logger.debug(s"Merge metadata: split_id=${serializedMetadata.getSplitId}, merge_ops=${serializedMetadata.getNumMergeOps}")
     
     // CRITICAL: Verify the merged file actually exists at the expected location
     try {
@@ -1309,8 +1348,8 @@ class MergeSplitsExecutor(
         println(s"⚠️  [DRIVER] File existence check failed: ${ex.getMessage}")
         logger.warn(s"[DRIVER] File existence check failed", ex)
     }
-    
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata))
+
+    MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
   }
 
   /**
@@ -1607,28 +1646,30 @@ object MergeSplitsExecutor {
         )
     }
     
-    // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
-    logger.warn(s"⚙️  [EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
+    // Perform the actual merge using configured merge mode (process-based by default)
+    logger.warn(s"⚙️  [EXECUTOR] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
     logger.warn(s"📁 [EXECUTOR] Input paths:")
     inputSplitPaths.asScala.zipWithIndex.foreach { case (path, idx) =>
       logger.warn(s"📁 [EXECUTOR]   [$idx]: $path")
     }
     logger.warn(s"📁 [EXECUTOR] Output path: $outputSplitPath")
     logger.warn(s"📁 [EXECUTOR] Relative path for transaction log: $mergedPath")
-    logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    
-    val metadata = try {
-      QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+    logger.warn(s"📁 [EXECUTOR] Heap size: ${awsConfig.heapSize / (1024 * 1024)}MB")
+    logger.info(s"[EXECUTOR] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+
+    val serializedMetadata = try {
+      awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
     } catch {
       case ex: Exception =>
-        println(s"💥 [EXECUTOR] CRITICAL: QuickwitSplit.mergeSplits() threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        println(s"💥 [EXECUTOR] CRITICAL: ${awsConfig.mergeMode} merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        logger.error(s"[EXECUTOR] ${awsConfig.mergeMode} merge failed", ex)
         ex.printStackTrace()
-        throw new RuntimeException(s"Merge operation failed: ${ex.getMessage}", ex)
+        throw new RuntimeException(s"${awsConfig.mergeMode} merge operation failed: ${ex.getMessage}", ex)
     }
     
-    println(s"📊 [EXECUTOR] Physical merge completed: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-    logger.info(s"[EXECUTOR] Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-    logger.debug(s"[EXECUTOR] Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
+    println(s"📊 [EXECUTOR] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+    logger.info(s"[EXECUTOR] Successfully merged splits: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+    logger.debug(s"[EXECUTOR] Merge metadata: split_id=${serializedMetadata.getSplitId}, merge_ops=${serializedMetadata.getNumMergeOps}")
     
     // CRITICAL: Verify the merged file actually exists at the expected location
     try {
@@ -1648,8 +1689,8 @@ object MergeSplitsExecutor {
         println(s"⚠️  [EXECUTOR] File existence check failed: ${ex.getMessage}")
         logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
-    
-    MergedSplitInfo(mergedPath, metadata.getUncompressedSizeBytes, SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata))
+
+    MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
   }
 }
 

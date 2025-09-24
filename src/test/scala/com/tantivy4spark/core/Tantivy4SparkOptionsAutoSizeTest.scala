@@ -103,9 +103,10 @@ class Tantivy4SparkOptionsAutoSizeTest extends TestBase {
     val mixedCaseMap = new CaseInsensitiveStringMap(mixedCaseOptions.asJava)
     val tantivyOptions = Tantivy4SparkOptions(mixedCaseMap)
 
-    // Note: The current implementation uses exact key matching in autoSizeEnabled, etc.
-    // So this test verifies the current behavior - case sensitivity depends on the exact key used
-    assert(tantivyOptions.autoSizeEnabled.isEmpty) // Because exact key doesn't match
+    // CaseInsensitiveStringMap should handle case variations
+    assert(tantivyOptions.autoSizeEnabled.contains(true)) // Should work with case insensitive map
+    assert(tantivyOptions.autoSizeTargetSplitSize.contains("50M")) // Should work with case insensitive map
+    assert(tantivyOptions.autoSizeInputRowCount.contains(5000L)) // Should work with case insensitive map
   }
 
   test("Tantivy4SparkOptions should handle invalid autoSizeInputRowCount gracefully") {

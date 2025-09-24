@@ -26,8 +26,8 @@ import scala.util.Try
 
 sealed trait Action extends Serializable
 
-// Custom deserializer to handle Integer -> Long conversion for numRecords
-class NumRecordsDeserializer extends JsonDeserializer[Option[Long]] {
+// Custom deserializer to handle Integer -> Long conversion for numeric fields
+class OptionalLongDeserializer extends JsonDeserializer[Option[Long]] {
   override def deserialize(p: JsonParser, ctxt: DeserializationContext): Option[Long] = {
     val node = p.getCodec.readTree[JsonNode](p)
     if (node.isNull) {
@@ -66,10 +66,10 @@ case class AddAction(
   tags: Option[Map[String, String]] = None,
   @JsonProperty("minValues") minValues: Option[Map[String, String]] = None,
   @JsonProperty("maxValues") maxValues: Option[Map[String, String]] = None,
-  @JsonProperty("numRecords") @JsonDeserialize(using = classOf[NumRecordsDeserializer]) numRecords: Option[Long] = None,
+  @JsonProperty("numRecords") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) numRecords: Option[Long] = None,
   // Footer offset optimization metadata for tantivy4java splits
-  @JsonProperty("footerStartOffset") footerStartOffset: Option[Long] = None,
-  @JsonProperty("footerEndOffset") footerEndOffset: Option[Long] = None,
+  @JsonProperty("footerStartOffset") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) footerStartOffset: Option[Long] = None,
+  @JsonProperty("footerEndOffset") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) footerEndOffset: Option[Long] = None,
   @JsonProperty("hotcacheStartOffset") hotcacheStartOffset: Option[Long] = None,
   @JsonProperty("hotcacheLength") hotcacheLength: Option[Long] = None,
   @JsonProperty("hasFooterOffsets") hasFooterOffsets: Boolean = false,

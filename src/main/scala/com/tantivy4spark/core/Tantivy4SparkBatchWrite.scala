@@ -94,9 +94,15 @@ class Tantivy4SparkBatchWrite(
 
     // Initialize transaction log with schema and partition columns
     transactionLog.initialize(writeInfo.schema(), partitionColumns)
-    
+
     val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
+    }
+
+    // Log how many empty partitions were filtered out
+    val emptyPartitionsCount = messages.length - addActions.length
+    if (emptyPartitionsCount > 0) {
+      logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
     }
 
     // Add all files in a single transaction (like Delta Lake)
@@ -108,10 +114,10 @@ class Tantivy4SparkBatchWrite(
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logger.warn(s"Aborting write with ${messages.length} messages")
-    
+
     // Clean up any files that were created but not committed
     val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
     }
 
     // In a real implementation, we would delete the physical files here

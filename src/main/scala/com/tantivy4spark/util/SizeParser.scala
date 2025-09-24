@@ -57,28 +57,28 @@ object SizeParser {
         val numberPart = trimmed.dropRight(1)
         val value = numberPart.toLong
         if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive: $sizeStr")
+          throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
         value * GB
       } else if (trimmed.endsWith("M")) {
         val numberPart = trimmed.dropRight(1)
         val value = numberPart.toLong
         if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive: $sizeStr")
+          throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
         value * MB
       } else if (trimmed.endsWith("K")) {
         val numberPart = trimmed.dropRight(1)
         val value = numberPart.toLong
         if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive: $sizeStr")
+          throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
         value * KB
       } else {
-        // Pure number - interpret as bytes
+        // Pure number - interpret as bytes (zero allowed for bytes)
         val value = trimmed.toLong
-        if (value <= 0) {
-          throw new IllegalArgumentException(s"Size value must be positive: $sizeStr")
+        if (value < 0) {
+          throw new IllegalArgumentException(s"Size value must be non-negative: $sizeStr")
         }
         value
       }

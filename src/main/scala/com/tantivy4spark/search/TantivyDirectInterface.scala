@@ -263,14 +263,53 @@ class TantivyDirectInterface(
     try {
       getConfigValue(key, defaultValue.toString).toInt
     } catch {
-      case _: NumberFormatException => 
+      case _: NumberFormatException =>
         logger.warn(s"Invalid numeric value for $key, using default: $defaultValue")
+        defaultValue
+    }
+  }
+
+  /**
+   * Parse a size value that can include suffixes like K, M, G, T
+   * Examples: "100M", "2G", "512K", "1000000" (raw bytes)
+   */
+  private def parseSize(value: String): Long = {
+    val trimmed = value.trim.toUpperCase
+
+    if (trimmed.matches("\\d+[KMGT]?")) {
+      val (numberPart, suffix) = if (trimmed.last.isLetter) {
+        (trimmed.dropRight(1), trimmed.last.toString)
+      } else {
+        (trimmed, "")
+      }
+
+      val baseValue = numberPart.toLong
+      suffix match {
+        case "K" => baseValue * 1024L
+        case "M" => baseValue * 1024L * 1024L
+        case "G" => baseValue * 1024L * 1024L * 1024L
+        case "T" => baseValue * 1024L * 1024L * 1024L * 1024L
+        case "" => baseValue // Raw bytes
+        case _ => throw new IllegalArgumentException(s"Unknown size suffix: $suffix")
+      }
+    } else {
+      throw new IllegalArgumentException(s"Invalid size format: $value")
+    }
+  }
+
+  private def getConfigValueSize(key: String, defaultValue: Long): Long = {
+    try {
+      val stringValue = getConfigValue(key, defaultValue.toString)
+      parseSize(stringValue)
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Invalid size value for $key: ${e.getMessage}, using default: $defaultValue")
         defaultValue
     }
   }
   
   // Resolve index writer configuration
-  private val heapSize = getConfigValueInt("spark.tantivy4spark.indexWriter.heapSize", 100000000) // 100MB default
+  private val heapSize = getConfigValueSize("spark.tantivy4spark.indexWriter.heapSize", 100L * 1024 * 1024) // 100MB default
   private val threadCount = getConfigValueInt("spark.tantivy4spark.indexWriter.threads", 2) // 2 threads default
   private val batchSize = getConfigValueInt("spark.tantivy4spark.indexWriter.batchSize", 10000) // 10,000 records default
   private val useBatch = getConfigValue("spark.tantivy4spark.indexWriter.useBatch", "true").toBoolean // Use batch by default
@@ -383,7 +422,8 @@ class TantivyDirectInterface(
     Option(threadLocalWriter.get()) match {
       case Some(writer) => writer
       case None =>
-        val writer = index.writer(heapSize, threadCount)
+        val heapSizeInt = Math.min(heapSize, Int.MaxValue).toInt // Convert to Int, capping at Int.MaxValue
+        val writer = index.writer(heapSizeInt, threadCount)
         threadLocalWriter.set(writer)
         logger.debug(s"Created new IndexWriter for Spark task thread ${Thread.currentThread().getName}")
         writer

@@ -521,7 +521,13 @@ class Tantivy4SparkDataWriter(
 
   override def commit(): WriterCommitMessage = {
     logger.debug(s"Committing Tantivy index with $recordCount documents")
-    
+
+    // If no records were written, return empty commit message without creating AddAction
+    if (recordCount == 0) {
+      logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written (recordCount=0)")
+      return Tantivy4SparkCommitMessage(null) // Return null AddAction for empty partitions
+    }
+
     // Create split file name with UUID for guaranteed uniqueness
     // Format: part-{partitionId}-{taskId}-{uuid}.split
     val splitId = UUID.randomUUID().toString

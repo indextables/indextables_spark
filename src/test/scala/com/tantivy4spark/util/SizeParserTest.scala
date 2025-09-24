@@ -136,7 +136,7 @@ class SizeParserTest extends TestBase {
   test("SizeParser should format non-exact sizes as bytes") {
     assert(SizeParser.formatBytes(1025L) == "1025 bytes") // Not exactly 1K
     assert(SizeParser.formatBytes(1024L * 1024L + 1L) == "1048577 bytes") // Not exactly 1M
-    assert(SizeParser.formatBytes(1024L * 1024L * 1024L + 1024L) == "1073742848 bytes") // Not exactly 1G
+    assert(SizeParser.formatBytes(1024L * 1024L * 1024L + 1L) == "1073741825 bytes") // Not exactly 1G
   }
 
   test("SizeParser should validate size formats correctly") {

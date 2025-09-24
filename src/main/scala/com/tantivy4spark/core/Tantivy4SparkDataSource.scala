@@ -579,31 +579,36 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
             data.rdd.getNumPartitions * 50000L // Assume 50k records per partition
         }
 
-        val calculatedTarget = tantivyOptions.autoSizeTargetSplitSize match {
+        // Validate auto-sizing configuration early - these errors should not be caught
+        val targetSizeBytes = tantivyOptions.autoSizeTargetSplitSize match {
           case Some(sizeStr) =>
-            try {
-              import com.tantivy4spark.util.{SizeParser, SplitSizeAnalyzer}
-
-              val targetSizeBytes = SizeParser.parseSize(sizeStr)
-              logger.info(s"V1 Auto-sizing: target split size = ${SizeParser.formatBytes(targetSizeBytes)}")
-
-              // Analyze historical data to calculate target rows
-              val analyzer = SplitSizeAnalyzer(new Path(path), spark, optionsMap)
-              analyzer.calculateTargetRows(targetSizeBytes) match {
-                case Some(calculatedRows) =>
-                  logger.info(s"V1 Auto-sizing: calculated target rows per split = $calculatedRows based on historical data")
-                  calculatedRows
-                case None =>
-                  logger.warn("V1 Auto-sizing: failed to calculate target rows from historical data, using manual configuration")
-                  tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
-              }
-            } catch {
-              case ex: Exception =>
-                logger.error(s"V1 Auto-sizing failed: ${ex.getMessage}", ex)
-                tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+            import com.tantivy4spark.util.SizeParser
+            val bytes = SizeParser.parseSize(sizeStr)
+            if (bytes <= 0) {
+              throw new IllegalArgumentException(s"Auto-sizing target split size must be positive: $sizeStr")
             }
+            bytes
           case None =>
-            logger.warn("V1 Auto-sizing: enabled but no target split size specified, using manual configuration")
+            throw new IllegalArgumentException("Auto-sizing enabled but no target split size specified")
+        }
+
+        val calculatedTarget = try {
+          import com.tantivy4spark.util.{SizeParser, SplitSizeAnalyzer}
+          logger.info(s"V1 Auto-sizing: target split size = ${SizeParser.formatBytes(targetSizeBytes)}")
+
+          // Analyze historical data to calculate target rows
+          val analyzer = SplitSizeAnalyzer(new Path(path), spark, optionsMap)
+          analyzer.calculateTargetRows(targetSizeBytes) match {
+            case Some(calculatedRows) =>
+              logger.info(s"V1 Auto-sizing: calculated target rows per split = $calculatedRows based on historical data")
+              calculatedRows
+            case None =>
+              logger.warn("V1 Auto-sizing: failed to calculate target rows from historical data, using manual configuration")
+              tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"V1 Auto-sizing historical analysis failed: ${ex.getMessage}", ex)
             tantivyOptions.targetRecordsPerSplit.getOrElse(1000000L)
         }
 

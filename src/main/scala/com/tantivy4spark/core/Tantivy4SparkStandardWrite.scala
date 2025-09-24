@@ -128,9 +128,16 @@ class Tantivy4SparkStandardWrite(
     if (!isOverwrite) {
       validateIndexingConfigurationForAppend()
     }
-    
+
     val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
+    }
+
+    // Log how many empty partitions were filtered out
+    val emptyPartitionsCount = messages.length - addActions.length
+    if (emptyPartitionsCount > 0) {
+      println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
+      logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
@@ -198,7 +205,7 @@ class Tantivy4SparkStandardWrite(
     
     // Clean up any files that were created but not committed
     val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
     }
 
     // TODO: In a real implementation, we would delete the physical files here
