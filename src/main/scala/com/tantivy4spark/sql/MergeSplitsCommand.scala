@@ -225,7 +225,8 @@ case class SerializableAwsConfig(
     pathStyleAccess: Boolean,
     tempDirectoryPath: Option[String] = None,
     mergeMode: String = "direct",
-    heapSize: Long = 50L * 1024L * 1024L // 50MB default
+    heapSize: Long = 50L * 1024L * 1024L, // 50MB default
+    debugEnabled: Boolean = false // Debug mode disabled by default
 ) extends Serializable {
   
   /**
@@ -323,14 +324,18 @@ class MergeSplitsExecutor(
       val heapSize = getConfigWithFallback("spark.tantivy4spark.merge.heapSize")
         .map(_.toLong).getOrElse(50L * 1024L * 1024L) // Default 50MB
 
+      // Extract debug configuration for process-based merging
+      val debugEnabled = getConfigWithFallback("spark.tantivy4spark.merge.debug")
+        .map(_.toLowerCase == "true").getOrElse(false)
+
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-      println(s"🔍 [DRIVER] Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB)")
+      println(s"🔍 [DRIVER] Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-      logger.info(s"🔍 Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB)")
+      logger.info(s"🔍 Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
 
       // Validate temp directory path if specified
       tempDirectoryPath.foreach { path =>
@@ -361,13 +366,14 @@ class MergeSplitsExecutor(
         pathStyleAccess,
         tempDirectoryPath, // Custom temp directory path for merge operations
         mergeMode, // Merge mode: "process" or "direct"
-        heapSize // Heap size for process-based merging
+        heapSize, // Heap size for process-based merging
+        debugEnabled // Debug mode for process-based merging
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "process", 50L * 1024L * 1024L)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "process", 50L * 1024L * 1024L, false)
     }
   }
   
@@ -1092,12 +1098,12 @@ class MergeSplitsExecutor(
    */
   private def createMergedSplitDistributed(mergeGroup: MergeGroup, tablePathStr: String, awsConfig: SerializableAwsConfig): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
-    
+
     // Validate group has at least 2 files (required by tantivy4java)
     if (mergeGroup.files.length < 2) {
       throw new IllegalArgumentException(s"Cannot merge group with ${mergeGroup.files.length} files - at least 2 required")
     }
-    
+
     // Generate new split path with UUID for uniqueness
     val uuid = java.util.UUID.randomUUID().toString
     val partitionPath = if (mergeGroup.partitionValues.isEmpty) "" else {
@@ -1146,27 +1152,36 @@ class MergeSplitsExecutor(
     logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
     
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
-    
+
     // Create merge configuration with broadcast AWS credentials and temp directory
     val mergeConfig = awsConfig.tempDirectoryPath match {
       case Some(tempDir) =>
-        // Use 7-parameter constructor with custom temp directory
+        // Use full constructor with custom temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
-          0L,                // targetSplitNumDocs (0 = use default)
-          java.util.Collections.emptyList[String](), // splitIdsToDelete
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
       case None =>
-        // Use 4-parameter constructor with system default temp directory
+        // Use full constructor with system default temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          null,              // tempDirectoryPath (use system default)
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
     }
     
@@ -1289,23 +1304,32 @@ class MergeSplitsExecutor(
     // Create merge configuration with AWS credentials and temp directory
     val mergeConfig = awsConfig.tempDirectoryPath match {
       case Some(tempDir) =>
-        // Use 7-parameter constructor with custom temp directory
+        // Use full constructor with custom temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
-          0L,                // targetSplitNumDocs (0 = use default)
-          java.util.Collections.emptyList[String](), // splitIdsToDelete
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
       case None =>
-        // Use 4-parameter constructor with system default temp directory
+        // Use full constructor with system default temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          null,              // tempDirectoryPath (use system default)
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
     }
     
@@ -1622,27 +1646,36 @@ object MergeSplitsExecutor {
     logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
     
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
-    
+
     // Create merge configuration with broadcast AWS credentials and temp directory
     val mergeConfig = awsConfig.tempDirectoryPath match {
       case Some(tempDir) =>
-        // Use 7-parameter constructor with custom temp directory
+        // Use full constructor with custom temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
-          0L,                // targetSplitNumDocs (0 = use default)
-          java.util.Collections.emptyList[String](), // splitIdsToDelete
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
       case None =>
-        // Use 4-parameter constructor with system default temp directory
+        // Use full constructor with system default temp directory and debug support
         new QuickwitSplit.MergeConfig(
           "merged-index-uid", // indexUid
           "tantivy4spark",   // sourceId
           "merge-node",      // nodeId
-          awsConfig.toQuickwitSplitAwsConfig()        // AWS configuration for S3 access
+          "default-doc-mapping", // docMappingUid
+          0L,                // partitionId
+          java.util.Collections.emptyList[String](), // deleteQueries
+          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          null,              // tempDirectoryPath (use system default)
+          awsConfig.heapSize, // heapSizeBytes
+          awsConfig.debugEnabled // debugEnabled
         )
     }
     
