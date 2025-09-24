@@ -365,8 +365,13 @@ class Tantivy4SparkOptimizedWrite(
     println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     logger.warn(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
-    serializedOptions.foreach { case (k, v) => 
-      println(s"🔍 DEBUG: serializedOption $k = $v")
+    serializedOptions.foreach { case (k, v) =>
+      val redactedValue = if (k.toLowerCase.contains("secret") || k.toLowerCase.contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")) {
+        "***REDACTED***"
+      } else {
+        v
+      }
+      println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
     
     val addActions = messages.collect {

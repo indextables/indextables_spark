@@ -126,7 +126,7 @@ class SplitSearchEngine private(
    * Search the split using a SplitQuery object and return results as Spark InternalRows.
    * This is the new preferred method that uses tantivy4java's efficient SplitQuery API.
    */
-  def search(splitQuery: SplitQuery, limit: Int = 10): Array[InternalRow] = {
+  def search(splitQuery: SplitQuery, limit: Int = 100): Array[InternalRow] = {
     try {
       logger.debug(s"Searching split with SplitQuery object, limit: $limit")
       logger.warn(s"Running SplitQuery: ${splitQuery.toString()}")
@@ -214,7 +214,7 @@ class SplitSearchEngine private(
   /**
    * Search using a query string. The string will be parsed into a SplitQuery.
    */
-  def searchByString(queryString: String, limit: Int = 10): Array[InternalRow] = {
+  def searchByString(queryString: String, limit: Int = 100): Array[InternalRow] = {
     val splitQuery = parseQuery(queryString)
     search(splitQuery, limit)
   }
