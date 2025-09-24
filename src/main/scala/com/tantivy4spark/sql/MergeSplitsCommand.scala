@@ -320,7 +320,7 @@ class MergeSplitsExecutor(
         .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
       // Extract merge mode configuration (process-based vs direct)
-      val mergeMode = getConfigWithFallback("spark.tantivy4spark.merge.mode").getOrElse("process")
+      val mergeMode = getConfigWithFallback("spark.tantivy4spark.merge.mode").getOrElse("direct")
       val heapSize = getConfigWithFallback("spark.tantivy4spark.merge.heapSize")
         .map(_.toLong).getOrElse(50L * 1024L * 1024L) // Default 50MB
 
@@ -373,7 +373,7 @@ class MergeSplitsExecutor(
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "process", 50L * 1024L * 1024L, false)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "direct", 50L * 1024L * 1024L, false)
     }
   }
   
