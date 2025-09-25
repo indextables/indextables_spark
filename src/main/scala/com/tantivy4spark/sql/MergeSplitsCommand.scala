@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.ThreadLocalRandom
 import com.tantivy4java.{QuickwitSplit, MergeBinaryExtractor, Index}
+import com.tantivy4spark.util.ConfigNormalization
 import scala.jdk.CollectionConverters._
 
 /**
@@ -296,14 +297,17 @@ class MergeSplitsExecutor(
     try {
       val sparkConf = sparkSession.conf
       val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-      
-      // Helper function to get config with Hadoop fallback
+
+      // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
+      val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+      // Helper function to get config from normalized configs with fallback
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val sparkValue = sparkConf.getOption(sparkKey)
-        val hadoopValue = Option(hadoopConf.get(sparkKey))
-        val result = sparkValue.orElse(hadoopValue)
-        
-        logger.debug(s"🔍 AWS Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
+        val result = mergedConfigs.get(sparkKey)
+
+        logger.debug(s"🔍 AWS Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
         result
       }
       
@@ -312,7 +316,7 @@ class MergeSplitsExecutor(
       val sessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken")
       val region = getConfigWithFallback("spark.tantivy4spark.aws.region")
       val endpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint")
-      val pathStyleAccess = sparkConf.getOption("spark.tantivy4spark.s3.pathStyleAccess")
+      val pathStyleAccess = getConfigWithFallback("spark.tantivy4spark.s3.pathStyleAccess")
         .map(_.toLowerCase == "true").getOrElse(false)
 
       // Extract temporary directory configuration for merge operations with auto-detection

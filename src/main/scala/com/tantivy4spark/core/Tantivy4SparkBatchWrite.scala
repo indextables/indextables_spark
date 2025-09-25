@@ -47,9 +47,12 @@ class Tantivy4SparkBatchWrite(
     options.entrySet().asScala.foreach { entry =>
       val key = entry.getKey
       val value = entry.getValue
-      if (key.startsWith("spark.tantivy4spark.")) {
-        enrichedHadoopConf.set(key, value)
-        serializedOptions.put(key, value)
+      if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        enrichedHadoopConf.set(normalizedKey, value)
+        serializedOptions.put(normalizedKey, value)
         logger.info(s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
       }
     }
@@ -60,8 +63,11 @@ class Tantivy4SparkBatchWrite(
       val iter = enrichedHadoopConf.iterator()
       while (iter.hasNext) {
         val entry = iter.next()
-        if (entry.getKey.startsWith("spark.tantivy4spark.")) {
-          props.put(entry.getKey, entry.getValue)
+        if (entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")) {
+          val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+            entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+          } else entry.getKey
+          props.put(normalizedKey, entry.getValue)
         }
       }
       props.toMap

@@ -47,10 +47,14 @@ statement
         (TARGET SIZE targetSize=alphanumericValue)?
         (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
-    | FLUSH TANTIVY4SPARK SEARCHER CACHE                        #flushTantivyCache
-    | INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE
+    | FLUSH tantivyKeyword SEARCHER CACHE                       #flushTantivyCache
+    | INVALIDATE tantivyKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateTantivyTransactionLogCache
     | .*?                                                       #passThrough
+    ;
+
+tantivyKeyword
+    : TANTIVY4SPARK | INDEXTABLES
     ;
 
 alphanumericValue
@@ -76,7 +80,7 @@ quotedIdentifier
     ;
 
 nonReserved
-    : CACHE | SEARCHER | TANTIVY4SPARK | FOR | TRANSACTION | LOG | MAX | GROUPS
+    : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | FOR | TRANSACTION | LOG | MAX | GROUPS
     ;
 
 // Keywords (case-insensitive)
@@ -92,6 +96,7 @@ TRANSACTION: [Tt][Rr][Aa][Nn][Ss][Aa][Cc][Tt][Ii][Oo][Nn];
 LOG: [Ll][Oo][Gg];
 FOR: [Ff][Oo][Rr];
 TANTIVY4SPARK: [Tt][Aa][Nn][Tt][Ii][Vv][Yy]'4'[Ss][Pp][Aa][Rr][Kk];
+INDEXTABLES: [Ii][Nn][Dd][Ee][Xx][Tt][Aa][Bb][Ll][Ee][Ss];
 SEARCHER: [Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr];
 CACHE: [Cc][Aa][Cc][Hh][Ee];
 MAX: [Mm][Aa][Xx];

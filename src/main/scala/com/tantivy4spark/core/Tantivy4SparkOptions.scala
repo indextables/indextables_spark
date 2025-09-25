@@ -101,13 +101,21 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get field type mapping configuration.
    * Maps field names to their indexing types: "string", "text", or "json".
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    */
   def getFieldTypeMapping: Map[String, String] = {
     import scala.jdk.CollectionConverters._
     options.asCaseSensitiveMap().asScala.toMap
-      .filter { case (key, _) => key.startsWith("spark.tantivy4spark.indexing.typemap.") }
+      .filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.indexing.typemap.") ||
+        key.startsWith("spark.indextables.indexing.typemap.")
+      }
       .map { case (key, value) =>
-        val fieldName = key.substring("spark.tantivy4spark.indexing.typemap.".length)
+        val fieldName = if (key.startsWith("spark.tantivy4spark.indexing.typemap.")) {
+          key.substring("spark.tantivy4spark.indexing.typemap.".length)
+        } else {
+          key.substring("spark.indextables.indexing.typemap.".length)
+        }
         fieldName -> value.toLowerCase
       }
   }
@@ -145,13 +153,21 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get tokenizer override configuration.
    * Maps field names to their tokenizer types.
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    */
   def getTokenizerOverrides: Map[String, String] = {
     import scala.jdk.CollectionConverters._
     options.asCaseSensitiveMap().asScala.toMap
-      .filter { case (key, _) => key.startsWith("spark.tantivy4spark.indexing.tokenizer.") }
+      .filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.indexing.tokenizer.") ||
+        key.startsWith("spark.indextables.indexing.tokenizer.")
+      }
       .map { case (key, value) =>
-        val fieldName = key.substring("spark.tantivy4spark.indexing.tokenizer.".length)
+        val fieldName = if (key.startsWith("spark.tantivy4spark.indexing.tokenizer.")) {
+          key.substring("spark.tantivy4spark.indexing.tokenizer.".length)
+        } else {
+          key.substring("spark.indextables.indexing.tokenizer.".length)
+        }
         fieldName -> value
       }
   }

@@ -54,8 +54,11 @@ class Tantivy4SparkOptimizedWrite(
     val iter = hadoopConf.iterator()
     while (iter.hasNext) {
       val entry = iter.next()
-      if (entry.getKey.startsWith("spark.tantivy4spark.")) {
-        props.put(entry.getKey, entry.getValue)
+      if (entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")) {
+        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else entry.getKey
+        props.put(normalizedKey, entry.getValue)
       }
     }
     props.toMap
@@ -348,13 +351,23 @@ class Tantivy4SparkOptimizedWrite(
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
     
-    // Combine serialized hadoop config with tantivy4spark options
-    val combinedHadoopConfig = serializedHadoopConf ++ 
-      serializedOptions.filter(_._1.startsWith("spark.tantivy4spark."))
-      
+    // Combine serialized hadoop config with tantivy4spark options (normalize spark.indextables to spark.tantivy4spark)
+    val normalizedTantivyOptions = serializedOptions
+      .filter(kv => kv._1.startsWith("spark.tantivy4spark.") || kv._1.startsWith("spark.indextables."))
+      .map { case (key, value) =>
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        normalizedKey -> value
+      }
+    val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
+
     serializedOptions.foreach { case (key, value) =>
-      if (key.startsWith("spark.tantivy4spark.")) {
-        logger.info(s"Will copy DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
+      if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        logger.info(s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
       }
     }
     

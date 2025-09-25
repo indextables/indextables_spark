@@ -474,7 +474,8 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     
     // Extract all tantivy4spark options from Spark configuration
     val sparkConfigOptions = try {
-      sparkConf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     } catch {
       case _: Exception => Map.empty[String, String]
     }
@@ -689,17 +690,23 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       if (executorLogger.isDebugEnabled) {
         executorLogger.debug("Executor: Adding write options to Hadoop config")
         enrichedOptions.foreach { case (key, value) =>
-          if (key.startsWith("spark.tantivy4spark.")) {
-            localHadoopConf.set(key, value)
-            val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
-            executorLogger.debug(s"  Setting in executor: $key = $displayValue")
+          if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+            val normalizedKey = if (key.startsWith("spark.indextables.")) {
+              key.replace("spark.indextables.", "spark.tantivy4spark.")
+            } else key
+            localHadoopConf.set(normalizedKey, value)
+            val displayValue = if (normalizedKey.contains("secret") || normalizedKey.contains("Secret") || normalizedKey.contains("session")) "***" else value
+            executorLogger.debug(s"  Setting in executor: $normalizedKey = $displayValue")
           }
         }
       } else {
         // Still need to set the config even when debug is disabled
         enrichedOptions.foreach { case (key, value) =>
-          if (key.startsWith("spark.tantivy4spark.")) {
-            localHadoopConf.set(key, value)
+          if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+            val normalizedKey = if (key.startsWith("spark.indextables.")) {
+              key.replace("spark.indextables.", "spark.tantivy4spark.")
+            } else key
+            localHadoopConf.set(normalizedKey, value)
           }
         }
       }
@@ -720,7 +727,15 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       val localWriterFactory = new com.tantivy4spark.core.Tantivy4SparkWriterFactory(
         new Path(serializablePath),
         serializableSchema,
-        enrichedOptions.filter(_._1.startsWith("spark.tantivy4spark.")),
+        // Filter options and normalize keys
+        enrichedOptions.filter { case (key, _) =>
+          key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+        }.map { case (key, value) =>
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.tantivy4spark.")
+          } else key
+          normalizedKey -> value
+        },
         serializedHadoopConfig
       )
       val writer = localWriterFactory.createWriter(partitionId, 0L)
@@ -758,18 +773,39 @@ class Tantivy4SparkRelation(
     // Get schema from transaction log
     val spark = sqlContext.sparkSession
     
-    // Extract tantivy4spark configurations from Spark session for credential propagation
+    // Extract tantivy4spark/indextables configurations from Spark session for credential propagation
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
+      .filter { entry =>
+        entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+      }
+      .map { entry =>
+        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else entry.getKey
+        normalizedKey -> entry.getValue
+      }
       .toMap
-    
+
     // Also get configs from Spark session (in case they weren't propagated to Hadoop config)
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
-    
+    val sparkConfigs = spark.conf.getAll.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }.toMap
+
     // Include read options (from DataFrame read API)
-    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+    val readTantivyOptions = readOptions.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }
     
     // Combine all sources with proper precedence to avoid duplicate key warnings
     // readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
@@ -795,17 +831,38 @@ class Tantivy4SparkRelation(
     
     val spark = sqlContext.sparkSession
     
-    // Extract tantivy4spark configurations for credential propagation (same as schema method)
+    // Extract tantivy4spark/indextables configurations for credential propagation (same as schema method)
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
+      .filter { entry =>
+        entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+      }
+      .map { entry =>
+        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else entry.getKey
+        normalizedKey -> entry.getValue
+      }
       .toMap
-    
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
-    
-    // Include read options (from DataFrame read API)  
-    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+
+    val sparkConfigs = spark.conf.getAll.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }.toMap
+
+    // Include read options (from DataFrame read API)
+    val readTantivyOptions = readOptions.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }
     
     // Combine all sources with proper precedence to avoid duplicate key warnings
     // readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
@@ -915,20 +972,41 @@ class Tantivy4SparkRelation(
       val hadoopTantivyProps = {
         import scala.jdk.CollectionConverters._
         hadoopConf.iterator().asScala
-          .filter(_.getKey.startsWith("spark.tantivy4spark."))
-          .map(entry => entry.getKey -> entry.getValue)
+          .filter { entry =>
+            entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+          }
+          .map { entry =>
+            val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+              entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+            } else entry.getKey
+            normalizedKey -> entry.getValue
+          }
           .toMap
       }
-      
+
       // Extract from Spark session config (middle precedence)
       val sparkTantivyProps = try {
-        spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+        spark.conf.getAll.filter { case (key, _) =>
+          key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+        }.map { case (key, value) =>
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.tantivy4spark.")
+          } else key
+          normalizedKey -> value
+        }.toMap
       } catch {
         case _: Exception => Map.empty[String, String]
       }
-      
+
       // Extract from read options (highest precedence)
-      val readTantivyProps = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+      val readTantivyProps = readOptions.filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+      }.map { case (key, value) =>
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        normalizedKey -> value
+      }
       
       // Merge with proper precedence: Hadoop < Spark config < read options
       val tantivyProps = hadoopTantivyProps ++ sparkTantivyProps ++ readTantivyProps
@@ -963,17 +1041,38 @@ class Tantivy4SparkRelation(
     
     val spark = sqlContext.sparkSession
     
-    // Extract tantivy4spark configurations for credential propagation (same as schema method)
+    // Extract tantivy4spark/indextables configurations for credential propagation (same as schema method)
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
+      .filter { entry =>
+        entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+      }
+      .map { entry =>
+        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else entry.getKey
+        normalizedKey -> entry.getValue
+      }
       .toMap
-    
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
-    
-    // Include read options (from DataFrame read API)  
-    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+
+    val sparkConfigs = spark.conf.getAll.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }.toMap
+
+    // Include read options (from DataFrame read API)
+    val readTantivyOptions = readOptions.filter { case (key, _) =>
+      key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    }.map { case (key, value) =>
+      val normalizedKey = if (key.startsWith("spark.indextables.")) {
+        key.replace("spark.indextables.", "spark.tantivy4spark.")
+      } else key
+      normalizedKey -> value
+    }
     
     // Combine all sources with proper precedence to avoid duplicate key warnings
     // readOptions take highest precedence, then sparkConfigs, then hadoopConfigs
@@ -1081,20 +1180,41 @@ class Tantivy4SparkRelation(
       val hadoopTantivyProps = {
         import scala.jdk.CollectionConverters._
         hadoopConf.iterator().asScala
-          .filter(_.getKey.startsWith("spark.tantivy4spark."))
-          .map(entry => entry.getKey -> entry.getValue)
+          .filter { entry =>
+            entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+          }
+          .map { entry =>
+            val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+              entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+            } else entry.getKey
+            normalizedKey -> entry.getValue
+          }
           .toMap
       }
-      
+
       // Extract from Spark session config (middle precedence)
       val sparkTantivyProps = try {
-        spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+        spark.conf.getAll.filter { case (key, _) =>
+          key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+        }.map { case (key, value) =>
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.tantivy4spark.")
+          } else key
+          normalizedKey -> value
+        }.toMap
       } catch {
         case _: Exception => Map.empty[String, String]
       }
-      
+
       // Extract from read options (highest precedence)
-      val readTantivyProps = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+      val readTantivyProps = readOptions.filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+      }.map { case (key, value) =>
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        normalizedKey -> value
+      }
       
       // Merge with proper precedence: Hadoop < Spark config < read options
       val tantivyProps = hadoopTantivyProps ++ sparkTantivyProps ++ readTantivyProps
@@ -1207,22 +1327,44 @@ class Tantivy4SparkTable(
     
     // Extract configurations from Hadoop config (lowest precedence)
     val hadoopTantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
+      .filter { entry =>
+        entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")
+      }
+      .map { entry =>
+        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
+          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else entry.getKey
+        normalizedKey -> entry.getValue
+      }
       .filter(_._2 != null)  // Filter out null values
       .toMap
-    
+
     // Extract configurations from Spark session config (middle precedence)
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
+      spark.conf.getAll.filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+      }.map { case (key, value) =>
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        normalizedKey -> value
+      }.filter(_._2 != null).toMap
     } catch {
       case _: Exception => Map.empty[String, String]
     }
-    
+
     // Extract configurations from read options (highest precedence)
     println(s"🔧 V2 Read: ALL options received: ${options.asScala.keys.mkString(", ")}")
     val readTantivyConfigs = options.asScala
-      .filter(_._1.startsWith("spark.tantivy4spark."))
+      .filter { case (key, _) =>
+        key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+      }
+      .map { case (key, value) =>
+        val normalizedKey = if (key.startsWith("spark.indextables.")) {
+          key.replace("spark.indextables.", "spark.tantivy4spark.")
+        } else key
+        normalizedKey -> value
+      }
       .filter(_._2 != null)  // Filter out null values
       .toMap
     
@@ -1449,22 +1591,22 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // Extract configurations with proper precedence hierarchy: Hadoop < Spark config < read options
-    val hadoopTantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
-      .filter(_._2 != null)  // Filter out null values
-      .toMap
+    val hadoopTantivyConfigs = {
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    }
     
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     } catch {
       case _: Exception => Map.empty[String, String]
     }
     
-    val readTantivyConfigs = options.asScala
-      .filter(_._1.startsWith("spark.tantivy4spark."))
-      .filter(_._2 != null)  // Filter out null values
-      .toMap
+    val readTantivyConfigs = {
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromOptions(options)
+    }
     
     // Merge with proper precedence: Hadoop < Spark config < read options
     val mergedTantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
@@ -1500,14 +1642,14 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // Apply the same configuration hierarchy as inferSchema: Hadoop < Spark config < table properties
-    val hadoopTantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
-      .map(entry => entry.getKey -> entry.getValue)
-      .filter(_._2 != null)  // Filter out null values
-      .toMap
+    val hadoopTantivyConfigs = {
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    }
     
     val sparkTantivyConfigs = try {
-      spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).filter(_._2 != null).toMap
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     } catch {
       case _: Exception => Map.empty[String, String]
     }
