@@ -180,8 +180,9 @@ object Tantivy4SparkRelation {
       localHadoopConf.set(key, value)
     }
     
-    // DEBUG: Print all tantivy4spark configurations received in executor
-    val tantivyConfigs = hadoopConfProps.filter(_._1.startsWith("spark.tantivy4spark."))
+    // DEBUG: Print all tantivy4spark configurations received in executor (including normalized indextables configs)
+    import com.tantivy4spark.util.ConfigNormalization
+    val tantivyConfigs = ConfigNormalization.extractTantivyConfigsFromMap(hadoopConfProps)
     if (executorLogger.isDebugEnabled) {
       executorLogger.debug(s"processFileWithCustomFilters received ${hadoopConfProps.size} total config properties")
       executorLogger.debug(s"processFileWithCustomFilters found ${tantivyConfigs.size} tantivy4spark configs:")
@@ -489,12 +490,13 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     
     // Copy all tantivy4spark options into Hadoop configuration so they're available in executors
     val currentHadoopConf = spark.sparkContext.hadoopConfiguration
-    finalOptions.foreach { case (key, value) =>
-      if (key.startsWith("spark.tantivy4spark.")) {
-        currentHadoopConf.set(key, value)
-        if (logger.isDebugEnabled) {
-          logger.debug(s"Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
-        }
+    // Apply normalization to ensure both spark.tantivy4spark.* and spark.indextables.* are handled
+    import com.tantivy4spark.util.ConfigNormalization
+    val normalizedConfigs = ConfigNormalization.extractTantivyConfigsFromMap(finalOptions)
+    normalizedConfigs.foreach { case (key, value) =>
+      currentHadoopConf.set(key, value)
+      if (logger.isDebugEnabled) {
+        logger.debug(s"Setting Hadoop config: $key = ${if (key.contains("secret") || key.contains("Secret")) "***" else value}")
       }
     }
     val writeOptions = new CaseInsensitiveStringMap(finalOptions.asJava)
@@ -1437,11 +1439,13 @@ class Tantivy4SparkTable(
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
-    // Debug: Log existing hadoop config before modification
+    // Debug: Log existing hadoop config before modification (including normalized indextables configs)
     logger.info(s"🔧 V2 Write: Existing Hadoop config tantivy4spark properties:")
-    hadoopConf.iterator().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
-      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
-      logger.info(s"  ${entry.getKey} = $value")
+    import com.tantivy4spark.util.ConfigNormalization
+    val existingTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    existingTantivyConfigs.foreach { case (key, value) =>
+      val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
+      logger.info(s"  $key = $displayValue")
     }
     
     // Copy write options to Hadoop configuration so they're available in executors
@@ -1449,25 +1453,25 @@ class Tantivy4SparkTable(
     import scala.jdk.CollectionConverters._
     val writeOptions = info.options()
     logger.info(s"🔧 V2 Write: DataFrame options to copy:")
-    writeOptions.entrySet().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
-      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
-      logger.info(s"  ${entry.getKey} = $value")
+    val writeOptionTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromOptions(writeOptions)
+    writeOptionTantivyConfigs.foreach { case (key, value) =>
+      val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
+      logger.info(s"  $key = $displayValue")
     }
     
-    writeOptions.entrySet().asScala.foreach { entry =>
-      val key = entry.getKey
-      val value = entry.getValue
-      if (key.startsWith("spark.tantivy4spark.")) {
-        hadoopConf.set(key, value)
-        logger.info(s"🔧 V2 Write: Set Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value}")
-      }
+    // Apply normalization to ensure both spark.tantivy4spark.* and spark.indextables.* are handled
+    val normalizedWriteConfigs = ConfigNormalization.extractTantivyConfigsFromOptions(writeOptions)
+    normalizedWriteConfigs.foreach { case (key, value) =>
+      hadoopConf.set(key, value)
+      logger.info(s"🔧 V2 Write: Set Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value}")
     }
     
-    // Debug: Log final hadoop config after modification
+    // Debug: Log final hadoop config after modification (including normalized indextables configs)
     logger.info(s"🔧 V2 Write: Final Hadoop config tantivy4spark properties:")
-    hadoopConf.iterator().asScala.filter(_.getKey.startsWith("spark.tantivy4spark.")).foreach { entry =>
-      val value = if (entry.getKey.contains("secret") || entry.getKey.contains("Secret") || entry.getKey.contains("session")) "***" else entry.getValue
-      logger.info(s"  ${entry.getKey} = $value")
+    val finalTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    finalTantivyConfigs.foreach { case (key, value) =>
+      val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
+      logger.info(s"  $key = $displayValue")
     }
     
     // Inject partition information into write options for V2 compatibility

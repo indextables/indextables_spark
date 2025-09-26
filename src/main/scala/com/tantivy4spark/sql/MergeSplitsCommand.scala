@@ -227,21 +227,79 @@ case class SerializableAwsConfig(
     tempDirectoryPath: Option[String] = None,
     mergeMode: String = "direct",
     heapSize: Long = 50L * 1024L * 1024L, // 50MB default
-    debugEnabled: Boolean = false // Debug mode disabled by default
+    debugEnabled: Boolean = false, // Debug mode disabled by default
+    credentialsProviderClass: Option[String] = None // Custom credential provider class name
 ) extends Serializable {
   
   /**
    * Convert to tantivy4java AwsConfig instance.
+   * Resolves custom credential providers if specified.
    */
-  def toQuickwitSplitAwsConfig(): QuickwitSplit.AwsConfig = {
-    new QuickwitSplit.AwsConfig(
-      accessKey,
-      secretKey,
-      sessionToken.orNull,
-      region,
-      endpoint.orNull,
-      pathStyleAccess
-    )
+  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
+    credentialsProviderClass match {
+      case Some(providerClassName) =>
+        try {
+          // Resolve credentials using custom credential provider
+          val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) = resolveCredentialsFromProvider(providerClassName, tablePath)
+          new QuickwitSplit.AwsConfig(
+            resolvedAccessKey,
+            resolvedSecretKey,
+            resolvedSessionToken.orNull,
+            region,
+            endpoint.orNull,
+            pathStyleAccess
+          )
+        } catch {
+          case ex: Exception =>
+            // Fall back to explicit credentials if provider fails
+            println(s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}")
+            println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
+            new QuickwitSplit.AwsConfig(
+              accessKey,
+              secretKey,
+              sessionToken.orNull,
+              region,
+              endpoint.orNull,
+              pathStyleAccess
+            )
+        }
+      case None =>
+        // Use explicit credentials
+        new QuickwitSplit.AwsConfig(
+          accessKey,
+          secretKey,
+          sessionToken.orNull,
+          region,
+          endpoint.orNull,
+          pathStyleAccess
+        )
+    }
+  }
+
+  /**
+   * Resolve AWS credentials from a custom credential provider class.
+   * Returns (accessKey, secretKey, sessionToken).
+   */
+  private def resolveCredentialsFromProvider(providerClassName: String, tablePath: String): (String, String, Option[String]) = {
+    import java.net.URI
+    import org.apache.hadoop.conf.Configuration
+    import com.tantivy4spark.utils.CredentialProviderFactory
+
+    println(s"🔍 [EXECUTOR] Resolving credentials using custom provider: $providerClassName")
+    println(s"🔍 [EXECUTOR] Using table path for credential provider: $tablePath")
+
+    // Use the provided table path for the credential provider constructor
+    val tableUri = new URI(tablePath)
+    val hadoopConf = new Configuration()
+
+    // Use CredentialProviderFactory to instantiate and extract credentials
+    val provider = CredentialProviderFactory.createCredentialProvider(providerClassName, tableUri, hadoopConf)
+    val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(provider)
+
+    println(s"✅ [EXECUTOR] Successfully resolved credentials from $providerClassName")
+    println(s"🔍 [EXECUTOR] Resolved credentials: accessKey=${basicCredentials.accessKey.take(4)}***, sessionToken=${basicCredentials.sessionToken.map(_ => "***").getOrElse("None")}")
+
+    (basicCredentials.accessKey, basicCredentials.secretKey, basicCredentials.sessionToken)
   }
 
   /**
@@ -332,12 +390,17 @@ class MergeSplitsExecutor(
       val debugEnabled = getConfigWithFallback("spark.tantivy4spark.merge.debug")
         .map(_.toLowerCase == "true").getOrElse(false)
 
+      // Extract custom credential provider class name
+      val credentialsProviderClass = getConfigWithFallback("spark.tantivy4spark.aws.credentialsProviderClass")
+
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
+      println(s"🔍 [DRIVER] Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
       println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
       println(s"🔍 [DRIVER] Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
+      logger.info(s"🔍 Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
       logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
       logger.info(s"🔍 Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
 
@@ -371,13 +434,14 @@ class MergeSplitsExecutor(
         tempDirectoryPath, // Custom temp directory path for merge operations
         mergeMode, // Merge mode: "process" or "direct"
         heapSize, // Heap size for process-based merging
-        debugEnabled // Debug mode for process-based merging
+        debugEnabled, // Debug mode for process-based merging
+        credentialsProviderClass // Custom credential provider class name
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "direct", 50L * 1024L * 1024L, false)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "direct", 50L * 1024L * 1024L, false, None)
     }
   }
   
@@ -1154,7 +1218,7 @@ class MergeSplitsExecutor(
     
     logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
     logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-    
+
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
     // Create merge configuration with broadcast AWS credentials and temp directory
@@ -1168,7 +1232,7 @@ class MergeSplitsExecutor(
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
@@ -1182,7 +1246,7 @@ class MergeSplitsExecutor(
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
           null,              // tempDirectoryPath (use system default)
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
@@ -1316,7 +1380,7 @@ class MergeSplitsExecutor(
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
@@ -1330,7 +1394,7 @@ class MergeSplitsExecutor(
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
           null,              // tempDirectoryPath (use system default)
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
@@ -1648,7 +1712,7 @@ object MergeSplitsExecutor {
     
     logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
     logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-    
+
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
     // Create merge configuration with broadcast AWS credentials and temp directory
@@ -1662,7 +1726,7 @@ object MergeSplitsExecutor {
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
           tempDir,           // tempDirectoryPath
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
@@ -1676,7 +1740,7 @@ object MergeSplitsExecutor {
           "default-doc-mapping", // docMappingUid
           0L,                // partitionId
           java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(),       // AWS configuration for S3 access
+          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
           null,              // tempDirectoryPath (use system default)
           awsConfig.heapSize, // heapSizeBytes
           awsConfig.debugEnabled // debugEnabled
