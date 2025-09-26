@@ -130,6 +130,7 @@ case class CloudStorageConfig(
   awsRegion: Option[String] = None,
   awsEndpoint: Option[String] = None,
   awsPathStyleAccess: Boolean = false,
+  awsCredentialsProviderClass: Option[String] = None,
   
   // Azure configuration
   azureAccountName: Option[String] = None,
@@ -170,15 +171,13 @@ object CloudStorageProviderFactory {
   def createProvider(path: String, options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageProvider = {
     val protocol = ProtocolBasedIOFactory.determineProtocol(path)
     
-    logger.debug(s"CloudStorageProviderFactory.createProvider called for path: $path")
-    logger.debug(s"Options passed (${options.size()} total tantivy4spark options)")
+    logger.info(s"CloudStorageProviderFactory.createProvider called for path: $path")
+    logger.info(s"Options passed (${options.size()} total options)")
     import scala.jdk.CollectionConverters._
-    if (logger.isDebugEnabled) {
-      options.entrySet().asScala.foreach { entry =>
-        if (entry.getKey.startsWith("spark.tantivy4spark.")) {
-          val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("session")) "***" else entry.getValue
-          logger.debug(s"   ${entry.getKey} = $displayValue")
-        }
+    options.entrySet().asScala.foreach { entry =>
+      if (entry.getKey.startsWith("spark.tantivy4spark.")) {
+        val displayValue = if (entry.getKey.contains("secret") || entry.getKey.contains("session")) "***" else entry.getValue
+        logger.info(s"   Option: ${entry.getKey} = $displayValue")
       }
     }
     
@@ -190,10 +189,11 @@ object CloudStorageProviderFactory {
     logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path")
     
     protocol match {
-      case ProtocolBasedIOFactory.S3Protocol => 
+      case ProtocolBasedIOFactory.S3Protocol =>
         logger.info(s"S3 config - endpoint: ${config.awsEndpoint}, region: ${config.awsRegion}, pathStyle: ${config.awsPathStyleAccess}")
         logger.info(s"S3 credentials - accessKey: ${config.awsAccessKey.map(_.take(4) + "...").getOrElse("None")}, secretKey: ${config.awsSecretKey.map(_ => "***").getOrElse("None")}")
-        new S3CloudStorageProvider(config)
+        logger.info(s"S3 custom provider - class: ${config.awsCredentialsProviderClass.getOrElse("None")}")
+        new S3CloudStorageProvider(config, enrichedHadoopConf, path)
       case ProtocolBasedIOFactory.HDFSProtocol | ProtocolBasedIOFactory.FileProtocol | ProtocolBasedIOFactory.LocalProtocol =>
         new HadoopCloudStorageProvider(hadoopConf)
     }
@@ -214,18 +214,26 @@ object CloudStorageProviderFactory {
           val sparkConf = session.conf
           
           // Copy Tantivy4Spark specific configurations
-          // String configurations
+          // String configurations - check both prefixes
           val stringConfigs = Seq(
             "spark.tantivy4spark.aws.accessKey",
             "spark.tantivy4spark.aws.secretKey",
             "spark.tantivy4spark.aws.sessionToken",
             "spark.tantivy4spark.aws.region",
-            "spark.tantivy4spark.s3.endpoint"
+            "spark.tantivy4spark.s3.endpoint",
+            "spark.tantivy4spark.aws.credentialsProviderClass",
+            "spark.indextables.aws.accessKey",
+            "spark.indextables.aws.secretKey",
+            "spark.indextables.aws.sessionToken",
+            "spark.indextables.aws.region",
+            "spark.indextables.s3.endpoint",
+            "spark.indextables.aws.credentialsProviderClass"
           )
           
           // Boolean configurations
           val booleanConfigs = Seq(
-            "spark.tantivy4spark.s3.pathStyleAccess"
+            "spark.tantivy4spark.s3.pathStyleAccess",
+            "spark.indextables.s3.pathStyleAccess"
           )
           
           // Copy string configurations - only if they exist
@@ -285,7 +293,7 @@ object CloudStorageProviderFactory {
   /**
    * Extract cloud storage configuration from Spark options and Hadoop config
    */
-  private def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageConfig = {
+  def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageConfig = {
     // Debug logging for configuration extraction
     logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Extracting cloud config from options:")
     options.entrySet().asScala.foreach { entry =>
@@ -299,43 +307,51 @@ object CloudStorageProviderFactory {
     // Trace credential extraction step by step
     val accessKeyFromOptions = Option(options.get("spark.tantivy4spark.aws.accessKey"))
     val accessKeyFromHadoopTantivy = Option(hadoopConf.get("spark.tantivy4spark.aws.accessKey"))
+    val accessKeyFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.accessKey"))
     val accessKeyFromHadoopS3a = Option(hadoopConf.get("spark.hadoop.fs.s3a.access.key"))
     val accessKeyFromS3a = Option(hadoopConf.get("fs.s3a.access.key"))
     
     logger.info(s"Access key extraction:")
     logger.info(s"  - From options: $accessKeyFromOptions")
     logger.info(s"  - From hadoop tantivy config: $accessKeyFromHadoopTantivy")
+    logger.info(s"  - From hadoop indextables config: $accessKeyFromHadoopIndexTables")
     logger.info(s"  - From hadoop s3a config: $accessKeyFromHadoopS3a")
     logger.info(s"  - From s3a config: $accessKeyFromS3a")
     
     val secretKeyFromOptions = Option(options.get("spark.tantivy4spark.aws.secretKey"))
     val secretKeyFromHadoopTantivy = Option(hadoopConf.get("spark.tantivy4spark.aws.secretKey"))
+    val secretKeyFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.secretKey"))
     val secretKeyFromHadoopS3a = Option(hadoopConf.get("spark.hadoop.fs.s3a.secret.key"))
     val secretKeyFromS3a = Option(hadoopConf.get("fs.s3a.secret.key"))
     
     logger.info(s"Secret key extraction:")
     logger.info(s"  - From options: ${secretKeyFromOptions.map(_ => "***")}")
     logger.info(s"  - From hadoop tantivy config: ${secretKeyFromHadoopTantivy.map(_ => "***")}")
+    logger.info(s"  - From hadoop indextables config: ${secretKeyFromHadoopIndexTables.map(_ => "***")}")
     logger.info(s"  - From hadoop s3a config: ${secretKeyFromHadoopS3a.map(_ => "***")}")
     logger.info(s"  - From s3a config: ${secretKeyFromS3a.map(_ => "***")}")
     
     val finalAccessKey = accessKeyFromOptions
       .orElse(accessKeyFromHadoopTantivy)
+      .orElse(accessKeyFromHadoopIndexTables)
       .orElse(accessKeyFromHadoopS3a)
       .orElse(accessKeyFromS3a)
-    
+
     val finalSecretKey = secretKeyFromOptions
       .orElse(secretKeyFromHadoopTantivy)
+      .orElse(secretKeyFromHadoopIndexTables)
       .orElse(secretKeyFromHadoopS3a)
       .orElse(secretKeyFromS3a)
     
     // Extract session token from all possible sources
     val sessionTokenFromOptions = Option(options.get("spark.tantivy4spark.aws.sessionToken"))
     val sessionTokenFromHadoopTantivy = Option(hadoopConf.get("spark.tantivy4spark.aws.sessionToken"))
+    val sessionTokenFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.sessionToken"))
     val sessionTokenFromS3a = Option(hadoopConf.get("fs.s3a.session.token"))
-    
+
     val finalSessionToken = sessionTokenFromOptions
       .orElse(sessionTokenFromHadoopTantivy)
+      .orElse(sessionTokenFromHadoopIndexTables)
       .orElse(sessionTokenFromS3a)
     
     logger.info(s"Final credentials: accessKey=${finalAccessKey.map(_.take(4) + "...")}, secretKey=${finalSecretKey.map(_ => "***")}, sessionToken=${finalSessionToken.map(_ => "***")}")
@@ -360,16 +376,21 @@ object CloudStorageProviderFactory {
       awsAccessKey = finalAccessKey,
       awsSecretKey = finalSecretKey,
       awsSessionToken = finalSessionToken,
+      awsCredentialsProviderClass = Option(options.get("spark.tantivy4spark.aws.credentialsProviderClass"))
+        .orElse(Option(hadoopConf.get("spark.tantivy4spark.aws.credentialsProviderClass")))
+        .orElse(Option(hadoopConf.get("spark.indextables.aws.credentialsProviderClass"))),
         
       awsRegion = {
         val regionFromOptions = Option(options.get("spark.tantivy4spark.aws.region"))
         val regionFromHadoopTantivy = Option(hadoopConf.get("spark.tantivy4spark.aws.region"))
+        val regionFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.region"))
         val regionFromHadoopS3a = Option(hadoopConf.get("fs.s3a.endpoint.region"))
         val regionFromSystemProp = Option(System.getProperty("aws.region"))
         val regionFromAwsEnv = Option(System.getenv("AWS_DEFAULT_REGION")).orElse(Option(System.getenv("AWS_REGION")))
-        
+
         val finalRegion = regionFromOptions
           .orElse(regionFromHadoopTantivy)
+          .orElse(regionFromHadoopIndexTables)
           .orElse(regionFromHadoopS3a)
           .orElse(regionFromSystemProp)
           .orElse(regionFromAwsEnv)
@@ -377,6 +398,7 @@ object CloudStorageProviderFactory {
         logger.info(s"🔍 REGION RESOLUTION PRIORITY:")
         logger.info(s"  - From options: $regionFromOptions")
         logger.info(s"  - From Hadoop Tantivy config: $regionFromHadoopTantivy")
+        logger.info(s"  - From Hadoop IndexTables config: $regionFromHadoopIndexTables")
         logger.info(s"  - From Hadoop S3a config: $regionFromHadoopS3a")
         logger.info(s"  - From system properties: $regionFromSystemProp")
         logger.info(s"  - From environment variables: $regionFromAwsEnv")
@@ -395,6 +417,7 @@ object CloudStorageProviderFactory {
       awsEndpoint = Option(options.get("spark.tantivy4spark.s3.endpoint"))
         .orElse(Option(options.get("spark.tantivy4spark.s3.serviceUrl")))
         .orElse(Option(hadoopConf.get("spark.tantivy4spark.s3.endpoint")))
+        .orElse(Option(hadoopConf.get("spark.indextables.s3.endpoint")))
         .orElse(Option(hadoopConf.get("spark.hadoop.fs.s3a.endpoint")))
         .orElse(Option(hadoopConf.get("fs.s3a.endpoint"))),
         
@@ -426,13 +449,14 @@ object CloudStorageProviderFactory {
         }
         
         val pathStyleFromHadoop1 = hadoopConf.getBoolean("spark.tantivy4spark.s3.pathStyleAccess", false)
+        val pathStyleFromHadoopIndexTables = hadoopConf.getBoolean("spark.indextables.s3.pathStyleAccess", false)
         val pathStyleFromHadoop2 = hadoopConf.getBoolean("spark.hadoop.fs.s3a.path.style.access", false)
         val pathStyleFromHadoop3 = hadoopConf.getBoolean("fs.s3a.path.style.access", false)
         
         if (logger.isDebugEnabled) {
           logger.debug("PATH STYLE ACCESS EXTRACTION:")
           logger.debug(s"  Options: aws=$pathStyleFromOptions1, s3=$pathStyleFromOptions2")
-          logger.debug(s"  Spark: $pathStyleFromSparkSession, Hadoop: $pathStyleFromHadoop1/$pathStyleFromHadoop2/$pathStyleFromHadoop3")
+          logger.debug(s"  Spark: $pathStyleFromSparkSession, Hadoop: $pathStyleFromHadoop1/$pathStyleFromHadoopIndexTables/$pathStyleFromHadoop2/$pathStyleFromHadoop3")
         }
         
         // Check if we have a localhost endpoint - if so, force path-style access for S3Mock
@@ -441,7 +465,7 @@ object CloudStorageProviderFactory {
         
         val isLocalHostEndpoint = endpointValue.exists(_.contains("localhost"))
         
-        val finalPathStyle = pathStyleFromOptions1 || pathStyleFromOptions2 || pathStyleFromSparkSession || pathStyleFromHadoop1 || pathStyleFromHadoop2 || pathStyleFromHadoop3 || isLocalHostEndpoint
+        val finalPathStyle = pathStyleFromOptions1 || pathStyleFromOptions2 || pathStyleFromSparkSession || pathStyleFromHadoop1 || pathStyleFromHadoopIndexTables || pathStyleFromHadoop2 || pathStyleFromHadoop3 || isLocalHostEndpoint
         
         if (logger.isDebugEnabled) {
           logger.debug(s"  Localhost endpoint detected: $isLocalHostEndpoint, Final pathStyleAccess: $finalPathStyle")

@@ -29,12 +29,18 @@ import java.net.URI
 import java.util.concurrent.{CompletableFuture, Executors}
 import scala.jdk.CollectionConverters._
 import scala.util.{Try}
+import com.tantivy4spark.utils.CredentialProviderFactory
 
 /**
  * High-performance S3 storage provider using AWS SDK directly.
  * Bypasses Hadoop filesystem for better performance and reliability.
  */
-class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStorageProvider {
+class S3CloudStorageProvider(
+  config: CloudStorageConfig,
+  hadoopConf: org.apache.hadoop.conf.Configuration = null,
+  tablePath: String = "s3://dummy"
+) extends CloudStorageProvider {
+
 
   private val logger = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
   private val executor = Executors.newCachedThreadPool()
@@ -91,6 +97,32 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
       key
     }
   }
+
+  /**
+   * Normalize a path to table level by removing filename if present.
+   * This ensures that credential providers are always created with the table path,
+   * not individual split file paths.
+   * IMPORTANT: Preserves the original scheme (s3a://, s3://, etc.) to ensure
+   * credential providers receive the same URI scheme as specified by the user.
+   */
+  private def normalizeToTablePath(path: String): String = {
+    val uri = new URI(path)
+    val pathPart = uri.getPath
+
+    // If the path ends with a .split file, remove it to get the table path
+    if (pathPart != null && pathPart.endsWith(".split")) {
+      val splitIndex = pathPart.lastIndexOf('/')
+      if (splitIndex > 0) {
+        val tablePath = pathPart.substring(0, splitIndex)
+        // Preserve the original scheme, authority, query, and fragment
+        new URI(uri.getScheme, uri.getAuthority, tablePath, uri.getQuery, uri.getFragment).toString
+      } else {
+        path // Fallback to original path if we can't determine table path
+      }
+    } else {
+      path // Not a split file path, use as-is
+    }
+  }
   
   private val s3Client: S3Client = {
     val builder = S3Client.builder()
@@ -135,22 +167,73 @@ class S3CloudStorageProvider(config: CloudStorageConfig) extends CloudStoragePro
         }
       }
     }
-    
-    // Configure credentials - only use DefaultCredentialsProvider if no credentials are configured
-    val credentialsProvider = (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
-      case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
-        logger.info(s"Using AWS session credentials with access key: ${accessKey.take(4)}...")
-        val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
-        StaticCredentialsProvider.create(credentials)
-      case (Some(accessKey), Some(secretKey), None) =>
-        logger.info(s"Using AWS basic credentials with access key: ${accessKey.take(4)}...")
-        val credentials = AwsBasicCredentials.create(accessKey, secretKey)
-        StaticCredentialsProvider.create(credentials)
-      case _ =>
-        logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
-        DefaultCredentialsProvider.create()
+
+    // Helper method for fallback credential configuration
+    def createFallbackCredentialsProvider() = {
+      (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
+        case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
+          logger.info(s"Using AWS session credentials with access key: ${accessKey.take(4)}...")
+          val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+          StaticCredentialsProvider.create(credentials)
+        case (Some(accessKey), Some(secretKey), None) =>
+          logger.info(s"Using AWS basic credentials with access key: ${accessKey.take(4)}...")
+          val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+          StaticCredentialsProvider.create(credentials)
+        case _ =>
+          logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
+          DefaultCredentialsProvider.create()
+      }
     }
-    
+
+    // Configure credentials with the following priority:
+    // 1. Custom provider (if configured)
+    // 2. Explicit credentials (access key/secret key in config)
+    // 3. Default provider chain
+    val credentialsProvider = config.awsCredentialsProviderClass match {
+      case Some(providerClassName) =>
+        logger.info(s"Using custom AWS credentials provider: $providerClassName")
+        try {
+          // Create custom credential provider using reflection
+          // Normalize the path to table level by removing filename if present
+          val normalizedTablePath = normalizeToTablePath(tablePath)
+          val customProvider = CredentialProviderFactory.createCredentialProvider(
+            providerClassName,
+            new URI(normalizedTablePath), // Use normalized table path URI for constructor
+            if (hadoopConf != null) hadoopConf else new org.apache.hadoop.conf.Configuration()
+          )
+
+          // Extract credentials using reflection to avoid AWS SDK dependencies
+          val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(customProvider)
+
+          logger.info(s"Successfully extracted credentials from custom provider. Access key: ${basicCredentials.accessKey.take(4)}...")
+
+          // Create static credentials provider with extracted credentials
+          if (basicCredentials.hasSessionToken) {
+            val credentials = AwsSessionCredentials.create(
+              basicCredentials.accessKey,
+              basicCredentials.secretKey,
+              basicCredentials.sessionToken.get
+            )
+            StaticCredentialsProvider.create(credentials)
+          } else {
+            val credentials = AwsBasicCredentials.create(
+              basicCredentials.accessKey,
+              basicCredentials.secretKey
+            )
+            StaticCredentialsProvider.create(credentials)
+          }
+
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to create custom credential provider: $providerClassName", ex)
+            logger.warn("Falling back to explicit credentials or default provider chain")
+            createFallbackCredentialsProvider()
+        }
+
+      case None =>
+        createFallbackCredentialsProvider()
+    }
+
     builder.credentialsProvider(credentialsProvider).build()
   }
   

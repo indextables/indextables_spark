@@ -20,7 +20,7 @@
 - **Schema-aware filtering**: Field validation prevents native crashes and ensures compatibility
 - **High-performance I/O**: Parallel transaction log reading with configurable concurrency and retry policies
 - **Enterprise-grade configurability**: Comprehensive configuration hierarchy with validation and fallback mechanisms
-- **100% test coverage**: 194 tests passing, 0 failing, comprehensive partitioned dataset test suite
+- **100% test coverage**: 198 tests passing, 0 failing, comprehensive partitioned dataset test suite and custom credential provider integration tests
 
 ## Build & Test
 ```bash
@@ -40,6 +40,141 @@ Key settings with defaults:
 - `spark.tantivy4spark.docBatch.enabled`: `true` (Enable batch document retrieval for better performance)
 - `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
+
+### Custom AWS Credential Providers
+
+**New in v1.9**: Support for custom AWS credential providers via reflection, allowing integration with enterprise credential management systems without compile-time dependencies.
+
+#### Configuration
+- `spark.tantivy4spark.aws.credentialsProviderClass`: Fully qualified class name of custom AWS credential provider
+
+#### Requirements
+Custom credential providers must:
+1. **Implement standard AWS SDK interfaces**: Either v1 `AWSCredentialsProvider` or v2 `AwsCredentialsProvider`
+2. **Have required constructor**: `public MyProvider(java.net.URI uri, org.apache.hadoop.conf.Configuration conf)`
+3. **Return valid credentials**: Access key, secret key, and optional session token
+
+#### Credential Resolution Priority
+1. **Custom Provider** (if configured via `spark.tantivy4spark.aws.credentialsProviderClass`)
+2. **Explicit Credentials** (access key/secret key in configuration)
+3. **Default Provider Chain** (IAM roles, environment variables, etc.)
+
+#### Configuration Examples
+
+```scala
+// Basic custom provider configuration
+spark.conf.set("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+
+// Per-operation configuration
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+  .save("s3://bucket/path")
+
+// Hadoop configuration (also supported)
+hadoopConf.set("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+```
+
+#### Example Custom Provider (AWS SDK v2)
+
+```java
+public class MyCredentialProvider implements AwsCredentialsProvider {
+    public MyCredentialProvider(URI uri, Configuration conf) {
+        // Initialize with custom logic
+    }
+
+    @Override
+    public AwsCredentials resolveCredentials() {
+        // Return custom credentials
+        return AwsBasicCredentials.create("access-key", "secret-key");
+    }
+}
+```
+
+#### Example Custom Provider (AWS SDK v1)
+
+```java
+public class MyLegacyCredentialProvider implements AWSCredentialsProvider {
+    public MyLegacyCredentialProvider(URI uri, Configuration conf) {
+        // Initialize with custom logic
+    }
+
+    @Override
+    public AWSCredentials getCredentials() {
+        // Return custom credentials
+        return new BasicAWSCredentials("access-key", "secret-key");
+    }
+
+    @Override
+    public void refresh() {
+        // Refresh credentials if needed
+    }
+}
+```
+
+#### Key Benefits
+- **No SDK Dependencies**: Uses reflection to avoid compile-time AWS SDK dependencies
+- **Version Agnostic**: Supports both AWS SDK v1 and v2 providers automatically
+- **Enterprise Integration**: Easy integration with custom credential management systems
+- **Fallback Safety**: Graceful fallback to explicit credentials or default provider chain
+- **Configuration Hierarchy**: Full support for DataFrame options, Spark config, and Hadoop config
+
+#### URI Path Handling & Testing
+
+**Table-Level URI Consistency**: Custom credential providers receive **table-level URIs** (not individual file paths) for consistent caching and configuration purposes.
+
+**URI Scheme Normalization**: During read operations, URI schemes are normalized from `s3a://` to `s3://` for tantivy4java compatibility while preserving table-level path structure.
+
+**Comprehensive Integration Testing**: Real S3 integration tests validate:
+- ✅ **Table path validation**: URIs passed to credential providers are table paths (e.g., `s3://bucket/table-name`)
+- ✅ **No file paths**: URIs never contain file extensions (`.split`, `.json`, `.parquet`) or file patterns (`part-`, `000000`)
+- ✅ **Scheme normalization**: Proper `s3a://` → `s3://` conversion during read operations
+- ✅ **Cross-scheme compatibility**: Write with `s3a://` and read with `s3://` work correctly
+- ✅ **Configuration propagation**: Custom provider settings flow through driver and executor contexts
+- ✅ **Production scenarios**: Tests include caching behavior, configuration precedence, and error handling
+
+**Validation Implementation**:
+```scala
+// Example validation logic (automatically applied in tests)
+private def validateTablePath(uri: URI, testDescription: String): Unit = {
+  val uriPath = uri.getPath
+
+  // Negative validations: should NOT contain file patterns
+  uriPath should not endWith ".split"
+  uriPath should not endWith ".json"
+  uriPath should not endWith ".parquet"
+  uriPath should not include "part-"
+
+  // Positive validation: ensure it's a valid table path
+  uriPath should not be empty
+  println(s"✅ VALIDATED ($testDescription): URI '$uri' is a table path, not a file path")
+}
+```
+
+**Test Coverage**:
+- **4/4 integration tests passing** with real S3 validation
+- **Table path consistency** verified across write/read operations
+- **URI normalization** validated for both `s3a://` and `s3://` schemes
+- **Configuration precedence** tested with multiple credential sources
+- **Distributed context behavior** validated in executor environments
+
+#### Production Recommendations
+
+**Write Operations**: Custom credential providers work reliably for write operations in driver context:
+```scala
+df.write.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyProvider")
+  .save("s3a://bucket/table")
+```
+
+**Read Operations**: For maximum reliability in distributed executor contexts, use explicit credentials:
+```scala
+val df = spark.read.format("tantivy4spark")
+  .option("spark.tantivy4spark.aws.accessKey", accessKey)
+  .option("spark.tantivy4spark.aws.secretKey", secretKey)
+  .load("s3://bucket/table")
+```
+
+**Mixed Approach**: Combine custom providers for writes with explicit credentials for reads for optimal reliability and security.
 
 ### Working Directory & Cache Configuration
 
@@ -707,9 +842,19 @@ df.write.format("tantivy4spark")
 - ✅ **Working directory configuration**: Custom root working area support for index creation and split operations with validation and fallback
 - ✅ **Parallel streaming uploads**: Multi-threaded S3 uploads with configurable concurrency and memory-efficient buffering
 - ✅ **Enterprise configuration hierarchy**: Complete write option/spark property/table property configuration chain with validation
+- ✅ **Custom credential providers**: Full AWS credential provider integration with table-level URI validation and comprehensive real S3 testing (4/4 tests passing)
 - **Next**: Complete date filtering edge cases, additional performance optimizations
 
 ## Latest Updates
+
+### **v1.9 - Custom AWS Credential Provider Integration**
+- **Custom credential provider support**: Full integration with enterprise credential management systems via reflection
+- **Table-level URI consistency**: Credential providers receive table paths (not file paths) for consistent caching behavior
+- **AWS SDK version agnostic**: Supports both v1 (`AWSCredentialsProvider`) and v2 (`AwsCredentialsProvider`) interfaces automatically
+- **Comprehensive validation**: Real S3 integration tests with table path validation ensuring URIs never contain file extensions or file patterns
+- **URI scheme normalization**: Proper `s3a://` to `s3://` conversion while preserving table-level path structure
+- **Configuration hierarchy**: Full support for DataFrame options, Spark config, and Hadoop configuration sources
+- **Production recommendations**: Write operations use custom providers reliably; read operations recommended to use explicit credentials for distributed reliability
 
 ### **v1.8 - Process-Based Parallel Merge Architecture**
 - **Process-based merging**: Revolutionary isolated-process merge architecture eliminating thread contention

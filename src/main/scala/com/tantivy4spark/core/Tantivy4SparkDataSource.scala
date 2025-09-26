@@ -1654,9 +1654,10 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
       case _: Exception => Map.empty[String, String]
     }
     
-    val tableTantivyConfigs = options.asScala
-      .filter(_._1.startsWith("spark.tantivy4spark."))
-      .toMap
+    val tableTantivyConfigs = {
+      import com.tantivy4spark.util.ConfigNormalization
+      ConfigNormalization.extractTantivyConfigsFromOptions(options)
+    }
     
     // Merge with proper precedence: Hadoop < Spark config < table properties
     val mergedTantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ tableTantivyConfigs
