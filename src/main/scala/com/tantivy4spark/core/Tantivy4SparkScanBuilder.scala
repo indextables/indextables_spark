@@ -19,7 +19,9 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownV2Filters, SupportsPushDownRequiredColumns, SupportsPushDownLimit}
+import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownV2Filters, SupportsPushDownRequiredColumns, SupportsPushDownLimit, SupportsPushDownAggregates}
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
+import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
@@ -38,13 +40,17 @@ class Tantivy4SparkScanBuilder(
     with SupportsPushDownFilters
     with SupportsPushDownV2Filters
     with SupportsPushDownRequiredColumns
-    with SupportsPushDownLimit {
+    with SupportsPushDownLimit
+    with SupportsPushDownAggregates {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters = Array.empty[Filter]
   private var requiredSchema = schema
   private var _limit: Option[Int] = None
+
+  // Aggregate pushdown state
+  private var _pushedAggregation: Option[Aggregation] = None
 
   // Generate instance key for this ScanBuilder to retrieve IndexQueries
   private val instanceKey = {
@@ -55,13 +61,65 @@ class Tantivy4SparkScanBuilder(
 
 
   override def build(): Scan = {
-    // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
-    val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    // Check if we have aggregate pushdown
+    _pushedAggregation match {
+      case Some(aggregation) =>
+        logger.info(s"🔍 BUILD: Creating aggregate scan for pushed aggregation")
+        // Return aggregate scan (will implement this next)
+        createAggregateScan(aggregation)
+      case None =>
+        // Regular scan
+        logger.info(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
+        // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
+        val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
-    logger.error(s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan")
-    extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
+        logger.error(s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan")
+        extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
 
-    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+        new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+    }
+  }
+
+  /**
+   * Create an aggregate scan for pushed aggregations.
+   */
+  private def createAggregateScan(aggregation: Aggregation): Scan = {
+    // Check if we can use transaction log count optimization
+    if (canUseTransactionLogCount(aggregation)) {
+      logger.info(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
+      createTransactionLogCountScan(aggregation)
+    } else {
+      // For now, return a regular scan until we implement Tantivy4SparkAggregateScan
+      logger.warn(s"🔍 AGGREGATE SCAN: Aggregate scan not yet implemented, falling back to regular scan")
+
+      val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+      new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+    }
+  }
+
+  /**
+   * Check if we can optimize COUNT queries using transaction log.
+   */
+  private def canUseTransactionLogCount(aggregation: Aggregation): Boolean = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    aggregation.aggregateExpressions.length == 1 && {
+      aggregation.aggregateExpressions.head match {
+        case _: Count =>
+          // Check if we only have partition filters or no filters
+          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+          logger.info(s"🔍 TRANSACTION LOG COUNT: Can use transaction log optimization: $hasOnlyPartitionFilters")
+          hasOnlyPartitionFilters
+        case _ => false
+      }
+    }
+  }
+
+  /**
+   * Create a specialized scan that returns count from transaction log.
+   */
+  private def createTransactionLogCountScan(aggregation: Aggregation): Scan = {
+    new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, broadcastConfig)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
@@ -118,6 +176,36 @@ class Tantivy4SparkScanBuilder(
     _limit = Some(limit)
     logger.info(s"Pushed limit: $limit")
     true // We support limit pushdown
+  }
+
+  override def pushAggregation(aggregation: Aggregation): Boolean = {
+    logger.info(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
+
+    // Validate aggregation is supported
+    if (!isAggregationSupported(aggregation)) {
+      logger.info(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
+      return false
+    }
+
+    // Check if filters are compatible with aggregate pushdown
+    if (!areFiltersCompatibleWithAggregation()) {
+      logger.info(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
+      return false
+    }
+
+    // Store for later use in build()
+    _pushedAggregation = Some(aggregation)
+    logger.info(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
+    true
+  }
+
+  override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
+    logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Checking if complete pushdown is supported for: $aggregation")
+
+    // Return true if we can completely handle this aggregation at the data source level
+    val canCompletelyPushDown = isAggregationSupported(aggregation) && areFiltersCompatibleWithAggregation()
+    logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Can completely push down: $canCompletelyPushDown")
+    canCompletelyPushDown
   }
 
 
@@ -213,6 +301,144 @@ class Tantivy4SparkScanBuilder(
 
     logger.error(s"🔍 EXTRACT DEBUG: No IndexQuery filters found using any method")
     Array.empty[Any]
+  }
+
+  /**
+   * Check if the aggregation is supported for pushdown.
+   */
+  private def isAggregationSupported(aggregation: Aggregation): Boolean = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    aggregation.aggregateExpressions.forall { expr =>
+      expr match {
+        case _: Count =>
+          logger.info(s"🔍 AGGREGATE VALIDATION: COUNT aggregation is supported")
+          true
+        case sum: Sum =>
+          val fieldName = getFieldName(sum.column)
+          val isSupported = isNumericFastField(fieldName)
+          logger.info(s"🔍 AGGREGATE VALIDATION: SUM on field '$fieldName' supported: $isSupported")
+          isSupported
+        case avg: Avg =>
+          val fieldName = getFieldName(avg.column)
+          val isSupported = isNumericFastField(fieldName)
+          logger.info(s"🔍 AGGREGATE VALIDATION: AVG on field '$fieldName' supported: $isSupported")
+          isSupported
+        case min: Min =>
+          val fieldName = getFieldName(min.column)
+          val isSupported = isNumericFastField(fieldName)
+          logger.info(s"🔍 AGGREGATE VALIDATION: MIN on field '$fieldName' supported: $isSupported")
+          isSupported
+        case max: Max =>
+          val fieldName = getFieldName(max.column)
+          val isSupported = isNumericFastField(fieldName)
+          logger.info(s"🔍 AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
+          isSupported
+        case other =>
+          logger.info(s"🔍 AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+          false
+      }
+    }
+  }
+
+  /**
+   * Extract field name from an aggregate expression column.
+   */
+  private def getFieldName(column: org.apache.spark.sql.connector.expressions.Expression): String = {
+    // Use toString for now as a simple way to get field name
+    // This is a temporary implementation
+    val columnStr = column.toString
+    if (columnStr.startsWith("FieldReference(")) {
+      // Extract field name from FieldReference(fieldName) format
+      val pattern = """FieldReference\(([^)]+)\)""".r
+      pattern.findFirstMatchIn(columnStr) match {
+        case Some(m) => m.group(1)
+        case None => throw new UnsupportedOperationException(s"Could not extract field name from: $columnStr")
+      }
+    } else {
+      throw new UnsupportedOperationException(s"Complex column expressions not supported for aggregation: $column")
+    }
+  }
+
+  /**
+   * Check if a field is numeric and marked as fast in the schema.
+   */
+  private def isNumericFastField(fieldName: String): Boolean = {
+    // Check if field is marked as fast in configuration
+    val tantivyOptions = new Tantivy4SparkOptions(options)
+    val fastFields = tantivyOptions.getFastFields
+
+    if (!fastFields.contains(fieldName)) {
+      logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast, rejecting aggregate pushdown")
+      return false
+    }
+
+    // Check if field is numeric
+    schema.fields.find(_.name == fieldName) match {
+      case Some(field) if isNumericType(field.dataType) =>
+        logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is numeric and fast - supported")
+        true
+      case Some(field) =>
+        logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not numeric (${field.dataType}) - not supported")
+        false
+      case None =>
+        logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' not found in schema - not supported")
+        false
+    }
+  }
+
+  /**
+   * Check if a DataType is numeric.
+   */
+  private def isNumericType(dataType: org.apache.spark.sql.types.DataType): Boolean = {
+    import org.apache.spark.sql.types._
+    dataType match {
+      case _: IntegerType | _: LongType | _: FloatType | _: DoubleType | _: DecimalType => true
+      case _ => false
+    }
+  }
+
+
+  /**
+   * Check if current filters are compatible with aggregate pushdown.
+   */
+  private def areFiltersCompatibleWithAggregation(): Boolean = {
+    _pushedFilters.forall { filter =>
+      filter match {
+        // Supported filter types
+        case _: org.apache.spark.sql.sources.EqualTo => true
+        case _: org.apache.spark.sql.sources.GreaterThan => true
+        case _: org.apache.spark.sql.sources.LessThan => true
+        case _: org.apache.spark.sql.sources.GreaterThanOrEqual => true
+        case _: org.apache.spark.sql.sources.LessThanOrEqual => true
+        case _: org.apache.spark.sql.sources.In => true
+        case _: org.apache.spark.sql.sources.IsNull => true
+        case _: org.apache.spark.sql.sources.IsNotNull => true
+        case _: org.apache.spark.sql.sources.And => true
+        case _: org.apache.spark.sql.sources.Or => true
+        case _: org.apache.spark.sql.sources.StringContains => true
+        case _: org.apache.spark.sql.sources.StringStartsWith => true
+        case _: org.apache.spark.sql.sources.StringEndsWith => true
+
+        // Unsupported filter types that would break aggregation accuracy
+        case filter if filter.getClass.getSimpleName.contains("RLike") =>
+          logger.info(s"🔍 FILTER COMPATIBILITY: Regular expression filter not supported for aggregation: $filter")
+          false
+        case other =>
+          logger.info(s"🔍 FILTER COMPATIBILITY: Unknown filter type, assuming supported: $other")
+          true
+      }
+    }
+  }
+
+
+  /**
+   * Check if a filter is a partition filter.
+   */
+  private def isPartitionFilter(filter: org.apache.spark.sql.sources.Filter): Boolean = {
+    // For now, assume no partition filters are present
+    // TODO: Implement proper partition filter detection based on partition columns
+    false
   }
 }
 

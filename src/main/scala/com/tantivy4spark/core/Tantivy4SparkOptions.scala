@@ -123,9 +123,12 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get fast fields configuration.
    * Returns set of field names that should get "fast" indexing.
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    */
   def getFastFields: Set[String] = {
-    Option(options.get("spark.tantivy4spark.indexing.fastfields"))
+    // Check indextables prefix first (preferred)
+    Option(options.get("spark.indextables.indexing.fastfields"))
+      .orElse(Option(options.get("spark.tantivy4spark.indexing.fastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -133,9 +136,11 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get store-only fields configuration.
    * Returns set of field names that should be stored but not indexed.
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    */
   def getStoreOnlyFields: Set[String] = {
-    Option(options.get("spark.tantivy4spark.indexing.storeonlyfields"))
+    Option(options.get("spark.indextables.indexing.storeonlyfields"))
+      .orElse(Option(options.get("spark.tantivy4spark.indexing.storeonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -143,9 +148,11 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get index-only fields configuration.
    * Returns set of field names that should be indexed but not stored.
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    */
   def getIndexOnlyFields: Set[String] = {
-    Option(options.get("spark.tantivy4spark.indexing.indexonlyfields"))
+    Option(options.get("spark.indextables.indexing.indexonlyfields"))
+      .orElse(Option(options.get("spark.tantivy4spark.indexing.indexonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }

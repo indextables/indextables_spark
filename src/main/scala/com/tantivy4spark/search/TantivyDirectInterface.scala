@@ -50,6 +50,54 @@ object TantivyDirectInterface {
   }
   
   // Thread-safe schema creation to prevent "Field already exists in schema id" race conditions
+  /**
+   * Auto-configure fast fields if none are explicitly configured.
+   * Makes the first numeric/date field fast to enable aggregations.
+   */
+  private def autoConfigureFastFields(
+    sparkSchema: StructType,
+    options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
+    tantivyOptions: com.tantivy4spark.core.Tantivy4SparkOptions
+  ): org.apache.spark.sql.util.CaseInsensitiveStringMap = {
+
+    val currentFastFields = tantivyOptions.getFastFields
+
+    // If fast fields are already configured, return original options
+    if (currentFastFields.nonEmpty) {
+      logger.debug(s"Fast fields already configured: ${currentFastFields.mkString(", ")}")
+      return options
+    }
+
+    // Find the first numeric or date field for auto-configuration
+    val firstNumericOrDateField = sparkSchema.fields.find { field =>
+      field.dataType match {
+        case org.apache.spark.sql.types.IntegerType |
+             org.apache.spark.sql.types.LongType |
+             org.apache.spark.sql.types.FloatType |
+             org.apache.spark.sql.types.DoubleType |
+             org.apache.spark.sql.types.DateType |
+             org.apache.spark.sql.types.TimestampType => true
+        case _ => false
+      }
+    }
+
+    firstNumericOrDateField match {
+      case Some(field) =>
+        logger.info(s"🔧 AUTO-FAST-FIELD: No fast fields configured, automatically making '${field.name}' fast for aggregation support")
+
+        // Create new options map with auto-configured fast field
+        import scala.jdk.CollectionConverters._
+        val existingOptions = options.asCaseSensitiveMap().asScala.toMap
+        val newOptions = existingOptions + ("spark.indextables.indexing.fastfields" -> field.name)
+
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(newOptions.asJava)
+
+      case None =>
+        logger.debug("No numeric or date fields found for auto-fast-field configuration")
+        options
+    }
+  }
+
   private def createSchemaThreadSafe(sparkSchema: StructType, options: org.apache.spark.sql.util.CaseInsensitiveStringMap): (com.tantivy4java.Schema, SchemaBuilder) = {
     schemaCreationLock.synchronized {
       logger.debug(s"Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
@@ -57,10 +105,14 @@ object TantivyDirectInterface {
       val builder = new SchemaBuilder()
       val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(options)
 
+      // Auto-configure fast fields if none are configured
+      val autoConfiguredOptions = autoConfigureFastFields(sparkSchema, options, tantivyOptions)
+      val finalTantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(autoConfiguredOptions)
+
       sparkSchema.fields.foreach { field =>
         val fieldName = field.name
         val fieldType = field.dataType
-        val indexingConfig = tantivyOptions.getFieldIndexingConfig(fieldName)
+        val indexingConfig = finalTantivyOptions.getFieldIndexingConfig(fieldName)
 
         logger.debug(s"Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
 
