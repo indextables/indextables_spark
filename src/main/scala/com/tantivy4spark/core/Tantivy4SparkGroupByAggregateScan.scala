@@ -98,9 +98,12 @@ class Tantivy4SparkGroupByAggregateScan(
           val columnDataType = getColumnDataType(sum.column)
           (s"sum", columnDataType)
         case avg: Avg =>
-          // For Avg, result is typically Double
-          import org.apache.spark.sql.types.DoubleType
-          (s"avg", DoubleType)
+          // AVG should not appear here if supportCompletePushDown=false
+          throw new IllegalStateException(
+            s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
+            s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+            s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+          )
         case min: Min =>
           // For Min, data type matches the column
           val columnDataType = getColumnDataType(min.column)
@@ -409,14 +412,13 @@ class Tantivy4SparkGroupByAggregateReader(
               }
 
             case avg: Avg =>
+              // AVG should be automatically transformed by Spark into SUM + COUNT when supportCompletePushDown=false
               val fieldName = getFieldName(avg.column)
-              logger.info(s"🔍 GROUP BY EXECUTION: Adding AVG sub-aggregation for field '$fieldName' at index $index")
-              termsAgg match {
-                case terms: TermsAggregation =>
-                  terms.addSubAggregation(s"avg_$index", new com.tantivy4java.AverageAggregation(fieldName))
-                case multiTerms: com.tantivy4java.MultiTermsAggregation =>
-                  multiTerms.addSubAggregation(s"avg_$index", new com.tantivy4java.AverageAggregation(fieldName))
-              }
+              throw new IllegalStateException(
+                s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
+                s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+                s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+              )
 
             case min: Min =>
               val fieldName = getFieldName(min.column)
@@ -821,20 +823,12 @@ class Tantivy4SparkGroupByAggregateReader(
             }
 
           case _: Avg =>
-            // Extract AVG result from sub-aggregation
-            try {
-              val avgResult = multiBucket.getSubAggregation(s"avg_$index").asInstanceOf[com.tantivy4java.AverageResult]
-              if (avgResult != null) {
-                avgResult.getAverage.toLong  // Convert to Long for consistency
-              } else {
-                logger.warn(s"🔍 GROUP BY EXECUTION: AVG sub-aggregation result is null for index $index")
-                0L
-              }
-            } catch {
-              case e: Exception =>
-                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting AVG sub-aggregation result for index $index: ${e.getMessage}")
-                0L
-            }
+            // AVG should not appear here if supportCompletePushDown=false
+            throw new IllegalStateException(
+              s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
+              s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+              s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+            )
 
           case _: Min =>
             // Extract MIN result from sub-aggregation
@@ -917,20 +911,12 @@ class Tantivy4SparkGroupByAggregateReader(
             }
 
           case _: Avg =>
-            // Extract AVG result from sub-aggregation
-            try {
-              val avgResult = bucket.getSubAggregation(s"avg_$index").asInstanceOf[com.tantivy4java.AverageResult]
-              if (avgResult != null) {
-                avgResult.getAverage.toLong  // Convert to Long for consistency
-              } else {
-                logger.warn(s"🔍 GROUP BY EXECUTION: AVG sub-aggregation result is null for index $index")
-                0L
-              }
-            } catch {
-              case e: Exception =>
-                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting AVG sub-aggregation result for index $index: ${e.getMessage}")
-                0L
-            }
+            // AVG should not appear here if supportCompletePushDown=false
+            throw new IllegalStateException(
+              s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
+              s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+              s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+            )
 
           case _: Min =>
             // Extract MIN result from sub-aggregation

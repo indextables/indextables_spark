@@ -538,6 +538,60 @@ class SimpleAggregatePushdownTest extends TestBase {
     }
   }
 
+  test("Distributed aggregation should work correctly across multiple partitions") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      val testData = createTestData()
+
+      // Write test data using V2 API - DO NOT coalesce, let it create multiple partitions
+      testData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .option("spark.tantivy4spark.indexing.typemap.category", "string")
+        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read data using V2 API
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tempPath)
+
+      // Verify we have all the data
+      val totalCount = df.count()
+      println(s"🔍 DISTRIBUTED: Total count = $totalCount")
+
+      // Test multiple aggregation types that should work in distributed mode
+      val result = df.agg(
+        count(lit(1)).as("total_count"),
+        sum("score").as("total_sum"),
+        avg("score").as("avg_score"),
+        min("score").as("min_score"),
+        max("score").as("max_score")
+      ).collect()
+
+      val row = result(0)
+      val actualCount = row.getLong(0)
+      val actualSum = row.getLong(1)
+      val actualAvg = row.getDouble(2)
+      val actualMin = row.getInt(3)
+      val actualMax = row.getInt(4)
+
+      println(s"🔍 DISTRIBUTED RESULTS:")
+      println(s"  Count: $actualCount (expected: 5)")
+      println(s"  Sum: $actualSum (expected: 150)")
+      println(s"  Avg: $actualAvg (expected: 30.0)")
+      println(s"  Min: $actualMin (expected: 10)")
+      println(s"  Max: $actualMax (expected: 50)")
+
+      // All should be correct even with multiple partitions
+      actualCount shouldBe 5L
+      actualSum shouldBe 150L
+      actualAvg shouldBe 30.0
+      actualMin shouldBe 10
+      actualMax shouldBe 50
+
+      println(s"✅ Distributed aggregation test passed!")
+    }
+  }
+
   test("Aggregate pushdown should work with disabled AQE for predictable plans") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 

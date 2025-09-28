@@ -365,21 +365,14 @@ class Tantivy4SparkSimpleAggregateReader(
             }
 
           case avg: Avg =>
+            // AVG should be automatically transformed by Spark into SUM + COUNT when supportCompletePushDown=false
+            // If we receive AVG directly, it indicates a configuration problem
             val fieldName = getFieldName(avg.column)
-            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing AVG aggregation for field '$fieldName'")
-            val avgAgg = new com.tantivy4java.AverageAggregation(fieldName)
-            val query = new SplitMatchAllQuery()
-            val result = searcher.search(query, 0, s"avg_agg", avgAgg)
-
-            if (result.hasAggregations()) {
-              val avgResult = result.getAggregation("avg_agg").asInstanceOf[com.tantivy4java.AverageResult]
-              val avgValue = if (avgResult != null) avgResult.getAverage else 0.0
-              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: AVG result for '$fieldName': $avgValue")
-              aggregationResults += avgValue
-            } else {
-              logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No AVG aggregation result for '$fieldName'")
-              aggregationResults += 0.0
-            }
+            throw new IllegalStateException(
+              s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
+              s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+              s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+            )
 
           case min: Min =>
             val fieldName = getFieldName(min.column)

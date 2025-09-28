@@ -217,6 +217,15 @@ class Tantivy4SparkScanBuilder(
     true // We support limit pushdown
   }
 
+  override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
+    // Return false to allow Spark to handle final aggregation combining partial results
+    // This enables proper distributed aggregation where:
+    // - AVG is transformed to SUM + COUNT by Spark
+    // - Partial results from each partition are combined correctly
+    logger.info(s"🔍 AGGREGATE PUSHDOWN: supportCompletePushDown called - returning false for distributed aggregation")
+    false
+  }
+
   override def pushAggregation(aggregation: Aggregation): Boolean = {
     println(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
     logger.info(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
@@ -280,31 +289,6 @@ class Tantivy4SparkScanBuilder(
     true
   }
 
-  override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
-    println(s"🔍 COMPLETE PUSHDOWN CHECK: Checking if complete pushdown is supported for: $aggregation")
-    logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Checking if complete pushdown is supported for: $aggregation")
-
-    // Debug each condition separately
-    val isAggSupported = isAggregationSupported(aggregation)
-    val areFiltersCompatible = areFiltersCompatibleWithAggregation()
-
-    println(s"🔍 COMPLETE PUSHDOWN DEBUG: isAggregationSupported = $isAggSupported")
-    println(s"🔍 COMPLETE PUSHDOWN DEBUG: areFiltersCompatibleWithAggregation = $areFiltersCompatible")
-
-    // Check for GROUP BY in the aggregation
-    val groupByExpressions = aggregation.groupByExpressions()
-    val hasGroupBy = groupByExpressions != null && groupByExpressions.nonEmpty
-    println(s"🔍 COMPLETE PUSHDOWN DEBUG: hasGroupBy = $hasGroupBy")
-    if (hasGroupBy) {
-      println(s"🔍 COMPLETE PUSHDOWN DEBUG: GROUP BY expressions: ${groupByExpressions.mkString(", ")}")
-    }
-
-    // Return true if we can completely handle this aggregation at the data source level
-    val canCompletelyPushDown = isAggSupported && areFiltersCompatible
-    println(s"🔍 COMPLETE PUSHDOWN CHECK: Can completely push down: $canCompletelyPushDown")
-    logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Can completely push down: $canCompletelyPushDown")
-    canCompletelyPushDown
-  }
 
   /**
    * Extract field name from Spark expression for GROUP BY detection.
