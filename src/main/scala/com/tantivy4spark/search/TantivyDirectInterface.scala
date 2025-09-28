@@ -51,8 +51,10 @@ object TantivyDirectInterface {
   
   // Thread-safe schema creation to prevent "Field already exists in schema id" race conditions
   /**
-   * Auto-configure fast fields if none are explicitly configured.
-   * Makes the first numeric/date field fast to enable aggregations.
+   * Auto-configure fast fields based on field types if none are explicitly configured.
+   * By default, makes all numeric, string (raw tokenizer), and date fields fast unless:
+   * 1. Fast fields are explicitly configured
+   * 2. Non-fast fields are explicitly configured to exclude specific fields
    */
   private def autoConfigureFastFields(
     sparkSchema: StructType,
@@ -61,6 +63,7 @@ object TantivyDirectInterface {
   ): org.apache.spark.sql.util.CaseInsensitiveStringMap = {
 
     val currentFastFields = tantivyOptions.getFastFields
+    val currentNonFastFields = tantivyOptions.getNonFastFields
 
     // If fast fields are already configured, return original options
     if (currentFastFields.nonEmpty) {
@@ -68,33 +71,45 @@ object TantivyDirectInterface {
       return options
     }
 
-    // Find the first numeric or date field for auto-configuration
-    val firstNumericOrDateField = sparkSchema.fields.find { field =>
+    // Find all fields that should be fast by default
+    val defaultFastFields = sparkSchema.fields.filter { field =>
       field.dataType match {
+        // Numeric and date fields are fast by default
         case org.apache.spark.sql.types.IntegerType |
              org.apache.spark.sql.types.LongType |
              org.apache.spark.sql.types.FloatType |
              org.apache.spark.sql.types.DoubleType |
              org.apache.spark.sql.types.DateType |
              org.apache.spark.sql.types.TimestampType => true
+        // String fields with raw tokenizer (explicit "string" type) are fast by default
+        // Text fields with default tokenizer (default behavior) are NOT fast by default
+        case org.apache.spark.sql.types.StringType =>
+          val fieldTypeOverride = tantivyOptions.getFieldTypeMapping.get(field.name)
+          // Only explicitly configured "string" fields should be fast by default
+          // If no explicit configuration, it defaults to "text" (default tokenizer) and should NOT be fast
+          fieldTypeOverride.contains("string")
         case _ => false
       }
-    }
+    }.map(_.name).toSet
 
-    firstNumericOrDateField match {
-      case Some(field) =>
-        logger.info(s"🔧 AUTO-FAST-FIELD: No fast fields configured, automatically making '${field.name}' fast for aggregation support")
+    // Remove any fields explicitly configured as non-fast
+    val finalFastFields = defaultFastFields -- currentNonFastFields
 
-        // Create new options map with auto-configured fast field
-        import scala.jdk.CollectionConverters._
-        val existingOptions = options.asCaseSensitiveMap().asScala.toMap
-        val newOptions = existingOptions + ("spark.indextables.indexing.fastfields" -> field.name)
+    if (finalFastFields.nonEmpty) {
+      logger.info(s"🔧 AUTO-FAST-FIELD: No fast fields configured, automatically making fields fast by default: ${finalFastFields.mkString(", ")}")
+      if (currentNonFastFields.nonEmpty) {
+        logger.info(s"🔧 AUTO-FAST-FIELD: Excluding non-fast fields: ${currentNonFastFields.mkString(", ")}")
+      }
 
-        new org.apache.spark.sql.util.CaseInsensitiveStringMap(newOptions.asJava)
+      // Create new options map with auto-configured fast fields
+      import scala.jdk.CollectionConverters._
+      val existingOptions = options.asCaseSensitiveMap().asScala.toMap
+      val newOptions = existingOptions + ("spark.indextables.indexing.fastfields" -> finalFastFields.mkString(","))
 
-      case None =>
-        logger.debug("No numeric or date fields found for auto-fast-field configuration")
-        options
+      new org.apache.spark.sql.util.CaseInsensitiveStringMap(newOptions.asJava)
+    } else {
+      logger.debug("No fields qualify for auto-fast-field configuration after applying exclusions")
+      options
     }
   }
 
@@ -128,8 +143,8 @@ object TantivyDirectInterface {
 
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            // Use new field type configuration: default to "string" instead of "text"
-            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("string")
+            // Default to "text" (default tokenizer). Only explicit "string" config uses raw tokenizer.
+            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("text")
 
             // Store-only fields: tantivy4java now properly supports store-only string fields
             // after the "keyword" type bug was fixed in the schema conversion logic

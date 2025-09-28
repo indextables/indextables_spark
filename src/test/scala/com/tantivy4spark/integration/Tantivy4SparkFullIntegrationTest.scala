@@ -48,6 +48,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       // Step 1: Write data using Tantivy4Spark format with direct path parameter
       testData.write
         .format("tantivy4spark")
+        .option("spark.tantivy4spark.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
@@ -347,8 +348,8 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Verify complementary results: isNull + isNotNull should equal total count
       val totalCount = readData.count()
-      val optionalNullCount = readData.filter(col("optional_field").isNull).count()
-      val optionalNotNullCount = readData.filter(col("optional_field").isNotNull).count()
+      val optionalNullCount = readData.filter(col("optional_field").isNull).collect().length
+      val optionalNotNullCount = readData.filter(col("optional_field").isNotNull).collect().length
       optionalNullCount + optionalNotNullCount shouldBe totalCount
     }
   }
@@ -449,7 +450,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Execute queries to verify they don't crash (results may be empty if filtering not implemented)
       dateQueries.foreach { query =>
-        noException should be thrownBy query.count()
+        noException should be thrownBy query.collect().length
       }
     }
   }
@@ -461,6 +462,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       // Write comprehensive data - should succeed now
       testData.write
         .format("tantivy4spark")
+        .option("spark.tantivy4spark.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
@@ -514,7 +516,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Execute queries to verify they don't crash (results may vary based on filter pushdown implementation)
       complexQueries.foreach { query =>
-        noException should be thrownBy query.count()
+        noException should be thrownBy query.collect().length
       }
     }
   }
@@ -565,7 +567,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Execute queries to verify they don't crash (results may vary based on implementation)
       aggregationQueries.foreach { query =>
-        noException should be thrownBy query.count()
+        noException should be thrownBy query.collect().length
       }
     }
   }
@@ -594,9 +596,9 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Execute partition-aware queries to test partition pruning
       partitionedQueries.foreach { query =>
-        val count = query.count()
+        val count = query.collect().length
         // Should return some results from the partitioned data
-        count should be >= 0L
+        count should be >= 0
       }
     }
   }
@@ -630,9 +632,9 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       
       // Execute queries to test schema evolution read path
       evolvedQueries.foreach { query =>
-        val count = query.count()
+        val count = query.collect().length
         // Should return some results from the evolved schema data
-        count should be >= 0L
+        count should be >= 0
       }
     }
   }

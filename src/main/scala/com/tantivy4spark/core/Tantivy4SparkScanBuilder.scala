@@ -488,20 +488,11 @@ class Tantivy4SparkScanBuilder(
    * Check if a field is numeric and marked as fast in the schema.
    */
   private def isNumericFastField(fieldName: String): Boolean = {
-    // Use broadcast config instead of options for merged configuration
-    val mergedConfig = broadcastConfig.value
-    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
-      .getOrElse("")
-
-    val fastFields = if (fastFieldsStr.nonEmpty) {
-      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-    } else {
-      Set.empty[String]
-    }
+    // Get actual fast fields from the schema/docMappingJson
+    val fastFields = getActualFastFieldsFromSchema()
 
     if (!fastFields.contains(fieldName)) {
-      logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast, rejecting aggregate pushdown")
+      logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema, rejecting aggregate pushdown")
       return false
     }
 
@@ -535,8 +526,9 @@ class Tantivy4SparkScanBuilder(
    * Check if current filters are compatible with aggregate pushdown.
    */
   private def areFiltersCompatibleWithAggregation(): Boolean = {
+    // Check if filter types are supported and if filter fields are fast fields
     _pushedFilters.forall { filter =>
-      filter match {
+      val isFilterTypeSupported = filter match {
         // Supported filter types
         case _: org.apache.spark.sql.sources.EqualTo => true
         case _: org.apache.spark.sql.sources.GreaterThan => true
@@ -560,6 +552,151 @@ class Tantivy4SparkScanBuilder(
           logger.info(s"🔍 FILTER COMPATIBILITY: Unknown filter type, assuming supported: $other")
           true
       }
+
+      // If filter type is supported, also check if filter field is configured as fast field
+      if (isFilterTypeSupported) {
+        validateFilterFieldsAreFast(filter)
+      } else {
+        false
+      }
+    }
+  }
+
+  /**
+   * Get fast fields from the actual table schema/docMappingJson, not from configuration.
+   * This reads the transaction log to determine which fields are actually configured as fast.
+   */
+  private def getActualFastFieldsFromSchema(): Set[String] = {
+    try {
+      logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
+
+      // Read existing files from transaction log to get docMappingJson
+      val existingFiles = transactionLog.listFiles()
+      val existingDocMapping = existingFiles
+        .flatMap(_.docMappingJson)
+        .headOption // Get the first available doc mapping
+
+      if (existingDocMapping.isDefined) {
+        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
+
+        // Parse the docMappingJson to extract fast field information
+        import com.fasterxml.jackson.databind.JsonNode
+        import com.tantivy4spark.util.JsonUtil
+        import scala.jdk.CollectionConverters._
+
+        val mappingJson = existingDocMapping.get
+        val docMapping = JsonUtil.mapper.readTree(mappingJson)
+
+        if (docMapping.isArray) {
+          val fastFields = docMapping.asScala.flatMap { fieldNode =>
+            val fieldName = Option(fieldNode.get("name")).map(_.asText())
+            val isFast = Option(fieldNode.get("options"))
+              .flatMap(options => Option(options.get("fast")))
+              .map(_.asBoolean())
+              .getOrElse(false)
+
+            if (isFast && fieldName.isDefined) {
+              logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Found fast field: ${fieldName.get}")
+              Some(fieldName.get)
+            } else {
+              None
+            }
+          }.toSet
+
+          logger.info(s"🔍 SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
+          fastFields
+        } else {
+          logger.warn("🔍 SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
+          Set.empty[String]
+        }
+      } else {
+        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
+        // Fall back to configuration-based validation for new tables
+        val mergedConfig = broadcastConfig.value
+        val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
+          .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+          .getOrElse("")
+        if (fastFieldsStr.nonEmpty) {
+          fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+        } else {
+          Set.empty[String]
+        }
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
+        // Fall back to configuration-based validation
+        val mergedConfig = broadcastConfig.value
+        val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
+          .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+          .getOrElse("")
+        if (fastFieldsStr.nonEmpty) {
+          fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+        } else {
+          Set.empty[String]
+        }
+    }
+  }
+
+  private def validateFilterFieldsAreFast(filter: org.apache.spark.sql.sources.Filter): Boolean = {
+    // Get actual fast fields from the schema/docMappingJson
+    val fastFields = getActualFastFieldsFromSchema()
+
+    // Extract field names from filter
+    val filterFields = extractFieldNamesFromFilter(filter)
+
+    // Check if all filter fields are configured as fast fields
+    val missingFastFields = filterFields.filterNot(fastFields.contains)
+
+    if (missingFastFields.nonEmpty) {
+      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
+
+      logger.info(s"🔍 FILTER FAST FIELD VALIDATION: Missing fast fields for filter: $columnList")
+      logger.info(s"🔍 FILTER FAST FIELD VALIDATION: Current fast fields from schema: $currentFastFields")
+      logger.info(s"🔍 FILTER FAST FIELD VALIDATION: Filter rejected for aggregation pushdown: $filter")
+
+      throw new IllegalArgumentException(
+        s"""COUNT aggregation with filters requires fast field configuration.
+           |
+           |Missing fast fields for filter columns: $columnList
+           |
+           |The table schema shows these fields are not configured as fast fields.
+           |With the new default behavior, numeric, string, and date fields should be fast by default.
+           |
+           |Current fast fields in schema: $currentFastFields
+           |Required fast fields: ${(fastFields ++ missingFastFields).toSeq.distinct.mkString("'", "', '", "'")}
+           |
+           |Filter: $filter""".stripMargin
+      )
+    }
+
+    true
+  }
+
+  /**
+   * Extract field names from a Spark Filter.
+   */
+  private def extractFieldNamesFromFilter(filter: org.apache.spark.sql.sources.Filter): Set[String] = {
+    filter match {
+      case f: org.apache.spark.sql.sources.EqualTo => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.GreaterThan => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.LessThan => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.GreaterThanOrEqual => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.LessThanOrEqual => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.In => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.IsNull => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.IsNotNull => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringContains => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringStartsWith => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringEndsWith => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.And =>
+        extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
+      case f: org.apache.spark.sql.sources.Or =>
+        extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
+      case other =>
+        logger.warn(s"🔍 FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
+        Set.empty[String]
     }
   }
 
@@ -587,8 +724,7 @@ class Tantivy4SparkScanBuilder(
         case Some(field) =>
           import org.apache.spark.sql.types._
           // ALL GROUP BY fields must be fast fields for tantivy4java TermsAggregation
-          val tantivyOptions = new Tantivy4SparkOptions(options)
-          val fastFields = tantivyOptions.getFastFields
+          val fastFields = getActualFastFieldsFromSchema()
           val isFast = fastFields.contains(columnName)
 
           field.dataType match {

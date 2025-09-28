@@ -2,6 +2,9 @@
 
 **Tantivy4Spark** is a high-performance Spark DataSource implementing fast full-text search using Tantivy via tantivy4java. It runs embedded in Spark executors without server-side components.
 
+## Note
+- This is the only way to run a single test for this project:  mvn test-compile scalatest:test -DwildcardSuites='com.tantivy4spark.core.DateStringFilterValidationTest'
+
 ## Key Features
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
 - **Transaction log**: Delta Lake-style with atomic operations and high-performance compaction

@@ -343,12 +343,12 @@ class Tantivy4SparkPartitionReader(
 
           val queryObj = if (splitFieldNames.nonEmpty) {
             // Use mixed filter converter to handle both Spark filters and IndexQuery filters
-            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames))
+            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast))
             logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None)
+            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
             logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }

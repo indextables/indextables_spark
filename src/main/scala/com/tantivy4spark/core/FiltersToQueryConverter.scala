@@ -221,6 +221,40 @@ object FiltersToQueryConverter {
   }
 
   /**
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object with schema field validation and options.
+   */
+  def convertToSplitQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]], options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]): SplitQuery = {
+    // Separate Spark filters from custom filters
+    val sparkFilters = filters.collect { case f: Filter => f }
+    val customFilters = filters.filterNot(_.isInstanceOf[Filter])
+
+    // Use existing method for Spark filters with options support
+    val sparkQuery = if (sparkFilters.nonEmpty) {
+      convertToSplitQuery(sparkFilters, splitSearchEngine, schemaFieldNames, options)
+    } else {
+      new SplitMatchAllQuery()
+    }
+
+    // For now, process custom filters without options (since existing method doesn't support it)
+    // This can be enhanced later if needed
+    if (customFilters.nonEmpty) {
+      val customQuery = convertToSplitQuery(customFilters.toArray, splitSearchEngine, schemaFieldNames)
+
+      // Combine both queries if we have both types
+      if (sparkFilters.nonEmpty) {
+        val combinedQuery = new SplitBooleanQuery()
+        combinedQuery.addMust(sparkQuery)
+        combinedQuery.addMust(customQuery)
+        combinedQuery
+      } else {
+        customQuery
+      }
+    } else {
+      sparkQuery
+    }
+  }
+
+  /**
    * Convert Spark filters to a tantivy4java Query object with schema field validation.
    */
   def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine, schemaFieldNames: Option[Set[String]]): Query = {
@@ -956,13 +990,23 @@ object FiltersToQueryConverter {
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
         // Check if field is configured as a fast field - range queries only work on fast fields
+        queryLog(s"🔍 DEBUG: Checking fast field config for '$attribute', options = $options")
         val isFastField = options.map { opts =>
-          Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+          val fastFieldsStr = Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+          queryLog(s"🔍 DEBUG: fastfields config = '$fastFieldsStr'")
+          fastFieldsStr
             .map(_.split(",").map(_.trim).contains(attribute))
             .getOrElse(false)
         }.getOrElse(false)
 
-        if (!isFastField) {
+        // For date fields, be more permissive since they're often used for range queries
+        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
+        val isDateFieldWorkaround = fieldType == FieldType.DATE
+        val shouldAllowQuery = isFastField || isDateFieldWorkaround
+
+        queryLog(s"🔍 DEBUG: isFastField for '$attribute' = $isFastField, isDateField = $isDateFieldWorkaround, shouldAllow = $shouldAllowQuery")
+
+        if (!shouldAllowQuery) {
           queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }
@@ -1000,7 +1044,12 @@ object FiltersToQueryConverter {
             .getOrElse(false)
         }.getOrElse(false)
 
-        if (!isFastField) {
+        // For date fields, be more permissive since they're often used for range queries
+        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
+        val isDateFieldWorkaround = fieldType == FieldType.DATE
+        val shouldAllowQuery = isFastField || isDateFieldWorkaround
+
+        if (!shouldAllowQuery) {
           queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }

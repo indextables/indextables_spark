@@ -83,8 +83,8 @@ class NumericFieldFilteringTestSimple extends TestBase {
 
       // Test 5: SQL vs DataFrame API
       println("\n=== TEST 5: SQL vs DataFrame API ===")
-      val dfCount = readDf.filter($"age" === 25).count()
-      val sqlCount = spark.sql("SELECT * FROM employees WHERE age = 25").count()
+      val dfCount = readDf.filter($"age" === 25).collect().length
+      val sqlCount = spark.sql("SELECT * FROM employees WHERE age = 25").collect().length
       println(s"DataFrame API: $dfCount rows")
       println(s"SQL API: $sqlCount rows")
       assert(dfCount == sqlCount, s"DataFrame ($dfCount) and SQL ($sqlCount) should match")

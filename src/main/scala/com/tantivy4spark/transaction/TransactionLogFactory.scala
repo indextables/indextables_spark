@@ -21,6 +21,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
+import scala.jdk.CollectionConverters._
 
 /**
  * Factory for creating transaction log instances.
@@ -71,7 +72,9 @@ class TransactionLogAdapter(
 ) extends TransactionLog(
   optimizedLog.getTablePath(),
   spark,
-  options
+  new CaseInsensitiveStringMap(
+    (options.asCaseSensitiveMap().asScala + ("spark.tantivy4spark.transaction.allowDirectUsage" -> "true")).asJava
+  )
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogAdapter])

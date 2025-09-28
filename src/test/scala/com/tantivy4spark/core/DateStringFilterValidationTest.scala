@@ -44,10 +44,11 @@ class DateStringFilterValidationTest extends TestBase {
         ("event5", Date.valueOf("2024-02-14"), "content5")
       ).toDF("id", "event_date", "description")
 
-      // Write partitioned by date
+      // Write partitioned by date with fast field configuration
       testData.write
         .format("tantivy4spark")
         .mode("overwrite")
+        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
@@ -119,6 +120,7 @@ class DateStringFilterValidationTest extends TestBase {
       testData.write
         .format("tantivy4spark")
         .mode("overwrite")
+        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
@@ -154,6 +156,7 @@ class DateStringFilterValidationTest extends TestBase {
       testData.write
         .format("tantivy4spark")
         .mode("overwrite")
+        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 

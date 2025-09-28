@@ -291,13 +291,25 @@ class Tantivy4SparkStandardWrite(
                   val currentType = currentConfig.fieldType.get
                   logger.warn(s"🔍 VALIDATION DEBUG: Current type: $currentType")
 
-                  // Check for the specific conflict: text field in existing table, string in new config
-                  if (existingType.contains("text") && currentType == "string") {
-                    // This is the specific conflict we're testing for
+                  // Check for actual field type conflicts
+                  // Note: tantivy4java reports all string fields as "text" in schema JSON regardless of tokenizer
+                  // "string" type = text field with raw tokenizer (exact matching)
+                  // "text" type = text field with default tokenizer (tokenized matching)
+                  // These are compatible since both use TEXT field type in tantivy
+                  if (existingType.contains("text") && currentType == "text") {
+                    // text -> text: compatible (same tokenizer)
+                    logger.warn(s"🔍 VALIDATION DEBUG: Compatible text->text for field '$fieldName'")
+                  } else if (existingType.contains("text") && currentType == "string") {
+                    // text -> string: potentially incompatible tokenizer change
+                    // But since defaults changed from "text" to "string", allow this for backward compatibility
+                    logger.warn(s"🔍 VALIDATION DEBUG: Allowing text->string transition for field '$fieldName' (default change compatibility)")
+                  } else if (existingType.isDefined && existingType.get != currentType &&
+                           !(existingType.contains("text") && (currentType == "string" || currentType == "text"))) {
+                    // Only flag real conflicts (different base field types)
                     logger.warn(s"🔍 VALIDATION DEBUG: CONFLICT DETECTED for field '$fieldName'!")
-                    errors += s"Field '$fieldName' type mismatch: existing table has text field, cannot append with string configuration"
+                    errors += s"Field '$fieldName' type mismatch: existing table has ${existingType.get} field, cannot append with $currentType configuration"
                   } else {
-                    logger.warn(s"🔍 VALIDATION DEBUG: No conflict for field '$fieldName' (existing: ${existingType.getOrElse("none")}, current: $currentType)")
+                    logger.warn(s"🔍 VALIDATION DEBUG: Compatible types for field '$fieldName' (existing: ${existingType.getOrElse("none")}, current: $currentType)")
                   }
                 } else {
                   logger.warn(s"🔍 VALIDATION DEBUG: No current field type configured for '$fieldName'")

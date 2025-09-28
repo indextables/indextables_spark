@@ -110,7 +110,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     val standardResult = tantivyDF.filter(col("review_text").contains("engine"))
     println("Results with standard contains filter:")
     standardResult.show(false)
-    println(s"Standard filter count: ${standardResult.count()}")
+    println(s"Standard filter count: ${standardResult.collect().length}")
     
     // Test 3: Check expression conversion
     println("\n=== Test 3: Expression Conversion ===")

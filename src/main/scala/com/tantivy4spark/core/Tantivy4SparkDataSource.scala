@@ -161,13 +161,14 @@ object Tantivy4SparkRelation {
 
   // Enhanced processFile that can handle both Spark filters and custom IndexQuery filters
   def processFileWithCustomFilters(
-      filePath: String, 
-      serializableSchema: StructType, 
+      filePath: String,
+      serializableSchema: StructType,
       hadoopConfProps: Map[String, String],
       sparkFilters: Array[Filter] = Array.empty,
       customFilters: Array[Any] = Array.empty,
       limit: Option[Int] = None,
-      splitMetadata: Option[SerializableSplitMetadata] = None
+      splitMetadata: Option[SerializableSplitMetadata] = None,
+      readOptions: Map[String, String] = Map.empty
   ): Iterator[org.apache.spark.sql.Row] = {
     import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
     
@@ -267,22 +268,30 @@ object Tantivy4SparkRelation {
       val allFilters = sparkFilters.toSeq ++ customFilters.toSeq
       val splitQuery = if (allFilters.nonEmpty) {
         val queryObj = if (splitFieldNames.nonEmpty) {
+          // Convert readOptions to CaseInsensitiveStringMap for passing to FiltersToQueryConverter
+          import scala.jdk.CollectionConverters._
+          val optionsMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(readOptions.asJava)
+
           // Combine all filters for processing by existing FiltersToQueryConverter
           val combinedFilters: Array[Any] = (sparkFilters ++ customFilters.collect {
             case f: IndexQueryFilter => f
             case f: IndexQueryAllFilter => f
           }).toArray
-          
-          val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(combinedFilters, splitSearchEngine, Some(splitFieldNames))
+
+          val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(combinedFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsMap))
           executorLogger.info(s"CatalystScan: Created SplitQuery with schema validation: ${validatedQuery.getClass.getSimpleName}")
           validatedQuery
         } else {
+          // Convert readOptions to CaseInsensitiveStringMap for passing to FiltersToQueryConverter
+          import scala.jdk.CollectionConverters._
+          val optionsMap = new org.apache.spark.sql.util.CaseInsensitiveStringMap(readOptions.asJava)
+
           val combinedFilters: Array[Any] = (sparkFilters ++ customFilters.collect {
             case f: IndexQueryFilter => f
             case f: IndexQueryAllFilter => f
           }).toArray
-          
-          val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(combinedFilters, splitSearchEngine, None)
+
+          val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(combinedFilters, splitSearchEngine, None, Some(optionsMap))
           executorLogger.info(s"CatalystScan: Created SplitQuery without validation: ${fallbackQuery.getClass.getSimpleName}")
           fallbackQuery
         }
@@ -1023,11 +1032,14 @@ class Tantivy4SparkRelation(
       if (filters.nonEmpty) {
         logger.info(s"V1 API: Pushing down ${filters.length} filters: ${filters.mkString(", ")}")
       }
-      
+
+      // Extract readOptions to avoid serialization issues with 'this' reference
+      val serializableReadOptions = readOptions
+
       // Create RDD from file paths using standalone object method for proper serialization
       // Now with proper filter pushdown support via PrunedFilteredScan
       spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap { case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
-        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, filters, Array.empty, None, splitMetadata)
+        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, filters, Array.empty, None, splitMetadata, serializableReadOptions)
       }
     }
   }
@@ -1237,11 +1249,14 @@ class Tantivy4SparkRelation(
           logger.info(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
         }
       }
-      
+
+      // Extract readOptions to avoid serialization issues with 'this' reference
+      val serializableReadOptions = readOptions
+
       // Create RDD from file paths using standalone object method for proper serialization
       // Pass all filters to processFile method
       spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap { case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
-        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, sparkFilters, customFilters, None, splitMetadata)
+        Tantivy4SparkRelation.processFileWithCustomFilters(filePath, serializableSchema, hadoopConfProps, sparkFilters, customFilters, None, splitMetadata, serializableReadOptions)
       }
     }
   }
@@ -1250,39 +1265,51 @@ class Tantivy4SparkRelation(
   override def buildScan(requiredColumns: Seq[org.apache.spark.sql.catalyst.expressions.Attribute], filters: Seq[Expression]): RDD[org.apache.spark.sql.Row] = {
     import com.tantivy4spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
     import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
-    
+    import com.tantivy4spark.conversion.CatalystToSparkFilterConverter
+
     logger.info(s"CatalystScan.buildScan called with ${filters.length} predicates")
     filters.foreach(predicate => logger.info(s"  Predicate: $predicate (${predicate.getClass.getSimpleName})"))
-    
+
     // Extract column names from Attribute objects
     val columnNames = requiredColumns.map(_.name).toArray
-    
-    // Convert IndexQuery expressions to custom filters that FiltersToQueryConverter can handle
-    val convertedFilters: Array[Any] = filters.flatMap {
+
+    // Separate IndexQuery expressions from regular expressions
+    val (indexQueryExprs, regularExprs) = filters.partition {
+      case _: IndexQueryExpression | _: IndexQueryAllExpression => true
+      case _ => false
+    }
+
+    // Convert IndexQuery expressions to custom filters
+    val indexQueryFilters: Array[Any] = indexQueryExprs.flatMap {
       case indexQuery: IndexQueryExpression =>
-        // Extract column name and query string from IndexQueryExpression
         val columnName = indexQuery.getColumnName.getOrElse("unknown")
         val queryString = indexQuery.getQueryString.getOrElse("")
-        
         logger.info(s"Converting IndexQueryExpression to IndexQueryFilter: column=$columnName, query='$queryString'")
         Some(IndexQueryFilter(columnName, queryString))
-        
+
       case indexQueryAll: IndexQueryAllExpression =>
-        // Extract query string from IndexQueryAllExpression
         val queryString = indexQueryAll.getQueryString.getOrElse("")
-        
         logger.info(s"Converting IndexQueryAllExpression to IndexQueryAllFilter: query='$queryString'")
         Some(IndexQueryAllFilter(queryString))
-        
-      case other =>
-        logger.warn(s"Unsupported expression in CatalystScan: $other (${other.getClass.getSimpleName})")
-        None
+
+      case _ => None
     }.toArray
-    
-    logger.info(s"Converted ${convertedFilters.length} expressions to custom filters")
-    
-    // Use a specialized method that can handle our custom filters alongside regular Spark filters
-    buildScanWithCustomFilters(columnNames, Array.empty[org.apache.spark.sql.sources.Filter], convertedFilters)
+
+    // Convert regular expressions to Spark Filter objects
+    val sparkFilters: Array[org.apache.spark.sql.sources.Filter] = regularExprs.flatMap { expr =>
+      try {
+        CatalystToSparkFilterConverter.convertExpression(expr)
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to convert expression to Spark filter: $expr (${expr.getClass.getSimpleName}), error: ${ex.getMessage}")
+          None
+      }
+    }.toArray
+
+    logger.info(s"Converted ${indexQueryFilters.length} IndexQuery expressions and ${sparkFilters.length} regular expressions")
+
+    // Use a specialized method that can handle both types of filters
+    buildScanWithCustomFilters(columnNames, sparkFilters, indexQueryFilters)
   }
 }
 

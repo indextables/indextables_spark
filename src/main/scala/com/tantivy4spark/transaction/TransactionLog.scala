@@ -29,7 +29,16 @@ import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
 
 class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) extends AutoCloseable {
-  
+
+  // Check if this is being used directly instead of through the factory
+  private val allowDirectUsage = options.getBoolean("spark.tantivy4spark.transaction.allowDirectUsage", false)
+  if (!allowDirectUsage) {
+    throw new RuntimeException(
+      s"TransactionLog should no longer be used directly. Use TransactionLogFactory.create() instead. " +
+      s"If you need to use this class directly for testing, set spark.tantivy4spark.transaction.allowDirectUsage=true"
+    )
+  }
+
   private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
   
   // Determine if we should use cloud-optimized transaction log

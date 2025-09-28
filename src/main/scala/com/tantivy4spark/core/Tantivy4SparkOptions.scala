@@ -134,6 +134,20 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   }
 
   /**
+   * Get non-fast fields configuration.
+   * Returns set of field names that should be excluded from default fast field behavior.
+   * This allows users to exclude specific fields from being auto-configured as fast.
+   * Supports both spark.tantivy4spark and spark.indextables prefixes.
+   */
+  def getNonFastFields: Set[String] = {
+    // Check indextables prefix first (preferred)
+    Option(options.get("spark.indextables.indexing.nonfastfields"))
+      .orElse(Option(options.get("spark.tantivy4spark.indexing.nonfastfields")))
+      .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
+      .getOrElse(Set.empty)
+  }
+
+  /**
    * Get store-only fields configuration.
    * Returns set of field names that should be stored but not indexed.
    * Supports both spark.tantivy4spark and spark.indextables prefixes.
@@ -238,6 +252,7 @@ object Tantivy4SparkOptions {
   // Indexing configuration keys
   val INDEXING_TYPEMAP_PREFIX = "spark.tantivy4spark.indexing.typemap."
   val INDEXING_FASTFIELDS = "spark.tantivy4spark.indexing.fastfields"
+  val INDEXING_NONFASTFIELDS = "spark.tantivy4spark.indexing.nonfastfields"
   val INDEXING_STOREONLY_FIELDS = "spark.tantivy4spark.indexing.storeonlyfields"
   val INDEXING_INDEXONLY_FIELDS = "spark.tantivy4spark.indexing.indexonlyfields"
   val INDEXING_TOKENIZER_PREFIX = "spark.tantivy4spark.indexing.tokenizer."

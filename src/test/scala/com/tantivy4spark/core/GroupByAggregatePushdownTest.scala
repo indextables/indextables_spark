@@ -5,7 +5,7 @@ import org.scalatest.BeforeAndAfterAll
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import scala.collection.JavaConverters._
 
@@ -52,13 +52,17 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     // Test scan builder creation
     assert(scanBuilder != null, "ScanBuilder should be created successfully")
 
-    // Test that pushGroupBy method exists and is callable
+    // Test that pushAggregation method exists and is callable
     // We can't test with real aggregations due to final classes, but we can test the structure
-    val groupByMethod = scanBuilder.getClass.getDeclaredMethod("pushGroupBy", classOf[Array[String]])
-    assert(groupByMethod != null, "pushGroupBy method should exist")
+    val pushAggregationMethod = scanBuilder.getClass.getDeclaredMethod("pushAggregation", classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation])
+    assert(pushAggregationMethod != null, "pushAggregation method should exist")
 
     // Test that the method is public
-    assert(java.lang.reflect.Modifier.isPublic(groupByMethod.getModifiers), "pushGroupBy should be public")
+    assert(java.lang.reflect.Modifier.isPublic(pushAggregationMethod.getModifiers), "pushAggregation should be public")
+
+    // Test that supportCompletePushDown method exists
+    val supportMethod = scanBuilder.getClass.getDeclaredMethod("supportCompletePushDown", classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation])
+    assert(supportMethod != null, "supportCompletePushDown method should exist")
   }
 
   test("GROUP BY options validation helper should exist") {
@@ -87,11 +91,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
   // Helper methods for creating mock objects
 
   private def createMockTransactionLog(): TransactionLog = {
-    // Create a mock transaction log that returns empty file list
-    new TransactionLog(new Path("/mock/path"), spark) {
-      override def listFiles(): Seq[com.tantivy4spark.transaction.AddAction] = {
-        Seq.empty
-      }
-    }
+    // Create a mock transaction log that returns empty file list using factory
+    TransactionLogFactory.create(new Path("/mock/path"), spark)
   }
 }
