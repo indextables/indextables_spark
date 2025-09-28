@@ -154,6 +154,138 @@ class GroupByIntegrationTest extends AnyFunSuite {
     }
   }
 
+  test("Multi-dimensional GROUP BY with COUNT aggregation") {
+    val spark = SparkSession.builder()
+      .appName("MultiDimensionalGroupByTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with multiple grouping dimensions
+      val testData = Seq(
+        ("doc1", "north", "electronics", "q1", 100),
+        ("doc2", "north", "electronics", "q1", 200),
+        ("doc3", "north", "electronics", "q2", 150),
+        ("doc4", "south", "electronics", "q1", 300),
+        ("doc5", "south", "books", "q1", 50),
+        ("doc6", "north", "books", "q2", 75)
+      ).toDF("id", "region", "category", "quarter", "sales")
+
+      val tempDir = Files.createTempDirectory("multi-groupby-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with all GROUP BY columns as fast fields
+      testData.write.format("tantivy4spark")
+        .option("spark.tantivy4spark.indexing.typemap.region", "string")
+        .option("spark.tantivy4spark.indexing.typemap.category", "string")
+        .option("spark.tantivy4spark.indexing.typemap.quarter", "string")
+        .option("spark.tantivy4spark.indexing.fastfields", "region,category,quarter,sales")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+
+      // Perform multi-dimensional GROUP BY query - this should use MultiTermsAggregation
+      println("🔍 MULTI-DIMENSIONAL GROUP BY TEST: Executing 3-dimensional GROUP BY query...")
+      val multiGroupByResult = df.groupBy("region", "category", "quarter").count()
+
+      // Show the execution plan to see if multi-dimensional GROUP BY was pushed down
+      println("🔍 MULTI-DIMENSIONAL GROUP BY TEST: Execution plan:")
+      multiGroupByResult.explain(true)
+
+      // Collect results
+      val results = multiGroupByResult.collect()
+
+      println("🔍 MULTI-DIMENSIONAL GROUP BY TEST: Results:")
+      results.foreach { row =>
+        println(s"  ${row.getString(0)}/${row.getString(1)}/${row.getString(2)}: ${row.getLong(3)}")
+      }
+
+      // Verify expected results - should have 5 unique combinations
+      // north/electronics/q1: 2, north/electronics/q2: 1, south/electronics/q1: 1, south/books/q1: 1, north/books/q2: 1
+      assert(results.length == 5, s"Expected 5 groups, got ${results.length}")
+
+      val resultMap = results.map(row =>
+        (row.getString(0), row.getString(1), row.getString(2)) -> row.getLong(3)
+      ).toMap
+
+      assert(resultMap(("north", "electronics", "q1")) == 2, s"north/electronics/q1 should have 2 docs")
+      assert(resultMap(("north", "electronics", "q2")) == 1, s"north/electronics/q2 should have 1 doc")
+      assert(resultMap(("south", "electronics", "q1")) == 1, s"south/electronics/q1 should have 1 doc")
+      assert(resultMap(("south", "books", "q1")) == 1, s"south/books/q1 should have 1 doc")
+      assert(resultMap(("north", "books", "q2")) == 1, s"north/books/q2 should have 1 doc")
+
+      println(s"✅ MULTI-DIMENSIONAL GROUP BY test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally {
+      spark.stop()
+    }
+  }
+
+  test("Multi-dimensional GROUP BY with SUM aggregation") {
+    val spark = SparkSession.builder()
+      .appName("MultiDimensionalGroupBySumTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data for multi-dimensional SUM aggregation
+      val testData = Seq(
+        ("doc1", "team_a", "project_x", 100),
+        ("doc2", "team_a", "project_x", 200),
+        ("doc3", "team_a", "project_y", 150),
+        ("doc4", "team_b", "project_x", 300),
+        ("doc5", "team_b", "project_y", 250)
+      ).toDF("id", "team", "project", "effort")
+
+      val tempDir = Files.createTempDirectory("multi-groupby-sum-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data
+      testData.write.format("tantivy4spark")
+        .option("spark.tantivy4spark.indexing.typemap.team", "string")
+        .option("spark.tantivy4spark.indexing.typemap.project", "string")
+        .option("spark.tantivy4spark.indexing.fastfields", "team,project,effort")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+
+      // Perform multi-dimensional GROUP BY with SUM
+      println("🔍 MULTI-DIMENSIONAL GROUP BY SUM TEST: Executing 2-dimensional GROUP BY with SUM...")
+      val multiGroupBySumResult = df.groupBy("team", "project").agg(sum("effort").as("total_effort"))
+
+      // Show execution plan
+      println("🔍 MULTI-DIMENSIONAL GROUP BY SUM TEST: Execution plan:")
+      multiGroupBySumResult.explain(true)
+
+      // Collect and verify results
+      val results = multiGroupBySumResult.collect()
+      val resultMap = results.map(row => (row.getString(0), row.getString(1)) -> row.getLong(2)).toMap
+
+      // Expected: team_a/project_x: 300, team_a/project_y: 150, team_b/project_x: 300, team_b/project_y: 250
+      assert(resultMap(("team_a", "project_x")) == 300, s"team_a/project_x should have sum 300")
+      assert(resultMap(("team_a", "project_y")) == 150, s"team_a/project_y should have sum 150")
+      assert(resultMap(("team_b", "project_x")) == 300, s"team_b/project_x should have sum 300")
+      assert(resultMap(("team_b", "project_y")) == 250, s"team_b/project_y should have sum 250")
+
+      println(s"✅ MULTI-DIMENSIONAL GROUP BY SUM test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally {
+      spark.stop()
+    }
+  }
+
   test("GROUP BY pushdown detection - verify pushGroupBy() is called") {
     val spark = SparkSession.builder()
       .appName("GroupByPushdownDetectionTest")

@@ -367,13 +367,26 @@ class Tantivy4SparkGroupByAggregateReader(
 
       logger.info(s"🔍 GROUP BY EXECUTION: Searcher created successfully")
 
-      // For single-column GROUP BY, create terms aggregation
-      if (partition.groupByColumns.length == 1) {
-        val groupByColumn = partition.groupByColumns(0)
-        logger.info(s"🔍 GROUP BY EXECUTION: Creating TermsAggregation for column: $groupByColumn")
+      // Support both single and multi-column GROUP BY
+      if (partition.groupByColumns.length >= 1) {
+        val groupByColumns = partition.groupByColumns
+        logger.info(s"🔍 GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
 
-        // Create TermsAggregation for GROUP BY field
-        val termsAgg = new TermsAggregation("group_by_terms", groupByColumn, 1000, 0)
+        val (termsAgg, isMultiDimensional) = if (groupByColumns.length == 1) {
+          // Single column GROUP BY - use field directly
+          val groupByColumn = groupByColumns(0)
+          logger.info(s"🔍 GROUP BY EXECUTION: Single-dimensional GROUP BY on '$groupByColumn'")
+          (new TermsAggregation("group_by_terms", groupByColumn, 1000, 0), false)
+        } else {
+          // Multi-column GROUP BY - use new MultiTermsAggregation
+          logger.info(s"🔍 GROUP BY EXECUTION: Multi-dimensional GROUP BY on ${groupByColumns.length} fields: ${groupByColumns.mkString(", ")}")
+          logger.info(s"🔍 GROUP BY EXECUTION: Using native MultiTermsAggregation")
+
+          // Create MultiTermsAggregation with the field array
+          val multiTermsAgg = new com.tantivy4java.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
+          logger.info(s"🔍 GROUP BY EXECUTION: Created MultiTermsAggregation for fields: ${groupByColumns.mkString(", ")}")
+          (multiTermsAgg, true)
+        }
 
         logger.info(s"🔍 GROUP BY EXECUTION: Using TermsAggregation for GROUP BY with ${partition.aggregation.aggregateExpressions.length} aggregations")
 
@@ -388,22 +401,42 @@ class Tantivy4SparkGroupByAggregateReader(
             case sum: Sum =>
               val fieldName = getFieldName(sum.column)
               logger.info(s"🔍 GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
-              termsAgg.addSubAggregation(s"sum_$index", new com.tantivy4java.SumAggregation(fieldName))
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(s"sum_$index", new com.tantivy4java.SumAggregation(fieldName))
+                case multiTerms: com.tantivy4java.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(s"sum_$index", new com.tantivy4java.SumAggregation(fieldName))
+              }
 
             case avg: Avg =>
               val fieldName = getFieldName(avg.column)
               logger.info(s"🔍 GROUP BY EXECUTION: Adding AVG sub-aggregation for field '$fieldName' at index $index")
-              termsAgg.addSubAggregation(s"avg_$index", new com.tantivy4java.AverageAggregation(fieldName))
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(s"avg_$index", new com.tantivy4java.AverageAggregation(fieldName))
+                case multiTerms: com.tantivy4java.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(s"avg_$index", new com.tantivy4java.AverageAggregation(fieldName))
+              }
 
             case min: Min =>
               val fieldName = getFieldName(min.column)
               logger.info(s"🔍 GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
-              termsAgg.addSubAggregation(s"min_$index", new com.tantivy4java.MinAggregation(fieldName))
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(s"min_$index", new com.tantivy4java.MinAggregation(fieldName))
+                case multiTerms: com.tantivy4java.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(s"min_$index", new com.tantivy4java.MinAggregation(fieldName))
+              }
 
             case max: Max =>
               val fieldName = getFieldName(max.column)
               logger.info(s"🔍 GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
-              termsAgg.addSubAggregation(s"max_$index", new com.tantivy4java.MaxAggregation(fieldName))
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(s"max_$index", new com.tantivy4java.MaxAggregation(fieldName))
+                case multiTerms: com.tantivy4java.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(s"max_$index", new com.tantivy4java.MaxAggregation(fieldName))
+              }
 
             case other =>
               logger.warn(s"🔍 GROUP BY EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
@@ -440,37 +473,80 @@ class Tantivy4SparkGroupByAggregateReader(
             return Array.empty[InternalRow]
           }
 
-          val termsResult = aggregationResult.asInstanceOf[TermsResult]
-          val buckets = termsResult.getBuckets
+          if (isMultiDimensional) {
+            // Handle MultiTermsResult for multi-dimensional GROUP BY
+            logger.info(s"🔍 GROUP BY EXECUTION: Processing MultiTermsResult for multi-dimensional GROUP BY")
 
-          if (buckets == null) {
-            logger.error(s"🔍 GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
-            return Array.empty[InternalRow]
-          }
+            // The aggregationResult is a TermsResult containing the nested structure
+            // We need to wrap it in a MultiTermsResult to flatten the nested buckets
+            val termsResult = aggregationResult.asInstanceOf[TermsResult]
+            val multiTermsResult = new com.tantivy4java.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
+            val multiBuckets = multiTermsResult.getBuckets
 
-          logger.info(s"🔍 GROUP BY EXECUTION: Found ${buckets.size()} groups")
-
-          // Convert buckets to InternalRow
-          val rows = buckets.asScala.filter(_ != null).map { bucket =>
-            try {
-              val groupByValue = convertBucketKeyToSpark(bucket, groupByColumn)
-              val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
-
-              val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
-              logger.info(s"🔍 GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
-
-              // Combine GROUP BY value with aggregation results
-              InternalRow.fromSeq(Seq(groupByValue) ++ aggregationValues)
-            } catch {
-              case e: Exception =>
-                logger.error(s"🔍 GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
-                // Return empty row in case of error
-                InternalRow.empty
+            if (multiBuckets == null) {
+              logger.error(s"🔍 GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
+              return Array.empty[InternalRow]
             }
-          }.toArray
 
-          logger.info(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
-          rows
+            logger.info(s"🔍 GROUP BY EXECUTION: Found ${multiBuckets.size()} multi-dimensional groups")
+
+            // Convert multi-dimensional buckets to InternalRow
+            val rows = multiBuckets.asScala.filter(_ != null).map { multiBucket =>
+              try {
+                val fieldValues = multiBucket.getFieldValues()
+                val groupByValues = fieldValues.map(value => convertStringValueToSpark(value, StringType))
+                val aggregationValues = calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
+
+                val keyString = fieldValues.mkString("|")
+                logger.info(s"🔍 GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents")
+
+                // Combine multi-dimensional GROUP BY values with aggregation results
+                InternalRow.fromSeq(groupByValues ++ aggregationValues)
+              } catch {
+                case e: Exception =>
+                  logger.error(s"🔍 GROUP BY EXECUTION: Error processing multi-dimensional bucket: ${e.getMessage}", e)
+                  // Return empty row in case of error
+                  InternalRow.empty
+              }
+            }.toArray
+
+            logger.info(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} multi-dimensional GROUP BY result rows")
+            rows
+
+          } else {
+            // Handle regular TermsResult for single-dimensional GROUP BY
+            val termsResult = aggregationResult.asInstanceOf[TermsResult]
+            val buckets = termsResult.getBuckets
+
+            if (buckets == null) {
+              logger.error(s"🔍 GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
+              return Array.empty[InternalRow]
+            }
+
+            logger.info(s"🔍 GROUP BY EXECUTION: Found ${buckets.size()} groups")
+
+            // Convert buckets to InternalRow
+            val rows = buckets.asScala.filter(_ != null).map { bucket =>
+              try {
+                val groupByValue = convertBucketKeyToSpark(bucket, groupByColumns(0))
+                val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
+
+                val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
+                logger.info(s"🔍 GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
+
+                // Combine GROUP BY value with aggregation results
+                InternalRow.fromSeq(Seq(groupByValue) ++ aggregationValues)
+              } catch {
+                case e: Exception =>
+                  logger.error(s"🔍 GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
+                  // Return empty row in case of error
+                  InternalRow.empty
+              }
+            }.toArray
+
+            logger.info(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
+            rows
+          }
 
         } else {
           logger.warn(s"🔍 GROUP BY EXECUTION: No aggregation results returned")
@@ -666,6 +742,131 @@ class Tantivy4SparkGroupByAggregateReader(
             // These should now be handled by separate metric aggregations
             logger.warn(s"🔍 GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately")
             bucket.getDocCount.toLong  // Fallback
+
+          case other =>
+            logger.warn(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
+            0L
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert string value to appropriate Spark type
+   */
+  private def convertStringValueToSpark(value: String, dataType: org.apache.spark.sql.types.DataType): Any = {
+    import org.apache.spark.unsafe.types.UTF8String
+    import org.apache.spark.sql.types._
+
+    dataType match {
+      case StringType => UTF8String.fromString(value)
+      case IntegerType =>
+        try {
+          value.toInt
+        } catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Int: ${e.getMessage}")
+            0
+        }
+      case LongType =>
+        try {
+          value.toLong
+        } catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Long: ${e.getMessage}")
+            0L
+        }
+      case _ => UTF8String.fromString(value)
+    }
+  }
+
+  /**
+   * Calculate aggregation values using sub-aggregations from MultiTermsBucket
+   */
+  private def calculateAggregationValuesFromMultiTermsBucket(
+      multiBucket: com.tantivy4java.MultiTermsResult.MultiTermsBucket,
+      aggregation: Aggregation
+  ): Array[Any] = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    if (multiBucket == null) {
+      logger.error(s"🔍 GROUP BY EXECUTION: MultiTermsBucket is null in calculateAggregationValuesFromMultiTermsBucket")
+      return Array(0L)
+    }
+
+    aggregation.aggregateExpressions.zipWithIndex.map { case (aggExpr, index) =>
+      if (aggExpr == null) {
+        logger.error(s"🔍 GROUP BY EXECUTION: Aggregate expression is null at index $index")
+        0L
+      } else {
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            // For COUNT/COUNT(*), use the document count from the bucket
+            multiBucket.getDocCount.toLong
+
+          case _: Sum =>
+            // Extract SUM result from sub-aggregation
+            try {
+              val sumResult = multiBucket.getSubAggregation(s"sum_$index").asInstanceOf[com.tantivy4java.SumResult]
+              if (sumResult != null) {
+                sumResult.getSum.toLong
+              } else {
+                logger.warn(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
+                0L
+              }
+            } catch {
+              case e: Exception =>
+                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
+                0L
+            }
+
+          case _: Avg =>
+            // Extract AVG result from sub-aggregation
+            try {
+              val avgResult = multiBucket.getSubAggregation(s"avg_$index").asInstanceOf[com.tantivy4java.AverageResult]
+              if (avgResult != null) {
+                avgResult.getAverage.toLong  // Convert to Long for consistency
+              } else {
+                logger.warn(s"🔍 GROUP BY EXECUTION: AVG sub-aggregation result is null for index $index")
+                0L
+              }
+            } catch {
+              case e: Exception =>
+                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting AVG sub-aggregation result for index $index: ${e.getMessage}")
+                0L
+            }
+
+          case _: Min =>
+            // Extract MIN result from sub-aggregation
+            try {
+              val minResult = multiBucket.getSubAggregation(s"min_$index").asInstanceOf[com.tantivy4java.MinResult]
+              if (minResult != null) {
+                minResult.getMin.toLong
+              } else {
+                logger.warn(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
+                0L
+              }
+            } catch {
+              case e: Exception =>
+                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
+                0L
+            }
+
+          case _: Max =>
+            // Extract MAX result from sub-aggregation
+            try {
+              val maxResult = multiBucket.getSubAggregation(s"max_$index").asInstanceOf[com.tantivy4java.MaxResult]
+              if (maxResult != null) {
+                maxResult.getMax.toLong
+              } else {
+                logger.warn(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
+                0L
+              }
+            } catch {
+              case e: Exception =>
+                logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
+                0L
+            }
 
           case other =>
             logger.warn(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
