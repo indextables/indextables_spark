@@ -140,18 +140,32 @@ class Tantivy4SparkScanBuilder(
    * Check if we can optimize COUNT queries using transaction log.
    */
   private def canUseTransactionLogCount(aggregation: Aggregation): Boolean = {
-    import org.apache.spark.sql.connector.expressions.aggregate._
+    import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
-    aggregation.aggregateExpressions.length == 1 && {
+    println(s"🔍 SCAN BUILDER: canUseTransactionLogCount called with ${aggregation.aggregateExpressions.length} expressions")
+    aggregation.aggregateExpressions.foreach(expr => println(s"🔍 SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})"))
+    println(s"🔍 SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(filter => println(s"🔍 SCAN BUILDER: Pushed filter: $filter"))
+
+    val result = aggregation.aggregateExpressions.length == 1 && {
       aggregation.aggregateExpressions.head match {
         case _: Count =>
           // Check if we only have partition filters or no filters
           val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
-          logger.info(s"🔍 TRANSACTION LOG COUNT: Can use transaction log optimization: $hasOnlyPartitionFilters")
+          println(s"🔍 SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters")
           hasOnlyPartitionFilters
-        case _ => false
+        case _: CountStar =>
+          // Check if we only have partition filters or no filters
+          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+          println(s"🔍 SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters")
+          hasOnlyPartitionFilters
+        case _ =>
+          println(s"🔍 SCAN BUILDER: Not a COUNT aggregation, cannot use transaction log")
+          false
       }
     }
+    println(s"🔍 SCAN BUILDER: canUseTransactionLogCount returning: $result")
+    result
   }
 
   /**
@@ -553,12 +567,55 @@ class Tantivy4SparkScanBuilder(
           true
       }
 
-      // If filter type is supported, also check if filter field is configured as fast field
+      // If filter type is supported, check if it requires fast fields
       if (isFilterTypeSupported) {
-        validateFilterFieldsAreFast(filter)
+        // Only range operations require fast fields, not equality operations
+        val requiresFastFields = filter match {
+          // Range operations require fast fields
+          case _: org.apache.spark.sql.sources.GreaterThan => true
+          case _: org.apache.spark.sql.sources.LessThan => true
+          case _: org.apache.spark.sql.sources.GreaterThanOrEqual => true
+          case _: org.apache.spark.sql.sources.LessThanOrEqual => true
+
+          // Equality and containment operations do NOT require fast fields
+          case _: org.apache.spark.sql.sources.EqualTo => false
+          case _: org.apache.spark.sql.sources.In => false
+          case _: org.apache.spark.sql.sources.IsNull => false
+          case _: org.apache.spark.sql.sources.IsNotNull => false
+          case _: org.apache.spark.sql.sources.StringContains => false
+          case _: org.apache.spark.sql.sources.StringStartsWith => false
+          case _: org.apache.spark.sql.sources.StringEndsWith => false
+
+          // Compound operations: validate recursively
+          case _: org.apache.spark.sql.sources.And => true // Will validate children
+          case _: org.apache.spark.sql.sources.Or => true  // Will validate children
+
+          // Unknown operations: assume they don't require fast fields
+          case _ => false
+        }
+
+        if (requiresFastFields) {
+          validateFilterFieldsAreFast(filter)
+        } else {
+          true // Filter is supported and doesn't require fast fields
+        }
       } else {
         false
       }
+    }
+  }
+
+  /**
+   * Get partition columns from the transaction log metadata.
+   */
+  private def getPartitionColumns(): Set[String] = {
+    try {
+      val metadata = transactionLog.getMetadata()
+      metadata.partitionColumns.toSet
+    } catch {
+      case e: Exception =>
+        logger.warn(s"🔍 PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
+        Set.empty
     }
   }
 
@@ -642,11 +699,21 @@ class Tantivy4SparkScanBuilder(
     // Get actual fast fields from the schema/docMappingJson
     val fastFields = getActualFastFieldsFromSchema()
 
+    // Get partition columns - these don't need to be fast since they're handled by transaction log
+    val partitionColumns = getPartitionColumns()
+
     // Extract field names from filter
     val filterFields = extractFieldNamesFromFilter(filter)
 
-    // Check if all filter fields are configured as fast fields
-    val missingFastFields = filterFields.filterNot(fastFields.contains)
+    // Exclude partition columns from fast field validation
+    val nonPartitionFilterFields = filterFields -- partitionColumns
+
+    logger.info(s"🔍 FILTER VALIDATION: All filter fields: ${filterFields.mkString(", ")}")
+    logger.info(s"🔍 FILTER VALIDATION: Partition columns: ${partitionColumns.mkString(", ")}")
+    logger.info(s"🔍 FILTER VALIDATION: Non-partition filter fields: ${nonPartitionFilterFields.mkString(", ")}")
+
+    // Check if all non-partition filter fields are configured as fast fields
+    val missingFastFields = nonPartitionFilterFields.filterNot(fastFields.contains)
 
     if (missingFastFields.nonEmpty) {
       val columnList = missingFastFields.mkString("'", "', '", "'")
@@ -844,9 +911,34 @@ class Tantivy4SparkScanBuilder(
    * Check if a filter is a partition filter.
    */
   private def isPartitionFilter(filter: org.apache.spark.sql.sources.Filter): Boolean = {
-    // For now, assume no partition filters are present
-    // TODO: Implement proper partition filter detection based on partition columns
-    false
+    val partitionColumns = getPartitionColumns()
+    val referencedColumns = getFilterReferencedColumns(filter)
+    referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)
+  }
+
+  /**
+   * Get columns referenced by a filter.
+   */
+  private def getFilterReferencedColumns(filter: org.apache.spark.sql.sources.Filter): Set[String] = {
+    import org.apache.spark.sql.sources._
+    filter match {
+      case EqualTo(attribute, _) => Set(attribute)
+      case EqualNullSafe(attribute, _) => Set(attribute)
+      case GreaterThan(attribute, _) => Set(attribute)
+      case GreaterThanOrEqual(attribute, _) => Set(attribute)
+      case LessThan(attribute, _) => Set(attribute)
+      case LessThanOrEqual(attribute, _) => Set(attribute)
+      case In(attribute, _) => Set(attribute)
+      case IsNull(attribute) => Set(attribute)
+      case IsNotNull(attribute) => Set(attribute)
+      case StringStartsWith(attribute, _) => Set(attribute)
+      case StringEndsWith(attribute, _) => Set(attribute)
+      case StringContains(attribute, _) => Set(attribute)
+      case And(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Or(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Not(child) => getFilterReferencedColumns(child)
+      case _ => Set.empty[String]
+    }
   }
 
   /**

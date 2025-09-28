@@ -20,7 +20,7 @@ package com.tantivy4spark.sql
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.spark.sql.functions.{col, lit, concat}
 import org.apache.hadoop.fs.Path
 import java.nio.file.Files
@@ -43,7 +43,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     super.beforeEach()
     tempTablePath = Files.createTempDirectory("merge_temp_test_").toFile.getAbsolutePath
     customTempDir = Files.createTempDirectory("custom_merge_temp_").toFile.getAbsolutePath
-    transactionLog = new TransactionLog(new Path(tempTablePath), spark)
+    transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
   }
 
   override def afterEach(): Unit = {

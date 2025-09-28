@@ -49,15 +49,11 @@ object TransactionLogFactory {
     val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
                                           options.getBoolean("spark.tantivy4spark.transaction.optimized.enabled", true))
 
-    if (useOptimized) {
-      logger.info(s"Creating optimized transaction log for $tablePath")
+    // Always use optimized implementation - the old TransactionLog class is deprecated
+    logger.info(s"Creating transaction log for $tablePath (useOptimized setting: $useOptimized)")
 
-      // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
-      new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
-    } else {
-      logger.info(s"Creating standard transaction log for $tablePath")
-      new TransactionLog(tablePath, spark, options)
-    }
+    // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
+    new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
   }
 }
 

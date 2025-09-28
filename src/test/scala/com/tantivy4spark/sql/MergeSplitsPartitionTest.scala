@@ -20,7 +20,7 @@ package com.tantivy4spark.sql
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
 import org.apache.spark.sql.functions.{col, lit}
 import org.apache.hadoop.fs.Path
 import java.nio.file.Files
@@ -41,7 +41,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
   override def beforeEach(): Unit = {
     super.beforeEach()
     tempTablePath = Files.createTempDirectory("partition_merge_test_").toFile.getAbsolutePath
-    transactionLog = new TransactionLog(new Path(tempTablePath), spark)
+    transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
   }
 
   override def afterEach(): Unit = {
