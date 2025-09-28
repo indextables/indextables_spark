@@ -130,11 +130,10 @@ class Tantivy4SparkScanBuilder(
    * Create a simple aggregation scan (no GROUP BY).
    */
   private def createSimpleAggregateScan(aggregation: Aggregation): Scan = {
-    // For now, return a regular scan until we implement Tantivy4SparkAggregateScan
-    logger.warn(s"🔍 AGGREGATE SCAN: Simple aggregate scan not yet implemented, falling back to regular scan")
+    logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan for: ${aggregation.aggregateExpressions.mkString(", ")}")
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, broadcastConfig, aggregation)
   }
 
   /**
