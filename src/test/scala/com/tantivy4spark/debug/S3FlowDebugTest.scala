@@ -299,7 +299,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
   test("TransactionLog with S3Mock integration") {
     // Test 5: Can TransactionLog work with S3Mock?
-    import com.tantivy4spark.transaction.TransactionLog
+    import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
     import org.apache.hadoop.fs.Path
     import org.apache.spark.sql.types._
 
@@ -350,7 +350,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
     val tablePath = new Path(s"s3://$TEST_BUCKET/test-table")
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
-    val transactionLog = new TransactionLog(tablePath, spark, caseInsensitiveOptions)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark, caseInsensitiveOptions)
 
     try {
       // Test schema initialization

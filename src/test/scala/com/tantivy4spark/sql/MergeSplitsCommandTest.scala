@@ -327,13 +327,13 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
   test("MERGE SPLITS should correctly construct S3 paths for input and output splits") {
     import com.tantivy4spark.sql.{MergeSplitsExecutor, MergeGroup, MergedSplitInfo}
-    import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+    import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
     import org.apache.hadoop.fs.Path
     import java.lang.reflect.Method
     
     // Create a mock executor to test path construction
     val s3TablePath = new Path("s3://test-bucket/test-table")
-    val mockTransactionLog = new TransactionLog(s3TablePath, spark)
+    val mockTransactionLog = TransactionLogFactory.create(s3TablePath, spark)
     
     // Create executor instance
     val executor = new MergeSplitsExecutor(

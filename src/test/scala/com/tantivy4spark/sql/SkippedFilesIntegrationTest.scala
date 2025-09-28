@@ -18,7 +18,7 @@
 package com.tantivy4spark.sql
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction, SkipAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction, SkipAction}
 import org.apache.spark.sql.functions._
 import org.scalatest.matchers.should.Matchers
 import java.io.File
@@ -54,7 +54,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Step 2: Get transaction log and test skip recording
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val testFilePath = "test/corrupted_file.split"
       val testReason = "File corruption detected during merge"
 
@@ -155,7 +155,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         .mode("overwrite")
         .save(outputPath)
 
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
 
       // When tracking is disabled, the configuration should still be readable
       val cooldownHours = spark.conf.get("spark.tantivy4spark.skippedFiles.cooldownDuration", "24").toInt
@@ -307,7 +307,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         .mode("overwrite")
         .save(outputPath)
 
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
 
       // Record multiple skipped files
       val skipPaths = Seq(
@@ -398,7 +398,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         .mode("overwrite")
         .save(outputPath)
 
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val testFilePath = "retry/test_file.split"
       val testReason = "File failed during merge - testing retry logic"
 

@@ -206,8 +206,8 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     println(s"✅ Successfully wrote test data to S3: $tablePath")
 
     // Verify we have multiple splits before merge
-    import com.tantivy4spark.transaction.TransactionLog
-    val transactionLog = new TransactionLog(
+    import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
+    val transactionLog = TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(tablePath), spark)
     val initialFiles = transactionLog.listFiles()
 

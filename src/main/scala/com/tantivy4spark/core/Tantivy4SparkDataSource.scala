@@ -28,7 +28,7 @@ import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{StructType, TimestampType, DateType, LongType, StringType, DoubleType, FloatType, IntegerType, BooleanType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
@@ -817,7 +817,7 @@ class Tantivy4SparkRelation(
     allConfigs ++= readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.result().asJava)
     
-    val transactionLog = new TransactionLog(new Path(path), spark, options)
+    val transactionLog = TransactionLogFactory.create(new Path(path), spark, options)
     transactionLog.getSchema().getOrElse {
       throw new RuntimeException(s"Path does not exist: $path. No transaction log found. Use spark.write to create the table first.")
     }
@@ -874,7 +874,7 @@ class Tantivy4SparkRelation(
     allConfigs ++= readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.result().asJava)
     
-    val transactionLog = new TransactionLog(new Path(path), spark, options)
+    val transactionLog = TransactionLogFactory.create(new Path(path), spark, options)
     
     // Check if table exists by trying to get schema first
     val tableSchema = transactionLog.getSchema()
@@ -1084,7 +1084,7 @@ class Tantivy4SparkRelation(
     allConfigs ++= readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.result().asJava)
     
-    val transactionLog = new TransactionLog(new Path(path), spark, options)
+    val transactionLog = TransactionLogFactory.create(new Path(path), spark, options)
     
     // Check if table exists by trying to get schema first
     val tableSchema = transactionLog.getSchema()
@@ -1296,7 +1296,7 @@ class Tantivy4SparkTable(
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkTable])
   private val spark = SparkSession.active
   private val tablePath = new Path(path)
-  private val transactionLog = new TransactionLog(tablePath, spark, options)
+  private val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
   override def name(): String = s"tantivy4spark.`$path`"
 
@@ -1621,7 +1621,7 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val mergedConfigMap = options.asScala.toMap ++ mergedTantivyConfigs
     val mergedOptions = new CaseInsensitiveStringMap(mergedConfigMap.asJava)
     
-    val transactionLog = new TransactionLog(new Path(paths.head), spark, mergedOptions)
+    val transactionLog = TransactionLogFactory.create(new Path(paths.head), spark, mergedOptions)
     
     transactionLog.getSchema().getOrElse {
       throw new RuntimeException(s"Path does not exist: ${paths.head}. No transaction log found. Use spark.write to create the table first.")

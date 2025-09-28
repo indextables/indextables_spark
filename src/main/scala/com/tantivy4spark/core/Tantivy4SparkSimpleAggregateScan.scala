@@ -317,12 +317,8 @@ class Tantivy4SparkSimpleAggregateReader(
         new org.apache.hadoop.fs.Path(partition.tablePath, partition.split.path)
       }
 
-      // Convert to file:// URL format for tantivy4java
-      val splitPath = if (resolvedPath.toString.startsWith("file://")) {
-        resolvedPath.toString
-      } else {
-        s"file://${resolvedPath.toString}"
-      }
+      // Convert s3a:// to s3:// for tantivy4java compatibility
+      val splitPath = resolvedPath.toString.replace("s3a://", "s3://")
 
       logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Resolved split path: ${splitPath}")
 

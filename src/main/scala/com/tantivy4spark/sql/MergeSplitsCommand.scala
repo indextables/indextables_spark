@@ -25,7 +25,7 @@ import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types.{StringType, LongType, StructType, StructField}
 import org.apache.spark.unsafe.types.UTF8String
-import com.tantivy4spark.transaction.{TransactionLog, AddAction, RemoveAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction, RemoveAction}
 import com.tantivy4spark.storage.SplitManager
 import com.tantivy4spark.io.{CloudStorageProviderFactory}
 import org.apache.hadoop.fs.Path
@@ -130,7 +130,7 @@ case class MergeSplitsCommand(
     }
     
     // Create transaction log
-    val transactionLog = new TransactionLog(tablePath, sparkSession)
+    val transactionLog = TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
     
     try {
       // Check if transaction log is initialized

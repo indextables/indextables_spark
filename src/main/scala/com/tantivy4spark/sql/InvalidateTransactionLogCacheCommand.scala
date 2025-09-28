@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types.{StringType, LongType}
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import org.slf4j.LoggerFactory
 
@@ -94,7 +94,7 @@ case class InvalidateTransactionLogCacheCommand(
       val resolvedPath = resolveTablePath(path, sparkSession)
       
       // Create a temporary TransactionLog to access the cache
-      val transactionLog = new TransactionLog(resolvedPath, sparkSession)
+      val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
       
       try {
         // Try to access the transaction log to validate it exists and has been initialized

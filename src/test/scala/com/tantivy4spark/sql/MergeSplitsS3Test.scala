@@ -342,9 +342,9 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     
     println("📊 Verifying initial split files were created...")
     
-    // Check that multiple splits were actually created  
-    import com.tantivy4spark.transaction.TransactionLog
-    val transactionLog = new TransactionLog(
+    // Check that multiple splits were actually created
+    import com.tantivy4spark.transaction.{TransactionLogFactory}
+    val transactionLog = TransactionLogFactory.create(
       new org.apache.hadoop.fs.Path(s3TablePath), spark)
     val initialFiles = transactionLog.listFiles()
     

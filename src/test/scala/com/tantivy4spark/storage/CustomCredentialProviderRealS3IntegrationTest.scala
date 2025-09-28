@@ -528,7 +528,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Write first batch
     println(s"📝 Writing batch 1...")
     data1.write
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("tantivy4spark")
       .options(mergeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -536,7 +536,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Write second batch (append mode to create more split files)
     println(s"📝 Writing batch 2...")
     data2.write
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("tantivy4spark")
       .options(mergeOptions)
       .mode("append")
       .save(tablePath)
@@ -544,7 +544,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Write third batch (append mode to create more split files)
     println(s"📝 Writing batch 3...")
     data3.write
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("tantivy4spark")
       .options(mergeOptions)
       .mode("append")
       .save(tablePath)
@@ -619,7 +619,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     )
 
     val result = spark.read
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("tantivy4spark")
       .options(readOptions)
       .load(tablePath)
 

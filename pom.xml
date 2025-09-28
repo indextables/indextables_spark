@@ -154,7 +154,7 @@
             <version>${antlr.version}</version>
         </dependency>
 
-        <!-- Test Dependencies -->
+<!-- Test Dependencies -->
         <dependency>
             <groupId>org.scalatest</groupId>
             <artifactId>scalatest_${scala.compat.version}</artifactId>

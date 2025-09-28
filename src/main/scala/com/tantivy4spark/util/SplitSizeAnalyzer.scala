@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.util
 
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -50,7 +50,7 @@ class SplitSizeAnalyzer(
   def calculateTargetRows(targetSizeBytes: Long, maxHistoricalSplits: Int = 10): Option[Long] = {
     try {
       // Create transaction log reader
-      val transactionLog = new TransactionLog(tablePath, spark, options)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         // Get recent split data from the transaction log

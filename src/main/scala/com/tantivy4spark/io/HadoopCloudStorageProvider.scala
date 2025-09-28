@@ -33,7 +33,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       
