@@ -18,7 +18,7 @@
 package com.tantivy4spark.integration
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLogFactory, TransactionLog, AddAction}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.scalatest.BeforeAndAfterEach
@@ -36,7 +36,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
   override def beforeEach(): Unit = {
     super.beforeEach()
     testTablePath = new Path(tempDir, "txn_log_stats_test")
-    transactionLog = new TransactionLog(testTablePath, spark)
+    transactionLog = TransactionLogFactory.create(testTablePath, spark)
   }
   
   test("should write complete statistics for all supported data types") {
@@ -222,7 +222,7 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
       .save(testTablePath.toString)
     
     // Create a new transaction log instance to test persistence
-    val newTransactionLog = new TransactionLog(testTablePath, spark)
+    val newTransactionLog = TransactionLogFactory.create(testTablePath, spark)
     val retrievedActions = newTransactionLog.listFiles()
     
     assert(retrievedActions.length == 1, "Should retrieve the written file")

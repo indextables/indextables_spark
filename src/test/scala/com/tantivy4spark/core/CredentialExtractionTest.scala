@@ -214,7 +214,7 @@ class CredentialExtractionTest extends TestBase {
     println(s"  Total options: ${allConfigs.size}")
     
     // The actual TransactionLog construction would be:
-    // val transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    // val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     // But we don't do it here to avoid needing S3Mock setup in this unit test
   }
 }

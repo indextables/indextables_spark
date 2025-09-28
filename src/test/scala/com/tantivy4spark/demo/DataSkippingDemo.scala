@@ -18,7 +18,7 @@
 package com.tantivy4spark.demo
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
 import com.tantivy4spark.core.Tantivy4SparkScan
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
@@ -52,7 +52,7 @@ object DataSkippingDemo extends TestBase {
   
   private def demonstrateDataSkipping(): Unit = {
     val testTablePath = new Path(tempDir, "data_skipping_demo")
-    val transactionLog = new TransactionLog(testTablePath, spark)
+    val transactionLog = TransactionLogFactory.create(testTablePath, spark)
     
     val schema = StructType(Array(
       StructField("customer_id", LongType, false),

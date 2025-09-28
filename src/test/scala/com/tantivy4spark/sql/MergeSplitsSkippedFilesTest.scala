@@ -18,7 +18,7 @@
 package com.tantivy4spark.sql
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction, SkipAction}
+import com.tantivy4spark.transaction.{TransactionLogFactory, TransactionLog, AddAction, SkipAction}
 import com.tantivy4spark.sql.SerializableSplitMetadata
 import org.apache.spark.sql.functions._
 import org.scalatest.matchers.should.Matchers
@@ -77,7 +77,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Step 2: Read transaction log to get current state
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val beforeMergeActions = transactionLog.listFiles()
       val beforeMergeCount = beforeMergeActions.length
 
@@ -149,7 +149,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Get initial transaction log state
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val initialFiles = transactionLog.listFiles()
 
       println(s"Initial state: ${initialFiles.length} files")
@@ -248,7 +248,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Get initial transaction log state
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val initialFiles = transactionLog.listFiles()
       val initialFileCount = initialFiles.length
 

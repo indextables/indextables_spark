@@ -153,10 +153,10 @@ class LimitPushdownTest extends TestBase {
         .save(tempPath)
 
       // Read the transaction log to get the schema
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       import org.apache.spark.sql.types.DataType
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val metadata = transactionLog.getMetadata()
       val schema = DataType.fromJson(metadata.schemaString).asInstanceOf[org.apache.spark.sql.types.StructType]
       

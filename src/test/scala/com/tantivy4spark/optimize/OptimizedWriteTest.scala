@@ -225,9 +225,9 @@ class OptimizedWriteTest extends TestBase {
         .save(tempPath)
 
       // Count actual split files created (don't verify read count due to 10k search limit)
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val files = transactionLog.listFiles()
       
       files.length shouldBe 1
@@ -247,9 +247,9 @@ class OptimizedWriteTest extends TestBase {
         .save(tempPath)
 
       // Count actual split files created
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val files = transactionLog.listFiles()
       
       // Should be 3 splits: ceil(250/100) = 3
@@ -270,9 +270,9 @@ class OptimizedWriteTest extends TestBase {
         .save(tempPath)
 
       // Count actual split files created
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val files = transactionLog.listFiles()
       
       // Should be 10 splits: ceil(1000/100) = 10
@@ -293,9 +293,9 @@ class OptimizedWriteTest extends TestBase {
         .save(tempPath)
 
       // Count actual split files created
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val files = transactionLog.listFiles()
       
       // Should be 10 splits: ceil(500/50) = 10
@@ -316,9 +316,9 @@ class OptimizedWriteTest extends TestBase {
         .save(tempPath)
 
       // Count actual split files created
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val files = transactionLog.listFiles()
       
       files.length shouldBe 1

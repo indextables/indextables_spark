@@ -45,7 +45,7 @@ class TransactionLogPerformanceTest extends TestBase {
 
       val startTimeWithoutCheckpoints = System.currentTimeMillis()
 
-      val logWithoutCheckpoints = new TransactionLog(tablePath, spark, optionsWithoutCheckpoints)
+      val logWithoutCheckpoints = TransactionLogFactory.create(tablePath, spark, optionsWithoutCheckpoints)
       try {
         logWithoutCheckpoints.initialize(schema)
 
@@ -91,7 +91,7 @@ class TransactionLogPerformanceTest extends TestBase {
       val startTimeWithCheckpoints = System.currentTimeMillis()
 
       val tablePath2 = new Path(tempDir.getCanonicalPath, "test_table_with_checkpoints")
-      val logWithCheckpoints = new TransactionLog(tablePath2, spark, optionsWithCheckpoints)
+      val logWithCheckpoints = TransactionLogFactory.create(tablePath2, spark, optionsWithCheckpoints)
       try {
         logWithCheckpoints.initialize(schema)
 
@@ -156,7 +156,7 @@ class TransactionLogPerformanceTest extends TestBase {
         ).asJava
       )
 
-      val log = new TransactionLog(tablePath, spark, optionsWithParallel)
+      val log = TransactionLogFactory.create(tablePath, spark, optionsWithParallel)
       try {
         log.initialize(schema)
 
@@ -206,7 +206,7 @@ class TransactionLogPerformanceTest extends TestBase {
         ).asJava
       )
 
-      val log = new TransactionLog(tablePath, spark, options)
+      val log = TransactionLogFactory.create(tablePath, spark, options)
       try {
         log.initialize(schema)
 
@@ -259,7 +259,7 @@ class TransactionLogPerformanceTest extends TestBase {
         ).asJava
       )
 
-      val log = new TransactionLog(tablePath, spark, options)
+      val log = TransactionLogFactory.create(tablePath, spark, options)
       try {
         log.initialize(schema)
 
@@ -296,7 +296,7 @@ class TransactionLogPerformanceTest extends TestBase {
         assert(lastCheckpointFile.isDefined, "Expected _last_checkpoint file")
 
         // Test reading from checkpoints - create a new TransactionLog instance to force fresh reads
-        val log2 = new TransactionLog(tablePath, spark, options)
+        val log2 = TransactionLogFactory.create(tablePath, spark, options)
         try {
           // Check what versions exist
           val allVersions = log2.getVersions()
@@ -368,7 +368,7 @@ class TransactionLogPerformanceTest extends TestBase {
         ).asJava
       )
 
-      val log = new TransactionLog(tablePath, spark, options)
+      val log = TransactionLogFactory.create(tablePath, spark, options)
       try {
         log.initialize(schema)
 
@@ -416,7 +416,7 @@ class TransactionLogPerformanceTest extends TestBase {
         assert(checkpointFiles.nonEmpty, "Expected checkpoint files to be created")
 
         // Create new TransactionLog instance to test reading behavior
-        val log2 = new TransactionLog(tablePath, spark, options)
+        val log2 = TransactionLogFactory.create(tablePath, spark, options)
         try {
           val allFiles = log2.listFiles()
           println(s"Files read after cleanup: ${allFiles.length}")

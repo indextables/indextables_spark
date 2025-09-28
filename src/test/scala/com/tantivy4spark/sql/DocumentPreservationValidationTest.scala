@@ -18,7 +18,7 @@
 package com.tantivy4spark.sql
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SaveMode}
 import org.apache.hadoop.fs.Path
@@ -52,7 +52,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     tempTablePath = tempDir.getAbsolutePath
     
     // Initialize transaction log
-    transactionLog = new TransactionLog(new Path(tempTablePath), spark)
+    transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
     
     logger.info(s"Test setup: tempTablePath = $tempTablePath")
   }

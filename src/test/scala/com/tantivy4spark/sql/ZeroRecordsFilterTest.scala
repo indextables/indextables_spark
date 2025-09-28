@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.sql
 
-import com.tantivy4spark.transaction.{AddAction, TransactionLog}
+import com.tantivy4spark.transaction.{AddAction, TransactionLogFactory, TransactionLog}
 import org.apache.spark.sql.SparkSession
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -94,7 +94,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     // Check transaction log to ensure no AddActions were created
     val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
     val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog = new TransactionLog(hadoopPath, spark, emptyOptions)
+    val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
 
     // Get AddActions directly
     val addActions = transactionLog.listFiles()
@@ -146,7 +146,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     // Get initial transaction log state
     val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
     val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog = new TransactionLog(hadoopPath, spark, emptyOptions)
+    val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
     val initialAddActions = transactionLog.listFiles()
 
     println(s"Initial AddActions: ${initialAddActions.length}")

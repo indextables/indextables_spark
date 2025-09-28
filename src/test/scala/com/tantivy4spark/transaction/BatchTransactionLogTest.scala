@@ -28,7 +28,7 @@ class BatchTransactionLogTest extends TestBase {
   test("should create single transaction with multiple ADD entries like Delta Lake") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
 
@@ -143,7 +143,7 @@ class BatchTransactionLogTest extends TestBase {
   test("should handle empty batch gracefully") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
 
@@ -171,7 +171,7 @@ class BatchTransactionLogTest extends TestBase {
   test("should work correctly with mixed individual and batch operations") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
       try {
 

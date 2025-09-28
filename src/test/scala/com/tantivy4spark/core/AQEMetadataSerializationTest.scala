@@ -18,7 +18,7 @@
 package com.tantivy4spark.core
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{AddAction, TransactionLog}
+import com.tantivy4spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.functions._
 import org.scalatest.matchers.should.Matchers
@@ -63,7 +63,7 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         .save(tempPath)
 
       // Read the transaction log to get AddActions
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       addActions.length should be > 0

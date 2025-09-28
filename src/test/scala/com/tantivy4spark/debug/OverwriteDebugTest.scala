@@ -42,9 +42,9 @@ class OverwriteDebugTest extends TestBase {
     read2.show()
     
     // Check what's in the transaction log
-    import com.tantivy4spark.transaction.TransactionLog
+    import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
     import org.apache.hadoop.fs.Path
-    val transactionLog = new TransactionLog(new Path(testPath), spark)
+    val transactionLog = TransactionLogFactory.create(new Path(testPath), spark)
     val files = transactionLog.listFiles()
     println(s"Files in transaction log: ${files.length}")
     println(s"Table path: $testPath")

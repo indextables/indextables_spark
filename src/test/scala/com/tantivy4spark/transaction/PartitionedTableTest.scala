@@ -55,7 +55,7 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
     ))
     
     val partitionColumns = Seq("year", "month")
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     transactionLog.initialize(schema, partitionColumns)
     
@@ -72,7 +72,7 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
     ))
     
     val invalidPartitionColumns = Seq("nonexistent_column")
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     // Should throw exception for invalid partition columns
     assertThrows[IllegalArgumentException] {
@@ -112,7 +112,7 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should create ADD actions with partition values") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),
@@ -194,7 +194,7 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should support overwrite mode with partitions") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),

@@ -47,7 +47,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should track row count in ADD actions") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),
@@ -90,7 +90,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should handle overwrite mode correctly") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),
@@ -129,7 +129,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should handle append mode with multiple transactions") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", LongType),
@@ -202,7 +202,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
     assert(readDf.count() == 100, "Should read back all 100 rows")
     
     // Access transaction log to verify it references existing split files
-    val transactionLog = new TransactionLog(new Path(testPath), spark)
+    val transactionLog = TransactionLogFactory.create(new Path(testPath), spark)
     val files = transactionLog.listFiles()
     
     assert(files.nonEmpty, "Transaction log should contain file references")
@@ -225,7 +225,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should handle overwrite followed by append correctly") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),
@@ -352,7 +352,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
     assert(readDf.agg(min("id"), max("id")).collect()(0) === org.apache.spark.sql.Row(0L, 99L))
     
     // Verify transaction log state
-    val _ = new TransactionLog(new Path(testPath), spark)
+    val _ = TransactionLogFactory.create(new Path(testPath), spark)
     // assert(transactionLog.getTotalRowCount() == 100) // Skip due to type casting issue
     
     // Clean up
@@ -362,7 +362,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should handle empty overwrite correctly") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType)
@@ -386,7 +386,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
   }
   
   test("should preserve min/max values in ADD actions") {
-    val transactionLog = new TransactionLog(tablePath, spark)
+    val transactionLog = TransactionLogFactory.create(tablePath, spark)
     
     val schema = StructType(Seq(
       StructField("id", IntegerType),

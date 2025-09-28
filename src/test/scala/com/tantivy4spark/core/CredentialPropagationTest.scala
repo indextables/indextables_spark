@@ -19,7 +19,7 @@ package com.tantivy4spark.core
 
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import io.findify.s3mock.S3Mock
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -509,7 +509,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
         "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
       ).asJava)
       
-      val transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+      val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
       transactionLog.initialize(testSchema)
       transactionLog.close()
       

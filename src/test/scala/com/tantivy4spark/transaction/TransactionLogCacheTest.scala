@@ -44,7 +44,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("cache should be enabled by default") {
     val options = new CaseInsensitiveStringMap(Collections.emptyMap())
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     val stats = transactionLog.getCacheStats()
     assert(stats.isDefined, "Cache should be enabled by default")
@@ -56,7 +56,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
       "spark.tantivy4spark.transaction.cache.enabled" -> "false"
     ).asJava)
     
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     val stats = transactionLog.getCacheStats()
     assert(stats.isEmpty, "Cache should be disabled when explicitly set to false")
@@ -68,7 +68,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
       "spark.tantivy4spark.transaction.cache.expirationSeconds" -> customExpirationSeconds.toString
     ).asJava)
     
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     val stats = transactionLog.getCacheStats()
     assert(stats.isDefined, "Cache should be enabled")
@@ -78,7 +78,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("cache improves performance on repeated reads") {
     val options = new CaseInsensitiveStringMap(Collections.emptyMap())
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     // Initialize the transaction log
     val schema = StructType(Seq(
@@ -118,7 +118,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("cache invalidation works after writes") {
     val options = new CaseInsensitiveStringMap(Collections.emptyMap())
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     // Initialize the transaction log
     val schema = StructType(Seq(
@@ -147,7 +147,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
       "spark.tantivy4spark.transaction.cache.expirationSeconds" -> shortExpirationSeconds.toString
     ).asJava)
     
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     // Initialize and add data
     val schema = StructType(Seq(
@@ -178,7 +178,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("manual cache invalidation works") {
     val options = new CaseInsensitiveStringMap(Collections.emptyMap())
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     // Initialize and add data
     val schema = StructType(Seq(
@@ -209,7 +209,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("metadata caching works correctly") {
     val options = new CaseInsensitiveStringMap(Collections.emptyMap())
-    transactionLog = new TransactionLog(new Path(tablePath), spark, options)
+    transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
     
     // Initialize the transaction log
     val schema = StructType(Seq(

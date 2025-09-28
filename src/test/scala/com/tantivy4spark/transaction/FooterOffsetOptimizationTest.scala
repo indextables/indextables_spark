@@ -129,7 +129,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     println("🧪 [TEST] Testing transaction log persistence of footer offset fields")
 
     withTempPath { tempDir =>
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tempDir.toString), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tempDir.toString), spark)
 
       // Create AddAction with footer offset metadata
       val optimizedAddAction = AddAction(
@@ -272,7 +272,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       df.write.format("tantivy4spark").save(tablePath)
 
       // Read transaction log to check for footer offset metadata
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
       val allFiles = transactionLog.listFiles()
 
       println(s"🧪 [TEST] Found ${allFiles.length} files in transaction log")
@@ -336,7 +336,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read transaction log to check for footer offset metadata
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
       val allFiles = transactionLog.listFiles()
 
       println(s"🧪 [TEST] V2 DataSource found ${allFiles.length} files in transaction log")
@@ -409,7 +409,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       println("✅ V2 DataSource basic read successful")
 
       // Check transaction log for footer offset metadata
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
       val allFiles = transactionLog.listFiles()
       
       println(s"🧪 [TEST] V2 IndexQuery test found ${allFiles.length} files with footer offset status:")
@@ -451,7 +451,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read transaction log and analyze metadata
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
       val allFiles = transactionLog.listFiles()
 
       println(s"🧪 [TEST] V2 Metadata analysis for ${allFiles.length} files:")

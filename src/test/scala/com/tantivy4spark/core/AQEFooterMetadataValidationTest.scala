@@ -24,7 +24,7 @@ import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
 import org.apache.spark.sql.execution.{CollectLimitExec, SparkPlan}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.scalatest.matchers.should.Matchers
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
 import org.apache.hadoop.fs.Path
 import scala.collection.mutable
 
@@ -68,7 +68,7 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         .save(tempPath)
 
       // Validate that footer metadata is present in transaction log
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       println(s"📊 Created ${addActions.length} splits for AQE testing")
@@ -166,7 +166,7 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         .save(tempPath)
 
       // Validate footer metadata in partitioned structure
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       println(s"📊 Created ${addActions.length} partitioned splits for dynamic pruning test")

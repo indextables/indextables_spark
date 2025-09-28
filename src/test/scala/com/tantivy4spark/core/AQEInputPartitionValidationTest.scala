@@ -18,7 +18,7 @@
 package com.tantivy4spark.core
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{AddAction, TransactionLog}
+import com.tantivy4spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.sources.{Filter, EqualTo}
@@ -55,7 +55,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         .save(tempPath)
 
       // Get AddActions from transaction log
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       addActions.length should be > 0
@@ -141,7 +141,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         .save(tempPath)
 
       // Get transaction log
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       val readSchema = StructType(Array(
@@ -217,7 +217,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         .option("targetRecordsPerSplit", "20")
         .save(tempPath)
 
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       val readSchema = StructType(Array(
@@ -345,7 +345,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         .option("targetRecordsPerSplit", "16")
         .save(tempPath)
 
-      val transactionLog = new TransactionLog(new Path(tempPath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
       val addActions = transactionLog.listFiles()
 
       addActions.foreach { addAction =>

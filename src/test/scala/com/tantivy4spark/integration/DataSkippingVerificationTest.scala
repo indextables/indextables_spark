@@ -18,7 +18,7 @@
 package com.tantivy4spark.integration
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction}
+import com.tantivy4spark.transaction.{TransactionLogFactory, TransactionLog, AddAction}
 import com.tantivy4spark.core.Tantivy4SparkScan
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
@@ -35,7 +35,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
   override def beforeEach(): Unit = {
     super.beforeEach()
     testTablePath = new Path(tempDir, "data_skipping_verification")
-    transactionLog = new TransactionLog(testTablePath, spark)
+    transactionLog = TransactionLogFactory.create(testTablePath, spark)
     
     val schema = StructType(Array(
       StructField("id", LongType, false),

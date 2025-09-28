@@ -520,10 +520,10 @@ class PartitionedDatasetTest extends TestBase {
     // Count logically active files using transaction log, not physical files on disk
     // This is important because RemoveActions don't delete files, they just mark them as removed
     try {
-      import com.tantivy4spark.transaction.TransactionLog
+      import com.tantivy4spark.transaction.TransactionLogFactory
       import org.apache.hadoop.fs.Path
 
-      val transactionLog = new TransactionLog(new Path(path), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(path), spark)
       val activeFiles = transactionLog.listFiles()
       activeFiles.length
     } catch {

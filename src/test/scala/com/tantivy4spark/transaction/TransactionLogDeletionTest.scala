@@ -44,7 +44,7 @@ class TransactionLogDeletionTest extends TestBase {
         ).asJava
       )
 
-      val log = new TransactionLog(tablePath, spark, options)
+      val log = TransactionLogFactory.create(tablePath, spark, options)
       try {
         log.initialize(schema)
 

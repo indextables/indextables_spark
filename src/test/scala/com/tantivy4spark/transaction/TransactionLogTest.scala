@@ -28,7 +28,7 @@ class TransactionLogTest extends TestBase {
   test("should initialize transaction log with schema") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
       val testSchema = getTestSchema()
 
       try {
@@ -60,7 +60,7 @@ class TransactionLogTest extends TestBase {
   test("should add and list files") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
       
       try {
         transactionLog.initialize(getTestSchema())
@@ -102,7 +102,7 @@ class TransactionLogTest extends TestBase {
   test("should handle file removal") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
       
       try {
         transactionLog.initialize(getTestSchema())
@@ -134,7 +134,7 @@ class TransactionLogTest extends TestBase {
   test("should maintain version ordering") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val transactionLog = new TransactionLog(tablePath, spark)
+      val transactionLog = TransactionLogFactory.create(tablePath, spark)
       
       try {
         transactionLog.initialize(getTestSchema())
@@ -166,7 +166,7 @@ class TransactionLogTest extends TestBase {
   test("should handle missing transaction log directory") {
     withTempPath { tempPath =>
       val nonExistentPath = new Path(tempPath, "nonexistent")
-      val transactionLog = new TransactionLog(nonExistentPath, spark)
+      val transactionLog = TransactionLogFactory.create(nonExistentPath, spark)
 
       try {
         val schema = transactionLog.getSchema()

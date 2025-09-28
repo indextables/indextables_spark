@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.sql
 
-import com.tantivy4spark.transaction.{AddAction, TransactionLog}
+import com.tantivy4spark.transaction.{AddAction, TransactionLogFactory, TransactionLog}
 import org.apache.spark.sql.SparkSession
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -145,7 +145,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     // Get transaction log to examine actions before merge
     val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
     val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog = new TransactionLog(hadoopPath, spark, emptyOptions)
+    val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
     val addActionsBeforeMerge = transactionLog.listFiles()
 
     // Count AddActions before merge
@@ -241,7 +241,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     // Get initial state
     val hadoopPath2 = new org.apache.hadoop.fs.Path(tablePath)
     val emptyOptions2 = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog2 = new TransactionLog(hadoopPath2, spark, emptyOptions2)
+    val transactionLog2 = TransactionLogFactory.create(hadoopPath2, spark, emptyOptions2)
     val initialAddActions = transactionLog2.listFiles()
 
     println(s"Initial AddActions: ${initialAddActions.length}")

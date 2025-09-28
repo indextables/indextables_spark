@@ -347,6 +347,9 @@ class SimpleAggregatePushdownTest extends TestBase {
       "spark.tantivy4spark.indexing.fastfields" -> "score"
     ).asJava)
 
+    // For testing: create a mock TransactionLog with empty files
+    // Set the configuration to allow direct TransactionLog usage for testing
+    spark.conf.set("spark.tantivy4spark.transaction.allowDirectUsage", "true")
     val transactionLog = new TransactionLog(new Path("/mock/path"), spark) {
       override def listFiles(): Seq[com.tantivy4spark.transaction.AddAction] = Seq.empty
     }

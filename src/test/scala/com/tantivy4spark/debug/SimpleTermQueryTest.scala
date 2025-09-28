@@ -84,8 +84,8 @@ class SimpleTermQueryTest extends TestBase {
       println(s"🔍 Reading metadata from transaction log for split: $splitPath")
       println(s"🔍 File exists: ${splitFile.exists()}")
       
-      import com.tantivy4spark.transaction.TransactionLog
-      val transactionLog = new TransactionLog(new org.apache.hadoop.fs.Path(tempPath), spark)
+      import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
+      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tempPath), spark)
       try {
         val allFiles = transactionLog.listFiles()
         val matchingFile = allFiles.find(_.path.endsWith(splitFile.getName)).getOrElse {

@@ -20,7 +20,7 @@ package com.tantivy4spark.sql
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.{TransactionLog, AddAction, RemoveAction}
+import com.tantivy4spark.transaction.{TransactionLogFactory, TransactionLog, AddAction, RemoveAction}
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types.{StringType, IntegerType, LongType, StructType, StructField}
 import org.apache.spark.sql.functions.{col, concat, lit}
@@ -125,7 +125,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     super.beforeEach()
     // Always use local files for reliable testing (S3 tests are separate)
     tempTablePath = Files.createTempDirectory("optimize_validation_").toFile.getAbsolutePath
-    transactionLog = new TransactionLog(new Path(tempTablePath), spark)
+    transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
   }
 
   override def afterEach(): Unit = {
@@ -639,7 +639,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     val originalTempPath = tempTablePath
     tempTablePath = Files.createTempDirectory("transaction_log_test_").toFile.getAbsolutePath
     transactionLog.close()
-    transactionLog = new TransactionLog(new Path(tempTablePath), spark)
+    transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
     
     println(s"🧪 [TEST] Using fresh temp path: $tempTablePath")
     println("🧪 [TEST] Testing transaction log reader behavior: add1(append), add2(append), add3(overwrite), add4(append), merge(), add5(append)")

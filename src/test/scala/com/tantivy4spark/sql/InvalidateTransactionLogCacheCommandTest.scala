@@ -1,7 +1,7 @@
 package com.tantivy4spark.sql
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.transaction.TransactionLog
+import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 import org.apache.hadoop.fs.Path
@@ -29,7 +29,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
       val tablePath = tempDir.toString
       
       // Create and initialize a transaction log with caching enabled
-      val transactionLog = new TransactionLog(new Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark)
       
       try {
         val schema = StructType(Array(
@@ -149,7 +149,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
       val tablePath = tempDir.toString
       
       // Create and initialize a transaction log with caching enabled
-      val transactionLog = new TransactionLog(new Path(tablePath), spark)
+      val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark)
       
       try {
         val schema = StructType(Array(
