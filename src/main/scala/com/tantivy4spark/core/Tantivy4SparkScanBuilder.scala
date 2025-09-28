@@ -21,7 +21,6 @@ package com.tantivy4spark.core
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownV2Filters, SupportsPushDownRequiredColumns, SupportsPushDownLimit, SupportsPushDownAggregates}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
@@ -44,6 +43,9 @@ class Tantivy4SparkScanBuilder(
     with SupportsPushDownAggregates {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
+
+  println(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
+  logger.info(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters = Array.empty[Filter]
   private var requiredSchema = schema
@@ -51,6 +53,7 @@ class Tantivy4SparkScanBuilder(
 
   // Aggregate pushdown state
   private var _pushedAggregation: Option[Aggregation] = None
+  private var _pushedGroupBy: Option[Array[String]] = None
 
   // Generate instance key for this ScanBuilder to retrieve IndexQueries
   private val instanceKey = {
@@ -84,17 +87,54 @@ class Tantivy4SparkScanBuilder(
    * Create an aggregate scan for pushed aggregations.
    */
   private def createAggregateScan(aggregation: Aggregation): Scan = {
-    // Check if we can use transaction log count optimization
-    if (canUseTransactionLogCount(aggregation)) {
-      logger.info(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
-      createTransactionLogCountScan(aggregation)
-    } else {
-      // For now, return a regular scan until we implement Tantivy4SparkAggregateScan
-      logger.warn(s"🔍 AGGREGATE SCAN: Aggregate scan not yet implemented, falling back to regular scan")
-
-      val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-      new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+    _pushedGroupBy match {
+      case Some(groupByColumns) =>
+        // GROUP BY aggregation
+        logger.info(s"🔍 AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}")
+        createGroupByAggregateScan(aggregation, groupByColumns)
+      case None =>
+        // Simple aggregation without GROUP BY
+        // Check if we can use transaction log count optimization
+        if (canUseTransactionLogCount(aggregation)) {
+          logger.info(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
+          createTransactionLogCountScan(aggregation)
+        } else {
+          logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan")
+          createSimpleAggregateScan(aggregation)
+        }
     }
+  }
+
+  /**
+   * Create a GROUP BY aggregation scan.
+   */
+  private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String]): Scan = {
+    logger.info(s"🔍 GROUP BY SCAN: Creating GROUP BY scan for aggregation: $aggregation")
+    logger.info(s"🔍 GROUP BY SCAN: GROUP BY columns: ${groupByColumns.mkString(", ")}")
+
+    // For now, create a specialized GROUP BY scan
+    // This will be implemented as Tantivy4SparkGroupByAggregateScan
+    new Tantivy4SparkGroupByAggregateScan(
+      sparkSession,
+      transactionLog,
+      schema,
+      _pushedFilters,
+      options,
+      broadcastConfig,
+      aggregation,
+      groupByColumns
+    )
+  }
+
+  /**
+   * Create a simple aggregation scan (no GROUP BY).
+   */
+  private def createSimpleAggregateScan(aggregation: Aggregation): Scan = {
+    // For now, return a regular scan until we implement Tantivy4SparkAggregateScan
+    logger.warn(s"🔍 AGGREGATE SCAN: Simple aggregate scan not yet implemented, falling back to regular scan")
+
+    val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
   }
 
   /**
@@ -179,35 +219,128 @@ class Tantivy4SparkScanBuilder(
   }
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
+    println(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
     logger.info(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
 
-    // Validate aggregation is supported
+    // Check if this is a GROUP BY aggregation
+    val groupByExpressions = aggregation.groupByExpressions()
+    val hasGroupBy = groupByExpressions != null && groupByExpressions.nonEmpty
+
+    println(s"🔍 GROUP BY CHECK: hasGroupBy = $hasGroupBy")
+    if (hasGroupBy) {
+      println(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
+      logger.info(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
+      groupByExpressions.foreach { expr =>
+        logger.info(s"🔍 GROUP BY EXPRESSION: $expr")
+      }
+
+      // Extract GROUP BY column names
+      val groupByColumns = groupByExpressions.map(extractFieldNameFromExpression)
+      logger.info(s"🔍 GROUP BY COLUMNS: ${groupByColumns.mkString(", ")}")
+
+      // Validate GROUP BY columns are supported - throw exception if not
+      println(s"🔍 GROUP BY VALIDATION: About to check areGroupByColumnsSupported")
+      validateGroupByColumnsOrThrow(groupByColumns)
+      println(s"🔍 GROUP BY VALIDATION: areGroupByColumnsSupported passed")
+
+      // Check if aggregation is compatible with GROUP BY - throw exception if not
+      println(s"🔍 GROUP BY VALIDATION: About to check isAggregationCompatibleWithGroupBy")
+      validateAggregationCompatibilityOrThrow(aggregation)
+      println(s"🔍 GROUP BY VALIDATION: isAggregationCompatibleWithGroupBy passed")
+
+      // Store GROUP BY information
+      _pushedGroupBy = Some(groupByColumns)
+      logger.info(s"🔍 GROUP BY PUSHDOWN: ACCEPTED - GROUP BY will be pushed down")
+    } else {
+      logger.info(s"🔍 SIMPLE AGGREGATION: No GROUP BY expressions found")
+    }
+
+    // Validate aggregation is supported (both simple and GROUP BY)
+    println(s"🔍 AGGREGATE PUSHDOWN: About to check isAggregationSupported")
     if (!isAggregationSupported(aggregation)) {
+      println(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
       logger.info(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
       return false
     }
+    println(s"🔍 AGGREGATE PUSHDOWN: isAggregationSupported passed")
 
     // Check if filters are compatible with aggregate pushdown
+    println(s"🔍 AGGREGATE PUSHDOWN: About to check areFiltersCompatibleWithAggregation")
     if (!areFiltersCompatibleWithAggregation()) {
+      println(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
       logger.info(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
       return false
     }
+    println(s"🔍 AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
 
     // Store for later use in build()
     _pushedAggregation = Some(aggregation)
+    println(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
     logger.info(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
+    println(s"🔍 AGGREGATE PUSHDOWN: Returning true")
     true
   }
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
+    println(s"🔍 COMPLETE PUSHDOWN CHECK: Checking if complete pushdown is supported for: $aggregation")
     logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Checking if complete pushdown is supported for: $aggregation")
 
+    // Debug each condition separately
+    val isAggSupported = isAggregationSupported(aggregation)
+    val areFiltersCompatible = areFiltersCompatibleWithAggregation()
+
+    println(s"🔍 COMPLETE PUSHDOWN DEBUG: isAggregationSupported = $isAggSupported")
+    println(s"🔍 COMPLETE PUSHDOWN DEBUG: areFiltersCompatibleWithAggregation = $areFiltersCompatible")
+
+    // Check for GROUP BY in the aggregation
+    val groupByExpressions = aggregation.groupByExpressions()
+    val hasGroupBy = groupByExpressions != null && groupByExpressions.nonEmpty
+    println(s"🔍 COMPLETE PUSHDOWN DEBUG: hasGroupBy = $hasGroupBy")
+    if (hasGroupBy) {
+      println(s"🔍 COMPLETE PUSHDOWN DEBUG: GROUP BY expressions: ${groupByExpressions.mkString(", ")}")
+    }
+
     // Return true if we can completely handle this aggregation at the data source level
-    val canCompletelyPushDown = isAggregationSupported(aggregation) && areFiltersCompatibleWithAggregation()
+    val canCompletelyPushDown = isAggSupported && areFiltersCompatible
+    println(s"🔍 COMPLETE PUSHDOWN CHECK: Can completely push down: $canCompletelyPushDown")
     logger.info(s"🔍 COMPLETE PUSHDOWN CHECK: Can completely push down: $canCompletelyPushDown")
     canCompletelyPushDown
   }
 
+  /**
+   * Extract field name from Spark expression for GROUP BY detection.
+   */
+  private def extractFieldNameFromExpression(expression: org.apache.spark.sql.connector.expressions.Expression): String = {
+    // Use toString and try to extract field name
+    val exprStr = expression.toString
+    println(s"🔍 FIELD EXTRACTION: Expression string: '$exprStr'")
+    println(s"🔍 FIELD EXTRACTION: Expression class: ${expression.getClass.getSimpleName}")
+
+    // Check if it's a FieldReference by class name
+    if (expression.getClass.getSimpleName == "FieldReference") {
+      // For FieldReference, toString() returns the field name directly
+      val fieldName = exprStr
+      println(s"🔍 FIELD EXTRACTION: Extracted field name from FieldReference: '$fieldName'")
+      fieldName
+    } else if (exprStr.startsWith("FieldReference(")) {
+      // Fallback for other FieldReference string formats
+      val pattern = """FieldReference\(([^)]+)\)""".r
+      pattern.findFirstMatchIn(exprStr) match {
+        case Some(m) =>
+          val fieldName = m.group(1)
+          println(s"🔍 FIELD EXTRACTION: Extracted field name from pattern: '$fieldName'")
+          fieldName
+        case None =>
+          println(s"🔍 FIELD EXTRACTION: Could not extract field name from expression: $expression")
+          logger.warn(s"Could not extract field name from expression: $expression")
+          "unknown_field"
+      }
+    } else {
+      println(s"🔍 FIELD EXTRACTION: Unsupported expression type for field extraction: $expression")
+      logger.warn(s"Unsupported expression type for field extraction: $expression")
+      "unknown_field"
+    }
+  }
 
   private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
@@ -307,12 +440,22 @@ class Tantivy4SparkScanBuilder(
    * Check if the aggregation is supported for pushdown.
    */
   private def isAggregationSupported(aggregation: Aggregation): Boolean = {
-    import org.apache.spark.sql.connector.expressions.aggregate._
+    import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar, Sum, Avg, Min, Max}
 
-    aggregation.aggregateExpressions.forall { expr =>
-      expr match {
+    println(s"🔍 AGGREGATE VALIDATION: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
+    aggregation.aggregateExpressions.zipWithIndex.foreach { case (expr, index) =>
+      println(s"🔍 AGGREGATE VALIDATION: Expression $index: $expr (${expr.getClass.getSimpleName})")
+    }
+
+    val result = aggregation.aggregateExpressions.forall { expr =>
+      val isSupported = expr match {
         case _: Count =>
+          println(s"🔍 AGGREGATE VALIDATION: COUNT aggregation is supported")
           logger.info(s"🔍 AGGREGATE VALIDATION: COUNT aggregation is supported")
+          true
+        case _: CountStar =>
+          println(s"🔍 AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
+          logger.info(s"🔍 AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
           true
         case sum: Sum =>
           val fieldName = getFieldName(sum.column)
@@ -335,38 +478,44 @@ class Tantivy4SparkScanBuilder(
           logger.info(s"🔍 AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
           isSupported
         case other =>
+          println(s"🔍 AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
           logger.info(s"🔍 AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
           false
       }
+      println(s"🔍 AGGREGATE VALIDATION: Expression $expr supported: $isSupported")
+      isSupported
     }
+    println(s"🔍 AGGREGATE VALIDATION: Overall aggregation supported: $result")
+    result
   }
 
   /**
    * Extract field name from an aggregate expression column.
    */
   private def getFieldName(column: org.apache.spark.sql.connector.expressions.Expression): String = {
-    // Use toString for now as a simple way to get field name
-    // This is a temporary implementation
-    val columnStr = column.toString
-    if (columnStr.startsWith("FieldReference(")) {
-      // Extract field name from FieldReference(fieldName) format
-      val pattern = """FieldReference\(([^)]+)\)""".r
-      pattern.findFirstMatchIn(columnStr) match {
-        case Some(m) => m.group(1)
-        case None => throw new UnsupportedOperationException(s"Could not extract field name from: $columnStr")
-      }
-    } else {
+    // Use existing extractFieldNameFromExpression method
+    val fieldName = extractFieldNameFromExpression(column)
+    if (fieldName == "unknown_field") {
       throw new UnsupportedOperationException(s"Complex column expressions not supported for aggregation: $column")
     }
+    fieldName
   }
 
   /**
    * Check if a field is numeric and marked as fast in the schema.
    */
   private def isNumericFastField(fieldName: String): Boolean = {
-    // Check if field is marked as fast in configuration
-    val tantivyOptions = new Tantivy4SparkOptions(options)
-    val fastFields = tantivyOptions.getFastFields
+    // Use broadcast config instead of options for merged configuration
+    val mergedConfig = broadcastConfig.value
+    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
+      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+      .getOrElse("")
+
+    val fastFields = if (fastFieldsStr.nonEmpty) {
+      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+    } else {
+      Set.empty[String]
+    }
 
     if (!fastFields.contains(fieldName)) {
       logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast, rejecting aggregate pushdown")
@@ -431,6 +580,146 @@ class Tantivy4SparkScanBuilder(
     }
   }
 
+  /**
+   * Check if GROUP BY columns are supported for pushdown.
+   */
+  private def areGroupByColumnsSupported(groupByColumns: Array[String]): Boolean = {
+    println(s"🔍 GROUP BY VALIDATION: Checking ${groupByColumns.length} columns: ${groupByColumns.mkString(", ")}")
+    println(s"🔍 GROUP BY VALIDATION: Schema fields: ${schema.fields.map(_.name).mkString(", ")}")
+
+    groupByColumns.forall { columnName =>
+      println(s"🔍 GROUP BY VALIDATION: Checking column '$columnName'")
+      // Check if the column exists in the schema
+      val fieldExists = schema.fields.exists(_.name == columnName)
+      println(s"🔍 GROUP BY VALIDATION: Field '$columnName' exists: $fieldExists")
+      if (!fieldExists) {
+        println(s"🔍 GROUP BY VALIDATION: Field '$columnName' not found in schema")
+        logger.info(s"🔍 GROUP BY VALIDATION: Field '$columnName' not found in schema")
+        return false
+      }
+
+      // For GROUP BY, we need fields that can be used for terms aggregation
+      // String fields work well for grouping
+      schema.fields.find(_.name == columnName) match {
+        case Some(field) =>
+          import org.apache.spark.sql.types._
+          // ALL GROUP BY fields must be fast fields for tantivy4java TermsAggregation
+          val tantivyOptions = new Tantivy4SparkOptions(options)
+          val fastFields = tantivyOptions.getFastFields
+          val isFast = fastFields.contains(columnName)
+
+          field.dataType match {
+            case StringType =>
+              if (isFast) {
+                logger.info(s"🔍 GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
+                true
+              } else {
+                logger.info(s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY")
+                false
+              }
+            case IntegerType | LongType =>
+              if (isFast) {
+                logger.info(s"🔍 GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
+                true
+              } else {
+                logger.info(s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY")
+                false
+              }
+            case DateType | TimestampType =>
+              if (isFast) {
+                logger.info(s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY")
+                true
+              } else {
+                logger.info(s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY")
+                println(s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY")
+                false
+              }
+            case _ =>
+              logger.info(s"🔍 GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
+              println(s"🔍 GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
+              false
+          }
+        case None => false
+      }
+    }
+  }
+
+  /**
+   * Check if the current aggregation is compatible with GROUP BY.
+   */
+  private def isAggregationCompatibleWithGroupBy(aggregation: Aggregation): Boolean = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+    println(s"🔍 GROUP BY COMPATIBILITY: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
+
+    // Check each aggregate expression - for GROUP BY, ALL aggregated fields must be fast fields
+    val result = aggregation.aggregateExpressions.forall { expr =>
+      val isCompatible = expr match {
+        case _: Count =>
+          println(s"🔍 GROUP BY COMPATIBILITY: COUNT is compatible with GROUP BY (no field required)")
+          true
+        case _: CountStar =>
+          println(s"🔍 GROUP BY COMPATIBILITY: COUNT(*) is compatible with GROUP BY (no field required)")
+          true
+        case sum: Sum =>
+          val fieldName = getFieldName(sum.column)
+          val isFast = isNumericFastField(fieldName)
+          if (isFast) {
+            println(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) is compatible with GROUP BY (fast field)")
+            true
+          } else {
+            println(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
+            logger.info(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
+            false
+          }
+        case avg: Avg =>
+          val fieldName = getFieldName(avg.column)
+          val isFast = isNumericFastField(fieldName)
+          if (isFast) {
+            println(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) is compatible with GROUP BY (fast field)")
+            true
+          } else {
+            println(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
+            logger.info(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
+            false
+          }
+        case min: Min =>
+          val fieldName = getFieldName(min.column)
+          val isFast = isNumericFastField(fieldName)
+          if (isFast) {
+            println(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) is compatible with GROUP BY (fast field)")
+            true
+          } else {
+            println(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
+            logger.info(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
+            false
+          }
+        case max: Max =>
+          val fieldName = getFieldName(max.column)
+          val isFast = isNumericFastField(fieldName)
+          if (isFast) {
+            println(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) is compatible with GROUP BY (fast field)")
+            true
+          } else {
+            println(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
+            logger.info(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
+            false
+          }
+        case other =>
+          println(s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}")
+          logger.info(s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}")
+          false
+      }
+      println(s"🔍 GROUP BY COMPATIBILITY: Expression $expr compatible: $isCompatible")
+      isCompatible
+    }
+    println(s"🔍 GROUP BY COMPATIBILITY: Overall compatibility: $result")
+    result
+  }
 
   /**
    * Check if a filter is a partition filter.
@@ -439,6 +728,128 @@ class Tantivy4SparkScanBuilder(
     // For now, assume no partition filters are present
     // TODO: Implement proper partition filter detection based on partition columns
     false
+  }
+
+  /**
+   * Validate GROUP BY columns and throw a descriptive exception if validation fails.
+   */
+  private def validateGroupByColumnsOrThrow(groupByColumns: Array[String]): Unit = {
+    val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
+
+    // Use broadcast config instead of options for merged configuration
+    val mergedConfig = broadcastConfig.value
+    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
+      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+      .getOrElse("")
+
+    val fastFields = if (fastFieldsStr.nonEmpty) {
+      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+    } else {
+      Set.empty[String]
+    }
+
+
+    groupByColumns.foreach { columnName =>
+      // Check if the column exists in the schema
+      schema.fields.find(_.name == columnName) match {
+        case Some(field) =>
+          import org.apache.spark.sql.types._
+          // Check if field is configured as fast field
+          if (!fastFields.contains(columnName)) {
+            missingFastFields += columnName
+          }
+        case None =>
+          throw new IllegalArgumentException(
+            s"GROUP BY column '$columnName' not found in schema. Available columns: ${schema.fields.map(_.name).mkString(", ")}"
+          )
+      }
+    }
+
+    if (missingFastFields.nonEmpty) {
+      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
+
+      throw new IllegalArgumentException(
+        s"""GROUP BY requires fast field configuration for efficient aggregation.
+           |
+           |Missing fast fields for GROUP BY columns: $columnList
+           |
+           |To fix this issue, configure these columns as fast fields:
+           |  .option("spark.indexfiles.indexing.fastfields", "${ (fastFields ++ missingFastFields).toSeq.distinct.mkString(",") }")
+           |
+           |Current fast fields: $currentFastFields
+           |Required fast fields: ${(fastFields ++ missingFastFields).toSeq.distinct.mkString("'", "', '", "'")}""".stripMargin
+      )
+    }
+  }
+
+  /**
+   * Validate aggregation compatibility with GROUP BY and throw a descriptive exception if validation fails.
+   */
+  private def validateAggregationCompatibilityOrThrow(aggregation: Aggregation): Unit = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+    val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
+
+    // Use broadcast config instead of options for merged configuration
+    val mergedConfig = broadcastConfig.value
+    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
+      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+      .getOrElse("")
+
+    val fastFields = if (fastFieldsStr.nonEmpty) {
+      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+    } else {
+      Set.empty[String]
+    }
+
+    aggregation.aggregateExpressions.foreach { expr =>
+      expr match {
+        case _: Count | _: CountStar =>
+          // COUNT and COUNT(*) don't require specific fast fields
+        case sum: Sum =>
+          val fieldName = getFieldName(sum.column)
+          if (!isNumericFastField(fieldName)) {
+            missingFastFields += fieldName
+          }
+        case avg: Avg =>
+          val fieldName = getFieldName(avg.column)
+          if (!isNumericFastField(fieldName)) {
+            missingFastFields += fieldName
+          }
+        case min: Min =>
+          val fieldName = getFieldName(min.column)
+          if (!isNumericFastField(fieldName)) {
+            missingFastFields += fieldName
+          }
+        case max: Max =>
+          val fieldName = getFieldName(max.column)
+          if (!isNumericFastField(fieldName)) {
+            missingFastFields += fieldName
+          }
+        case other =>
+          throw new UnsupportedOperationException(
+            s"Aggregation function '${other.getClass.getSimpleName}' is not supported with GROUP BY operations"
+          )
+      }
+    }
+
+    if (missingFastFields.nonEmpty) {
+      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
+      val allRequiredFields = (fastFields ++ missingFastFields).toSeq.distinct
+
+      throw new IllegalArgumentException(
+        s"""GROUP BY with aggregation functions requires fast field configuration for efficient processing.
+           |
+           |Missing fast fields for aggregation columns: $columnList
+           |
+           |To fix this issue, configure these columns as fast fields:
+           |  .option("spark.indexfiles.indexing.fastfields", "${allRequiredFields.mkString(",")}")
+           |
+           |Current fast fields: $currentFastFields
+           |Required fast fields: ${allRequiredFields.mkString("'", "', '", "'")}""".stripMargin
+      )
+    }
   }
 }
 
