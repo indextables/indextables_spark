@@ -184,6 +184,7 @@ class Tantivy4SparkSimpleAggregateBatch(
     filteredSplits.map { split =>
       new Tantivy4SparkSimpleAggregatePartition(
         split,
+        schema,
         pushedFilters,
         broadcastConfig,
         aggregation,
@@ -209,6 +210,7 @@ class Tantivy4SparkSimpleAggregateBatch(
  */
 class Tantivy4SparkSimpleAggregatePartition(
   val split: com.tantivy4spark.transaction.AddAction,
+  val schema: StructType,
   val pushedFilters: Array[Filter],
   val broadcastConfig: Broadcast[Map[String, String]],
   val aggregation: Aggregation,
@@ -347,8 +349,10 @@ class Tantivy4SparkSimpleAggregateReader(
 
     try {
       // Create cache configuration from broadcast config
-      val cacheConfig = createCacheConfig()
-      val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      val cacheConfig = com.tantivy4spark.util.ConfigUtils.createSplitCacheConfigFromBroadcast(
+        partition.broadcastConfig,
+        Some(partition.tablePath.toString)
+      )
 
       logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Creating searcher for split: ${partition.split.path}")
       logger.info(s"🔍 PATH DEBUG: partition.split.path = '${partition.split.path}'")
@@ -372,9 +376,57 @@ class Tantivy4SparkSimpleAggregateReader(
 
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
-      val searcher = cacheManager.createSplitSearcher(splitPath, splitMetadata)
+
+      // Create SplitSearchEngine for filter conversion and schema access
+      val splitSearchEngine = com.tantivy4spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
+        partition.schema, splitPath, splitMetadata, cacheConfig
+      )
+
+      // Get the internal searcher for aggregation operations
+      val searcher = splitSearchEngine.getSplitSearcher()
 
       logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Searcher created successfully")
+
+      // Get schema field names for filter validation
+      val splitSchema = splitSearchEngine.getSchema()
+      val splitFieldNames = try {
+        import scala.jdk.CollectionConverters._
+        val fieldNames = splitSchema.getFieldNames().asScala.toSet
+        logger.info(s"Split schema contains fields: ${fieldNames.mkString(", ")}")
+        fieldNames
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
+          Set.empty[String]
+      }
+
+      // Convert pushed filters to SplitQuery
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Converting ${partition.pushedFilters.length} pushed filters to query")
+      partition.pushedFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Filter: $f"))
+
+      val splitQuery = if (partition.pushedFilters.nonEmpty) {
+        // Create options map from broadcast config for field configuration
+        import scala.jdk.CollectionConverters._
+        val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.broadcastConfig.value.asJava)
+
+        val queryObj = if (splitFieldNames.nonEmpty) {
+          val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(
+            partition.pushedFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast)
+          )
+          logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery with schema validation: ${validatedQuery.getClass.getSimpleName}")
+          validatedQuery
+        } else {
+          val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(
+            partition.pushedFilters, splitSearchEngine, None, Some(optionsFromBroadcast)
+          )
+          logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery without schema validation: ${fallbackQuery.getClass.getSimpleName}")
+          fallbackQuery
+        }
+        queryObj
+      } else {
+        logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: No filters, using match-all query")
+        new SplitMatchAllQuery()
+      }
 
       // Create individual aggregations for each expression
       import org.apache.spark.sql.connector.expressions.aggregate._
@@ -383,20 +435,18 @@ class Tantivy4SparkSimpleAggregateReader(
       partition.aggregation.aggregateExpressions.zipWithIndex.foreach { case (aggExpr, index) =>
         aggExpr match {
           case _: Count | _: CountStar =>
-            // For COUNT, execute a simple match-all query and get document count
-            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing COUNT aggregation")
-            val query = new SplitMatchAllQuery()
-            val result = searcher.search(query, Int.MaxValue) // Get all matches for count
+            // For COUNT, execute query with filters applied
+            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing COUNT aggregation with filters")
+            val result = searcher.search(splitQuery, Int.MaxValue)
             val count = result.getHits().size()
             logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT result: $count")
             aggregationResults += count.toLong
 
           case sum: Sum =>
             val fieldName = getFieldName(sum.column)
-            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName'")
+            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName' with filters")
             val sumAgg = new com.tantivy4java.SumAggregation(fieldName)
-            val query = new SplitMatchAllQuery()
-            val result = searcher.search(query, 0, s"sum_agg", sumAgg)
+            val result = searcher.search(splitQuery, 0, s"sum_agg", sumAgg)
 
             if (result.hasAggregations()) {
               val sumResult = result.getAggregation("sum_agg").asInstanceOf[com.tantivy4java.SumResult]
@@ -420,10 +470,9 @@ class Tantivy4SparkSimpleAggregateReader(
 
           case min: Min =>
             val fieldName = getFieldName(min.column)
-            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName'")
+            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName' with filters")
             val minAgg = new com.tantivy4java.MinAggregation(fieldName)
-            val query = new SplitMatchAllQuery()
-            val result = searcher.search(query, 0, s"min_agg", minAgg)
+            val result = searcher.search(splitQuery, 0, s"min_agg", minAgg)
 
             if (result.hasAggregations()) {
               val minResult = result.getAggregation("min_agg").asInstanceOf[com.tantivy4java.MinResult]
@@ -437,10 +486,9 @@ class Tantivy4SparkSimpleAggregateReader(
 
           case max: Max =>
             val fieldName = getFieldName(max.column)
-            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName'")
+            logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName' with filters")
             val maxAgg = new com.tantivy4java.MaxAggregation(fieldName)
-            val query = new SplitMatchAllQuery()
-            val result = searcher.search(query, 0, s"max_agg", maxAgg)
+            val result = searcher.search(splitQuery, 0, s"max_agg", maxAgg)
 
             if (result.hasAggregations()) {
               val maxResult = result.getAggregation("max_agg").asInstanceOf[com.tantivy4java.MaxResult]
@@ -469,17 +517,6 @@ class Tantivy4SparkSimpleAggregateReader(
         e.printStackTrace()
         Array.empty[InternalRow]
     }
-  }
-
-  /**
-   * Create cache configuration from broadcast config
-   */
-  private def createCacheConfig(): SplitCacheManager.CacheConfig = {
-    val cacheName = s"simple-agg-cache-${System.currentTimeMillis()}"
-    val maxCacheSize = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "50000000").toLong
-
-    new SplitCacheManager.CacheConfig(cacheName)
-      .withMaxCacheSize(maxCacheSize)
   }
 
   /**
