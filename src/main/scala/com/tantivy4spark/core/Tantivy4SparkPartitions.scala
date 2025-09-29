@@ -552,50 +552,122 @@ class Tantivy4SparkDataWriter(
     }
   }
 
-  private val searchEngine = new TantivySearchEngine(writeSchema, options, hadoopConf)
-  private val statistics = new StatisticsCalculator.DatasetStatistics(writeSchema)
-  private var recordCount = 0L
-  private var partitionValues: Map[String, String] = Map.empty
-  private var partitionValuesExtracted = false
+  // For partitioned tables, we need to maintain separate writers per unique partition value combination
+  // Key: serialized partition values (e.g., "event_date=2023-01-15"), Value: (searchEngine, statistics, recordCount)
+  private val partitionWriters = scala.collection.mutable.Map[String, (TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)]()
+
+  // For non-partitioned tables, use a single writer
+  private var singleWriter: Option[(TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)] =
+    if (partitionColumns.isEmpty) Some((new TantivySearchEngine(writeSchema, options, hadoopConf), new StatisticsCalculator.DatasetStatistics(writeSchema), 0L)) else None
+
+  // Debug: log partition columns being used
+  logger.warn(s"🔍 DATAWRITER INIT: partition $partitionId, partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}")
 
   override def write(record: InternalRow): Unit = {
-    if (recordCount < 5) { // Log first 5 records for debugging
-      logger.debug(s"Writing record ${recordCount + 1}: ${record}")
-    }
+    if (partitionColumns.isEmpty) {
+      // Non-partitioned write - use single writer
+      val (engine, stats, count) = singleWriter.get
+      engine.addDocument(record)
+      stats.updateRow(record)
+      singleWriter = Some((engine, stats, count + 1))
+    } else {
+      // Partitioned write - extract partition values and route to appropriate writer
+      val partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
+      val partitionKey = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
 
-    // Extract partition values from the first record (all records in a partition should have same values)
-    if (!partitionValuesExtracted && partitionColumns.nonEmpty) {
-      try {
-        partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
-        partitionValuesExtracted = true
-        logger.debug(s"Extracted partition values for partition $partitionId: ${partitionValues}")
-      } catch {
-        case ex: Exception =>
-          logger.warn(s"Failed to extract partition values: ${ex.getMessage}", ex)
-      }
-    }
+      // Debug: log record details for the problematic partition
+      val idValue = if (writeSchema.fieldNames.contains("id")) {
+        try {
+          val idIndex = writeSchema.fieldIndex("id")
+          if (!record.isNullAt(idIndex)) record.getUTF8String(idIndex).toString else "null"
+        } catch {
+          case _: Exception => "unknown"
+        }
+      } else "no-id"
 
-    // Store the complete record in the split (including partition columns)
-    // This is consistent with Quickwit's approach
-    searchEngine.addDocument(record)
-    statistics.updateRow(record)
-    recordCount += 1
+      logger.warn(s"🔍 WRITE DEBUG: partition $partitionId writing record to partition '$partitionKey' with id=$idValue, values=$partitionValues")
+
+      // Get or create writer for this partition value combination
+      val (engine, stats, count) = partitionWriters.getOrElseUpdate(partitionKey, {
+        logger.info(s"Creating new writer for partition values: $partitionValues")
+        (new TantivySearchEngine(writeSchema, options, hadoopConf), new StatisticsCalculator.DatasetStatistics(writeSchema), 0L)
+      })
+
+      // Store the complete record in the split (including partition columns)
+      engine.addDocument(record)
+      stats.updateRow(record)
+      partitionWriters(partitionKey) = (engine, stats, count + 1)
+    }
   }
 
   override def commit(): WriterCommitMessage = {
-    logger.debug(s"Committing Tantivy index with $recordCount documents")
+    val allAddActions = scala.collection.mutable.ArrayBuffer[AddAction]()
 
-    // If no records were written, return empty commit message without creating AddAction
-    if (recordCount == 0) {
-      logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written (recordCount=0)")
-      return Tantivy4SparkCommitMessage(null) // Return null AddAction for empty partitions
+    // Handle non-partitioned writes
+    if (singleWriter.isDefined) {
+      val (searchEngine, statistics, recordCount) = singleWriter.get
+      if (recordCount == 0) {
+        logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
+        return Tantivy4SparkCommitMessage(Seq.empty)
+      }
+
+      val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
+      allAddActions += addAction
     }
 
+    // Handle partitioned writes - commit each partition writer separately
+    if (partitionWriters.nonEmpty) {
+      logger.info(s"Committing ${partitionWriters.size} partition writers")
+
+      partitionWriters.foreach { case (partitionKey, (searchEngine, statistics, recordCount)) =>
+        if (recordCount > 0) {
+          val partitionValues = parsePartitionKey(partitionKey)
+          val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
+          allAddActions += addAction
+        } else {
+          logger.warn(s"Skipping empty partition: $partitionKey")
+        }
+      }
+    }
+
+    if (allAddActions.isEmpty) {
+      logger.info(s"⚠️  No records written in partition $partitionId")
+      return Tantivy4SparkCommitMessage(Seq.empty)
+    }
+
+    logger.info(s"Committed partition $partitionId with ${allAddActions.size} split(s)")
+    Tantivy4SparkCommitMessage(allAddActions.toSeq)
+  }
+
+  private def parsePartitionKey(partitionKey: String): Map[String, String] = {
+    // Parse partition key like "event_date=2023-01-15" into Map("event_date" -> "2023-01-15")
+    partitionKey.split("/").map { part =>
+      val Array(key, value) = part.split("=", 2)
+      key -> value
+    }.toMap
+  }
+
+  private def commitWriter(
+      searchEngine: TantivySearchEngine,
+      statistics: StatisticsCalculator.DatasetStatistics,
+      recordCount: Long,
+      partitionValues: Map[String, String],
+      partitionKey: String
+  ): AddAction = {
+    logger.debug(s"Committing Tantivy index with $recordCount documents for partition: $partitionKey")
+
     // Create split file name with UUID for guaranteed uniqueness
-    // Format: part-{partitionId}-{taskId}-{uuid}.split
+    // Format: [partitionDir/]part-{partitionId}-{taskId}-{uuid}.split
     val splitId = UUID.randomUUID().toString
     val fileName = f"part-$partitionId%05d-$taskId-$splitId.split"
-    val filePath = new Path(normalizedTablePath, fileName)
+
+    // For partitioned tables, create file in partition directory
+    val filePath = if (partitionValues.nonEmpty) {
+      val partitionDir = new Path(normalizedTablePath, partitionKey)
+      new Path(partitionDir, fileName)
+    } else {
+      new Path(normalizedTablePath, fileName)
+    }
 
     // Use raw filesystem path for tantivy, not file:// URI
     // For S3Mock, apply path flattening via CloudStorageProvider
@@ -644,10 +716,12 @@ class Tantivy4SparkDataWriter(
     val minValues = statistics.getMinValues
     val maxValues = statistics.getMaxValues
 
-    // For AddAction path, we need to store the relative path that will resolve to the actual
-    // file location during read. If S3Mock flattening was applied, we need to calculate the
-    // relative path that will resolve to the flattened location.
-    val addActionPath = if (outputPath != filePath.toString) {
+    // For AddAction path, we need to store the relative path including partition directory
+    // Format: [partitionDir/]filename.split
+    val addActionPath = if (partitionValues.nonEmpty) {
+      // Include partition directory in the path
+      s"$partitionKey/$fileName"
+    } else if (outputPath != filePath.toString) {
       // Path normalization was applied - calculate relative path from table path to normalized output path
       val tablePath = normalizedTablePath.toString
       val tableUri = java.net.URI.create(tablePath)
@@ -662,8 +736,6 @@ class Tantivy4SparkDataWriter(
         // resolve to the flattened location when combined with the table path
         if (outputKey.contains("___") && !tableKey.contains("___")) {
           // S3Mock flattening occurred - store the entire flattened key relative to bucket
-          // This will allow proper resolution during read
-          val _ = tableUri.getHost
           val flattenedKey = outputKey
           flattenedKey
         } else if (outputKey.startsWith(tableKey)) {
@@ -784,16 +856,17 @@ class Tantivy4SparkDataWriter(
 
     logger.info(s"📝 AddAction created with path: ${addAction.path}")
 
-    logger.info(s"Committed writer for partition $partitionId with $recordCount records")
-    Tantivy4SparkCommitMessage(addAction)
+    addAction
   }
 
   override def abort(): Unit = {
     logger.warn(s"Aborting writer for partition $partitionId")
-    searchEngine.close()
+    singleWriter.foreach { case (engine, _, _) => engine.close() }
+    partitionWriters.values.foreach { case (engine, _, _) => engine.close() }
   }
 
   override def close(): Unit = {
-    searchEngine.close()
+    singleWriter.foreach { case (engine, _, _) => engine.close() }
+    partitionWriters.values.foreach { case (engine, _, _) => engine.close() }
   }
 }

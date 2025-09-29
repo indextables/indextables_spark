@@ -19,8 +19,8 @@ package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage, RequiresDistributionAndOrdering}
-import org.apache.spark.sql.connector.distributions.{Distribution, Distributions}
-import org.apache.spark.sql.connector.expressions.{SortOrder, SortDirection, Expressions}
+import org.apache.spark.sql.connector.distributions.{Distribution, Distributions, ClusteredDistribution}
+import org.apache.spark.sql.connector.expressions.{SortOrder, SortDirection, Expressions, LogicalExpressions}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
 import com.tantivy4spark.config.{Tantivy4SparkConfig, Tantivy4SparkSQLConf}
@@ -259,26 +259,20 @@ class Tantivy4SparkOptimizedWrite(
    * This tells Spark how to distribute (repartition) the data before writing.
    */
   override def requiredDistribution(): Distribution = {
-    // Use clustered distribution with the first available column for clustering
-    // This ensures we have non-empty clustering expressions to avoid the 
-    // "UnspecifiedDistribution + numPartitions" validation error
-    val clusteringExpressions = if (writeSchema.fields.nonEmpty) {
-      // Use the first field in the schema for clustering
-      Array[org.apache.spark.sql.connector.expressions.Expression](
-        Expressions.column(writeSchema.fields(0).name)
-      )
+    if (partitionColumns.nonEmpty) {
+      // For partitioned tables, cluster by partition columns using the correct constructor
+      val clusteredColumns = partitionColumns.toArray
+      logger.info(s"V2 optimized write: clustering by partition columns: ${partitionColumns.mkString(", ")}")
+      Distributions.clustered(clusteredColumns.map(Expressions.identity))
+    } else if (writeSchema.fields.nonEmpty) {
+      // For non-partitioned tables, use the first field in the schema for clustering
+      logger.info(s"V2 optimized write: clustering by first schema field: ${writeSchema.fields(0).name}")
+      Distributions.clustered(Array(Expressions.identity(writeSchema.fields(0).name)))
     } else {
-      // Fallback to empty array if no schema fields (shouldn't happen in practice)
-      logger.warn("No schema fields available for clustering, using empty clustering")
-      Array[org.apache.spark.sql.connector.expressions.Expression]()
+      // Fallback to unspecified distribution if no schema fields
+      logger.warn("No schema fields available for clustering, using unspecified distribution")
+      Distributions.unspecified()
     }
-    
-    val distribution = Distributions.clustered(clusteringExpressions)
-    logger.info(s"V2 optimized write: requiredDistribution() returning ClusteredDistribution with ${clusteringExpressions.length} clustering expressions")
-    if (clusteringExpressions.nonEmpty) {
-      logger.info(s"Clustering by field: ${clusteringExpressions(0)}")
-    }
-    distribution
   }
   
   /**
@@ -387,8 +381,9 @@ class Tantivy4SparkOptimizedWrite(
       println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
     
-    val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+    val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case _ => Seq.empty[AddAction]
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
@@ -480,8 +475,9 @@ class Tantivy4SparkOptimizedWrite(
     logger.warn(s"Aborting write with ${messages.length} messages")
     
     // Clean up any files that were created but not committed
-    val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage => msg.addAction
+    val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case _ => Seq.empty[AddAction]
     }
 
     // In a real implementation, we would delete the physical files here

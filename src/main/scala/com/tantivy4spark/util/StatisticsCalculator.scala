@@ -22,8 +22,8 @@ import org.apache.spark.sql.types._
 import scala.collection.mutable
 
 object StatisticsCalculator {
-  
-  class ColumnStatistics {
+
+  class ColumnStatistics(dataType: DataType) {
     private var minValue: Any = null
     private var maxValue: Any = null
     private var hasValues = false
@@ -45,8 +45,21 @@ object StatisticsCalculator {
       }
     }
     
-    def getMin: Option[String] = Option(minValue).map(_.toString)
-    def getMax: Option[String] = Option(maxValue).map(_.toString)
+    def getMin: Option[String] = Option(minValue).map(convertToString)
+    def getMax: Option[String] = Option(maxValue).map(convertToString)
+
+    private def convertToString(value: Any): String = {
+      dataType match {
+        case DateType =>
+          // Convert days since epoch to ISO date string
+          value match {
+            case days: Int => java.time.LocalDate.ofEpochDay(days.toLong).toString
+            case days: Long => java.time.LocalDate.ofEpochDay(days).toString
+            case _ => value.toString
+          }
+        case _ => value.toString
+      }
+    }
     
     private def compareValues(v1: Any, v2: Any, dataType: DataType): Int = {
       (v1, v2, dataType) match {
@@ -56,6 +69,7 @@ object StatisticsCalculator {
         case (a: Double, b: Double, DoubleType) => a.compareTo(b)
         case (a: Boolean, b: Boolean, BooleanType) => a.compareTo(b)
         case (a: String, b: String, StringType) => a.compareTo(b)
+        case (a: Int, b: Int, DateType) => a.compareTo(b) // DateType stores days since epoch as Int
         case _ => 0 // Default to equal for unsupported types
       }
     }
@@ -65,7 +79,7 @@ object StatisticsCalculator {
     private val columnStats = mutable.Map[String, ColumnStatistics]()
     
     schema.fields.foreach { field =>
-      columnStats(field.name) = new ColumnStatistics()
+      columnStats(field.name) = new ColumnStatistics(field.dataType)
     }
     
     def updateRow(row: InternalRow): Unit = {

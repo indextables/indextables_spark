@@ -101,8 +101,9 @@ class Tantivy4SparkBatchWrite(
     // Initialize transaction log with schema and partition columns
     transactionLog.initialize(writeInfo.schema(), partitionColumns)
 
-    val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
+    val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case _ => Seq.empty[AddAction]
     }
 
     // Log how many empty partitions were filtered out
@@ -122,8 +123,9 @@ class Tantivy4SparkBatchWrite(
     logger.warn(s"Aborting write with ${messages.length} messages")
 
     // Clean up any files that were created but not committed
-    val addActions = messages.collect {
-      case msg: Tantivy4SparkCommitMessage if msg.addAction != null => msg.addAction
+    val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case _ => Seq.empty[AddAction]
     }
 
     // In a real implementation, we would delete the physical files here
@@ -131,4 +133,4 @@ class Tantivy4SparkBatchWrite(
   }
 }
 
-case class Tantivy4SparkCommitMessage(addAction: AddAction) extends WriterCommitMessage
+case class Tantivy4SparkCommitMessage(addActions: Seq[AddAction]) extends WriterCommitMessage
