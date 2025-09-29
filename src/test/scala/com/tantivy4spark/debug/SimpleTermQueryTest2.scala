@@ -101,25 +101,30 @@ class SimpleTermQueryTest2 extends TestBase {
         val searchSchema = splitSearcher.getSchema()
         println(s"🔍 Schema fields: ${searchSchema.getFieldNames()}")
         
-        // Test 1: Simple term query for "Engineering"
-        println("\n🔎 Test 1: Term query for department = 'Engineering'")
-        val engineeringQuery = new SplitTermQuery("department", "Engineering")
+        // Test 1: Simple term query for "engineering" (lowercase - tokenized form)
+        // Note: Text fields with default tokenizer lowercase terms during indexing
+        println("\n🔎 Test 1: Term query for department = 'engineering' (tokenized form)")
+        val engineeringQuery = new SplitTermQuery("department", "engineering")
         println(s"Created SplitQuery: ${engineeringQuery.getClass.getSimpleName}")
-        
+
         val engineeringResults = splitSearcher.search(engineeringQuery, 10)
         val engineeringResultsSize = engineeringResults.getHits().size()
-        println(s"Found $engineeringResultsSize results for 'Engineering'")
+        println(s"Found $engineeringResultsSize results for 'engineering'")
         engineeringResults.close()
-        
+
         // Should find 2 results (id=1 and id=4)
         assert(engineeringResultsSize == 2, s"Expected 2 Engineering results, got $engineeringResultsSize")
         
-        // Test 2: Term query with no results
-        println("\n🔎 Test 2: Term query for department = 'engineering' (lowercase)")
-        val engineeringLowerQuery = new SplitTermQuery("department", "engineering")
-        val engineeringLowerResults = splitSearcher.search(engineeringLowerQuery, 10)
-        println(s"Found ${engineeringLowerResults.getHits().size()} results")
-        engineeringLowerResults.close()
+        // Test 2: Term query with no results (original capitalized form)
+        println("\n🔎 Test 2: Term query for department = 'Engineering' (original case - should find 0)")
+        val engineeringCapitalQuery = new SplitTermQuery("department", "Engineering")
+        val engineeringCapitalResults = splitSearcher.search(engineeringCapitalQuery, 10)
+        val capitalResultsSize = engineeringCapitalResults.getHits().size()
+        println(s"Found $capitalResultsSize results for 'Engineering'")
+        engineeringCapitalResults.close()
+
+        // Should find 0 results because text field tokenizes to lowercase
+        assert(capitalResultsSize == 0, s"Expected 0 results for capitalized 'Engineering', got $capitalResultsSize")
         
         // Test 3: Match all query
         println("\n🔎 Test 3: Match all query")

@@ -202,7 +202,8 @@ class TransactionLogPerformanceTest extends TestBase {
         Map(
           "spark.tantivy4spark.checkpoint.enabled" -> "true",
           "spark.tantivy4spark.checkpoint.interval" -> "3",
-          "spark.tantivy4spark.checkpoint.parallelism" -> "2"
+          "spark.tantivy4spark.checkpoint.parallelism" -> "2",
+          "spark.tantivy4spark.transaction.optimized.enabled" -> "false"  // Use standard transaction log for checkpoint testing
         ).asJava
       )
 
@@ -456,7 +457,8 @@ class TransactionLogPerformanceTest extends TestBase {
           "spark.tantivy4spark.checkpoint.enabled" -> "true",
           "spark.tantivy4spark.checkpoint.interval" -> "3",
           "spark.tantivy4spark.checkpoint.parallelism" -> "2",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+          "spark.tantivy4spark.transaction.cache.enabled" -> "false",
+          "spark.tantivy4spark.transaction.allowDirectUsage" -> "true"  // Allow direct usage for test
         ).asJava
       )
 

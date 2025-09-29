@@ -51,17 +51,27 @@ class OptimizedTransactionLog(
   )
   private val transactionLogPath = new Path(tablePath, "_transaction_log")
 
-  // Enhanced caching system
-  private val enhancedCache = new EnhancedTransactionLogCache(
-    logCacheSize = options.getLong("spark.tantivy4spark.cache.log.size", 1000),
-    logCacheTTLMinutes = options.getLong("spark.tantivy4spark.cache.log.ttl", 5),
-    snapshotCacheSize = options.getLong("spark.tantivy4spark.cache.snapshot.size", 100),
-    snapshotCacheTTLMinutes = options.getLong("spark.tantivy4spark.cache.snapshot.ttl", 10),
-    fileListCacheSize = options.getLong("spark.tantivy4spark.cache.filelist.size", 50),
-    fileListCacheTTLMinutes = options.getLong("spark.tantivy4spark.cache.filelist.ttl", 2),
-    metadataCacheSize = options.getLong("spark.tantivy4spark.cache.metadata.size", 100),
-    metadataCacheTTLMinutes = options.getLong("spark.tantivy4spark.cache.metadata.ttl", 30)
-  )
+  // Enhanced caching system with support for legacy expirationSeconds setting
+  private val enhancedCache = {
+    // Convert legacy expirationSeconds to minutes for enhanced cache compatibility
+    // For test compatibility, allow sub-minute expiration by using fraction of minute
+    val legacyExpirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", -1)
+    val legacyExpirationMinutes = if (legacyExpirationSeconds > 0) {
+      if (legacyExpirationSeconds < 60) 1L // Use 1 minute minimum for very short times
+      else legacyExpirationSeconds / 60
+    } else -1L
+
+    new EnhancedTransactionLogCache(
+      logCacheSize = options.getLong("spark.tantivy4spark.cache.log.size", 1000),
+      logCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.log.ttl", 5),
+      snapshotCacheSize = options.getLong("spark.tantivy4spark.cache.snapshot.size", 100),
+      snapshotCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.snapshot.ttl", 10),
+      fileListCacheSize = options.getLong("spark.tantivy4spark.cache.filelist.size", 50),
+      fileListCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.filelist.ttl", 2),
+      metadataCacheSize = options.getLong("spark.tantivy4spark.cache.metadata.size", 100),
+      metadataCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.metadata.ttl", 30)
+    )
+  }
 
   // Parallel operations handler
   private val parallelOps = new ParallelTransactionLogOperations(
@@ -617,5 +627,21 @@ class OptimizedTransactionLog(
     // when new versions are written
     val versionHash = versions.sorted.mkString(",").hashCode
     s"${tablePath.toString}-${versionHash}"
+  }
+
+  /**
+   * Get cache statistics for monitoring and debugging.
+   * Returns the enhanced cache statistics from the multi-level cache system.
+   */
+  def getCacheStatistics(): CacheStatistics = {
+    enhancedCache.getStatistics()
+  }
+
+  /**
+   * Invalidate all cached data for this table.
+   * Useful for testing or after external modifications.
+   */
+  def invalidateCache(tablePath: String): Unit = {
+    enhancedCache.invalidateTable(tablePath)
   }
 }

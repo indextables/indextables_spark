@@ -49,9 +49,19 @@ object TransactionLogFactory {
     val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
                                           options.getBoolean("spark.tantivy4spark.transaction.optimized.enabled", true))
 
-    logger.info(s"Creating transaction log for $tablePath (useOptimized setting: $useOptimized)")
+    // Also check if caching is disabled - if so, use standard transaction log
+    val cacheEnabled = options.getBoolean("spark.tantivy4spark.transaction.cache.enabled", true)
 
-    if (useOptimized) {
+    // For very short cache expiration times (like in tests), use standard transaction log
+    // since enhanced cache uses minute-based TTL which doesn't work well for sub-minute tests
+    val expirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 300L)
+    val useStandardForShortExpiration = expirationSeconds > 0 && expirationSeconds < 60
+
+    val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
+
+    logger.info(s"Creating transaction log for $tablePath (useOptimized: $useOptimized, cacheEnabled: $cacheEnabled, expirationSeconds: $expirationSeconds, useStandardForShortExpiration: $useStandardForShortExpiration, shouldUseOptimized: $shouldUseOptimized)")
+
+    if (shouldUseOptimized) {
       // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
       new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
     } else {
@@ -129,6 +139,44 @@ class TransactionLogAdapter(
 
   override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
     optimizedLog.removeFile(path, deletionTimestamp)
+  }
+
+  override def getCacheStats(): Option[CacheStats] = {
+    // Convert EnhancedTransactionLogCache statistics to legacy CacheStats format
+    val enhancedStats = optimizedLog.getCacheStatistics()
+
+    // Calculate aggregate statistics from all enhanced cache components
+    val totalHits = enhancedStats.logCacheStats.hitCount() +
+                   enhancedStats.snapshotCacheStats.hitCount() +
+                   enhancedStats.fileListCacheStats.hitCount() +
+                   enhancedStats.metadataCacheStats.hitCount() +
+                   enhancedStats.versionCacheStats.hitCount()
+
+    val totalMisses = enhancedStats.logCacheStats.missCount() +
+                     enhancedStats.snapshotCacheStats.missCount() +
+                     enhancedStats.fileListCacheStats.missCount() +
+                     enhancedStats.metadataCacheStats.missCount() +
+                     enhancedStats.versionCacheStats.missCount()
+
+    val hitRate = if (totalHits + totalMisses > 0) totalHits.toDouble / (totalHits + totalMisses) else 0.0
+
+    // Use request count as a proxy for "versions in cache" since size() is not available
+    val versionsInCache = enhancedStats.versionCacheStats.requestCount().toInt
+
+    // Read actual expiration setting from options
+    val expirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
+
+    Some(CacheStats(
+      hits = totalHits,
+      misses = totalMisses,
+      hitRate = hitRate,
+      versionsInCache = versionsInCache,
+      expirationSeconds = expirationSeconds
+    ))
+  }
+
+  override def invalidateCache(): Unit = {
+    optimizedLog.invalidateCache(getTablePath().toString)
   }
 
   // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions

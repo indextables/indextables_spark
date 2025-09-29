@@ -64,14 +64,18 @@ class Tantivy4SparkScanBuilder(
 
 
   override def build(): Scan = {
+    println(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
+
     // Check if we have aggregate pushdown
     _pushedAggregation match {
       case Some(aggregation) =>
+        println(s"🔍 BUILD: Creating aggregate scan for pushed aggregation: $aggregation")
         logger.info(s"🔍 BUILD: Creating aggregate scan for pushed aggregation")
         // Return aggregate scan (will implement this next)
         createAggregateScan(aggregation)
       case None =>
         // Regular scan
+        println(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
         logger.info(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
@@ -79,6 +83,8 @@ class Tantivy4SparkScanBuilder(
         logger.error(s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan")
         extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
 
+        println(s"🔍 BUILD DEBUG: Creating Tantivy4SparkScan with ${_pushedFilters.length} pushed filters")
+        _pushedFilters.foreach(filter => println(s"  - Creating scan with filter: $filter"))
         new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
     }
   }
@@ -96,9 +102,11 @@ class Tantivy4SparkScanBuilder(
         // Simple aggregation without GROUP BY
         // Check if we can use transaction log count optimization
         if (canUseTransactionLogCount(aggregation)) {
+          println(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
           logger.info(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
           createTransactionLogCountScan(aggregation)
         } else {
+          println(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan")
           logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan")
           createSimpleAggregateScan(aggregation)
         }
@@ -112,6 +120,7 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"🔍 GROUP BY SCAN: Creating GROUP BY scan for aggregation: $aggregation")
     logger.info(s"🔍 GROUP BY SCAN: GROUP BY columns: ${groupByColumns.mkString(", ")}")
 
+    // TODO: Verify that GROUP BY aggregations are also using the shared data skipping function
     // For now, create a specialized GROUP BY scan
     // This will be implemented as Tantivy4SparkGroupByAggregateScan
     new Tantivy4SparkGroupByAggregateScan(
@@ -133,7 +142,7 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan for: ${aggregation.aggregateExpressions.mkString(", ")}")
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, broadcastConfig, aggregation)
+    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, schema, _pushedFilters, options, broadcastConfig, aggregation)
   }
 
   /**
@@ -176,8 +185,12 @@ class Tantivy4SparkScanBuilder(
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
+    println(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
     logger.error(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
-    filters.foreach(filter => logger.error(s"  - Input filter: $filter (${filter.getClass.getSimpleName})"))
+    filters.foreach(filter => {
+      println(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
+      logger.error(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
+    })
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
     // we only need to handle regular Spark filters here.
@@ -185,6 +198,9 @@ class Tantivy4SparkScanBuilder(
 
     // Store supported filters
     _pushedFilters = supported
+
+    println(s"🔍 PUSHFILTERS DEBUG: Stored ${_pushedFilters.length} pushed filters")
+    _pushedFilters.foreach(filter => println(s"  - Stored filter: $filter"))
 
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
@@ -198,7 +214,12 @@ class Tantivy4SparkScanBuilder(
   }
 
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
+    println(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
     logger.info(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
+    predicates.foreach(predicate => {
+      println(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
+      logger.info(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
+    })
     predicates.foreach(predicate => logger.info(s"  - Input predicate: $predicate (${predicate.getClass.getSimpleName})"))
 
     // Convert predicates that we can handle and extract IndexQuery information

@@ -130,7 +130,9 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     Map(
       "spark.tantivy4spark.aws.accessKey" -> accessKey,
       "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.tantivy4spark.aws.region" -> S3_REGION,
+      "spark.tantivy4spark.indexing.fastfields" -> "category",  // Required for GROUP BY aggregation
+      "spark.tantivy4spark.indexing.typemap.category" -> "string"  // Configure as string for exact matching
     )
   }
 

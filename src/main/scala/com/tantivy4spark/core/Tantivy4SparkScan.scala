@@ -153,17 +153,37 @@ class Tantivy4SparkScan(
     }
   }
 
-  private def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
+  def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
+    println(s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters")
     logger.warn(s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters")
-    filters.foreach(f => logger.warn(s"🔍 DATA SKIPPING DEBUG: Filter: $f"))
-    
+    filters.foreach(f => {
+      println(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
+      logger.warn(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
+    })
+
     if (filters.isEmpty) {
       logger.warn(s"🔍 DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")
       return addActions
     }
 
     val partitionColumns = transactionLog.getPartitionColumns()
+    println(s"🔍 DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
     val initialCount = addActions.length
+
+    // Debug: Print AddAction details
+    addActions.zipWithIndex.foreach { case (action, index) =>
+      println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - path: ${action.path}")
+      println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - partitionValues: ${action.partitionValues}")
+      action.numRecords.foreach { numRecs =>
+        println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - numRecords: $numRecs")
+      }
+      action.minValues.foreach { minVals =>
+        println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - minValues: $minVals")
+      }
+      action.maxValues.foreach { maxVals =>
+        println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - maxValues: $maxVals")
+      }
+    }
     
     // Step 1: Apply partition pruning
     val partitionPrunedActions = if (partitionColumns.nonEmpty) {
@@ -245,14 +265,20 @@ class Tantivy4SparkScan(
   private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
     import org.apache.spark.sql.sources._
 
+    println(s"🔍 canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
+    filters.foreach(f => println(s"🔍 canFileMatchFilters: Filter: $f"))
+
     // If no min/max values available, conservatively keep the file
     if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
+      println(s"🔍 canFileMatchFilters: No min/max values, keeping file")
       return true
     }
 
-    // A file can match if ANY of the top-level filters can match
-    // This correctly handles cases where filters are combined with OR at the top level
-    filters.exists(filter => canFilterMatchFile(addAction, filter))
+    // A file can match only if ALL filters can potentially match
+    // Filters at this level are combined with AND logic by Spark
+    val result = filters.forall(filter => canFilterMatchFile(addAction, filter))
+    println(s"🔍 canFileMatchFilters: Result for file ${addAction.path}: $result")
+    result
   }
 
   /**

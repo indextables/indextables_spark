@@ -39,7 +39,9 @@ class FieldTypeTest extends TestBase with Matchers {
       val results = df.collect()
 
       results should have length 2
-      results(0).getString(0) should be("doc1")
+      val ids = results.map(_.getString(0)).toSet
+      ids should contain("doc1")
+      ids should contain("doc2")
     }
   }
 
@@ -60,7 +62,9 @@ class FieldTypeTest extends TestBase with Matchers {
       val results = df.collect()
 
       results should have length 2
-      results(0).getString(0) should be("doc1")
+      val ids = results.map(_.getString(0)).toSet
+      ids should contain("doc1")
+      ids should contain("doc2")
     }
   }
 }

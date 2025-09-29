@@ -46,14 +46,14 @@ class DateStringFilterValidationTest extends TestBase {
 
       // Write partitioned by date with fast field configuration
       testData.write
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
       // Read back and verify schema
-      val df = spark.read.format("tantivy4spark").load(tablePath)
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
 
       // Verify the data is there
       assert(df.count() == 5, "Should have 5 records")
@@ -118,13 +118,13 @@ class DateStringFilterValidationTest extends TestBase {
       ).toDF("id", "event_date", "description")
 
       testData.write
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
-      val df = spark.read.format("tantivy4spark").load(tablePath)
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
 
       // Test year boundary
       val yearBoundary = df.filter($"event_date" >= "2024-01-01" && $"event_date" <= "2024-01-01")
@@ -154,13 +154,13 @@ class DateStringFilterValidationTest extends TestBase {
       ).toDF("id", "event_date", "description")
 
       testData.write
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.tantivy4spark.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
-      val df = spark.read.format("tantivy4spark").load(tablePath)
+      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
 
       // Filter that should only touch specific partitions
       val januaryData = df.filter($"event_date" >= "2023-01-01" && $"event_date" < "2023-02-01")

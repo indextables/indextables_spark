@@ -25,10 +25,154 @@ import scala.jdk.CollectionConverters._
 import com.tantivy4spark.search.SplitSearchEngine
 import com.tantivy4spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
+// Data class for storing range optimization information
+case class RangeInfo(min: Option[Any], max: Option[Any], minInclusive: Boolean, maxInclusive: Boolean)
+
 object FiltersToQueryConverter {
-  
+
   private val logger = LoggerFactory.getLogger(this.getClass)
-  
+
+  // Store range optimization information globally
+  private val rangeOptimizations = scala.collection.mutable.Map[String, RangeInfo]()
+
+  /**
+   * Optimize range filters by detecting >= and < operations on the same field and
+   * storing the optimization information for later use.
+   */
+  def optimizeRangeFilters(filters: Array[Filter]): Array[Filter] = {
+    // Clear previous optimizations
+    rangeOptimizations.clear()
+
+    // Group filters by field name for range detection
+    val filtersByField = filters.groupBy {
+      case GreaterThan(attr, _) => Some(attr)
+      case GreaterThanOrEqual(attr, _) => Some(attr)
+      case LessThan(attr, _) => Some(attr)
+      case LessThanOrEqual(attr, _) => Some(attr)
+      case _ => None
+    }
+
+    val nonRangeFilters = filtersByField.getOrElse(None, Array.empty)
+    val rangeFilters = filtersByField - None
+
+    // Detect range combinations and store optimization info
+    val remainingFilters = scala.collection.mutable.ArrayBuffer[Filter]()
+
+    rangeFilters.foreach { case (fieldOpt, fieldFilters) =>
+      fieldOpt match {
+        case Some(field) if fieldFilters.length > 1 =>
+          // Check if we have a combination that can be optimized
+          val rangeInfo = analyzeRangeFilters(fieldFilters)
+          if (rangeInfo.min.isDefined || rangeInfo.max.isDefined) {
+            // Store optimization info and exclude these filters from regular processing
+            rangeOptimizations(field) = rangeInfo
+            queryLog(s"Detected range optimization for field '$field': ${rangeInfo}")
+          } else {
+            // Keep filters as-is if no optimization possible
+            remainingFilters ++= fieldFilters
+          }
+        case Some(_) =>
+          // Single range filter, keep as-is
+          remainingFilters ++= fieldFilters
+        case None =>
+          // Should not happen given our grouping
+      }
+    }
+
+    // Return non-range filters plus any remaining range filters
+    nonRangeFilters ++ remainingFilters
+  }
+
+  /**
+   * Analyze range filters for a field and extract range information.
+   */
+  private def analyzeRangeFilters(filters: Array[Filter]): RangeInfo = {
+    var min: Option[Any] = None
+    var max: Option[Any] = None
+    var minInclusive = true
+    var maxInclusive = true
+
+    filters.foreach {
+      case GreaterThan(_, value) =>
+        min = Some(value)
+        minInclusive = false
+      case GreaterThanOrEqual(_, value) =>
+        min = Some(value)
+        minInclusive = true
+      case LessThan(_, value) =>
+        max = Some(value)
+        maxInclusive = false
+      case LessThanOrEqual(_, value) =>
+        max = Some(value)
+        maxInclusive = true
+      case _ =>
+        // Ignore non-range filters
+    }
+
+    RangeInfo(min, max, minInclusive, maxInclusive)
+  }
+
+  /**
+   * Create an optimized range query from stored range information using SplitRangeQuery.
+   */
+  private def createOptimizedRangeQuery(field: String, rangeInfo: RangeInfo, schema: Schema, splitSearchEngine: SplitSearchEngine): Option[SplitQuery] = {
+    try {
+      val fieldType = getFieldType(schema, field)
+      val minValue = rangeInfo.min.map(convertSparkValueToTantivy(_, fieldType))
+      val maxValue = rangeInfo.max.map(convertSparkValueToTantivy(_, fieldType))
+
+      // Convert values to string format for SplitRangeQuery
+      def formatValueForRangeQuery(value: Any): String = {
+        value match {
+          case dateString: String =>
+            // For date fields, use YYYY-MM-DD format strings directly
+            dateString
+          case other => other.toString
+        }
+      }
+
+      // Determine the tantivy field type for SplitRangeQuery
+      val tantivyFieldType = fieldType match {
+        case FieldType.DATE => "date"
+        case FieldType.INTEGER => "i64"
+        case FieldType.UNSIGNED => "u64"
+        case FieldType.FLOAT => "f64"
+        case _ => "str"
+      }
+
+      // Create range bounds
+      val lowerBound = minValue match {
+        case Some(value) =>
+          val valueStr = formatValueForRangeQuery(value)
+          if (rangeInfo.minInclusive) {
+            com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(valueStr)
+          } else {
+            com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(valueStr)
+          }
+        case None => com.tantivy4java.SplitRangeQuery.RangeBound.unbounded()
+      }
+
+      val upperBound = maxValue match {
+        case Some(value) =>
+          val valueStr = formatValueForRangeQuery(value)
+          if (rangeInfo.maxInclusive) {
+            com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(valueStr)
+          } else {
+            com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(valueStr)
+          }
+        case None => com.tantivy4java.SplitRangeQuery.RangeBound.unbounded()
+      }
+
+      val rangeQuery = new com.tantivy4java.SplitRangeQuery(field, lowerBound, upperBound, tantivyFieldType)
+      queryLog(s"Creating optimized SplitRangeQuery: $rangeQuery")
+      Some(rangeQuery)
+    } catch {
+      case e: Exception =>
+        queryLog(s"Failed to create optimized range query for field '$field': ${e.getMessage}")
+        None
+    }
+  }
+
   /**
    * Safely execute a function with a Schema copy to avoid Arc reference counting issues.
    * This creates an independent Schema copy that can be used safely even if the original is closed.
@@ -86,42 +230,54 @@ object FiltersToQueryConverter {
       return new SplitMatchAllQuery()  // Match-all query using object type
     }
 
-    // Debug logging to understand what filters we receive  
+    // Debug logging to understand what filters we receive
     queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
     filters.zipWithIndex.foreach { case (filter, idx) =>
       queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
     }
 
+    // Optimize range filters before conversion
+    val optimizedFilters = optimizeRangeFilters(filters)
+
     // Filter out filters that reference non-existent fields
     val validFilters = schemaFieldNames match {
       case Some(fieldNames) =>
         queryLog(s"Schema validation enabled with fields: ${fieldNames.mkString(", ")}")
-        val valid = filters.filter(filter => isFilterValidForSchema(filter, fieldNames))
-        queryLog(s"Schema validation results: ${valid.length}/${filters.length} filters passed validation")
+        val valid = optimizedFilters.filter(filter => isFilterValidForSchema(filter, fieldNames))
+        queryLog(s"Schema validation results: ${valid.length}/${optimizedFilters.length} filters passed validation")
         valid
       case None =>
         queryLog("No schema validation - using all filters")
-        filters // No schema validation if fieldNames not provided
+        optimizedFilters // No schema validation if fieldNames not provided
     }
 
-    if (validFilters.length < filters.length) {
-      val skippedCount = filters.length - validFilters.length
+    if (validFilters.length < optimizedFilters.length) {
+      val skippedCount = optimizedFilters.length - validFilters.length
       logger.info(s"Schema validation: Skipped $skippedCount filters due to field validation")
     }
 
     // Convert filters to SplitQuery objects using safe schema copy
     val splitQueries = withSchemaCopy(splitSearchEngine) { schema =>
-      validFilters.flatMap(filter => convertFilterToSplitQuery(filter, schema, splitSearchEngine, options))
+      validFilters.flatMap(filter => convertFilterToSplitQuery(filter, schema, splitSearchEngine, options)).toList
     }
-    
-    if (splitQueries.isEmpty) {
+
+    // Add optimized range queries for fields that had multiple range conditions
+    val optimizedRangeQueries = withSchemaCopy(splitSearchEngine) { schema =>
+      rangeOptimizations.toList.flatMap { case (field, rangeInfo) =>
+        createOptimizedRangeQuery(field, rangeInfo, schema, splitSearchEngine).toList
+      }
+    }
+
+    val allQueries = splitQueries ++ optimizedRangeQueries
+
+    if (allQueries.isEmpty) {
       new SplitMatchAllQuery()
-    } else if (splitQueries.length == 1) {
-      splitQueries.head
+    } else if (allQueries.length == 1) {
+      allQueries.head
     } else {
       // Combine multiple queries with AND logic using SplitBooleanQuery
       val boolQuery = new SplitBooleanQuery()
-      splitQueries.foreach(query => boolQuery.addMust(query))
+      allQueries.foreach(query => boolQuery.addMust(query))
       boolQuery
     }
   }
@@ -829,28 +985,28 @@ object FiltersToQueryConverter {
     
     fieldType match {
       case FieldType.DATE =>
-        // Convert to LocalDateTime for proper date field querying
-        import java.time.LocalDateTime
-        import java.time.LocalDate
-        value match {
-          case ts: java.sql.Timestamp => 
-            ts.toLocalDateTime() // Direct conversion to LocalDateTime
-          case date: java.sql.Date => 
-            date.toLocalDate().atStartOfDay() // Convert to LocalDateTime at start of day
+        // Convert to YYYY-MM-DD date string format for SplitRangeQuery compatibility
+        // Based on SplitDateRangeQueryTest: uses simple date strings like "2021-01-01"
+        import java.time.{LocalDateTime, LocalDate}
+        val localDate = value match {
+          case ts: java.sql.Timestamp =>
+            ts.toLocalDateTime().toLocalDate // Get date part only
+          case date: java.sql.Date =>
+            date.toLocalDate() // Direct conversion to LocalDate
           case dateStr: String =>
-            // Parse string date to LocalDateTime
-            val localDate = LocalDate.parse(dateStr)
-            localDate.atStartOfDay()
+            // Parse string date to LocalDate
+            LocalDate.parse(dateStr)
           case daysSinceEpoch: Int =>
-            // Convert days since epoch to LocalDateTime
+            // Convert days since epoch to LocalDate
             val epochDate = LocalDate.of(1970, 1, 1)
-            val localDate = epochDate.plusDays(daysSinceEpoch.toLong)
-            localDate.atStartOfDay()
-          case other => 
+            epochDate.plusDays(daysSinceEpoch.toLong)
+          case other =>
             queryLog(s"DATE conversion: Unexpected type ${other.getClass.getSimpleName}, trying to parse as string")
-            val localDate = LocalDate.parse(other.toString)
-            localDate.atStartOfDay()
+            LocalDate.parse(other.toString)
         }
+        val dateString = localDate.toString // This gives YYYY-MM-DD format
+        queryLog(s"DATE conversion: $value -> $dateString")
+        dateString
       case FieldType.INTEGER =>
         // Keep original types for range queries - tantivy4java handles type conversion internally
         val result = value match {
@@ -903,12 +1059,37 @@ object FiltersToQueryConverter {
 
         // EqualTo should always use exact matching regardless of field type
         // For text fields, use phrase query syntax with quotes to ensure exact phrase matching
+        // For date fields, use range queries for proper date matching
         // For other fields, use term queries
         if (fieldType == FieldType.TEXT) {
           // Use parseQuery with quoted syntax for exact phrase matching on tokenized text fields
           val quotedValue = "\"" + convertedValue.toString.replace("\"", "\\\"") + "\""
           val queryString = s"$attribute:$quotedValue"
           Some(splitSearchEngine.parseQuery(queryString))
+        } else if (fieldType == FieldType.DATE) {
+          // For date fields, use SplitRangeQuery covering the entire day
+          convertedValue match {
+            case dateString: String =>
+              // For date equality, create a range covering the entire day using date strings
+              // Based on SplitDateRangeQueryTest: use YYYY-MM-DD format strings with "date" field type
+              import java.time.LocalDate
+              val localDate = LocalDate.parse(dateString)
+              val nextDay = localDate.plusDays(1)
+              val startDateStr = localDate.toString  // YYYY-MM-DD format
+              val endDateStr = nextDay.toString      // YYYY-MM-DD format
+
+              val rangeQuery = new com.tantivy4java.SplitRangeQuery(
+                attribute,
+                com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(startDateStr),  // Include start of day
+                com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(endDateStr),    // Exclude start of next day
+                "date"  // Use "date" field type as shown in SplitDateRangeQueryTest
+              )
+              queryLog(s"Creating date equality SplitRangeQuery with date strings: [$startDateStr TO $endDateStr) for $localDate")
+              Some(rangeQuery)
+            case other =>
+              queryLog(s"Unexpected date value type: ${other.getClass.getSimpleName}, falling back to term query")
+              Some(new SplitTermQuery(attribute, convertedValue.toString))
+          }
         } else {
           // For string fields and other types, use exact term matching
           Some(new SplitTermQuery(attribute, convertedValue.toString))

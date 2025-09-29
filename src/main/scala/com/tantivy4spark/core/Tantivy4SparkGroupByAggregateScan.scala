@@ -54,6 +54,7 @@ class Tantivy4SparkGroupByAggregateScan(
     new Tantivy4SparkGroupByAggregateBatch(
       sparkSession,
       transactionLog,
+      schema,
       pushedFilters,
       options,
       broadcastConfig,
@@ -167,6 +168,7 @@ class Tantivy4SparkGroupByAggregateScan(
 class Tantivy4SparkGroupByAggregateBatch(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
+  schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   broadcastConfig: Broadcast[Map[String, String]],
@@ -180,11 +182,19 @@ class Tantivy4SparkGroupByAggregateBatch(
     logger.info(s"🔍 GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
     // Get all splits from transaction log
-    val splits = transactionLog.listFiles()
-    logger.info(s"🔍 GROUP BY BATCH: Found ${splits.length} splits for GROUP BY aggregation")
+    val allSplits = transactionLog.listFiles()
+    logger.info(s"🔍 GROUP BY BATCH: Found ${allSplits.length} total splits")
 
-    // Create one partition per split for distributed GROUP BY processing
-    splits.map { split =>
+    // Apply data skipping using the same logic as simple aggregate scan
+    // Use the full table schema to ensure proper field type detection for data skipping
+    val helperScan = new Tantivy4SparkScan(
+      sparkSession, transactionLog, schema, pushedFilters, options, None, broadcastConfig, Array.empty
+    )
+    val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
+    logger.info(s"🔍 GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
+
+    // Create one partition per filtered split for distributed GROUP BY processing
+    filteredSplits.map { split =>
       new Tantivy4SparkGroupByAggregatePartition(
         split,
         pushedFilters,
@@ -227,6 +237,34 @@ class Tantivy4SparkGroupByAggregatePartition(
   logger.info(s"🔍 GROUP BY PARTITION: Table path: ${tablePath}")
   logger.info(s"🔍 GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
   logger.info(s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
+
+  /**
+   * Provide preferred locations for this GROUP BY aggregate partition based on split cache locality.
+   * Uses the same broadcast-based locality information as regular scan partitions.
+   */
+  override def preferredLocations(): Array[String] = {
+    import com.tantivy4spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+
+    logger.info(s"🎯 [GROUP-BY-AGG] preferredLocations() called for split: ${split.path}")
+
+    val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(split.path)
+    if (preferredHosts.nonEmpty) {
+      logger.info(s"🎯 [GROUP-BY-AGG] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
+      preferredHosts
+    } else {
+      logger.info(s"🎯 [GROUP-BY-AGG] No broadcast hosts found, trying legacy registry")
+      // Fallback to legacy registry for compatibility
+      val legacyHosts = SplitLocationRegistry.getPreferredHosts(split.path)
+      if (legacyHosts.nonEmpty) {
+        logger.info(s"🎯 [GROUP-BY-AGG] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
+        legacyHosts
+      } else {
+        logger.info(s"🎯 [GROUP-BY-AGG] No preferred hosts found - letting Spark decide")
+        // No cache history available, let Spark decide
+        Array.empty[String]
+      }
+    }
+  }
 }
 
 /**

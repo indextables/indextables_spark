@@ -45,14 +45,19 @@ class Tantivy4SparkSimpleAggregateScan(
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateScan])
 
+  println(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters")
+  pushedFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: Filter: $f"))
+
   override def readSchema(): StructType = {
     createSimpleAggregateSchema(aggregation)
   }
 
   override def toBatch: Batch = {
+    println(s"🔍 SIMPLE AGGREGATE SCAN: toBatch() called, creating batch")
     new Tantivy4SparkSimpleAggregateBatch(
       sparkSession,
       transactionLog,
+      schema,
       pushedFilters,
       options,
       broadcastConfig,
@@ -149,6 +154,7 @@ class Tantivy4SparkSimpleAggregateScan(
 class Tantivy4SparkSimpleAggregateBatch(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
+  schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   broadcastConfig: Broadcast[Map[String, String]],
@@ -157,15 +163,25 @@ class Tantivy4SparkSimpleAggregateBatch(
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateBatch])
 
+  println(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters")
+
   override def planInputPartitions(): Array[InputPartition] = {
     logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
 
     // Get all splits from transaction log
-    val splits = transactionLog.listFiles()
-    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Found ${splits.length} splits for simple aggregation")
+    val allSplits = transactionLog.listFiles()
+    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Found ${allSplits.length} total splits")
 
-    // Create one partition per split for distributed aggregation processing
-    splits.map { split =>
+    // Apply data skipping using the same logic as regular scan by creating a helper scan instance
+    // Use the full table schema to ensure proper field type detection for data skipping
+    val helperScan = new Tantivy4SparkScan(
+      sparkSession, transactionLog, schema, pushedFilters, options, None, broadcastConfig, Array.empty
+    )
+    val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
+    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
+
+    // Create one partition per filtered split for distributed aggregation processing
+    filteredSplits.map { split =>
       new Tantivy4SparkSimpleAggregatePartition(
         split,
         pushedFilters,
@@ -204,6 +220,34 @@ class Tantivy4SparkSimpleAggregatePartition(
   logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Created partition for split: ${split.path}")
   logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Table path: ${tablePath}")
   logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
+
+  /**
+   * Provide preferred locations for this aggregate partition based on split cache locality.
+   * Uses the same broadcast-based locality information as regular scan partitions.
+   */
+  override def preferredLocations(): Array[String] = {
+    import com.tantivy4spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+
+    logger.info(s"🎯 [SIMPLE-AGG] preferredLocations() called for split: ${split.path}")
+
+    val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(split.path)
+    if (preferredHosts.nonEmpty) {
+      logger.info(s"🎯 [SIMPLE-AGG] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
+      preferredHosts
+    } else {
+      logger.info(s"🎯 [SIMPLE-AGG] No broadcast hosts found, trying legacy registry")
+      // Fallback to legacy registry for compatibility
+      val legacyHosts = SplitLocationRegistry.getPreferredHosts(split.path)
+      if (legacyHosts.nonEmpty) {
+        logger.info(s"🎯 [SIMPLE-AGG] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
+        legacyHosts
+      } else {
+        logger.info(s"🎯 [SIMPLE-AGG] No preferred hosts found - letting Spark decide")
+        // No cache history available, let Spark decide
+        Array.empty[String]
+      }
+    }
+  }
 }
 
 /**
