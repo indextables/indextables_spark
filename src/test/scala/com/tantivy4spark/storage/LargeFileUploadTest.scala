@@ -58,18 +58,19 @@ class LargeFileUploadTest extends TestBase {
         .mode("overwrite")
         .save(tablePath)
 
-      // Verify data was written correctly
+      // Verify data was written correctly using efficient count
       val readDf = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tablePath)
 
-      val result = readDf.collect()
-      assert(result.length == 20000, s"Expected 20000 records, got ${result.length}")
+      val count = readDf.count()
+      assert(count == 20000, s"Expected 20000 records, got $count")
 
-      // Verify some sample data
-      val firstRecord = result.find(_.getLong(0) == 1L)
-      assert(firstRecord.isDefined, "Should find record with id=1")
-      assert(firstRecord.get.getString(1).contains("x-1"), "Data should contain expected pattern")
+      // Verify some sample data by reading a small subset
+      import org.apache.spark.sql.functions._
+      val sampleData = readDf.filter(col("id") === 1L).collect()
+      assert(sampleData.length == 1, "Should find exactly one record with id=1")
+      assert(sampleData.head.getString(1).contains("x-1"), "Data should contain expected pattern")
 
       println("✅ Large file upload test completed successfully")
     }
@@ -102,13 +103,13 @@ class LargeFileUploadTest extends TestBase {
         .mode("overwrite")
         .save(tablePath)
 
-      // Verify data integrity
+      // Verify data integrity using efficient count
       val readDf = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tablePath)
 
-      val result = readDf.collect()
-      assert(result.length == 100, s"Expected 100 records, got ${result.length}")
+      val count = readDf.count()
+      assert(count == 100, s"Expected 100 records, got $count")
 
       println("✅ Configuration threshold test completed successfully")
     }
