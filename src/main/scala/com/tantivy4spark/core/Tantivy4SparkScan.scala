@@ -298,9 +298,12 @@ class Tantivy4SparkScan(
         canFilterMatchFile(addAction, left) || canFilterMatchFile(addAction, right)
 
       case Not(child) =>
-        // For NOT: if the child cannot match, then NOT child can match
-        // Conservative approach: if we can't determine, keep the file
-        !canFilterMatchFile(addAction, child)
+        // For NOT filters with min/max range data: we cannot prove that ALL values
+        // in the range fail to satisfy the NOT condition. For example, if range is
+        // [business, tech] and filter is NOT(category = business), the range contains
+        // both business AND non-business values, so the file should not be skipped.
+        // NOT filters should only skip based on exact partition values, not ranges.
+        true
 
       case _ =>
         // For all other filters, use the existing shouldSkipFile logic (inverted)

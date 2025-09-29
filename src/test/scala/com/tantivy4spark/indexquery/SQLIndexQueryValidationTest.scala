@@ -51,6 +51,12 @@ class SQLIndexQueryValidationTest extends TestBase {
     ).toDF("id", "category", "title", "author", "publish_date", "score", "featured", "tags")
 
     // Write using V2 DataSource API with text fields for tokenized search
+    // Set field type configurations at Spark session level as well
+    spark.conf.set("spark.tantivy4spark.indexing.typemap.title", "text")
+    spark.conf.set("spark.tantivy4spark.indexing.typemap.category", "string")
+    spark.conf.set("spark.tantivy4spark.indexing.typemap.author", "string")
+    spark.conf.set("spark.tantivy4spark.indexing.typemap.tags", "text")
+
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .option("spark.tantivy4spark.indexing.typemap.category", "string")  // exact matching
@@ -113,6 +119,20 @@ class SQLIndexQueryValidationTest extends TestBase {
 
     println(s"Results: ${techResults.length}")
     techResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+
+    // Test the specific failing 'data' query
+    println("\n🔍 Testing IndexQuery for 'data' (this is the failing query):")
+    val dataResults = spark.sql("""
+      SELECT id, title, category FROM tantivy_documents
+      WHERE title indexquery 'data'
+      LIMIT 2147483647
+    """).collect()
+
+    println(s"Results: ${dataResults.length}")
+    dataResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+
+    println("\n🔍 Expected: should find IDs 2 (data engineering), 9 (data science), 10 (data analytics)")
+    println("🔍 If this doesn't show all three records, there's the bug!")
 
     println("✅ Debug information gathered - we can now fix the test expectations")
   }
@@ -299,10 +319,33 @@ class SQLIndexQueryValidationTest extends TestBase {
     val dataNotBusinessResults = spark.sql("""
       SELECT id, title, category FROM tantivy_documents
       WHERE title indexquery 'data' AND category != 'business'
+      LIMIT 2147483647
     """).collect()
 
     println(s"Results: ${dataNotBusinessResults.length}")
     dataNotBusinessResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+
+    // Debug: Let's test standalone IndexQuery to confirm it works
+    println("\n🔍 Debug: Testing standalone IndexQuery 'data' (should return IDs 2, 9, 10):")
+    val standaloneDataResults = spark.sql("""
+      SELECT id, title, category FROM tantivy_documents
+      WHERE title indexquery 'data'
+      LIMIT 2147483647
+    """).collect()
+
+    println(s"Standalone IndexQuery results: ${standaloneDataResults.length}")
+    standaloneDataResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+
+    // Debug: Let's test just the category filter separately
+    println("\n🔍 Debug: Testing standalone category != 'business' (should return IDs 1-9):")
+    val standaloneCategoryResults = spark.sql("""
+      SELECT id, title, category FROM tantivy_documents
+      WHERE category != 'business'
+      LIMIT 2147483647
+    """).collect()
+
+    println(s"Standalone category filter results: ${standaloneCategoryResults.length}")
+    standaloneCategoryResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
 
     // With the fixed SplitSearchEngine using enhanced SplitSearcher parseQuery API, IndexQuery should work
     // Expected: Records 2 (data engineering) and 9 (data science) - both have "data" token AND category != "business"

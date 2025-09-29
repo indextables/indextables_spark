@@ -130,7 +130,7 @@ object TantivyDirectInterface {
         val fieldType = field.dataType
         val indexingConfig = finalTantivyOptions.getFieldIndexingConfig(fieldName)
 
-        logger.debug(s"Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
+        logger.warn(s"🔍 FIELD CONFIG DEBUG: Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
 
         // Validate conflicting configurations
         if (indexingConfig.isStoreOnly && indexingConfig.isIndexOnly) {
