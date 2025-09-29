@@ -237,6 +237,30 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Surefire Plugin for forked test execution -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.0.0-M9</version>
+                <configuration>
+                    <!-- Fork each test class in a separate JVM for better isolation -->
+                    <forkCount>1</forkCount>
+                    <reuseForks>false</reuseForks>
+                    <parallel>none</parallel>
+                    <!-- JVM settings for forked processes -->
+                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m</argLine>
+                    <!-- Environment variables for forked processes -->
+                    <environmentVariables>
+                        <SPARK_LOCAL_DIRS>/tmp</SPARK_LOCAL_DIRS>
+                    </environmentVariables>
+                    <!-- Include ScalaTest tests -->
+                    <includes>
+                        <include>**/*Test.class</include>
+                        <include>**/*Suite.class</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
             <!-- ScalaTest -->
             <plugin>
                 <groupId>org.scalatest</groupId>
@@ -246,6 +270,8 @@
                     <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
                     <junitxml>.</junitxml>
                     <filereports>TestSuiteReport.txt</filereports>
+                    <!-- Run tests with increased memory -->
+                    <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m</argLine>
                 </configuration>
                 <executions>
                     <execution>

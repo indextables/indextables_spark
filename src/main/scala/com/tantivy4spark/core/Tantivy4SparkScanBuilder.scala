@@ -647,8 +647,7 @@ class Tantivy4SparkScanBuilder(
         if (docMapping.isArray) {
           val fastFields = docMapping.asScala.flatMap { fieldNode =>
             val fieldName = Option(fieldNode.get("name")).map(_.asText())
-            val isFast = Option(fieldNode.get("options"))
-              .flatMap(options => Option(options.get("fast")))
+            val isFast = Option(fieldNode.get("fast"))
               .map(_.asBoolean())
               .getOrElse(false)
 

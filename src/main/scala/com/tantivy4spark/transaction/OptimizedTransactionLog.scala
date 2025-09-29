@@ -28,7 +28,7 @@ import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicReference, AtomicLong}
 
 /**
  * Optimized transaction log implementation that integrates all performance enhancements
@@ -93,10 +93,13 @@ class OptimizedTransactionLog(
   // Current snapshot reference for lock-free reading
   private val currentSnapshot = new AtomicReference[Option[Snapshot]](None)
 
+  // Version counter for atomic increment
+  private val versionCounter = new AtomicLong(-1L)
+
   // Performance configuration
   private val maxStaleness = options.getLong("spark.tantivy4spark.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.tantivy4spark.parallel.read.enabled", true)
-  private val asyncUpdatesEnabled = options.getBoolean("spark.tantivy4spark.async.updates.enabled", true)
+  private val asyncUpdatesEnabled = options.getBoolean("spark.tantivy4spark.async.updates.enabled", false) // Disabled by default for stability
 
   def getTablePath(): Path = tablePath
 
@@ -149,7 +152,9 @@ class OptimizedTransactionLog(
       return getLatestVersion()
     }
 
-    val version = getLatestVersion() + 1
+    // Use atomic version generation to prevent race conditions
+    val version = getNextVersion()
+    println(s"[DEBUG] Assigning version $version for addFiles with ${addActions.size} actions")
 
     // Use parallel write for large batches
     if (addActions.size > 100 && parallelReadEnabled) {
@@ -169,6 +174,35 @@ class OptimizedTransactionLog(
       }
     }
 
+    version
+  }
+
+  /**
+   * Remove a single file by adding a RemoveAction
+   */
+  def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
+    // Use atomic version generation to prevent race conditions
+    val version = getNextVersion()
+    println(s"[DEBUG] Assigning version $version for removeFile '$path'")
+
+    val removeAction = RemoveAction(
+      path = path,
+      deletionTimestamp = Some(deletionTimestamp),
+      dataChange = true,
+      extendedFileMetadata = None,
+      partitionValues = None,
+      size = None
+    )
+
+    writeActions(version, Seq(removeAction))
+
+    // Invalidate caches after remove operation
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+
+    // Clear current snapshot to force recomputation
+    currentSnapshot.set(None)
+
+    println(s"[DEBUG] Removed file '$path' at version $version")
     version
   }
 
@@ -232,22 +266,29 @@ class OptimizedTransactionLog(
   private def listFilesOptimized(): Seq[AddAction] = {
     // Get versions once and pass consistently to avoid FileSystem caching issues
     val versions = getVersions()
+    val latestVersion = versions.sorted.lastOption.getOrElse(-1L)
     val checksum = computeCurrentChecksumWithVersions(versions)
-    println(s"[DEBUG] Computed checksum: $checksum")
+    println(s"[DEBUG] Computed checksum: $checksum, latest version: $latestVersion")
 
     val cached = enhancedCache.getOrComputeFileList(tablePath.toString, checksum, {
       println(s"[DEBUG] Cache miss, computing file list for checksum: $checksum")
       logger.info(s"Computing file list using optimized operations for checksum: $checksum")
 
-      // Try to get from current snapshot first
+      // Try to get from current snapshot first, but verify it's up to date with latest version
       currentSnapshot.get() match {
-        case Some(snapshot) if snapshot.age < maxStaleness.toMillis =>
-          println(s"[DEBUG] Using cached snapshot with ${snapshot.files.size} files")
+        case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
+          println(s"[DEBUG] Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
           snapshot.files
 
-        case _ =>
+        case Some(snapshot) =>
+          println(s"[DEBUG] Snapshot is stale (version ${snapshot.version} < $latestVersion), rebuilding")
+          // Clear stale snapshot
+          currentSnapshot.set(None)
+          reconstructStateStandard(versions)
+
+        case None =>
           // Always use standard reconstruction with consistent versions to avoid caching issues
-          println(s"[DEBUG] Using standard reconstruction with consistent versions from: ${versions.sorted.mkString(", ")}")
+          println(s"[DEBUG] No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
           reconstructStateStandard(versions)
       }
     })
@@ -316,7 +357,20 @@ class OptimizedTransactionLog(
     val versions = getVersions()
     val latest = versions.sorted.lastOption.getOrElse(-1L)
     println(s"[DEBUG] getLatestVersion: found versions ${versions.sorted.mkString(", ")}, latest = $latest")
+
+    // Update version counter if we found a higher version
+    versionCounter.updateAndGet(current => math.max(current, latest))
     latest
+  }
+
+  private def getNextVersion(): Long = {
+    // First, ensure version counter is initialized
+    if (versionCounter.get() == -1L) {
+      getLatestVersion()
+    }
+
+    // Atomically increment and return
+    versionCounter.incrementAndGet()
   }
 
   private def getVersions(): Seq[Long] = {
@@ -342,6 +396,7 @@ class OptimizedTransactionLog(
   }
 
   private def readVersionOptimized(version: Long): Seq[Action] = {
+    // Use cache with proper invalidation - version-specific caching should be safe
     enhancedCache.getOrComputeVersionActions(tablePath.toString, version, {
       readVersionDirect(version)
     })
@@ -352,13 +407,20 @@ class OptimizedTransactionLog(
     val versionFilePath = versionFile.toString
 
     if (!cloudProvider.exists(versionFilePath)) {
+      println(s"[DEBUG] Version file $versionFilePath does not exist")
       return Seq.empty
     }
 
     Try {
       val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-      parseActionsFromContent(content)
-    }.getOrElse(Seq.empty)
+      println(s"[DEBUG] Read version $version content: '${content.take(100)}...' (${content.length} chars)")
+      val actions = parseActionsFromContent(content)
+      println(s"[DEBUG] Parsed ${actions.size} actions from version $version")
+      actions
+    }.getOrElse {
+      println(s"[DEBUG] Failed to read/parse version $version")
+      Seq.empty
+    }
   }
 
   private def parseActionsFromContent(content: String): Seq[Action] = {
@@ -410,6 +472,32 @@ class OptimizedTransactionLog(
     println(s"[DEBUG] Writing version $version to $versionFilePath with ${actions.size} actions")
     cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
     println(s"[DEBUG] Successfully wrote version $version")
+
+    // Write-through cache management: proactively update caches with new data
+    enhancedCache.putVersionActions(tablePath.toString, version, actions)
+    println(s"[DEBUG] Cached version actions for ${tablePath.toString} version $version")
+
+    // Update file list cache if we have AddActions
+    val addActions = actions.collect { case add: AddAction => add }
+    if (addActions.nonEmpty) {
+      // Compute new file list state by getting current state and applying changes
+      val currentFiles = try {
+        listFiles()
+      } catch {
+        case _: Exception => Seq.empty[AddAction]
+      }
+
+      // Create a checksum for the current file list state
+      val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
+      enhancedCache.putFileList(tablePath.toString, fileListChecksum, currentFiles)
+      println(s"[DEBUG] Updated file list cache for ${tablePath.toString} with checksum $fileListChecksum")
+    }
+
+    // Update metadata cache if we have MetadataAction
+    actions.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
+      enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
+      println(s"[DEBUG] Cached metadata for ${tablePath.toString}")
+    }
 
     // Create checkpoint if needed
     checkpoint.foreach { cp =>
@@ -510,10 +598,13 @@ class OptimizedTransactionLog(
   }
 
   private def updateSnapshot(version: Long): Unit = {
-    val files = listFilesOptimized()
+    // Avoid recursive calls to listFilesOptimized - compute files directly
+    val versions = getVersions()
+    val files = reconstructStateStandard(versions)
     val metadata = getMetadata()
     val snapshot = Snapshot(version, files, metadata)
     currentSnapshot.set(Some(snapshot))
+    println(s"[DEBUG] Updated snapshot to version $version with ${files.size} files")
   }
 
   private def computeCurrentChecksum(): String = {
@@ -522,8 +613,9 @@ class OptimizedTransactionLog(
   }
 
   private def computeCurrentChecksumWithVersions(versions: Seq[Long]): String = {
-    // Simple checksum based on latest version from provided versions
-    val latest = versions.sorted.lastOption.getOrElse(-1L)
-    s"${tablePath.toString}-$latest"
+    // Include sorted version list in key, not just latest - this ensures cache invalidation
+    // when new versions are written
+    val versionHash = versions.sorted.mkString(",").hashCode
+    s"${tablePath.toString}-${versionHash}"
   }
 }

@@ -49,11 +49,17 @@ object TransactionLogFactory {
     val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
                                           options.getBoolean("spark.tantivy4spark.transaction.optimized.enabled", true))
 
-    // Always use optimized implementation - the old TransactionLog class is deprecated
     logger.info(s"Creating transaction log for $tablePath (useOptimized setting: $useOptimized)")
 
-    // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
-    new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
+    if (useOptimized) {
+      // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
+      new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
+    } else {
+      // Create standard TransactionLog for testing/compatibility
+      new TransactionLog(tablePath, spark, new CaseInsensitiveStringMap(
+        (options.asCaseSensitiveMap().asScala + ("spark.tantivy4spark.transaction.allowDirectUsage" -> "true")).asJava
+      ))
+    }
   }
 }
 
@@ -119,6 +125,10 @@ class TransactionLogAdapter(
 
   override def getMetadata(): MetadataAction = {
     optimizedLog.getMetadata()
+  }
+
+  override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
+    optimizedLog.removeFile(path, deletionTimestamp)
   }
 
   // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions

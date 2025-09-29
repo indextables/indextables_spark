@@ -53,9 +53,10 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
       val tempDir = Files.createTempDirectory("aggregate-test").toFile
-      val transactionLog = new com.tantivy4spark.transaction.TransactionLog(
+      val transactionLog = com.tantivy4spark.transaction.TransactionLogFactory.create(
         new org.apache.hadoop.fs.Path(tempDir.getAbsolutePath),
-        spark
+        spark,
+        options
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
@@ -89,9 +90,10 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val options1 = new CaseInsensitiveStringMap(optionsWithFastFields.asJava)
 
       val tempDir1 = Files.createTempDirectory("aggregate-test").toFile
-      val transactionLog1 = new com.tantivy4spark.transaction.TransactionLog(
+      val transactionLog1 = com.tantivy4spark.transaction.TransactionLogFactory.create(
         new org.apache.hadoop.fs.Path(tempDir1.getAbsolutePath),
-        spark
+        spark,
+        options1
       )
       val broadcastConfig1 = spark.sparkContext.broadcast(optionsWithFastFields)
 
@@ -170,9 +172,10 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
       val tempDir = Files.createTempDirectory("aggregate-test").toFile
-      val transactionLog = new com.tantivy4spark.transaction.TransactionLog(
+      val transactionLog = com.tantivy4spark.transaction.TransactionLogFactory.create(
         new org.apache.hadoop.fs.Path(tempDir.getAbsolutePath),
-        spark
+        spark,
+        options
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
@@ -218,9 +221,10 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
       val tempDir = Files.createTempDirectory("aggregate-test").toFile
-      val transactionLog = new com.tantivy4spark.transaction.TransactionLog(
+      val transactionLog = com.tantivy4spark.transaction.TransactionLogFactory.create(
         new org.apache.hadoop.fs.Path(tempDir.getAbsolutePath),
-        spark
+        spark,
+        options
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 

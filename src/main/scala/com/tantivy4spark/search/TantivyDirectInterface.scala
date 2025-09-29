@@ -81,13 +81,14 @@ object TantivyDirectInterface {
              org.apache.spark.sql.types.DoubleType |
              org.apache.spark.sql.types.DateType |
              org.apache.spark.sql.types.TimestampType => true
-        // String fields with raw tokenizer (explicit "string" type) are fast by default
-        // Text fields with default tokenizer (default behavior) are NOT fast by default
+        // String fields with raw tokenizer (default behavior) are fast by default
+        // Text fields with default tokenizer (explicit "text" type) are NOT fast by default
         case org.apache.spark.sql.types.StringType =>
           val fieldTypeOverride = tantivyOptions.getFieldTypeMapping.get(field.name)
-          // Only explicitly configured "string" fields should be fast by default
-          // If no explicit configuration, it defaults to "text" (default tokenizer) and should NOT be fast
-          fieldTypeOverride.contains("string")
+          // String fields (default) should be fast by default
+          // If no explicit configuration, it defaults to "string" (raw tokenizer) and should be fast
+          // Only explicitly configured "text" fields should NOT be fast
+          !fieldTypeOverride.contains("text")
         case _ => false
       }
     }.map(_.name).toSet
@@ -143,8 +144,8 @@ object TantivyDirectInterface {
 
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
-            // Default to "text" (default tokenizer). Only explicit "string" config uses raw tokenizer.
-            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("text")
+            // Default to "string" (raw tokenizer for exact matching). Only explicit "text" config uses default tokenizer.
+            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("string")
 
             // Store-only fields: tantivy4java now properly supports store-only string fields
             // after the "keyword" type bug was fixed in the schema conversion logic

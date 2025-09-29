@@ -348,9 +348,11 @@ class SimpleAggregatePushdownTest extends TestBase {
     ).asJava)
 
     // For testing: create a mock TransactionLog with empty files
-    // Set the configuration to allow direct TransactionLog usage for testing
-    spark.conf.set("spark.tantivy4spark.transaction.allowDirectUsage", "true")
-    val transactionLog = new TransactionLog(new Path("/mock/path"), spark) {
+    // Create options map with allowDirectUsage for testing
+    val testOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+      java.util.Map.of("spark.tantivy4spark.transaction.allowDirectUsage", "true")
+    )
+    val transactionLog = new TransactionLog(new Path("/mock/path"), spark, testOptions) {
       override def listFiles(): Seq[com.tantivy4spark.transaction.AddAction] = Seq.empty
     }
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())

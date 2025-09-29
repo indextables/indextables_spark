@@ -429,7 +429,7 @@ object FiltersToQueryConverter {
   /**
    * Convert a single Spark Filter to a tantivy4java Query.
    */
-  private def convertFilterToQuery(filter: Filter, splitSearchEngine: SplitSearchEngine, schema: Schema): Query = {
+  private def convertFilterToQuery(filter: Filter, splitSearchEngine: SplitSearchEngine, schema: Schema, options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None): Query = {
     try {
       filter match {
         case EqualTo(attribute, value) =>
@@ -520,9 +520,9 @@ object FiltersToQueryConverter {
         case In(attribute, values) =>
           queryLog(s"Creating In query: $attribute IN [${values.mkString(", ")}]")
           val fieldType = getFieldType(schema, attribute)
-          if (fieldType == FieldType.TEXT) {
-            // For TEXT fields, create OR query with Index.parseQuery for each value
-            queryLog(s"Field '$attribute' is TEXT, using OR of Index.parseQuery for IN query")
+          if (shouldUseTokenizedQuery(attribute, options)) {
+            // For TEXT fields with default tokenizer, create OR query with Index.parseQuery for each value
+            queryLog(s"Field '$attribute' uses tokenized search, using OR of Index.parseQuery for IN query")
             val parseQueries = values.map { value =>
               val queryString = s""""${value.toString}""""
               val fieldNames = List(attribute).asJava
@@ -542,8 +542,8 @@ object FiltersToQueryConverter {
             val occurQueries = termQueries.map(query => new Query.OccurQuery(Occur.SHOULD, query)).toList
             Query.booleanQuery(occurQueries.asJava)
           } else {
-            // For other fields (BOOLEAN, BYTES), use term set query with converted values
-            queryLog(s"Field '$attribute' is $fieldType, using termSetQuery")
+            // For STRING fields (raw tokenizer) and other non-tokenized fields, use term set query with converted values
+            queryLog(s"Field '$attribute' uses exact matching ($fieldType), using termSetQuery")
             val convertedValues = values.map(value => convertSparkValueToTantivy(value, fieldType))
             if (fieldType == FieldType.BOOLEAN) {
               queryLog(s"Boolean IN query - converted values: ${convertedValues.mkString("[", ", ", "]")}")
@@ -567,8 +567,8 @@ object FiltersToQueryConverter {
         
         case And(left, right) =>
           queryLog(s"Creating And query: $left AND $right")
-          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema)
-          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema)
+          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema, options)
+          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema, options)
           val occurQueries = List(
             new Query.OccurQuery(Occur.MUST, leftQuery),
             new Query.OccurQuery(Occur.MUST, rightQuery)
@@ -577,8 +577,8 @@ object FiltersToQueryConverter {
         
         case Or(left, right) =>
           queryLog(s"Creating Or query: $left OR $right")
-          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema)
-          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema)
+          val leftQuery = convertFilterToQuery(left, splitSearchEngine, schema, options)
+          val rightQuery = convertFilterToQuery(right, splitSearchEngine, schema, options)
           val occurQueries = List(
             new Query.OccurQuery(Occur.SHOULD, leftQuery),
             new Query.OccurQuery(Occur.SHOULD, rightQuery)
@@ -587,7 +587,7 @@ object FiltersToQueryConverter {
         
         case Not(child) =>
           queryLog(s"Creating Not query: NOT $child")
-          val childQuery = convertFilterToQuery(child, splitSearchEngine, schema)
+          val childQuery = convertFilterToQuery(child, splitSearchEngine, schema, options)
           // For NOT queries, we need both MUST (match all) and MUST_NOT (exclude) clauses
           val allQuery = Query.allQuery()
           val occurQueries = java.util.Arrays.asList(
@@ -919,15 +919,30 @@ object FiltersToQueryConverter {
       
       case In(attribute, values) if values.nonEmpty =>
         val fieldType = getFieldType(schema, attribute)
-        val termQueries = values.map { value =>
-          val converted = convertSparkValueToTantivy(value, fieldType)
-          new SplitTermQuery(attribute, converted.toString)
-        }.toList
-        
-        // Create boolean query with OR logic for IN clause
-        val boolQuery = new SplitBooleanQuery()
-        termQueries.foreach(query => boolQuery.addShould(query))
-        Some(boolQuery)
+        if (shouldUseTokenizedQuery(attribute, options)) {
+          // For TEXT fields with default tokenizer, use parseQuery with quoted syntax for exact phrase matching
+          val parseQueries = values.map { value =>
+            val quotedValue = "\"" + value.toString.replace("\"", "\\\"") + "\""
+            val queryString = s"$attribute:$quotedValue"
+            splitSearchEngine.parseQuery(queryString)
+          }.toList
+
+          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
+          val boolQuery = new SplitBooleanQuery()
+          parseQueries.foreach(query => boolQuery.addShould(query))
+          Some(boolQuery)
+        } else {
+          // For STRING fields (raw tokenizer) and other non-tokenized fields, use term queries
+          val termQueries = values.map { value =>
+            val converted = convertSparkValueToTantivy(value, fieldType)
+            new SplitTermQuery(attribute, converted.toString)
+          }.toList
+
+          // Create boolean query with OR logic for IN clause - now works correctly with tantivy4java fix
+          val boolQuery = new SplitBooleanQuery()
+          termQueries.foreach(query => boolQuery.addShould(query))
+          Some(boolQuery)
+        }
       
       case IsNotNull(_) =>
         Some(new SplitMatchAllQuery()) // Match all for IsNotNull
@@ -1116,14 +1131,14 @@ object FiltersToQueryConverter {
         }
 
       case Not(child) =>
-        // Handle NOT by using MUST_NOT logic with match-all
+        // Handle NOT by using pure MUST_NOT logic - now works correctly with tantivy4java fix
         val childQuery = convertFilterToSplitQuery(child, schema, splitSearchEngine, options)
 
         childQuery match {
           case Some(cq) =>
             val boolQuery = new SplitBooleanQuery()
-            boolQuery.addMust(new SplitMatchAllQuery()) // Must match all documents
-            boolQuery.addMustNot(cq) // But must not match the child condition
+            // With tantivy4java fix, pure mustNot queries work correctly
+            boolQuery.addMustNot(cq) // Documents that don't match the child condition
             Some(boolQuery)
           case None =>
             None // Fall back to Query conversion if child can't be converted

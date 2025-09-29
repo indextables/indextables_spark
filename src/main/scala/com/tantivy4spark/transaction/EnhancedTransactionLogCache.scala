@@ -235,6 +235,35 @@ class EnhancedTransactionLogCache(
     lazyValueCache.getOrElseUpdate(key, new LazyValue(compute)).asInstanceOf[LazyValue[T]]
   }
 
+  // Write-through cache methods for proactive cache management
+
+  /**
+   * Directly cache version actions (write-through)
+   */
+  def putVersionActions(tablePath: String, version: Long, actions: Seq[Action]): Unit = {
+    val key = LogCacheKey(tablePath, version)
+    versionCache.put(key, actions)
+    logger.debug(s"Cached version actions for $tablePath version $version")
+  }
+
+  /**
+   * Directly cache file list (write-through)
+   */
+  def putFileList(tablePath: String, checksum: String, files: Seq[AddAction]): Unit = {
+    val key = FileListCacheKey(tablePath, checksum)
+    fileListCache.put(key, files)
+    logger.debug(s"Cached file list for $tablePath checksum $checksum")
+  }
+
+  /**
+   * Directly cache metadata (write-through)
+   */
+  def putMetadata(tablePath: String, metadata: MetadataAction): Unit = {
+    val key = MetadataCacheKey(tablePath)
+    metadataCache.put(key, metadata)
+    logger.debug(s"Cached metadata for $tablePath")
+  }
+
   /**
    * Invalidate all caches for a specific table
    */
