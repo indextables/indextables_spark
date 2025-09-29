@@ -181,7 +181,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
         .option("spark.indextables.indexing.typemap.name", "string")  // Original prefix
         .option("spark.indextables.indexWriter.batchSize", "500")        // New prefix
         .option("spark.indextables.cache.maxSize", "30000000")         // Original prefix
-        .option("spark.indextables.indexWriter.heapSize", "25000000")    // New prefix
+        .option("spark.indextables.indexWriter.heapSize", "50000000")    // 50MB (meets 15MB/thread * 2 threads minimum)
         .mode("overwrite")
         .save(path.toString)
 
@@ -347,7 +347,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
       .option("spark.indextables.indexing.typemap.name", "string")      // Original prefix
       .option("spark.indextables.indexWriter.batchSize", "2000")          // New prefix
       .option("spark.indextables.cache.maxSize", "50000000")            // Original prefix
-      .option("spark.indextables.indexWriter.heapSize", "30000000")       // New prefix
+      .option("spark.indextables.indexWriter.heapSize", "50000000")       // 50MB (meets 15MB/thread * 2 threads minimum)
       .mode("overwrite")
       .save(testPath)
 
@@ -403,7 +403,8 @@ class IndexTablesValidationTest extends RealS3TestBase {
     val queryResults = spark.sql("SELECT * FROM s3_indexquery_data WHERE description indexquery 'distributed AND framework'").collect()
     queryResults.length should be >= 1
 
-    val allResults = readData.collect()
-    allResults.length should equal(4)
+    // Use count() instead of collect() to avoid partition limits
+    val totalCount = readData.count()
+    totalCount should equal(4)
   }
 }
