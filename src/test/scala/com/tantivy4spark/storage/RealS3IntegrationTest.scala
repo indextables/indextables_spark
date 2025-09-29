@@ -63,17 +63,17 @@ class RealS3IntegrationTest extends RealS3TestBase {
       val (accessKey, secretKey) = awsCredentials.get
       
       // Configure Spark for real S3 access (no path-style access needed)
-      spark.conf.set("spark.tantivy4spark.aws.accessKey", accessKey)
-      spark.conf.set("spark.tantivy4spark.aws.secretKey", secretKey)
-      spark.conf.set("spark.tantivy4spark.aws.region", S3_REGION)
+      spark.conf.set("spark.indextables.aws.accessKey", accessKey)
+      spark.conf.set("spark.indextables.aws.secretKey", secretKey)
+      spark.conf.set("spark.indextables.aws.region", S3_REGION)
       // Note: awsPathStyleAccess deliberately NOT set - real S3 uses virtual-hosted-style URLs
       
       // ALSO configure Hadoop config so CloudStorageProvider can find the region
       val hadoopConf = spark.sparkContext.hadoopConfiguration
-      hadoopConf.set("spark.tantivy4spark.aws.accessKey", accessKey)
-      hadoopConf.set("spark.tantivy4spark.aws.secretKey", secretKey)
-      hadoopConf.set("spark.tantivy4spark.aws.region", S3_REGION)
-      println(s"🔧 DEBUG: Set Hadoop config spark.tantivy4spark.aws.region=$S3_REGION")
+      hadoopConf.set("spark.indextables.aws.accessKey", accessKey)
+      hadoopConf.set("spark.indextables.aws.secretKey", secretKey)
+      hadoopConf.set("spark.indextables.aws.region", S3_REGION)
+      println(s"🔧 DEBUG: Set Hadoop config spark.indextables.aws.region=$S3_REGION")
       
       
       println(s"🔐 AWS credentials loaded successfully")
@@ -132,9 +132,9 @@ class RealS3IntegrationTest extends RealS3TestBase {
   private def getWriteOptions(): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION
     )
   }
 
@@ -144,9 +144,9 @@ class RealS3IntegrationTest extends RealS3TestBase {
   private def getReadOptions(): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION
     )
   }
 
@@ -500,7 +500,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     data1.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
-      .option("spark.tantivy4spark.indexing.fastfields", "batch")  // Configure batch as fast field
+      .option("spark.indextables.indexing.fastfields", "batch")  // Configure batch as fast field
       .mode("overwrite")
       .save(tablePath)
     
@@ -516,7 +516,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     data2.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
-      .option("spark.tantivy4spark.indexing.fastfields", "batch")  // Configure batch as fast field for append
+      .option("spark.indextables.indexing.fastfields", "batch")  // Configure batch as fast field for append
       .mode("append")
       .save(tablePath)
     
@@ -591,7 +591,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     println(s"✍️  Writing data for MERGE SPLITS scheme test...")
     
     val writeOptions = getWriteOptions() ++ Map(
-      "spark.tantivy4spark.indexwriter.batchSize" -> "50"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "50"  // Force multiple splits
     )
     
     data.write
@@ -664,7 +664,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     println(s"✍️  Writing substantial test data for MERGE SPLITS validation...")
     
     val writeOptions = getWriteOptions() ++ Map(
-      "spark.tantivy4spark.indexwriter.batchSize" -> "100"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "100"  // Force multiple splits
     )
     
     // Write in multiple phases to ensure multiple splits

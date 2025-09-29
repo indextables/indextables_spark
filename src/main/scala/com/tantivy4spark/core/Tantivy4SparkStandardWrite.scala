@@ -50,9 +50,9 @@ class Tantivy4SparkStandardWrite(
     val iter = hadoopConf.iterator()
     while (iter.hasNext) {
       val entry = iter.next()
-      if (entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")) {
+      if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
         val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-          entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+          entry.getKey.replace("spark.indextables.", "spark.indextables.")
         } else entry.getKey
         props.put(normalizedKey, entry.getValue)
       }
@@ -110,19 +110,19 @@ class Tantivy4SparkStandardWrite(
     
     // Combine serialized hadoop config with tantivy4spark options (normalize spark.indextables to spark.tantivy4spark)
     val normalizedTantivyOptions = serializedOptions
-      .filter(kv => kv._1.startsWith("spark.tantivy4spark.") || kv._1.startsWith("spark.indextables."))
+      .filter(kv => kv._1.startsWith("spark.indextables.") || kv._1.startsWith("spark.indextables."))
       .map { case (key, value) =>
         val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.tantivy4spark.")
+          key.replace("spark.indextables.", "spark.indextables.")
         } else key
         normalizedKey -> value
       }
     val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
       
     serializedOptions.foreach { case (key, value) =>
-      if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+      if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
         val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.tantivy4spark.")
+          key.replace("spark.indextables.", "spark.indextables.")
         } else key
         logger.info(s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
       }

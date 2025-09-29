@@ -107,7 +107,7 @@ class V2AdvancedWriteTest extends TestBase {
       try {
         moreData.write
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.cache.maxSize", "-1")  // Invalid config
+          .option("spark.indextables.cache.maxSize", "-1")  // Invalid config
           .mode("append")
           .save(tempPath)
       } catch {
@@ -178,7 +178,7 @@ class V2AdvancedWriteTest extends TestBase {
       
       largeData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "250")  // Force multiple splits
+        .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "250")  // Force multiple splits
         .mode("overwrite")
         .save(tempPath)
       

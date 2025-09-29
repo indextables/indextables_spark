@@ -89,8 +89,8 @@ class OptimizedWriteTest extends TestBase {
   test("should allow configuring optimized write via Spark conf") {
     withTempPath { tempPath =>
       // Configure via Spark session
-      spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "true")
-      spark.conf.set("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "750")
+      spark.conf.set("spark.indextables.optimizeWrite.enabled", "true")
+      spark.conf.set("spark.indextables.optimizeWrite.targetRecordsPerSplit", "750")
 
       val data = spark.range(1500).toDF("id")
       
@@ -108,8 +108,8 @@ class OptimizedWriteTest extends TestBase {
       println("✅ Optimized write configured via Spark conf")
       
       // Clean up configuration
-      spark.conf.unset("spark.tantivy4spark.optimizeWrite.enabled")
-      spark.conf.unset("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit")
+      spark.conf.unset("spark.indextables.optimizeWrite.enabled")
+      spark.conf.unset("spark.indextables.optimizeWrite.targetRecordsPerSplit")
     }
   }
 
@@ -188,7 +188,7 @@ class OptimizedWriteTest extends TestBase {
   test("should verify configuration hierarchy precedence") {
     withTempPath { tempPath =>
       // Set Spark config to false
-      spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "false")
+      spark.conf.set("spark.indextables.optimizeWrite.enabled", "false")
       
       val data = spark.range(100).toDF("id")
       
@@ -209,7 +209,7 @@ class OptimizedWriteTest extends TestBase {
       println("✅ Configuration hierarchy precedence works correctly")
       
       // Clean up
-      spark.conf.unset("spark.tantivy4spark.optimizeWrite.enabled")
+      spark.conf.unset("spark.indextables.optimizeWrite.enabled")
     }
   }
 

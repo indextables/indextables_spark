@@ -19,8 +19,8 @@ class SimpleIndexQueryDebugTest extends TestBase {
     // Write with string fields for exact matching
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.title", "string")
-      .option("spark.tantivy4spark.indexing.typemap.category", "string")
+      .option("spark.indextables.indexing.typemap.title", "string")
+      .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
       .save(testPath)
 

@@ -98,7 +98,7 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
       // Write data WITH batch configured as fast field
       data.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.fastfields", "batch")
+        .option("spark.indextables.indexing.fastfields", "batch")
         .mode("overwrite")
         .save(path)
 
@@ -131,7 +131,7 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
       // Write data with only one fast field configured
       data.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.fastfields", "batch")  // Only batch, not type
+        .option("spark.indextables.indexing.fastfields", "batch")  // Only batch, not type
         .mode("overwrite")
         .save(path)
 

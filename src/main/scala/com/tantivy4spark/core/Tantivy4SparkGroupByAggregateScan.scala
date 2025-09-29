@@ -615,7 +615,7 @@ class Tantivy4SparkGroupByAggregateReader(
    */
   private def createCacheConfig(): SplitCacheManager.CacheConfig = {
     val cacheName = s"groupby-cache-${System.currentTimeMillis()}"
-    val maxCacheSize = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "50000000").toLong
+    val maxCacheSize = getBroadcastConfig("spark.indextables.cache.maxSize", "50000000").toLong
 
     new SplitCacheManager.CacheConfig(cacheName)
       .withMaxCacheSize(maxCacheSize)

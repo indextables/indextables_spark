@@ -17,9 +17,9 @@ object FilterPushdownBugDemo {
       .config("spark.sql.shuffle.partitions", "4")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.tantivy4spark.aws.accessKey", "test-access")
-      .config("spark.tantivy4spark.aws.secretKey", "test-secret")
-      .config("spark.tantivy4spark.aws.region", "us-east-1")
+      .config("spark.indextables.aws.accessKey", "test-access")
+      .config("spark.indextables.aws.secretKey", "test-secret")
+      .config("spark.indextables.aws.region", "us-east-1")
       .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")

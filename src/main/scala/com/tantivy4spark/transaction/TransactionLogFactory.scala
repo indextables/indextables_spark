@@ -48,14 +48,14 @@ object TransactionLogFactory {
 
     // Check if optimization is explicitly disabled
     val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
-                                          options.getBoolean("spark.tantivy4spark.transaction.optimized.enabled", true))
+                                          options.getBoolean("spark.indextables.transaction.optimized.enabled", true))
 
     // Also check if caching is disabled - if so, use standard transaction log
-    val cacheEnabled = options.getBoolean("spark.tantivy4spark.transaction.cache.enabled", true)
+    val cacheEnabled = options.getBoolean("spark.indextables.transaction.cache.enabled", true)
 
     // For very short cache expiration times (like in tests), use standard transaction log
     // since enhanced cache uses minute-based TTL which doesn't work well for sub-minute tests
-    val expirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 300L)
+    val expirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
     val useStandardForShortExpiration = expirationSeconds > 0 && expirationSeconds < 60
 
     val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
@@ -71,7 +71,7 @@ object TransactionLogFactory {
       logger.info(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
       println(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
       new TransactionLog(tablePath, spark, new CaseInsensitiveStringMap(
-        (options.asCaseSensitiveMap().asScala + ("spark.tantivy4spark.transaction.allowDirectUsage" -> "true")).asJava
+        (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
       ))
     }
   }
@@ -89,7 +89,7 @@ class TransactionLogAdapter(
   optimizedLog.getTablePath(),
   spark,
   new CaseInsensitiveStringMap(
-    (options.asCaseSensitiveMap().asScala + ("spark.tantivy4spark.transaction.allowDirectUsage" -> "true")).asJava
+    (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
   )
 ) {
 
@@ -178,7 +178,7 @@ class TransactionLogAdapter(
     val versionsInCache = enhancedStats.versionCacheStats.requestCount().toInt
 
     // Read actual expiration setting from options
-    val expirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
+    val expirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
 
     Some(CacheStats(
       hits = totalHits,

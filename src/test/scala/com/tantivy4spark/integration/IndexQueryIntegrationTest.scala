@@ -236,7 +236,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       // Configure title field as text type for tokenized IndexQuery search
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.typemap.title", "text")
+        .option("spark.indextables.indexing.typemap.title", "text")
         .mode("overwrite")
         .save(tempPath)
 

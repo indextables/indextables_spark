@@ -21,10 +21,10 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     // Same field configuration
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.category", "string")
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")
-      .option("spark.tantivy4spark.indexing.typemap.author", "string")
-      .option("spark.tantivy4spark.indexing.typemap.tags", "text")
+      .option("spark.indextables.indexing.typemap.category", "string")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .option("spark.indextables.indexing.typemap.author", "string")
+      .option("spark.indextables.indexing.typemap.tags", "text")
       .mode("overwrite")
       .save(testPath)
 

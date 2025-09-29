@@ -76,11 +76,11 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
     
     // Configure Spark session with AWS credentials
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.indextables.aws.region", "us-east-1")
     
     println(s"✅ S3Mock server started on port $s3MockPort for V2 credential test")
   }
@@ -132,11 +132,11 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     // Write using V2 API (this should work since write path was already fixed)
     data.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")  // Force V2 API
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.aws.region", "us-east-1")
       .mode("overwrite")
       .save(s3Path)
     
@@ -145,11 +145,11 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     // Read using V2 API - this is where the credential propagation issue should manifest
     val result = spark.read
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")  // Force V2 API
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)  
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)  
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.aws.region", "us-east-1")
       .load(s3Path)
     
     // This should fail if credentials aren't properly propagated to SplitSearchEngine.fromSplitFile
@@ -179,33 +179,33 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     // Write data first
     data.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)  
-      .option("spark.tantivy4spark.aws.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)  
+      .option("spark.indextables.aws.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.aws.region", "us-east-1")
       .mode("overwrite")
       .save(s3Path)
       
     // Clear any existing Spark session config to force reliance on broadcast
-    val originalAccessKey = spark.conf.getOption("spark.tantivy4spark.aws.accessKey")
-    val originalSecretKey = spark.conf.getOption("spark.tantivy4spark.aws.secretKey")
-    val originalSessionToken = spark.conf.getOption("spark.tantivy4spark.aws.sessionToken")
+    val originalAccessKey = spark.conf.getOption("spark.indextables.aws.accessKey")
+    val originalSecretKey = spark.conf.getOption("spark.indextables.aws.secretKey")
+    val originalSessionToken = spark.conf.getOption("spark.indextables.aws.sessionToken")
     
     try {
       // Remove session-level config to force broadcast usage
-      spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-      spark.conf.unset("spark.tantivy4spark.aws.secretKey") 
-      spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
+      spark.conf.unset("spark.indextables.aws.accessKey")
+      spark.conf.unset("spark.indextables.aws.secretKey") 
+      spark.conf.unset("spark.indextables.aws.sessionToken")
       
       // This read should rely entirely on broadcast config from read options
       val result = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-        .option("spark.tantivy4spark.aws.region", "us-east-1")
+        .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+        .option("spark.indextables.aws.secretKey", SECRET_KEY)
+        .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.indextables.aws.region", "us-east-1")
         .load(s3Path)
         
       println(s"🔍 Testing broadcast credential propagation...")
@@ -215,9 +215,9 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
       
     } finally {
       // Restore original session config
-      originalAccessKey.foreach(spark.conf.set("spark.tantivy4spark.aws.accessKey", _))
-      originalSecretKey.foreach(spark.conf.set("spark.tantivy4spark.aws.secretKey", _))
-      originalSessionToken.foreach(spark.conf.set("spark.tantivy4spark.aws.sessionToken", _))
+      originalAccessKey.foreach(spark.conf.set("spark.indextables.aws.accessKey", _))
+      originalSecretKey.foreach(spark.conf.set("spark.indextables.aws.secretKey", _))
+      originalSessionToken.foreach(spark.conf.set("spark.indextables.aws.sessionToken", _))
     }
   }
 }

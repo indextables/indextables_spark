@@ -70,7 +70,7 @@ class Tantivy4SparkScan(
     
     // Check if pre-warm is enabled
     val broadcastConfigMap = broadcastConfig.value
-    val isPreWarmEnabled = broadcastConfigMap.getOrElse("spark.tantivy4spark.cache.prewarm.enabled", "true").toBoolean
+    val isPreWarmEnabled = broadcastConfigMap.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
     
     // Execute pre-warm phase if enabled
     if (isPreWarmEnabled && filteredActions.nonEmpty) {

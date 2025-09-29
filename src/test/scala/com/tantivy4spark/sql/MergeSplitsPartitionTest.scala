@@ -93,7 +93,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
       data1.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "25")
+        .option("spark.indextables.indexWriter.batchSize", "25")
         .partitionBy("year", "quarter")
         .mode("append")
         .save(tempTablePath)
@@ -108,7 +108,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
       data2.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "25")
+        .option("spark.indextables.indexWriter.batchSize", "25")
         .partitionBy("year", "quarter")
         .mode("append")
         .save(tempTablePath)
@@ -394,7 +394,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         val chunkData = data.filter(col("id").isin(chunk: _*))
         chunkData.coalesce(1).write
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.indexWriter.batchSize", "20")
+          .option("spark.indextables.indexWriter.batchSize", "20")
           .partitionBy("year", "quarter")
           .mode("append")
           .save(tempTablePath)

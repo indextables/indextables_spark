@@ -56,7 +56,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API to ensure we test distributed aggregation
       testData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
 
@@ -126,8 +126,8 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API
       testData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")  // String field for GROUP BY
-        .option("spark.tantivy4spark.indexing.fastfields", "category,score,rating")  // All fields must be fast
+        .option("spark.indextables.indexing.typemap.category", "string")  // String field for GROUP BY
+        .option("spark.indextables.indexing.fastfields", "category,score,rating")  // All fields must be fast
         .mode(SaveMode.Overwrite)
         .save(tablePath)
 
@@ -204,8 +204,8 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data
       largeTestData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "category,score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "category,score,rating")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
 

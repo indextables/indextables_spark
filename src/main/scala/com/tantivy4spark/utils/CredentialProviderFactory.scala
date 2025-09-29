@@ -37,7 +37,7 @@ object CredentialProviderFactory {
   private val providerCache = new ConcurrentHashMap[String, AnyRef]()
 
   // Configuration key for custom credential provider class
-  val CREDENTIAL_PROVIDER_CLASS_KEY = "spark.tantivy4spark.aws.credentialsProviderClass"
+  val CREDENTIAL_PROVIDER_CLASS_KEY = "spark.indextables.aws.credentialsProviderClass"
 
   /**
    * Simple credential holder to avoid AWS SDK dependencies

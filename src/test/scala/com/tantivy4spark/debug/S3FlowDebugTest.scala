@@ -106,12 +106,12 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
   test("CloudStorageProviderFactory with S3Mock") {
     // Test 2: Can CloudStorageProviderFactory create an S3 provider correctly?
     val options = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> "us-east-1",
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> "us-east-1",
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
@@ -160,12 +160,12 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     }
 
     val options = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> "us-east-1",
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> "us-east-1",
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
@@ -229,12 +229,12 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     }
 
     val options = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> "us-east-1",
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> "us-east-1",
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
@@ -323,29 +323,29 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     }
 
     // Configure Spark to use our S3Mock
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.indextables.aws.region", "us-east-1")
+    spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
 
     // Also set in Hadoop config for consistency
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    hadoopConf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    hadoopConf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    hadoopConf.set("spark.tantivy4spark.aws.region", "us-east-1")
-    hadoopConf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    hadoopConf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    hadoopConf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    hadoopConf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    hadoopConf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    hadoopConf.set("spark.indextables.aws.region", "us-east-1")
+    hadoopConf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    hadoopConf.set("spark.indextables.s3.pathStyleAccess", "true")
 
     val options = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> "us-east-1",
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> "us-east-1",
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val tablePath = new Path(s"s3://$TEST_BUCKET/test-table")

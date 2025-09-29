@@ -41,9 +41,9 @@ class IndexQueryDiagnosticTest extends TestBase {
     // Write using V2 DataSource API with text fields
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.category", "text")
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")
-      .option("spark.tantivy4spark.indexing.typemap.author", "string")
+      .option("spark.indextables.indexing.typemap.category", "text")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .option("spark.indextables.indexing.typemap.author", "string")
       .mode("overwrite")
       .save(s"$tempDir/diagnostic_test")
 

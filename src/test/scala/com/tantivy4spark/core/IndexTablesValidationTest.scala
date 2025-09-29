@@ -178,9 +178,9 @@ class IndexTablesValidationTest extends RealS3TestBase {
       // Write with mixed configurations
       testData.write
         .format("io.indextables.provider.IndexTablesProvider")
-        .option("spark.tantivy4spark.indexing.typemap.name", "string")  // Original prefix
+        .option("spark.indextables.indexing.typemap.name", "string")  // Original prefix
         .option("spark.indextables.indexWriter.batchSize", "500")        // New prefix
-        .option("spark.tantivy4spark.cache.maxSize", "30000000")         // Original prefix
+        .option("spark.indextables.cache.maxSize", "30000000")         // Original prefix
         .option("spark.indextables.indexWriter.heapSize", "25000000")    // New prefix
         .mode("overwrite")
         .save(path.toString)
@@ -192,7 +192,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
       // Read with mixed configurations
       val readData = spark.read
         .format("io.indextables.provider.IndexTablesProvider")
-        .option("spark.tantivy4spark.cache.maxSize", "20000000")         // Original prefix
+        .option("spark.indextables.cache.maxSize", "20000000")         // Original prefix
         .option("spark.indextables.docBatch.enabled", "true")            // New prefix
         .load(path.toString)
 
@@ -205,30 +205,30 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     // Test basic normalization
     ConfigNormalization.normalizeKey("spark.indextables.cache.maxSize") should equal(
-      "spark.tantivy4spark.cache.maxSize"
+      "spark.indextables.cache.maxSize"
     )
 
-    ConfigNormalization.normalizeKey("spark.tantivy4spark.cache.maxSize") should equal(
-      "spark.tantivy4spark.cache.maxSize"
+    ConfigNormalization.normalizeKey("spark.indextables.cache.maxSize") should equal(
+      "spark.indextables.cache.maxSize"
     )
 
     // Test key identification
     ConfigNormalization.isTantivyKey("spark.indextables.indexWriter.batchSize") should be(true)
-    ConfigNormalization.isTantivyKey("spark.tantivy4spark.indexWriter.batchSize") should be(true)
+    ConfigNormalization.isTantivyKey("spark.indextables.indexWriter.batchSize") should be(true)
     ConfigNormalization.isTantivyKey("spark.sql.adaptive.enabled") should be(false)
 
     // Test configuration filtering
     val mixedConfigs = Map(
-      "spark.tantivy4spark.cache.maxSize" -> "100000000",
+      "spark.indextables.cache.maxSize" -> "100000000",
       "spark.indextables.indexWriter.batchSize" -> "5000",
       "spark.sql.adaptive.enabled" -> "true"
     )
 
     val normalized = ConfigNormalization.filterAndNormalizeTantivyConfigs(mixedConfigs)
-    normalized should contain key "spark.tantivy4spark.cache.maxSize"
-    normalized should contain key "spark.tantivy4spark.indexWriter.batchSize"
+    normalized should contain key "spark.indextables.cache.maxSize"
+    normalized should contain key "spark.indextables.indexWriter.batchSize"
     normalized.keys should not contain "spark.sql.adaptive.enabled"
-    normalized("spark.tantivy4spark.indexWriter.batchSize") should equal("5000")
+    normalized("spark.indextables.indexWriter.batchSize") should equal("5000")
   }
 
   test("Tantivy4SparkOptions should handle spark.indextables configurations") {
@@ -237,7 +237,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     val options = new CaseInsensitiveStringMap(Map(
       "spark.indextables.indexing.typemap.title" -> "string",
-      "spark.tantivy4spark.indexing.typemap.content" -> "text",
+      "spark.indextables.indexing.typemap.content" -> "text",
       "spark.indextables.indexing.tokenizer.summary" -> "raw"
     ).asJava)
 
@@ -344,9 +344,9 @@ class IndexTablesValidationTest extends RealS3TestBase {
     // Write with mixed configurations
     testData.write
       .format("io.indextables.provider.IndexTablesProvider")
-      .option("spark.tantivy4spark.indexing.typemap.name", "string")      // Original prefix
+      .option("spark.indextables.indexing.typemap.name", "string")      // Original prefix
       .option("spark.indextables.indexWriter.batchSize", "2000")          // New prefix
-      .option("spark.tantivy4spark.cache.maxSize", "50000000")            // Original prefix
+      .option("spark.indextables.cache.maxSize", "50000000")            // Original prefix
       .option("spark.indextables.indexWriter.heapSize", "30000000")       // New prefix
       .mode("overwrite")
       .save(testPath)
@@ -354,7 +354,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
     // Read with mixed configurations
     val readData = spark.read
       .format("io.indextables.provider.IndexTablesProvider")
-      .option("spark.tantivy4spark.cache.maxSize", "40000000")            // Original prefix
+      .option("spark.indextables.cache.maxSize", "40000000")            // Original prefix
       .option("spark.indextables.docBatch.enabled", "true")               // New prefix
       .load(testPath)
 

@@ -70,8 +70,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -95,8 +95,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -120,8 +120,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -146,8 +146,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -172,8 +172,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -198,8 +198,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -224,8 +224,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -265,8 +265,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -299,8 +299,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -344,13 +344,13 @@ class SimpleAggregatePushdownTest extends TestBase {
     ))
 
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.indexing.fastfields" -> "score"
+      "spark.indextables.indexing.fastfields" -> "score"
     ).asJava)
 
     // For testing: create a mock TransactionLog with empty files
     // Create options map with allowDirectUsage for testing
     val testOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-      java.util.Map.of("spark.tantivy4spark.transaction.allowDirectUsage", "true")
+      java.util.Map.of("spark.indextables.transaction.allowDirectUsage", "true")
     )
     val transactionLog = new TransactionLog(new Path("/mock/path"), spark, testOptions) {
       override def listFiles(): Seq[com.tantivy4spark.transaction.AddAction] = Seq.empty
@@ -423,8 +423,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -469,8 +469,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -510,8 +510,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data using V2 API - use single partition to avoid distributed aggregation issues
       testData.coalesce(1).write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -551,8 +551,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data using V2 API - DO NOT coalesce, let it create multiple partitions
       testData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -610,8 +610,8 @@ class SimpleAggregatePushdownTest extends TestBase {
 
         // Write test data
         testData.write.format("tantivy4spark")
-          .option("spark.tantivy4spark.indexing.typemap.category", "string")
-          .option("spark.tantivy4spark.indexing.fastfields", "score,rating")
+          .option("spark.indextables.indexing.typemap.category", "string")
+          .option("spark.indextables.indexing.fastfields", "score,rating")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
 

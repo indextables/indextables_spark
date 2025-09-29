@@ -21,8 +21,8 @@ class ParseQueryApiTest extends TestBase {
     // Write with text fields
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")
-      .option("spark.tantivy4spark.indexing.typemap.category", "text")
+      .option("spark.indextables.indexing.typemap.title", "text")
+      .option("spark.indextables.indexing.typemap.category", "text")
       .mode("overwrite")
       .save(testPath)
 

@@ -53,12 +53,12 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
       .config("spark.driver.bindAddress", "127.0.0.1")
       .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
       // ONLY Tantivy4Spark S3 settings - NO Hadoop config
-      .config("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .config("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .config("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .config("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .config("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .config("spark.tantivy4spark.aws.region", "us-east-1")
+      .config("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .config("spark.indextables.aws.secretKey", SECRET_KEY)
+      .config("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .config("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .config("spark.indextables.s3.pathStyleAccess", "true")
+      .config("spark.indextables.aws.region", "us-east-1")
       .getOrCreate()
     
     spark.sparkContext.setLogLevel("WARN")

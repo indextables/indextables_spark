@@ -21,10 +21,10 @@ class ComplexIndexQueryDebugTest extends TestBase {
     // Same configuration as failing test
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.category", "string")  // exact matching
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")       // tokenized search
-      .option("spark.tantivy4spark.indexing.typemap.author", "string")    // exact matching
-      .option("spark.tantivy4spark.indexing.typemap.tags", "text")        // tokenized search
+      .option("spark.indextables.indexing.typemap.category", "string")  // exact matching
+      .option("spark.indextables.indexing.typemap.title", "text")       // tokenized search
+      .option("spark.indextables.indexing.typemap.author", "string")    // exact matching
+      .option("spark.indextables.indexing.typemap.tags", "text")        // tokenized search
       .mode("overwrite")
       .save(testPath)
 

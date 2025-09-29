@@ -55,21 +55,21 @@ class OptimizedTransactionLog(
   private val enhancedCache = {
     // Convert legacy expirationSeconds to minutes for enhanced cache compatibility
     // For test compatibility, allow sub-minute expiration by using fraction of minute
-    val legacyExpirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", -1)
+    val legacyExpirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", -1)
     val legacyExpirationMinutes = if (legacyExpirationSeconds > 0) {
       if (legacyExpirationSeconds < 60) 1L // Use 1 minute minimum for very short times
       else legacyExpirationSeconds / 60
     } else -1L
 
     new EnhancedTransactionLogCache(
-      logCacheSize = options.getLong("spark.tantivy4spark.cache.log.size", 1000),
-      logCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.log.ttl", 5),
-      snapshotCacheSize = options.getLong("spark.tantivy4spark.cache.snapshot.size", 100),
-      snapshotCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.snapshot.ttl", 10),
-      fileListCacheSize = options.getLong("spark.tantivy4spark.cache.filelist.size", 50),
-      fileListCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.filelist.ttl", 2),
-      metadataCacheSize = options.getLong("spark.tantivy4spark.cache.metadata.size", 100),
-      metadataCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.tantivy4spark.cache.metadata.ttl", 30)
+      logCacheSize = options.getLong("spark.indextables.cache.log.size", 1000),
+      logCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.log.ttl", 5),
+      snapshotCacheSize = options.getLong("spark.indextables.cache.snapshot.size", 100),
+      snapshotCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.snapshot.ttl", 10),
+      fileListCacheSize = options.getLong("spark.indextables.cache.filelist.size", 50),
+      fileListCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.filelist.ttl", 2),
+      metadataCacheSize = options.getLong("spark.indextables.cache.metadata.size", 100),
+      metadataCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.metadata.ttl", 30)
     )
   }
 
@@ -95,7 +95,7 @@ class OptimizedTransactionLog(
   )
 
   // Checkpoint handler
-  private val checkpointEnabled = options.getBoolean("spark.tantivy4spark.checkpoint.enabled", true)
+  private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
   private val checkpoint = if (checkpointEnabled) {
     Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options))
   } else None
@@ -107,9 +107,9 @@ class OptimizedTransactionLog(
   private val versionCounter = new AtomicLong(-1L)
 
   // Performance configuration
-  private val maxStaleness = options.getLong("spark.tantivy4spark.snapshot.maxStaleness", 5000).millis
-  private val parallelReadEnabled = options.getBoolean("spark.tantivy4spark.parallel.read.enabled", true)
-  private val asyncUpdatesEnabled = options.getBoolean("spark.tantivy4spark.async.updates.enabled", false) // Disabled by default for stability
+  private val maxStaleness = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
+  private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
+  private val asyncUpdatesEnabled = options.getBoolean("spark.indextables.async.updates.enabled", false) // Disabled by default for stability
 
   def getTablePath(): Path = tablePath
 

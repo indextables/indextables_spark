@@ -284,9 +284,9 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // configuration doesn't always propagate to executors in distributed contexts
     val (accessKey, secretKey) = awsCredentials.get
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     val result = spark.read
@@ -322,8 +322,8 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     println(s"✍️  Testing custom credential provider with different S3 schemes...")
 
     val writeOptions = Map(
-      "spark.tantivy4spark.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     // Write using s3a:// scheme
@@ -353,9 +353,9 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // support in distributed executor contexts
     val (accessKey, secretKey) = awsCredentials.get
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     val result = spark.read
@@ -389,8 +389,8 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Options should take precedence over hadoop config, so this should work
     // even if we have conflicting hadoop config values
     val writeOptions = Map(
-      "spark.tantivy4spark.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     URICapturingCredentialProvider.reset()
@@ -412,8 +412,8 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
 
     // Verify data was written successfully
     val readOptions = Map(
-      "spark.tantivy4spark.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     val result = spark.read
@@ -443,8 +443,8 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     println(s"✍️  Testing custom credential provider caching...")
 
     val options = Map(
-      "spark.tantivy4spark.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
+      "spark.indextables.aws.region" -> S3_REGION
     )
 
     // Record initial cache size (may not be 0 if other tests have run)
@@ -555,8 +555,8 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Store original values to restore later
     val originalCredProviderClass = spark.conf.getOption("spark.indextables.aws.credentialsProviderClass")
     val originalRegion = spark.conf.getOption("spark.indextables.aws.region")
-    val originalAccessKey = spark.conf.getOption("spark.tantivy4spark.aws.accessKey")
-    val originalSecretKey = spark.conf.getOption("spark.tantivy4spark.aws.secretKey")
+    val originalAccessKey = spark.conf.getOption("spark.indextables.aws.accessKey")
+    val originalSecretKey = spark.conf.getOption("spark.indextables.aws.secretKey")
 
     try {
       // Set custom credential provider configuration in Spark session
@@ -603,12 +603,12 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
         case None => spark.conf.unset("spark.indextables.aws.region")
       }
       originalAccessKey match {
-        case Some(value) => spark.conf.set("spark.tantivy4spark.aws.accessKey", value)
-        case None => spark.conf.unset("spark.tantivy4spark.aws.accessKey")
+        case Some(value) => spark.conf.set("spark.indextables.aws.accessKey", value)
+        case None => spark.conf.unset("spark.indextables.aws.accessKey")
       }
       originalSecretKey match {
-        case Some(value) => spark.conf.set("spark.tantivy4spark.aws.secretKey", value)
-        case None => spark.conf.unset("spark.tantivy4spark.aws.secretKey")
+        case Some(value) => spark.conf.set("spark.indextables.aws.secretKey", value)
+        case None => spark.conf.unset("spark.indextables.aws.secretKey")
       }
     }
 

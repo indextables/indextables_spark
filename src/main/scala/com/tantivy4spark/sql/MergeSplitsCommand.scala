@@ -369,29 +369,29 @@ class MergeSplitsExecutor(
         result
       }
       
-      val accessKey = getConfigWithFallback("spark.tantivy4spark.aws.accessKey")
-      val secretKey = getConfigWithFallback("spark.tantivy4spark.aws.secretKey")
-      val sessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken")
-      val region = getConfigWithFallback("spark.tantivy4spark.aws.region")
-      val endpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint")
-      val pathStyleAccess = getConfigWithFallback("spark.tantivy4spark.s3.pathStyleAccess")
+      val accessKey = getConfigWithFallback("spark.indextables.aws.accessKey")
+      val secretKey = getConfigWithFallback("spark.indextables.aws.secretKey")
+      val sessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken")
+      val region = getConfigWithFallback("spark.indextables.aws.region")
+      val endpoint = getConfigWithFallback("spark.indextables.s3.endpoint")
+      val pathStyleAccess = getConfigWithFallback("spark.indextables.s3.pathStyleAccess")
         .map(_.toLowerCase == "true").getOrElse(false)
 
       // Extract temporary directory configuration for merge operations with auto-detection
-      val tempDirectoryPath = getConfigWithFallback("spark.tantivy4spark.merge.tempDirectoryPath")
+      val tempDirectoryPath = getConfigWithFallback("spark.indextables.merge.tempDirectoryPath")
         .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
       // Extract merge mode configuration (process-based vs direct)
-      val mergeMode = getConfigWithFallback("spark.tantivy4spark.merge.mode").getOrElse("direct")
-      val heapSize = getConfigWithFallback("spark.tantivy4spark.merge.heapSize")
+      val mergeMode = getConfigWithFallback("spark.indextables.merge.mode").getOrElse("direct")
+      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
         .map(_.toLong).getOrElse(50L * 1024L * 1024L) // Default 50MB
 
       // Extract debug configuration for process-based merging
-      val debugEnabled = getConfigWithFallback("spark.tantivy4spark.merge.debug")
+      val debugEnabled = getConfigWithFallback("spark.indextables.merge.debug")
         .map(_.toLowerCase == "true").getOrElse(false)
 
       // Extract custom credential provider class name
-      val credentialsProviderClass = getConfigWithFallback("spark.tantivy4spark.aws.credentialsProviderClass")
+      val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
 
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
@@ -505,7 +505,7 @@ class MergeSplitsExecutor(
     logger.info(s"Found ${allFiles.length} split files in transaction log")
 
     // Filter out files that are currently in cooldown period
-    val trackingEnabled = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.trackingEnabled", "true").toBoolean
+    val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
     val currentFiles = if (trackingEnabled) {
       val filtered = transactionLog.filterFilesInCooldown(allFiles)
       val filteredCount = allFiles.length - filtered.length
@@ -680,8 +680,8 @@ class MergeSplitsExecutor(
         println(s"⚠️  [DRIVER] Merge operation skipped ${skippedSplitPaths.size} files: ${skippedSplitPaths.mkString(", ")}")
 
         // Record skipped files in transaction log with cooldown period
-        val cooldownHours = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.cooldownDuration", "24").toInt
-        val trackingEnabled = sparkSession.conf.get("spark.tantivy4spark.skippedFiles.trackingEnabled", "true").toBoolean
+        val cooldownHours = sparkSession.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
+        val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
 
         if (trackingEnabled) {
           skippedSplitPaths.foreach { skippedPath =>
@@ -1276,12 +1276,12 @@ class MergeSplitsExecutor(
         Option(System.getProperty(key)).orElse(Option(System.getenv(key)))
       }
       
-      val accessKey = getConfig("spark.tantivy4spark.aws.accessKey")
-      val secretKey = getConfig("spark.tantivy4spark.aws.secretKey") 
-      val sessionToken = getConfig("spark.tantivy4spark.aws.sessionToken")
-      val region = getConfig("spark.tantivy4spark.aws.region")
-      val endpoint = getConfig("spark.tantivy4spark.s3.endpoint")
-      val pathStyleAccess = getConfig("spark.tantivy4spark.s3.pathStyleAccess")
+      val accessKey = getConfig("spark.indextables.aws.accessKey")
+      val secretKey = getConfig("spark.indextables.aws.secretKey") 
+      val sessionToken = getConfig("spark.indextables.aws.sessionToken")
+      val region = getConfig("spark.indextables.aws.region")
+      val endpoint = getConfig("spark.indextables.s3.endpoint")
+      val pathStyleAccess = getConfig("spark.indextables.s3.pathStyleAccess")
         .map(_.toLowerCase == "true").getOrElse(false)
       
       logger.info(s"[EXECUTOR] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")

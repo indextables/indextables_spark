@@ -24,8 +24,8 @@ class NotFilterTest extends TestBase {
     // Write with mixed field types
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.name", "text")        // tokenized for IndexQuery
-      .option("spark.tantivy4spark.indexing.typemap.category", "string")  // exact matching
+      .option("spark.indextables.indexing.typemap.name", "text")        // tokenized for IndexQuery
+      .option("spark.indextables.indexing.typemap.category", "string")  // exact matching
       .mode("overwrite")
       .save(testPath)
 

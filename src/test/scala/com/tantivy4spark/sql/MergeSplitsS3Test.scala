@@ -55,12 +55,12 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .config("spark.driver.bindAddress", "127.0.0.1")
       .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
       // Configure Tantivy4Spark S3 settings (used by CloudStorageProvider)
-      .config("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .config("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .config("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .config("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .config("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .config("spark.tantivy4spark.aws.region", "us-east-1")
+      .config("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .config("spark.indextables.aws.secretKey", SECRET_KEY)
+      .config("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .config("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .config("spark.indextables.s3.pathStyleAccess", "true")
+      .config("spark.indextables.aws.region", "us-east-1")
       // Hadoop S3A config - ONLY needed because Spark itself needs to parse s3a:// URLs
       // when passed as path arguments to .save() and .load()
       // Tantivy4Spark itself doesn't use Hadoop - it uses CloudStorageProvider
@@ -191,7 +191,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     // Write with small batch size to create multiple splits
     testData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "10")
+      .option("spark.indextables.indexWriter.batchSize", "10")
       .mode("overwrite")
       .save(s3TablePath)
     
@@ -234,7 +234,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     testData.write
       .format("tantivy4spark")
       .partitionBy("partition")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "5")
+      .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
       .save(s3TablePath)
     
@@ -266,7 +266,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     
     testData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "5")
+      .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
       .save(s3aPath)
     
@@ -317,7 +317,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     testData.filter(col("id") <= 300).coalesce(1)
       .write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "100")
+      .option("spark.indextables.indexWriter.batchSize", "100")
       .option("targetRecordsPerSplit", "250")  
       .mode(SaveMode.Overwrite)  
       .save(s3TablePath)
@@ -326,7 +326,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     testData.filter(col("id") > 300 && col("id") <= 600).coalesce(1)
       .write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "100")
+      .option("spark.indextables.indexWriter.batchSize", "100")
       .option("targetRecordsPerSplit", "250")  
       .mode(SaveMode.Append)
       .save(s3TablePath)
@@ -335,7 +335,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     testData.filter(col("id") > 600).coalesce(1)
       .write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "100") 
+      .option("spark.indextables.indexWriter.batchSize", "100") 
       .option("targetRecordsPerSplit", "250")  
       .mode(SaveMode.Append)
       .save(s3TablePath)

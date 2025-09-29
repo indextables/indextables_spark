@@ -36,21 +36,21 @@ mvn test          # Run tests
 
 ### Core Settings
 Key settings with defaults:
-- `spark.tantivy4spark.indexWriter.heapSize`: `100000000` (100MB, supports human-readable formats like "2G", "500M", "1024K")
-- `spark.tantivy4spark.indexWriter.batchSize`: `10000` documents
-- `spark.tantivy4spark.indexWriter.threads`: `2`
-- `spark.tantivy4spark.cache.maxSize`: `200000000` (200MB)
-- `spark.tantivy4spark.cache.prewarm.enabled`: `true` (Enable proactive cache warming)
-- `spark.tantivy4spark.docBatch.enabled`: `true` (Enable batch document retrieval for better performance)
-- `spark.tantivy4spark.docBatch.maxSize`: `1000` (Maximum documents per batch)
-- `spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit`: `1000000`
+- `spark.indextables.indexWriter.heapSize`: `100000000` (100MB, supports human-readable formats like "2G", "500M", "1024K")
+- `spark.indextables.indexWriter.batchSize`: `10000` documents
+- `spark.indextables.indexWriter.threads`: `2`
+- `spark.indextables.cache.maxSize`: `200000000` (200MB)
+- `spark.indextables.cache.prewarm.enabled`: `true` (Enable proactive cache warming)
+- `spark.indextables.docBatch.enabled`: `true` (Enable batch document retrieval for better performance)
+- `spark.indextables.docBatch.maxSize`: `1000` (Maximum documents per batch)
+- `spark.indextables.optimizeWrite.targetRecordsPerSplit`: `1000000`
 
 ### Custom AWS Credential Providers
 
 **New in v1.9**: Support for custom AWS credential providers via reflection, allowing integration with enterprise credential management systems without compile-time dependencies.
 
 #### Configuration
-- `spark.tantivy4spark.aws.credentialsProviderClass`: Fully qualified class name of custom AWS credential provider
+- `spark.indextables.aws.credentialsProviderClass`: Fully qualified class name of custom AWS credential provider
 
 #### Requirements
 Custom credential providers must:
@@ -59,7 +59,7 @@ Custom credential providers must:
 3. **Return valid credentials**: Access key, secret key, and optional session token
 
 #### Credential Resolution Priority
-1. **Custom Provider** (if configured via `spark.tantivy4spark.aws.credentialsProviderClass`)
+1. **Custom Provider** (if configured via `spark.indextables.aws.credentialsProviderClass`)
 2. **Explicit Credentials** (access key/secret key in configuration)
 3. **Default Provider Chain** (IAM roles, environment variables, etc.)
 
@@ -67,15 +67,15 @@ Custom credential providers must:
 
 ```scala
 // Basic custom provider configuration
-spark.conf.set("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+spark.conf.set("spark.indextables.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
 
 // Per-operation configuration
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+  .option("spark.indextables.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
   .save("s3://bucket/path")
 
 // Hadoop configuration (also supported)
-hadoopConf.set("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
+hadoopConf.set("spark.indextables.aws.credentialsProviderClass", "com.example.MyCredentialProvider")
 ```
 
 #### Example Custom Provider (AWS SDK v2)
@@ -166,15 +166,15 @@ private def validateTablePath(uri: URI, testDescription: String): Unit = {
 **Write Operations**: Custom credential providers work reliably for write operations in driver context:
 ```scala
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.aws.credentialsProviderClass", "com.example.MyProvider")
+  .option("spark.indextables.aws.credentialsProviderClass", "com.example.MyProvider")
   .save("s3a://bucket/table")
 ```
 
 **Read Operations**: For maximum reliability in distributed executor contexts, use explicit credentials:
 ```scala
 val df = spark.read.format("tantivy4spark")
-  .option("spark.tantivy4spark.aws.accessKey", accessKey)
-  .option("spark.tantivy4spark.aws.secretKey", secretKey)
+  .option("spark.indextables.aws.accessKey", accessKey)
+  .option("spark.indextables.aws.secretKey", secretKey)
   .load("s3://bucket/table")
 ```
 
@@ -187,16 +187,16 @@ val df = spark.read.format("tantivy4spark")
 **New in v1.6**: Automatic `/local_disk0` detection and cache directory override for optimal performance on Databricks and high-performance storage environments.
 
 #### Directory Settings
-- `spark.tantivy4spark.indexWriter.tempDirectoryPath`: Custom working directory for index creation during writes (default: auto-detect `/local_disk0` or system temp)
-- `spark.tantivy4spark.merge.tempDirectoryPath`: Custom temporary directory for split merge operations (default: auto-detect `/local_disk0` or system temp)
-- `spark.tantivy4spark.cache.directoryPath`: Custom split cache directory for downloaded files (default: auto-detect `/local_disk0` or system temp)
+- `spark.indextables.indexWriter.tempDirectoryPath`: Custom working directory for index creation during writes (default: auto-detect `/local_disk0` or system temp)
+- `spark.indextables.merge.tempDirectoryPath`: Custom temporary directory for split merge operations (default: auto-detect `/local_disk0` or system temp)
+- `spark.indextables.cache.directoryPath`: Custom split cache directory for downloaded files (default: auto-detect `/local_disk0` or system temp)
 
 #### Process-Based Merge Configuration
 
 **New in v1.8**: Revolutionary process-based parallel merge architecture that eliminates thread contention and provides linear scalability for split merging operations.
 
-- `spark.tantivy4spark.merge.mode`: `"process"` (default) or `"direct"` (Merge execution mode)
-- `spark.tantivy4spark.merge.heapSize`: `52428800` (50MB, memory allocation for process-based merging)
+- `spark.indextables.merge.mode`: `"process"` (default) or `"direct"` (Merge execution mode)
+- `spark.indextables.merge.heapSize`: `52428800` (50MB, memory allocation for process-based merging)
 
 #### How Process-Based Merging Works
 
@@ -236,44 +236,44 @@ All directory configurations now automatically detect and use `/local_disk0` whe
 // No configuration needed - automatically optimized!
 
 // Manual Databricks optimization
-spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/local_disk0/temp")
-spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/local_disk0/merge-temp")
-spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/local_disk0/tantivy-cache")
+spark.conf.set("spark.indextables.indexWriter.tempDirectoryPath", "/local_disk0/temp")
+spark.conf.set("spark.indextables.merge.tempDirectoryPath", "/local_disk0/merge-temp")
+spark.conf.set("spark.indextables.cache.directoryPath", "/local_disk0/tantivy-cache")
 
 // High-performance storage: Use NVMe SSD
-spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
-spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-nvme/tantivy-cache")
+spark.conf.set("spark.indextables.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
+spark.conf.set("spark.indextables.cache.directoryPath", "/fast-nvme/tantivy-cache")
 
 // Memory filesystem: For maximum speed (sufficient RAM required)
-spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/dev/shm/tantivy-index")
-spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/dev/shm/tantivy-cache")
+spark.conf.set("spark.indextables.indexWriter.tempDirectoryPath", "/dev/shm/tantivy-index")
+spark.conf.set("spark.indextables.cache.directoryPath", "/dev/shm/tantivy-cache")
 
 // Per-write operation configuration
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-storage/index-temp")
-  .option("spark.tantivy4spark.cache.directoryPath", "/fast-storage/cache")
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/fast-storage/index-temp")
+  .option("spark.indextables.cache.directoryPath", "/fast-storage/cache")
   .save("s3://bucket/path")
 
 // Read with custom cache directory
 val df = spark.read.format("tantivy4spark")
-  .option("spark.tantivy4spark.cache.directoryPath", "/nvme/tantivy-cache")
+  .option("spark.indextables.cache.directoryPath", "/nvme/tantivy-cache")
   .load("s3://bucket/path")
 
 // Process-based merge configuration (default - no config needed)
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
 
 // Configure direct merge mode (legacy fallback)
-spark.conf.set("spark.tantivy4spark.merge.mode", "direct")
+spark.conf.set("spark.indextables.merge.mode", "direct")
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
 
 // Configure larger heap for process-based merging
-spark.conf.set("spark.tantivy4spark.merge.heapSize", "134217728")  // 128MB
+spark.conf.set("spark.indextables.merge.heapSize", "134217728")  // 128MB
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
 
 // High-performance merge configuration
-spark.conf.set("spark.tantivy4spark.merge.mode", "process")
-spark.conf.set("spark.tantivy4spark.merge.heapSize", "268435456")     // 256MB
-spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/fast-nvme/merge-temp")
+spark.conf.set("spark.indextables.merge.mode", "process")
+spark.conf.set("spark.indextables.merge.heapSize", "268435456")     // 256MB
+spark.conf.set("spark.indextables.merge.tempDirectoryPath", "/fast-nvme/merge-temp")
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 500M")
 ```
 
@@ -288,9 +288,9 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 500M")
 **New in v1.6**: Intelligent auto-sizing that dynamically repartitions DataFrames based on historical split data to achieve target split sizes with comprehensive test coverage.
 
 #### Auto-Sizing Settings
-- `spark.tantivy4spark.autoSize.enabled`: `false` (Enable auto-sizing based on historical data)
-- `spark.tantivy4spark.autoSize.targetSplitSize`: Target size per split (supports: `"100M"`, `"1G"`, `"512K"`, `"123456"` bytes)
-- `spark.tantivy4spark.autoSize.inputRowCount`: Explicit row count for accurate partitioning (required for V2 API, optional for V1)
+- `spark.indextables.autoSize.enabled`: `false` (Enable auto-sizing based on historical data)
+- `spark.indextables.autoSize.targetSplitSize`: Target size per split (supports: `"100M"`, `"1G"`, `"512K"`, `"123456"` bytes)
+- `spark.indextables.autoSize.inputRowCount`: Explicit row count for accurate partitioning (required for V2 API, optional for V1)
 
 #### How Auto-Sizing Works
 1. **Historical Analysis**: Examines recent splits in the transaction log to extract size and row count data
@@ -318,14 +318,14 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 500M")
 ```scala
 // V1 with automatic DataFrame counting
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.autoSize.enabled", "true")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "100M")
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "100M")
   .save("s3://bucket/path")
 
 // V1 with different size formats
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.autoSize.enabled", "1")        // Extended boolean support
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "512K") // Kilobyte format
+  .option("spark.indextables.autoSize.enabled", "1")        // Extended boolean support
+  .option("spark.indextables.autoSize.targetSplitSize", "512K") // Kilobyte format
   .save("s3://bucket/path")
 ```
 
@@ -334,28 +334,28 @@ df.write.format("tantivy4spark")
 // V2 with explicit row count for accurate auto-sizing
 val rowCount = df.count()
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.autoSize.enabled", "true")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "50M")
-  .option("spark.tantivy4spark.autoSize.inputRowCount", rowCount.toString)
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "50M")
+  .option("spark.indextables.autoSize.inputRowCount", rowCount.toString)
   .save("s3://bucket/path")
 
 // V2 without explicit count (uses estimation with warning)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.autoSize.enabled", "true")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "2G")
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "2G")
   .save("s3://bucket/path")
 ```
 
 **Global Configuration**
 ```scala
 // Session-level configuration
-spark.conf.set("spark.tantivy4spark.autoSize.enabled", "yes")    // Extended boolean
-spark.conf.set("spark.tantivy4spark.autoSize.targetSplitSize", "200M")
+spark.conf.set("spark.indextables.autoSize.enabled", "yes")    // Extended boolean
+spark.conf.set("spark.indextables.autoSize.targetSplitSize", "200M")
 df.write.format("tantivy4spark").save("s3://bucket/path")
 
 // Write options override session config
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "1G")  // Overrides session config
+  .option("spark.indextables.autoSize.targetSplitSize", "1G")  // Overrides session config
   .save("s3://bucket/path")
 ```
 
@@ -388,10 +388,10 @@ df.write.format("tantivy4spark")
 **New in v1.3**: Memory-efficient streaming uploads for large splits (4GB+) to prevent OOM errors.
 
 #### Upload Performance Settings
-- `spark.tantivy4spark.s3.streamingThreshold`: `104857600` (100MB - files larger than this use streaming upload)
-- `spark.tantivy4spark.s3.multipartThreshold`: `104857600` (100MB - threshold for S3 multipart upload)
-- `spark.tantivy4spark.s3.maxConcurrency`: `4` (Number of parallel upload threads for both byte array and streaming uploads)
-- `spark.tantivy4spark.s3.partSize`: `67108864` (64MB - size of each multipart upload part)
+- `spark.indextables.s3.streamingThreshold`: `104857600` (100MB - files larger than this use streaming upload)
+- `spark.indextables.s3.multipartThreshold`: `104857600` (100MB - threshold for S3 multipart upload)
+- `spark.indextables.s3.maxConcurrency`: `4` (Number of parallel upload threads for both byte array and streaming uploads)
+- `spark.indextables.s3.partSize`: `67108864` (64MB - size of each multipart upload part)
 
 #### Advanced Upload Features
 **Parallel Streaming Uploads (New in v1.3):**
@@ -412,48 +412,48 @@ df.write.format("tantivy4spark")
 **New in v1.2**: High-performance transaction log with Delta Lake-style checkpoint compaction and parallel S3 retrieval.
 
 #### Checkpoint Configuration
-- `spark.tantivy4spark.checkpoint.enabled`: `true` (Enable automatic checkpoint creation)
-- `spark.tantivy4spark.checkpoint.interval`: `10` (Create checkpoint every N transactions)
-- `spark.tantivy4spark.checkpoint.parallelism`: `4` (Thread pool size for parallel I/O)
-- `spark.tantivy4spark.checkpoint.read.timeoutSeconds`: `30` (Timeout for parallel read operations)
+- `spark.indextables.checkpoint.enabled`: `true` (Enable automatic checkpoint creation)
+- `spark.indextables.checkpoint.interval`: `10` (Create checkpoint every N transactions)
+- `spark.indextables.checkpoint.parallelism`: `4` (Thread pool size for parallel I/O)
+- `spark.indextables.checkpoint.read.timeoutSeconds`: `30` (Timeout for parallel read operations)
 
 #### Data Retention Policies
-- `spark.tantivy4spark.logRetention.duration`: `2592000000` (30 days in milliseconds)
-- `spark.tantivy4spark.checkpointRetention.duration`: `7200000` (2 hours in milliseconds)
+- `spark.indextables.logRetention.duration`: `2592000000` (30 days in milliseconds)
+- `spark.indextables.checkpointRetention.duration`: `7200000` (2 hours in milliseconds)
 
 #### File Cleanup & Safety
-- `spark.tantivy4spark.cleanup.enabled`: `true` (Enable automatic cleanup of old transaction files)
-- `spark.tantivy4spark.cleanup.failurePolicy`: `continue` (Continue operations if cleanup fails)
-- `spark.tantivy4spark.cleanup.dryRun`: `false` (Set to true to log cleanup actions without deleting files)
+- `spark.indextables.cleanup.enabled`: `true` (Enable automatic cleanup of old transaction files)
+- `spark.indextables.cleanup.failurePolicy`: `continue` (Continue operations if cleanup fails)
+- `spark.indextables.cleanup.dryRun`: `false` (Set to true to log cleanup actions without deleting files)
 
 #### Advanced Performance Features
-- `spark.tantivy4spark.checkpoint.checksumValidation.enabled`: `true` (Enable data integrity validation)
-- `spark.tantivy4spark.checkpoint.multipart.enabled`: `false` (Enable multi-part checkpoints for large tables)
-- `spark.tantivy4spark.checkpoint.multipart.maxActionsPerPart`: `50000` (Actions per checkpoint part)
-- `spark.tantivy4spark.checkpoint.auto.enabled`: `true` (Enable automatic checkpoint optimization)
-- `spark.tantivy4spark.checkpoint.auto.minFileAge`: `600000` (10 minutes in milliseconds)
+- `spark.indextables.checkpoint.checksumValidation.enabled`: `true` (Enable data integrity validation)
+- `spark.indextables.checkpoint.multipart.enabled`: `false` (Enable multi-part checkpoints for large tables)
+- `spark.indextables.checkpoint.multipart.maxActionsPerPart`: `50000` (Actions per checkpoint part)
+- `spark.indextables.checkpoint.auto.enabled`: `true` (Enable automatic checkpoint optimization)
+- `spark.indextables.checkpoint.auto.minFileAge`: `600000` (10 minutes in milliseconds)
 
 #### Transaction Log Cache
-- `spark.tantivy4spark.transaction.cache.enabled`: `true` (Enable transaction log caching)
-- `spark.tantivy4spark.transaction.cache.expirationSeconds`: `300` (5 minutes cache TTL)
+- `spark.indextables.transaction.cache.enabled`: `true` (Enable transaction log caching)
+- `spark.indextables.transaction.cache.expirationSeconds`: `300` (5 minutes cache TTL)
 
 ## Field Indexing Configuration
 
 **New in v1.1**: Advanced field indexing configuration with support for string, text, and JSON field types.
 
 ### Field Type Configuration
-- `spark.tantivy4spark.indexing.typemap.<field_name>`: Set field indexing type
+- `spark.indextables.indexing.typemap.<field_name>`: Set field indexing type
   - **`string`** (default): Exact string matching with raw tokenizer, supports precise filter pushdown
   - **`text`**: Full-text search with default tokenizer, best-effort filtering with Spark post-processing
   - **`json`**: JSON field indexing with tokenization
 
 ### Field Behavior Configuration
-- `spark.tantivy4spark.indexing.fastfields`: Comma-separated list of fields for fast access (e.g., `"id,score,timestamp"`)
-- `spark.tantivy4spark.indexing.storeonlyfields`: Fields stored but not indexed (e.g., `"metadata,description"`)
-- `spark.tantivy4spark.indexing.indexonlyfields`: Fields indexed but not stored (e.g., `"searchterms,keywords"`)
+- `spark.indextables.indexing.fastfields`: Comma-separated list of fields for fast access (e.g., `"id,score,timestamp"`)
+- `spark.indextables.indexing.storeonlyfields`: Fields stored but not indexed (e.g., `"metadata,description"`)
+- `spark.indextables.indexing.indexonlyfields`: Fields indexed but not stored (e.g., `"searchterms,keywords"`)
 
 ### Tokenizer Configuration
-- `spark.tantivy4spark.indexing.tokenizer.<field_name>`: Custom tokenizer for text fields
+- `spark.indextables.indexing.tokenizer.<field_name>`: Custom tokenizer for text fields
   - **`default`**: Standard tokenizer
   - **`whitespace`**: Whitespace-only tokenization
   - **`raw`**: No tokenization
@@ -464,12 +464,12 @@ df.write.format("tantivy4spark")
 ```scala
 // Configure field types and behavior
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexing.typemap.title", "string")        // Exact matching
-  .option("spark.tantivy4spark.indexing.typemap.content", "text")        // Full-text search
-  .option("spark.tantivy4spark.indexing.typemap.metadata", "json")       // JSON indexing
-  .option("spark.tantivy4spark.indexing.fastfields", "score,timestamp")  // Fast fields
-  .option("spark.tantivy4spark.indexing.storeonlyfields", "raw_data")     // Store only
-  .option("spark.tantivy4spark.indexing.tokenizer.content", "default")   // Custom tokenizer
+  .option("spark.indextables.indexing.typemap.title", "string")        // Exact matching
+  .option("spark.indextables.indexing.typemap.content", "text")        // Full-text search
+  .option("spark.indextables.indexing.typemap.metadata", "json")       // JSON indexing
+  .option("spark.indextables.indexing.fastfields", "score,timestamp")  // Fast fields
+  .option("spark.indextables.indexing.storeonlyfields", "raw_data")     // Store only
+  .option("spark.indextables.indexing.tokenizer.content", "default")   // Custom tokenizer
   .save("s3://bucket/path")
 ```
 
@@ -477,24 +477,24 @@ df.write.format("tantivy4spark")
 ```scala
 // Maximum performance with parallel streaming uploads
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.s3.maxConcurrency", "12")                  // 12 parallel upload threads
-  .option("spark.tantivy4spark.s3.partSize", "268435456")                 // 256MB part size
-  .option("spark.tantivy4spark.s3.multipartThreshold", "104857600")       // 100MB threshold
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
+  .option("spark.indextables.s3.maxConcurrency", "12")                  // 12 parallel upload threads
+  .option("spark.indextables.s3.partSize", "268435456")                 // 256MB part size
+  .option("spark.indextables.s3.multipartThreshold", "104857600")       // 100MB threshold
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
   .save("s3://bucket/high-performance")
 
 // Memory filesystem for extreme performance (requires sufficient RAM)
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/dev/shm/tantivy-index")
-  .option("spark.tantivy4spark.s3.maxConcurrency", "16")                  // Maximum concurrency
-  .option("spark.tantivy4spark.indexWriter.batchSize", "50000")           // Large batches
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/dev/shm/tantivy-index")
+  .option("spark.indextables.s3.maxConcurrency", "16")                  // Maximum concurrency
+  .option("spark.indextables.indexWriter.batchSize", "50000")           // Large batches
   .save("s3://bucket/memory-optimized")
 
 // Databricks optimized configuration
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/local_disk0/temp")
-  .option("spark.tantivy4spark.s3.maxConcurrency", "8")                   // Balanced concurrency
-  .option("spark.tantivy4spark.s3.partSize", "134217728")                 // 128MB parts
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/local_disk0/temp")
+  .option("spark.indextables.s3.maxConcurrency", "8")                   // Balanced concurrency
+  .option("spark.indextables.s3.partSize", "134217728")                 // 128MB parts
   .save("s3://bucket/databricks-optimized")
 ```
 
@@ -502,27 +502,27 @@ df.write.format("tantivy4spark")
 ```scala
 // Optimize for high-transaction workloads
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.enabled", "true")
-  .option("spark.tantivy4spark.checkpoint.interval", "5")                 // Checkpoint every 5 transactions
-  .option("spark.tantivy4spark.checkpoint.parallelism", "8")              // Use 8 threads for parallel I/O
-  .option("spark.tantivy4spark.logRetention.duration", "86400000")        // 1 day retention
+  .option("spark.indextables.checkpoint.enabled", "true")
+  .option("spark.indextables.checkpoint.interval", "5")                 // Checkpoint every 5 transactions
+  .option("spark.indextables.checkpoint.parallelism", "8")              // Use 8 threads for parallel I/O
+  .option("spark.indextables.logRetention.duration", "86400000")        // 1 day retention
   .save("s3://bucket/high-volume-data")
 
 // For very large tables with many transactions
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.enabled", "true")
-  .option("spark.tantivy4spark.checkpoint.interval", "20")                // Less frequent checkpoints
-  .option("spark.tantivy4spark.checkpoint.multipart.enabled", "true")     // Multi-part checkpoints
-  .option("spark.tantivy4spark.checkpoint.parallelism", "12")             // Higher parallelism
-  .option("spark.tantivy4spark.checkpoint.read.timeoutSeconds", "60")     // Longer timeout
+  .option("spark.indextables.checkpoint.enabled", "true")
+  .option("spark.indextables.checkpoint.interval", "20")                // Less frequent checkpoints
+  .option("spark.indextables.checkpoint.multipart.enabled", "true")     // Multi-part checkpoints
+  .option("spark.indextables.checkpoint.parallelism", "12")             // Higher parallelism
+  .option("spark.indextables.checkpoint.read.timeoutSeconds", "60")     // Longer timeout
   .save("s3://bucket/enterprise-data")
 
 // Conservative settings for stability
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.enabled", "true")
-  .option("spark.tantivy4spark.checkpoint.interval", "50")                // Infrequent checkpoints
-  .option("spark.tantivy4spark.checkpoint.parallelism", "2")              // Conservative parallelism
-  .option("spark.tantivy4spark.checkpoint.checksumValidation.enabled", "true")
+  .option("spark.indextables.checkpoint.enabled", "true")
+  .option("spark.indextables.checkpoint.interval", "50")                // Infrequent checkpoints
+  .option("spark.indextables.checkpoint.parallelism", "2")              // Conservative parallelism
+  .option("spark.indextables.checkpoint.checksumValidation.enabled", "true")
   .save("s3://bucket/critical-data")
 ```
 
@@ -556,8 +556,8 @@ df.write.format("tantivy4spark")
 **New in v1.7**: Robust handling of corrupted or problematic files during merge operations with intelligent cooldown and retry mechanisms.
 
 ### Core Settings
-- `spark.tantivy4spark.skippedFiles.trackingEnabled`: `true` (Enable skipped files tracking and cooldown)
-- `spark.tantivy4spark.skippedFiles.cooldownDuration`: `24` (Hours to wait before retrying failed files)
+- `spark.indextables.skippedFiles.trackingEnabled`: `true` (Enable skipped files tracking and cooldown)
+- `spark.indextables.skippedFiles.cooldownDuration`: `24` (Hours to wait before retrying failed files)
 
 ### Skipped Files Behavior
 
@@ -582,18 +582,18 @@ When tantivy4java returns null or empty indexUid (indicating no merge was perfor
 ```scala
 // Production settings with 48-hour cooldown
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.skippedFiles.trackingEnabled", "true")
-  .option("spark.tantivy4spark.skippedFiles.cooldownDuration", "48")
+  .option("spark.indextables.skippedFiles.trackingEnabled", "true")
+  .option("spark.indextables.skippedFiles.cooldownDuration", "48")
   .save("s3://bucket/production-data")
 
 // Development with shorter cooldown for faster testing
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.skippedFiles.cooldownDuration", "1")
+  .option("spark.indextables.skippedFiles.cooldownDuration", "1")
   .save("s3://bucket/dev-data")
 
 // Disable skipped files tracking (not recommended)
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.skippedFiles.trackingEnabled", "false")
+  .option("spark.indextables.skippedFiles.trackingEnabled", "false")
   .save("s3://bucket/path")
 ```
 
@@ -621,35 +621,35 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://
 
 // With field type configuration
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexing.typemap.title", "string")     // Exact matching
-  .option("spark.tantivy4spark.indexing.typemap.content", "text")     // Full-text search
-  .option("spark.tantivy4spark.indexing.fastfields", "score")         // Fast field access
+  .option("spark.indextables.indexing.typemap.title", "string")     // Exact matching
+  .option("spark.indextables.indexing.typemap.content", "text")     // Full-text search
+  .option("spark.indextables.indexing.fastfields", "score")         // Fast field access
   .save("s3://bucket/path")
 
 // With auto-sizing (V1 API - recommended for auto-sizing)
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.autoSize.enabled", "true")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "100M")
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "100M")
   .save("s3://bucket/path")
 
 // V2 API with auto-sizing and explicit row count
 val rowCount = df.count()
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.autoSize.enabled", "true")
-  .option("spark.tantivy4spark.autoSize.targetSplitSize", "50M")
-  .option("spark.tantivy4spark.autoSize.inputRowCount", rowCount.toString)
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "50M")
+  .option("spark.indextables.autoSize.inputRowCount", rowCount.toString)
   .save("s3://bucket/path")
 
 // With custom configuration
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexWriter.batchSize", "20000")
+  .option("spark.indextables.indexWriter.batchSize", "20000")
   .option("targetRecordsPerSplit", "500000")
   .save("s3://bucket/path")
 
 // With custom working directory for high-performance storage
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
-  .option("spark.tantivy4spark.indexWriter.batchSize", "20000")
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy-temp")
+  .option("spark.indextables.indexWriter.batchSize", "20000")
   .save("s3://bucket/path")
 ```
 
@@ -678,13 +678,13 @@ df.filter($"_indexall" indexquery "apache OR python").show()
 // Write partitioned data
 df.write.format("tantivy4spark")
   .partitionBy("load_date", "load_hour")
-  .option("spark.tantivy4spark.indexing.typemap.message", "text")
+  .option("spark.indextables.indexing.typemap.message", "text")
   .save("s3://bucket/partitioned-data")
 
 // V2 DataSource API (modern) with custom working directory
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .partitionBy("year", "month", "day")
-  .option("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-storage/tantivy-temp")
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/fast-storage/tantivy-temp")
   .save("s3://bucket/v2-partitioned")
 
 // Read with partition pruning
@@ -902,14 +902,14 @@ Both APIs support identical functionality including partitioned datasets, IndexQ
 ```scala
 // High-volume production (1000+ transactions/day)
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.interval", "20")           // More frequent checkpoints
-  .option("spark.tantivy4spark.logRetention.duration", "604800000") // 7 days retention
+  .option("spark.indextables.checkpoint.interval", "20")           // More frequent checkpoints
+  .option("spark.indextables.logRetention.duration", "604800000") // 7 days retention
   .save("s3://bucket/high-volume-data")
 
 // Conservative production (< 100 transactions/day)
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.interval", "50")             // Less frequent checkpoints
-  .option("spark.tantivy4spark.logRetention.duration", "2592000000")   // 30 days retention
+  .option("spark.indextables.checkpoint.interval", "50")             // Less frequent checkpoints
+  .option("spark.indextables.logRetention.duration", "2592000000")   // 30 days retention
   .save("s3://bucket/conservative-data")
 ```
 
@@ -917,9 +917,9 @@ df.write.format("tantivy4spark")
 ```scala
 // Development with faster cleanup for testing
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.checkpoint.interval", "5")
-  .option("spark.tantivy4spark.logRetention.duration", "3600000")     // 1 hour retention
-  .option("spark.tantivy4spark.cleanup.dryRun", "true")               // Log only, don't delete
+  .option("spark.indextables.checkpoint.interval", "5")
+  .option("spark.indextables.logRetention.duration", "3600000")     // 1 hour retention
+  .option("spark.indextables.cleanup.dryRun", "true")               // Log only, don't delete
   .save("s3://bucket/dev-data")
 ```
 
@@ -985,7 +985,7 @@ df.write.format("tantivy4spark")
 - **Advanced optimizations**: Backward listing optimization, incremental checksums, async updates with staleness tolerance
 - **Factory pattern integration**: Automatic selection of optimized implementation via TransactionLogFactory with seamless backward compatibility
 - **Adapter pattern**: TransactionLogAdapter enables drop-in replacement without changing existing code
-- **Configuration**: All optimizations configurable via spark.tantivy4spark.* properties (remapped from spark.indextables.* for consistency)
+- **Configuration**: All optimizations configurable via spark.indextables.* properties (remapped from spark.indextables.* for consistency)
 - **Production ready**: 5/5 tests passing including complex overwrite scenarios and factory integration
 - **Thread pool infrastructure**: Centralized thread pool management with dedicated pools for different operation types
 
@@ -1010,7 +1010,7 @@ df.write.format("tantivy4spark")
 ### **v1.8 - Process-Based Parallel Merge Architecture**
 - **Process-based merging**: Revolutionary isolated-process merge architecture eliminating thread contention
 - **Linear scalability**: Near-perfect efficiency (99.5-100%) across all parallelism levels
-- **Memory isolation**: Each merge process has independent heap space (configurable via `spark.tantivy4spark.merge.heapSize`)
+- **Memory isolation**: Each merge process has independent heap space (configurable via `spark.indextables.merge.heapSize`)
 - **Fault tolerance**: Process failures provide clear error messages; direct merge mode available as alternative
 - **Resource control**: Configurable memory limits per process (default 50MB, supports up to 256MB+)
 - **Backward compatibility**: Existing code continues to work unchanged - process mode is default with configurable direct mode
@@ -1080,16 +1080,16 @@ if (fileAge > logRetentionDuration &&
 #### **Retention Configuration**
 ```scala
 // Conservative (Production Default)
-"spark.tantivy4spark.logRetention.duration" -> "2592000000"  // 30 days
+"spark.indextables.logRetention.duration" -> "2592000000"  // 30 days
 
 // Moderate (High-Volume Production)
-"spark.tantivy4spark.logRetention.duration" -> "86400000"   // 1 day
+"spark.indextables.logRetention.duration" -> "86400000"   // 1 day
 
 // Aggressive (Development/Testing)
-"spark.tantivy4spark.logRetention.duration" -> "3600000"    // 1 hour
+"spark.indextables.logRetention.duration" -> "3600000"    // 1 hour
 
 // Checkpoint Files
-"spark.tantivy4spark.checkpointRetention.duration" -> "7200000" // 2 hours
+"spark.indextables.checkpointRetention.duration" -> "7200000" // 2 hours
 ```
 
 #### **Environment-Specific Behavior**
@@ -1140,7 +1140,7 @@ if (fileAge > logRetentionDuration &&
 
 // v1.1+ equivalent behavior
 df.write.format("tantivy4spark")
-  .option("spark.tantivy4spark.indexing.typemap.content", "text")  // Explicit text type
+  .option("spark.indextables.indexing.typemap.content", "text")  // Explicit text type
   .save("path")
 
 // v1.1+ recommended (new default)
@@ -1183,8 +1183,8 @@ Based on comprehensive performance tests with full checkpoint + incremental work
 ### Configuration Hierarchy and Best Practices
 
 **Configuration Priority (Highest to Lowest):**
-1. **Write Options**: `.option("spark.tantivy4spark.setting", "value")`
-2. **Spark Session**: `spark.conf.set("spark.tantivy4spark.setting", "value")`
+1. **Write Options**: `.option("spark.indextables.setting", "value")`
+2. **Spark Session**: `spark.conf.set("spark.indextables.setting", "value")`
 3. **Hadoop Configuration**: Set via `hadoopConf.set(...)`
 4. **System Defaults**: Built-in fallback values
 
@@ -1196,37 +1196,37 @@ Based on comprehensive performance tests with full checkpoint + incremental work
 // No configuration needed on Databricks, EMR, or systems with /local_disk0
 
 // NVMe SSD for maximum I/O performance
-spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy")
-spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", "/fast-nvme/tantivy-merge")
-spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/fast-nvme/tantivy-cache")
+spark.conf.set("spark.indextables.indexWriter.tempDirectoryPath", "/fast-nvme/tantivy")
+spark.conf.set("spark.indextables.merge.tempDirectoryPath", "/fast-nvme/tantivy-merge")
+spark.conf.set("spark.indextables.cache.directoryPath", "/fast-nvme/tantivy-cache")
 
 // Memory filesystem for extreme performance (RAM permitting)
-spark.conf.set("spark.tantivy4spark.indexWriter.tempDirectoryPath", "/dev/shm/tantivy")
-spark.conf.set("spark.tantivy4spark.cache.directoryPath", "/dev/shm/tantivy-cache")
+spark.conf.set("spark.indextables.indexWriter.tempDirectoryPath", "/dev/shm/tantivy")
+spark.conf.set("spark.indextables.cache.directoryPath", "/dev/shm/tantivy-cache")
 ```
 
 #### **2. Upload Performance Tuning**
 ```scala
 // High-throughput uploads for large datasets
-spark.conf.set("spark.tantivy4spark.s3.maxConcurrency", "16")          // Parallel uploads
-spark.conf.set("spark.tantivy4spark.s3.partSize", "268435456")         // 256MB parts
-spark.conf.set("spark.tantivy4spark.s3.multipartThreshold", "52428800") // 50MB threshold
+spark.conf.set("spark.indextables.s3.maxConcurrency", "16")          // Parallel uploads
+spark.conf.set("spark.indextables.s3.partSize", "268435456")         // 256MB parts
+spark.conf.set("spark.indextables.s3.multipartThreshold", "52428800") // 50MB threshold
 ```
 
 #### **3. Index Writer Optimization**
 ```scala
 // Large batch processing for high-volume writes
-spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "50000")   // Large batches
-spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "500000000") // 500MB heap
-spark.conf.set("spark.tantivy4spark.indexWriter.threads", "4")         // Parallel indexing
+spark.conf.set("spark.indextables.indexWriter.batchSize", "50000")   // Large batches
+spark.conf.set("spark.indextables.indexWriter.heapSize", "500000000") // 500MB heap
+spark.conf.set("spark.indextables.indexWriter.threads", "4")         // Parallel indexing
 ```
 
 #### **4. Transaction Log Performance**
 ```scala
 // Optimized for high-frequency writes
-spark.conf.set("spark.tantivy4spark.checkpoint.enabled", "true")
-spark.conf.set("spark.tantivy4spark.checkpoint.interval", "10")        // Frequent checkpoints
-spark.conf.set("spark.tantivy4spark.checkpoint.parallelism", "8")      // Parallel I/O
+spark.conf.set("spark.indextables.checkpoint.enabled", "true")
+spark.conf.set("spark.indextables.checkpoint.interval", "10")        // Frequent checkpoints
+spark.conf.set("spark.indextables.checkpoint.parallelism", "8")      // Parallel I/O
 ```
 
 ### Environment-Specific Recommendations

@@ -38,8 +38,8 @@ class TantivySearchEngine private (
   def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) =
     this({
       // Extract working directory from configuration hierarchy with auto-detection
-      val workingDirectory = Option(options.get("spark.tantivy4spark.indexWriter.tempDirectoryPath"))
-        .orElse(Option(hadoopConf.get("spark.tantivy4spark.indexWriter.tempDirectoryPath")))
+      val workingDirectory = Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
+        .orElse(Option(hadoopConf.get("spark.indextables.indexWriter.tempDirectoryPath")))
         .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
       new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
@@ -121,29 +121,29 @@ object TantivySearchEngine {
           logger.debug(s"🔍 Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})")
           
           com.tantivy4spark.storage.SplitCacheConfig(
-            cacheName = sparkConf.get("spark.tantivy4spark.cache.name", "tantivy4spark-cache"),
-            maxCacheSize = sparkConf.get("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
-            maxConcurrentLoads = sparkConf.get("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
-            enableQueryCache = sparkConf.get("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
-            splitCachePath = getConfigWithFallback("spark.tantivy4spark.cache.directoryPath")
+            cacheName = sparkConf.get("spark.indextables.cache.name", "tantivy4spark-cache"),
+            maxCacheSize = sparkConf.get("spark.indextables.cache.maxSize", "200000000").toLong,
+            maxConcurrentLoads = sparkConf.get("spark.indextables.cache.maxConcurrentLoads", "8").toInt,
+            enableQueryCache = sparkConf.get("spark.indextables.cache.queryCache", "true").toBoolean,
+            splitCachePath = getConfigWithFallback("spark.indextables.cache.directoryPath")
               .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultCachePath()),
             // AWS configuration with session token support - use Hadoop fallback for executor context
-            awsAccessKey = getConfigWithFallback("spark.tantivy4spark.aws.accessKey"),
-            awsSecretKey = getConfigWithFallback("spark.tantivy4spark.aws.secretKey"), 
-            awsSessionToken = getConfigWithFallback("spark.tantivy4spark.aws.sessionToken"),
-            awsRegion = getConfigWithFallback("spark.tantivy4spark.aws.region"),
-            awsEndpoint = getConfigWithFallback("spark.tantivy4spark.s3.endpoint"),
-            awsPathStyleAccess = getConfigWithFallback("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
+            awsAccessKey = getConfigWithFallback("spark.indextables.aws.accessKey"),
+            awsSecretKey = getConfigWithFallback("spark.indextables.aws.secretKey"), 
+            awsSessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken"),
+            awsRegion = getConfigWithFallback("spark.indextables.aws.region"),
+            awsEndpoint = getConfigWithFallback("spark.indextables.s3.endpoint"),
+            awsPathStyleAccess = getConfigWithFallback("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
             // Azure configuration
-            azureAccountName = getConfigWithFallback("spark.tantivy4spark.azure.accountName"),
-            azureAccountKey = getConfigWithFallback("spark.tantivy4spark.azure.accountKey"),
-            azureConnectionString = getConfigWithFallback("spark.tantivy4spark.azure.connectionString"),
-            azureEndpoint = getConfigWithFallback("spark.tantivy4spark.azure.endpoint"),
+            azureAccountName = getConfigWithFallback("spark.indextables.azure.accountName"),
+            azureAccountKey = getConfigWithFallback("spark.indextables.azure.accountKey"),
+            azureConnectionString = getConfigWithFallback("spark.indextables.azure.connectionString"),
+            azureEndpoint = getConfigWithFallback("spark.indextables.azure.endpoint"),
             // GCP configuration
-            gcpProjectId = getConfigWithFallback("spark.tantivy4spark.gcp.projectId"),
-            gcpServiceAccountKey = getConfigWithFallback("spark.tantivy4spark.gcp.serviceAccountKey"),
-            gcpCredentialsFile = getConfigWithFallback("spark.tantivy4spark.gcp.credentialsFile"),
-            gcpEndpoint = getConfigWithFallback("spark.tantivy4spark.gcp.endpoint")
+            gcpProjectId = getConfigWithFallback("spark.indextables.gcp.projectId"),
+            gcpServiceAccountKey = getConfigWithFallback("spark.indextables.gcp.serviceAccountKey"),
+            gcpCredentialsFile = getConfigWithFallback("spark.indextables.gcp.credentialsFile"),
+            gcpEndpoint = getConfigWithFallback("spark.indextables.gcp.endpoint")
           )
         case None =>
           logger.debug("No active Spark session found, using default SplitCacheConfig")

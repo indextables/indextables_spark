@@ -48,7 +48,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       // Step 1: Write data using Tantivy4Spark format with direct path parameter
       testData.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.fastfields", "age,salary,experience_years,is_active")
+        .option("spark.indextables.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
@@ -462,7 +462,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
       // Write comprehensive data - should succeed now
       testData.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.fastfields", "age,salary,experience_years,is_active")
+        .option("spark.indextables.indexing.fastfields", "age,salary,experience_years,is_active")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       

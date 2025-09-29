@@ -72,9 +72,9 @@ class PartitionedDatasetTest extends TestBase {
     timeSeriesData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "100")
-      .option("spark.tantivy4spark.indexing.typemap.event_type", "string")
-      .option("spark.tantivy4spark.indexing.typemap.message", "text")
+      .option("spark.indextables.indexWriter.batchSize", "100")
+      .option("spark.indextables.indexing.typemap.event_type", "string")
+      .option("spark.indextables.indexing.typemap.message", "text")
       .mode("overwrite")
       .save(testDataPath)
 
@@ -98,7 +98,7 @@ class PartitionedDatasetTest extends TestBase {
     timeSeriesData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("overwrite")
       .save(testDataPath)
 
@@ -151,8 +151,8 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "5") // Very small batches to force many files
-      .option("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "10") // Very small split sizes
+      .option("spark.indextables.indexWriter.batchSize", "5") // Very small batches to force many files
+      .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Very small split sizes
       .mode("overwrite")
       .save(testDataPath)
 
@@ -215,8 +215,8 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "5") // Small batches
-      .option("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "10") // Small split sizes
+      .option("spark.indextables.indexWriter.batchSize", "5") // Small batches
+      .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Small split sizes
       .mode("overwrite")
       .save(testDataPath)
 
@@ -259,8 +259,8 @@ class PartitionedDatasetTest extends TestBase {
     timeSeriesData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexing.typemap.message", "text")
-      .option("spark.tantivy4spark.indexing.typemap.event_type", "string")
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .option("spark.indextables.indexing.typemap.event_type", "string")
       .mode("overwrite")
       .save(testDataPath)
 
@@ -313,8 +313,8 @@ class PartitionedDatasetTest extends TestBase {
     initialData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexing.typemap.message", "text")
-      .option("spark.tantivy4spark.indexing.typemap.event_type", "text")
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .option("spark.indextables.indexing.typemap.event_type", "text")
       .mode("overwrite")
       .save(testDataPath)
 
@@ -324,8 +324,8 @@ class PartitionedDatasetTest extends TestBase {
     additionalData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.tantivy4spark.indexing.typemap.message", "text")
-      .option("spark.tantivy4spark.indexing.typemap.event_type", "text")
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .option("spark.indextables.indexing.typemap.event_type", "text")
       .mode("append")
       .save(testDataPath)
 

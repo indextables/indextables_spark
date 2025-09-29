@@ -268,8 +268,8 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
 
       val tantivyOptions = Map(
-        "spark.tantivy4spark.indexing.fastfields" -> "score,value",
-        "spark.tantivy4spark.indexing.typemap.content" -> "text"
+        "spark.indextables.indexing.fastfields" -> "score,value",
+        "spark.indextables.indexing.typemap.content" -> "text"
       )
 
       // Test indextables configuration (preferred)

@@ -30,30 +30,30 @@ class CredentialExtractionTest extends TestBase {
 
   test("should extract credentials from Spark session configuration") {
     // Set test credentials in Spark session
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "test-access-key")
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", "test-secret-key")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://test-endpoint:9000")
+    spark.conf.set("spark.indextables.aws.accessKey", "test-access-key")
+    spark.conf.set("spark.indextables.aws.secretKey", "test-secret-key")
+    spark.conf.set("spark.indextables.aws.region", "us-west-2")
+    spark.conf.set("spark.indextables.s3.endpoint", "http://test-endpoint:9000")
     
     // Test the extraction logic from schema() method
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .filter(_.getKey.startsWith("spark.indextables."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.indextables.")).toMap
     val readOptions = Map.empty[String, String]
-    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.indextables."))
     
     val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.asJava)
     
     // Verify extracted credentials
-    options.get("spark.tantivy4spark.aws.accessKey") shouldBe "test-access-key"
-    options.get("spark.tantivy4spark.aws.secretKey") shouldBe "test-secret-key"
-    options.get("spark.tantivy4spark.aws.region") shouldBe "us-west-2"
-    options.get("spark.tantivy4spark.s3.endpoint") shouldBe "http://test-endpoint:9000"
+    options.get("spark.indextables.aws.accessKey") shouldBe "test-access-key"
+    options.get("spark.indextables.aws.secretKey") shouldBe "test-secret-key"
+    options.get("spark.indextables.aws.region") shouldBe "us-west-2"
+    options.get("spark.indextables.s3.endpoint") shouldBe "http://test-endpoint:9000"
     
     println(s"✅ Extracted ${allConfigs.size} configs from Spark session")
     allConfigs.foreach { case (key, value) => 
@@ -63,35 +63,35 @@ class CredentialExtractionTest extends TestBase {
 
   test("should extract credentials from Hadoop configuration") {
     // Clear Spark session configs
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     // Set credentials in Hadoop configuration
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "hadoop-access-key")
-    hadoopConf.set("spark.tantivy4spark.aws.secretKey", "hadoop-secret-key")
-    hadoopConf.set("spark.tantivy4spark.aws.region", "eu-west-1")
-    hadoopConf.set("spark.tantivy4spark.s3.endpoint", "http://hadoop-endpoint:9000")
+    hadoopConf.set("spark.indextables.aws.accessKey", "hadoop-access-key")
+    hadoopConf.set("spark.indextables.aws.secretKey", "hadoop-secret-key")
+    hadoopConf.set("spark.indextables.aws.region", "eu-west-1")
+    hadoopConf.set("spark.indextables.s3.endpoint", "http://hadoop-endpoint:9000")
     
     // Test the extraction logic
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .filter(_.getKey.startsWith("spark.indextables."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.indextables.")).toMap
     val readTantivyOptions = Map.empty[String, String]
     
     val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.asJava)
     
     // Verify extracted credentials
-    options.get("spark.tantivy4spark.aws.accessKey") shouldBe "hadoop-access-key"
-    options.get("spark.tantivy4spark.aws.secretKey") shouldBe "hadoop-secret-key"
-    options.get("spark.tantivy4spark.aws.region") shouldBe "eu-west-1"
-    options.get("spark.tantivy4spark.s3.endpoint") shouldBe "http://hadoop-endpoint:9000"
+    options.get("spark.indextables.aws.accessKey") shouldBe "hadoop-access-key"
+    options.get("spark.indextables.aws.secretKey") shouldBe "hadoop-secret-key"
+    options.get("spark.indextables.aws.region") shouldBe "eu-west-1"
+    options.get("spark.indextables.s3.endpoint") shouldBe "http://hadoop-endpoint:9000"
     
     println(s"✅ Extracted ${allConfigs.size} configs from Hadoop configuration")
     allConfigs.foreach { case (key, value) => 
@@ -102,35 +102,35 @@ class CredentialExtractionTest extends TestBase {
   test("should prioritize read options over other sources") {
     // Set different values in each source
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "hadoop-key")
-    hadoopConf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    hadoopConf.set("spark.indextables.aws.accessKey", "hadoop-key")
+    hadoopConf.set("spark.indextables.aws.region", "us-east-1")
     
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "spark-key")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-west-1")
+    spark.conf.set("spark.indextables.aws.accessKey", "spark-key")
+    spark.conf.set("spark.indextables.aws.region", "us-west-1")
     
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> "read-key",
-      "spark.tantivy4spark.aws.secretKey" -> "read-secret",
-      "spark.tantivy4spark.aws.region" -> "eu-central-1"
+      "spark.indextables.aws.accessKey" -> "read-key",
+      "spark.indextables.aws.secretKey" -> "read-secret",
+      "spark.indextables.aws.region" -> "eu-central-1"
     )
     
     // Test the extraction logic with precedence
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .filter(_.getKey.startsWith("spark.indextables."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
-    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.tantivy4spark."))
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.indextables.")).toMap
+    val readTantivyOptions = readOptions.filter(_._1.startsWith("spark.indextables."))
     
     // Precedence: readOptions > sparkConfigs > hadoopConfigs
     val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.asJava)
     
     // Verify read options win
-    options.get("spark.tantivy4spark.aws.accessKey") shouldBe "read-key" // read options should win
-    options.get("spark.tantivy4spark.aws.secretKey") shouldBe "read-secret" // only in read options
-    options.get("spark.tantivy4spark.aws.region") shouldBe "eu-central-1" // read options should win
+    options.get("spark.indextables.aws.accessKey") shouldBe "read-key" // read options should win
+    options.get("spark.indextables.aws.secretKey") shouldBe "read-secret" // only in read options
+    options.get("spark.indextables.aws.region") shouldBe "eu-central-1" // read options should win
     
     println(s"✅ Precedence test passed - read options override other sources")
     println(s"  Final access key: read-key (from read options)")
@@ -140,34 +140,34 @@ class CredentialExtractionTest extends TestBase {
 
   test("should handle missing credentials gracefully") {
     // Clear all credential sources
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.unset("spark.tantivy4spark.aws.accessKey")
-    hadoopConf.unset("spark.tantivy4spark.aws.secretKey")
-    hadoopConf.unset("spark.tantivy4spark.aws.region")
-    hadoopConf.unset("spark.tantivy4spark.s3.endpoint")
+    hadoopConf.unset("spark.indextables.aws.accessKey")
+    hadoopConf.unset("spark.indextables.aws.secretKey")
+    hadoopConf.unset("spark.indextables.aws.region")
+    hadoopConf.unset("spark.indextables.s3.endpoint")
     
     // Test extraction with no credentials
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .filter(_.getKey.startsWith("spark.indextables."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.indextables.")).toMap
     val readTantivyOptions = Map.empty[String, String]
     
     val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
     val options = new CaseInsensitiveStringMap(allConfigs.asJava)
     
     // Verify no credentials extracted
-    Option(options.get("spark.tantivy4spark.aws.accessKey")) shouldBe None
-    Option(options.get("spark.tantivy4spark.aws.secretKey")) shouldBe None
-    Option(options.get("spark.tantivy4spark.aws.region")) shouldBe None
-    Option(options.get("spark.tantivy4spark.s3.endpoint")) shouldBe None
+    Option(options.get("spark.indextables.aws.accessKey")) shouldBe None
+    Option(options.get("spark.indextables.aws.secretKey")) shouldBe None
+    Option(options.get("spark.indextables.aws.region")) shouldBe None
+    Option(options.get("spark.indextables.s3.endpoint")) shouldBe None
     
     println(s"✅ Missing credentials handled correctly - no configs extracted")
     println(s"  Total configs: ${allConfigs.size} (expected: 0 or very few)")
@@ -179,20 +179,20 @@ class CredentialExtractionTest extends TestBase {
     import org.apache.hadoop.fs.Path
     
     // Set test credentials
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "validation-key") 
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", "validation-secret")
-    spark.conf.set("spark.tantivy4spark.aws.region", "ap-southeast-1")
+    spark.conf.set("spark.indextables.aws.accessKey", "validation-key") 
+    spark.conf.set("spark.indextables.aws.secretKey", "validation-secret")
+    spark.conf.set("spark.indextables.aws.region", "ap-southeast-1")
     
     val tablePath = "/tmp/validation-test-table"
     
     // Extract credentials exactly as Tantivy4SparkRelation.schema() does
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf.iterator().asScala
-      .filter(_.getKey.startsWith("spark.tantivy4spark."))
+      .filter(_.getKey.startsWith("spark.indextables."))
       .map(entry => entry.getKey -> entry.getValue)
       .toMap
     
-    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.tantivy4spark.")).toMap
+    val sparkConfigs = spark.conf.getAll.filter(_._1.startsWith("spark.indextables.")).toMap
     val readTantivyOptions = Map.empty[String, String] // Simulating empty read options
     
     val allConfigs = tantivyConfigs ++ sparkConfigs ++ readTantivyOptions
@@ -200,9 +200,9 @@ class CredentialExtractionTest extends TestBase {
     
     // This should succeed without creating the TransactionLog (which would need S3Mock setup)
     // But we can validate that the options contain the right credentials
-    options.get("spark.tantivy4spark.aws.accessKey") shouldBe "validation-key"
-    options.get("spark.tantivy4spark.aws.secretKey") shouldBe "validation-secret"
-    options.get("spark.tantivy4spark.aws.region") shouldBe "ap-southeast-1"
+    options.get("spark.indextables.aws.accessKey") shouldBe "validation-key"
+    options.get("spark.indextables.aws.secretKey") shouldBe "validation-secret"
+    options.get("spark.indextables.aws.region") shouldBe "ap-southeast-1"
     
     // Verify options are properly formatted for TransactionLog constructor
     options should not be null

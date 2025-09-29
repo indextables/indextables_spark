@@ -76,12 +76,12 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     }
     
     // Configure Spark for S3Mock
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.indextables.aws.region", "us-east-1")
   }
 
   override def afterAll(): Unit = {
@@ -231,23 +231,23 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     
     df.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-1")
       .mode("overwrite")
       .save(s3Path)
     
     val readDf = spark.read
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-1")
       .load(s3Path)
     
     // Test filtering for a date that doesn't exist
@@ -283,23 +283,23 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     
     df.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-1")
       .mode("overwrite")
       .save(s3Path)
     
     val readDf = spark.read
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-1")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-1")
       .load(s3Path)
     
     // Test text filtering - should find reviews containing "product"

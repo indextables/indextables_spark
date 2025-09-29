@@ -28,7 +28,7 @@ class ComplexNotFilterTest extends TestBase {
     // Write with default field types (no fast fields for price to test proper fallback)
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.name", "text")
+      .option("spark.indextables.indexing.typemap.name", "text")
       .mode("overwrite")
       .save(testPath)
 

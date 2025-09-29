@@ -88,7 +88,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     // Write the empty DataFrame
     emptyData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Check transaction log to ensure no AddActions were created
@@ -140,7 +140,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     // Write initial data
     testData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Get initial transaction log state
@@ -168,7 +168,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     emptyData.write
       .format("tantivy4spark")
       .mode("append")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Check final transaction log state

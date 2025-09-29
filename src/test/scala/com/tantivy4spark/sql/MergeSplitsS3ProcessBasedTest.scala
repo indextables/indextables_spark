@@ -57,19 +57,19 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
       val (accessKey, secretKey) = awsCredentials.get
 
       // Configure Spark for real S3 access
-      spark.conf.set("spark.tantivy4spark.aws.accessKey", accessKey)
-      spark.conf.set("spark.tantivy4spark.aws.secretKey", secretKey)
-      spark.conf.set("spark.tantivy4spark.aws.region", S3_REGION)
+      spark.conf.set("spark.indextables.aws.accessKey", accessKey)
+      spark.conf.set("spark.indextables.aws.secretKey", secretKey)
+      spark.conf.set("spark.indextables.aws.region", S3_REGION)
 
       // ALSO configure Hadoop config so CloudStorageProvider can find the region
       val hadoopConf = spark.sparkContext.hadoopConfiguration
-      hadoopConf.set("spark.tantivy4spark.aws.accessKey", accessKey)
-      hadoopConf.set("spark.tantivy4spark.aws.secretKey", secretKey)
-      hadoopConf.set("spark.tantivy4spark.aws.region", S3_REGION)
+      hadoopConf.set("spark.indextables.aws.accessKey", accessKey)
+      hadoopConf.set("spark.indextables.aws.secretKey", secretKey)
+      hadoopConf.set("spark.indextables.aws.region", S3_REGION)
 
       // Configure process-based merge (this is the default but explicitly set it)
-      spark.conf.set("spark.tantivy4spark.merge.mode", "process")
-      spark.conf.set("spark.tantivy4spark.merge.heapSize", "134217728") // 128MB for better performance
+      spark.conf.set("spark.indextables.merge.mode", "process")
+      spark.conf.set("spark.indextables.merge.heapSize", "134217728") // 128MB for better performance
 
       println(s"🔐 AWS credentials loaded successfully")
       println(s"🌊 Configured Spark for S3 access to bucket: $S3_BUCKET in region: $S3_REGION")
@@ -128,11 +128,11 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
   private def getWriteOptions(): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION,
-      "spark.tantivy4spark.indexing.fastfields" -> "category",  // Required for GROUP BY aggregation
-      "spark.tantivy4spark.indexing.typemap.category" -> "string"  // Configure as string for exact matching
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION,
+      "spark.indextables.indexing.fastfields" -> "category",  // Required for GROUP BY aggregation
+      "spark.indextables.indexing.typemap.category" -> "string"  // Configure as string for exact matching
     )
   }
 
@@ -142,9 +142,9 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
   private def getReadOptions(): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
-      "spark.tantivy4spark.aws.accessKey" -> accessKey,
-      "spark.tantivy4spark.aws.secretKey" -> secretKey,
-      "spark.tantivy4spark.aws.region" -> S3_REGION
+      "spark.indextables.aws.accessKey" -> accessKey,
+      "spark.indextables.aws.secretKey" -> secretKey,
+      "spark.indextables.aws.region" -> S3_REGION
     )
   }
 
@@ -183,7 +183,7 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     println(s"✍️  Writing test data in multiple batches to create multiple splits...")
 
     val writeOptions = getWriteOptions() ++ Map(
-      "spark.tantivy4spark.indexwriter.batchSize" -> "200"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "200"  // Force multiple splits
     )
 
     // Write in multiple phases to ensure multiple splits are created
@@ -355,7 +355,7 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     println(s"✍️  Writing test data for merge mode comparison...")
 
     val writeOptions = getWriteOptions() ++ Map(
-      "spark.tantivy4spark.indexwriter.batchSize" -> "100"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "100"  // Force multiple splits
     )
 
     data.write
@@ -368,7 +368,7 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
 
     // Test with process mode (default)
     println(s"🔧 Testing with process-based merge mode...")
-    spark.conf.set("spark.tantivy4spark.merge.mode", "process")
+    spark.conf.set("spark.indextables.merge.mode", "process")
 
     import com.tantivy4spark.sql.Tantivy4SparkSqlParser
     val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
@@ -394,7 +394,7 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     // Test that direct mode would also work (if we switched modes)
     // Note: We don't actually switch modes here since the splits have already been merged
     // But we verify the configuration is properly handled
-    val currentMode = spark.conf.get("spark.tantivy4spark.merge.mode", "process")
+    val currentMode = spark.conf.get("spark.indextables.merge.mode", "process")
     assert(currentMode == "process", "Should be using process mode")
 
     println(s"✅ Merge mode handling verified: currently using '$currentMode' mode")
@@ -414,7 +414,7 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
     println(s"✍️  Writing test data for credential propagation test...")
 
     val writeOptions = getWriteOptions() ++ Map(
-      "spark.tantivy4spark.indexwriter.batchSize" -> "75"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "75"  // Force multiple splits
     )
 
     data.write
@@ -425,8 +425,8 @@ class MergeSplitsS3ProcessBasedTest extends RealS3TestBase {
 
     // Verify credentials are properly configured
     val (accessKey, secretKey) = awsCredentials.get
-    assert(spark.conf.get("spark.tantivy4spark.aws.accessKey") == accessKey, "Access key should be configured")
-    assert(spark.conf.get("spark.tantivy4spark.aws.region") == S3_REGION, "Region should be configured")
+    assert(spark.conf.get("spark.indextables.aws.accessKey") == accessKey, "Access key should be configured")
+    assert(spark.conf.get("spark.indextables.aws.region") == S3_REGION, "Region should be configured")
 
     println(s"✅ AWS credentials properly configured in Spark session")
 

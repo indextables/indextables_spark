@@ -52,9 +52,9 @@ class LargeFileUploadTest extends TestBase {
       // Configure for streaming upload with lower threshold for testing
       df.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.s3.streamingThreshold", "5000000") // 5MB threshold for testing
-        .option("spark.tantivy4spark.s3.multipartThreshold", "5000000") // 5MB multipart threshold
-        .option("spark.tantivy4spark.s3.maxConcurrency", "2") // Limit concurrency for test
+        .option("spark.indextables.s3.streamingThreshold", "5000000") // 5MB threshold for testing
+        .option("spark.indextables.s3.multipartThreshold", "5000000") // 5MB multipart threshold
+        .option("spark.indextables.s3.maxConcurrency", "2") // Limit concurrency for test
         .mode("overwrite")
         .save(tablePath)
 
@@ -98,8 +98,8 @@ class LargeFileUploadTest extends TestBase {
       // Set a very low threshold to force streaming upload even for small files
       df.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.s3.streamingThreshold", "1024") // 1KB threshold
-        .option("spark.tantivy4spark.s3.multipartThreshold", "1024") // 1KB multipart threshold
+        .option("spark.indextables.s3.streamingThreshold", "1024") // 1KB threshold
+        .option("spark.indextables.s3.multipartThreshold", "1024") // 1KB multipart threshold
         .mode("overwrite")
         .save(tablePath)
 
@@ -142,10 +142,10 @@ class LargeFileUploadTest extends TestBase {
       // Test with optimized settings for large files
       df.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.s3.streamingThreshold", "100000000") // 100MB
-        .option("spark.tantivy4spark.s3.multipartThreshold", "100000000") // 100MB
-        .option("spark.tantivy4spark.s3.maxConcurrency", "8") // Higher concurrency
-        .option("spark.tantivy4spark.s3.partSize", "134217728") // 128MB parts
+        .option("spark.indextables.s3.streamingThreshold", "100000000") // 100MB
+        .option("spark.indextables.s3.multipartThreshold", "100000000") // 100MB
+        .option("spark.indextables.s3.maxConcurrency", "8") // Higher concurrency
+        .option("spark.indextables.s3.partSize", "134217728") // 128MB parts
         .mode("overwrite")
         .save(tablePath)
 

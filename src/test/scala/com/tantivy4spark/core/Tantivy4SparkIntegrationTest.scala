@@ -87,7 +87,7 @@ class Tantivy4SparkIntegrationTest extends TestBase {
         df.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
-          .option("spark.tantivy4spark.storage.force.standard", "true")
+          .option("spark.indextables.storage.force.standard", "true")
           .save(tempPath)
         
         // If write succeeds, configuration was properly handled

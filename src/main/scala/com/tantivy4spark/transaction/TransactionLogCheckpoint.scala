@@ -51,25 +51,25 @@ class TransactionLogCheckpoint(
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCheckpoint])
 
   // Configuration matching Delta Lake capabilities but using our own parameters
-  private val checkpointInterval = options.getInt("spark.tantivy4spark.checkpoint.interval", 10)
-  private val maxRetries = options.getInt("spark.tantivy4spark.checkpoint.maxRetries", 3)
-  private val parallelism = options.getInt("spark.tantivy4spark.checkpoint.parallelism", 4)
+  private val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
+  private val maxRetries = options.getInt("spark.indextables.checkpoint.maxRetries", 3)
+  private val parallelism = options.getInt("spark.indextables.checkpoint.parallelism", 4)
 
   // Retention configuration - matching Delta's log retention behavior
-  private val logRetentionDuration = options.getLong("spark.tantivy4spark.logRetention.duration", 30 * 24 * 60 * 60 * 1000L) // 30 days in ms
-  private val checkpointRetentionDuration = options.getLong("spark.tantivy4spark.checkpointRetention.duration", 2 * 60 * 60 * 1000L) // 2 hours in ms
+  private val logRetentionDuration = options.getLong("spark.indextables.logRetention.duration", 30 * 24 * 60 * 60 * 1000L) // 30 days in ms
+  private val checkpointRetentionDuration = options.getLong("spark.indextables.checkpointRetention.duration", 2 * 60 * 60 * 1000L) // 2 hours in ms
 
   // Performance configuration
-  private val checkpointReadTimeoutSeconds = options.getInt("spark.tantivy4spark.checkpoint.read.timeoutSeconds", 30)
-  private val enableChecksumValidation = options.getBoolean("spark.tantivy4spark.checkpoint.checksumValidation.enabled", true)
+  private val checkpointReadTimeoutSeconds = options.getInt("spark.indextables.checkpoint.read.timeoutSeconds", 30)
+  private val enableChecksumValidation = options.getBoolean("spark.indextables.checkpoint.checksumValidation.enabled", true)
 
   // Advanced configuration for large tables
-  private val enableMultiPartCheckpoints = options.getBoolean("spark.tantivy4spark.checkpoint.multipart.enabled", false)
-  private val maxActionsPerCheckpointPart = options.getInt("spark.tantivy4spark.checkpoint.multipart.maxActionsPerPart", 50000)
+  private val enableMultiPartCheckpoints = options.getBoolean("spark.indextables.checkpoint.multipart.enabled", false)
+  private val maxActionsPerCheckpointPart = options.getInt("spark.indextables.checkpoint.multipart.maxActionsPerPart", 50000)
 
   // Auto-compaction like Delta's auto-optimize
-  private val autoCheckpointEnabled = options.getBoolean("spark.tantivy4spark.checkpoint.auto.enabled", true)
-  private val autoCheckpointMinFileAge = options.getLong("spark.tantivy4spark.checkpoint.auto.minFileAge", 10 * 60 * 1000L) // 10 minutes
+  private val autoCheckpointEnabled = options.getBoolean("spark.indextables.checkpoint.auto.enabled", true)
+  private val autoCheckpointMinFileAge = options.getLong("spark.indextables.checkpoint.auto.minFileAge", 10 * 60 * 1000L) // 10 minutes
 
   private val executor = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
   private implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)

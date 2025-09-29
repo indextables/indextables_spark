@@ -199,7 +199,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+        .option("spark.indextables.indexWriter.batchSize", "50")
         .mode("append")
         .save(tempTablePath)
     }
@@ -250,7 +250,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "75")
+        .option("spark.indextables.indexWriter.batchSize", "75")
         .mode("append")
         .save(tempTablePath)
     }
@@ -303,7 +303,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "40")
+        .option("spark.indextables.indexWriter.batchSize", "40")
         .mode("append")
         .save(tempTablePath)
     }
@@ -347,7 +347,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "20")
+        .option("spark.indextables.indexWriter.batchSize", "20")
         .mode("append")
         .save(tempTablePath)
     }
@@ -412,7 +412,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "15")
+        .option("spark.indextables.indexWriter.batchSize", "15")
         .mode("append")
         .save(tempTablePath)
     }
@@ -506,7 +506,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+        .option("spark.indextables.indexWriter.batchSize", "50")
         .mode("append")
         .save(tempTablePath)
         
@@ -581,7 +581,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       
       data.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "25")
+        .option("spark.indextables.indexWriter.batchSize", "25")
         .mode("append")
         .save(tempTablePath)
     }
@@ -652,7 +652,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
     add1Data.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
     
@@ -664,7 +664,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
     add2Data.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
     
@@ -683,7 +683,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
     add3Data.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("overwrite")
       .save(tempTablePath)
     
@@ -713,7 +713,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
     add4Data.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
     
@@ -804,7 +804,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
     add5Data.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "50")
+      .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
     
@@ -880,7 +880,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       // Write using Tantivy4Spark format with small batch size to force separate splits
       df.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "50") // Small batch size
+        .option("spark.indextables.indexWriter.batchSize", "50") // Small batch size
         .mode("append")
         .save(tempTablePath)
     }
@@ -912,24 +912,24 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
    * Create AWS configuration for validation that matches the merge operation configuration.
    */
   private def createAwsConfigForValidation(): SerializableAwsConfig = {
-    val accessKey = spark.conf.getOption("spark.tantivy4spark.aws.accessKey")
+    val accessKey = spark.conf.getOption("spark.indextables.aws.accessKey")
       .orElse(Option(System.getenv("AWS_ACCESS_KEY_ID")))
       .getOrElse("test-default-access-key")
       
-    val secretKey = spark.conf.getOption("spark.tantivy4spark.aws.secretKey") 
+    val secretKey = spark.conf.getOption("spark.indextables.aws.secretKey") 
       .orElse(Option(System.getenv("AWS_SECRET_ACCESS_KEY")))
       .getOrElse("test-default-secret-key")
       
-    val sessionToken = spark.conf.getOption("spark.tantivy4spark.aws.sessionToken")
+    val sessionToken = spark.conf.getOption("spark.indextables.aws.sessionToken")
       .orElse(Option(System.getenv("AWS_SESSION_TOKEN")))
       
-    val region = spark.conf.getOption("spark.tantivy4spark.aws.region")
+    val region = spark.conf.getOption("spark.indextables.aws.region")
       .orElse(Option(System.getenv("AWS_DEFAULT_REGION")))
       .getOrElse("us-east-1")
       
-    val endpoint = spark.conf.getOption("spark.tantivy4spark.s3.endpoint")
+    val endpoint = spark.conf.getOption("spark.indextables.s3.endpoint")
     
-    val pathStyleAccess = spark.conf.getOption("spark.tantivy4spark.s3.pathStyleAccess")
+    val pathStyleAccess = spark.conf.getOption("spark.indextables.s3.pathStyleAccess")
       .map(_.toBoolean)
       .getOrElse(false)
     

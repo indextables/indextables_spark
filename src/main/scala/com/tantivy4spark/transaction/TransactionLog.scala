@@ -32,11 +32,11 @@ import java.util.concurrent.atomic.AtomicLong
 class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) extends AutoCloseable {
 
   // Check if this is being used directly instead of through the factory
-  private val allowDirectUsage = options.getBoolean("spark.tantivy4spark.transaction.allowDirectUsage", false)
+  private val allowDirectUsage = options.getBoolean("spark.indextables.transaction.allowDirectUsage", false)
   if (!allowDirectUsage) {
     throw new RuntimeException(
       s"TransactionLog should no longer be used directly. Use TransactionLogFactory.create() instead. " +
-      s"If you need to use this class directly for testing, set spark.tantivy4spark.transaction.allowDirectUsage=true"
+      s"If you need to use this class directly for testing, set spark.indextables.transaction.allowDirectUsage=true"
     )
   }
 
@@ -45,7 +45,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   // Determine if we should use cloud-optimized transaction log
   private val protocol = ProtocolBasedIOFactory.determineProtocol(tablePath.toString)
   private val useCloudOptimized = protocol match {
-    case ProtocolBasedIOFactory.S3Protocol => !options.getBoolean("spark.tantivy4spark.transaction.force.hadoop", false)
+    case ProtocolBasedIOFactory.S3Protocol => !options.getBoolean("spark.indextables.transaction.force.hadoop", false)
     case _ => false
   }
   
@@ -55,12 +55,12 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   private val transactionLogPathStr = transactionLogPath.toString
   
   // Cache configuration and initialization
-  private val cacheEnabled = options.getBoolean("spark.tantivy4spark.transaction.cache.enabled", true)
-  private val cacheExpirationSeconds = options.getLong("spark.tantivy4spark.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
+  private val cacheEnabled = options.getBoolean("spark.indextables.transaction.cache.enabled", true)
+  private val cacheExpirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
   private val cache = if (cacheEnabled) Some(new TransactionLogCache(cacheExpirationSeconds)) else None
 
   // Checkpoint configuration and initialization
-  private val checkpointEnabled = options.getBoolean("spark.tantivy4spark.checkpoint.enabled", true)
+  private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
   private val checkpoint = if (checkpointEnabled) Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)) else None
 
   // Atomic version counter for thread-safe version assignment

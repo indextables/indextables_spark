@@ -109,9 +109,9 @@ class V2ReadPathTest extends TestBase {
       try {
         val readDataV2 = spark.read
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.cache.maxSize", "100000000")
-          .option("spark.tantivy4spark.cache.queryCache", "true")
-          .option("spark.tantivy4spark.cache.name", "test-cache")
+          .option("spark.indextables.cache.maxSize", "100000000")
+          .option("spark.indextables.cache.queryCache", "true")
+          .option("spark.indextables.cache.name", "test-cache")
           .load(tempPath)
           
         // These operations should all work without serialization issues
@@ -152,8 +152,8 @@ class V2ReadPathTest extends TestBase {
         println("Testing V2 write path...")
         writeData.write
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")  // V2 Provider for writing
-          .option("spark.tantivy4spark.cache.maxSize", "50000000")
-          .option("spark.tantivy4spark.cache.name", "v2-write-test-cache")
+          .option("spark.indextables.cache.maxSize", "50000000")
+          .option("spark.indextables.cache.name", "v2-write-test-cache")
           .mode("overwrite")
           .save(tempPath)
           
@@ -163,8 +163,8 @@ class V2ReadPathTest extends TestBase {
         println("Testing V2 read path...")
         val readDataV2 = spark.read
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")  // V2 Provider for reading
-          .option("spark.tantivy4spark.cache.maxSize", "50000000")
-          .option("spark.tantivy4spark.cache.name", "v2-read-test-cache")
+          .option("spark.indextables.cache.maxSize", "50000000")
+          .option("spark.indextables.cache.name", "v2-read-test-cache")
           .load(tempPath)
           
         // Verify the data
@@ -211,16 +211,16 @@ class V2ReadPathTest extends TestBase {
       ).toDF("id", "title", "test_category")
       
       // Set different configs at different levels to test hierarchy
-      spark.conf.set("spark.tantivy4spark.cache.maxSize", "30000000")  // Spark level
+      spark.conf.set("spark.indextables.cache.maxSize", "30000000")  // Spark level
       val hadoopConf = spark.sparkContext.hadoopConfiguration
-      hadoopConf.set("spark.tantivy4spark.cache.maxSize", "20000000")  // Hadoop level
+      hadoopConf.set("spark.indextables.cache.maxSize", "20000000")  // Hadoop level
       
       try {
         // V2 write with options should override the other levels
         writeData.write
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.cache.maxSize", "40000000")  // Highest precedence
-          .option("spark.tantivy4spark.cache.name", "hierarchy-test-cache")
+          .option("spark.indextables.cache.maxSize", "40000000")  // Highest precedence
+          .option("spark.indextables.cache.name", "hierarchy-test-cache")
           .mode("overwrite")
           .save(tempPath)
           
@@ -229,7 +229,7 @@ class V2ReadPathTest extends TestBase {
         // Read back to verify
         val readData = spark.read
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.cache.maxSize", "40000000")
+          .option("spark.indextables.cache.maxSize", "40000000")
           .load(tempPath)
           
         val count = readData.count()
@@ -238,8 +238,8 @@ class V2ReadPathTest extends TestBase {
         println("✅ V2 Read with configuration hierarchy successful")
         
         // Clean up
-        spark.conf.unset("spark.tantivy4spark.cache.maxSize")
-        hadoopConf.unset("spark.tantivy4spark.cache.maxSize")
+        spark.conf.unset("spark.indextables.cache.maxSize")
+        hadoopConf.unset("spark.indextables.cache.maxSize")
         
       } catch {
         case ex: java.io.NotSerializableException =>

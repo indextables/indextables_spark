@@ -48,8 +48,8 @@ class AutoSizingIntegrationTest extends TestBase {
       autoSizeData.write
         .format("tantivy4spark")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "true")
-        .option("spark.tantivy4spark.autoSize.targetSplitSize", "1M")
+        .option("spark.indextables.autoSize.enabled", "true")
+        .option("spark.indextables.autoSize.targetSplitSize", "1M")
         .save(tempPath)
 
       // Verify auto-sized write
@@ -85,9 +85,9 @@ class AutoSizingIntegrationTest extends TestBase {
       autoSizeData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "true")
-        .option("spark.tantivy4spark.autoSize.targetSplitSize", "2M")
-        .option("spark.tantivy4spark.autoSize.inputRowCount", explicitRowCount.toString)
+        .option("spark.indextables.autoSize.enabled", "true")
+        .option("spark.indextables.autoSize.targetSplitSize", "2M")
+        .option("spark.indextables.autoSize.inputRowCount", explicitRowCount.toString)
         .save(tempPath)
 
       // Verify auto-sized write
@@ -121,8 +121,8 @@ class AutoSizingIntegrationTest extends TestBase {
       warningData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "true")
-        .option("spark.tantivy4spark.autoSize.targetSplitSize", "500K")
+        .option("spark.indextables.autoSize.enabled", "true")
+        .option("spark.indextables.autoSize.targetSplitSize", "500K")
         // Note: No inputRowCount provided - should trigger warning
         .save(tempPath)
 
@@ -146,8 +146,8 @@ class AutoSizingIntegrationTest extends TestBase {
       emptyData.write
         .format("tantivy4spark")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "true")
-        .option("spark.tantivy4spark.autoSize.targetSplitSize", "100K")
+        .option("spark.indextables.autoSize.enabled", "true")
+        .option("spark.indextables.autoSize.targetSplitSize", "100K")
         .option("targetRecordsPerSplit", "1000") // Manual fallback
         .save(tempPath)
 
@@ -177,8 +177,8 @@ class AutoSizingIntegrationTest extends TestBase {
         data.write
           .format("tantivy4spark")
           .mode("overwrite")
-          .option("spark.tantivy4spark.autoSize.enabled", "true")
-          .option("spark.tantivy4spark.autoSize.targetSplitSize", sizeFormat)
+          .option("spark.indextables.autoSize.enabled", "true")
+          .option("spark.indextables.autoSize.targetSplitSize", sizeFormat)
           .save(tempPath)
 
         val readBack = spark.read.format("tantivy4spark").load(tempPath)
@@ -223,8 +223,8 @@ class AutoSizingIntegrationTest extends TestBase {
         overrideData.write
           .format("tantivy4spark")
           .mode("overwrite")
-          .option("spark.tantivy4spark.autoSize.enabled", "true")
-          .option("spark.tantivy4spark.autoSize.targetSplitSize", "2M") // Different from session
+          .option("spark.indextables.autoSize.enabled", "true")
+          .option("spark.indextables.autoSize.targetSplitSize", "2M") // Different from session
           .save(tempPath)
 
         val overrideRead = spark.read.format("tantivy4spark").load(tempPath)
@@ -273,8 +273,8 @@ class AutoSizingIntegrationTest extends TestBase {
         invalidData.write
           .format("tantivy4spark")
           .mode("overwrite")
-          .option("spark.tantivy4spark.autoSize.enabled", "true")
-          .option("spark.tantivy4spark.autoSize.targetSplitSize", "invalid_size")
+          .option("spark.indextables.autoSize.enabled", "true")
+          .option("spark.indextables.autoSize.targetSplitSize", "invalid_size")
           .save(tempPath)
       }
 
@@ -299,8 +299,8 @@ class AutoSizingIntegrationTest extends TestBase {
         zeroData.write
           .format("tantivy4spark")
           .mode("overwrite")
-          .option("spark.tantivy4spark.autoSize.enabled", "true")
-          .option("spark.tantivy4spark.autoSize.targetSplitSize", "0")
+          .option("spark.indextables.autoSize.enabled", "true")
+          .option("spark.indextables.autoSize.targetSplitSize", "0")
           .save(tempPath)
       }
 
@@ -320,7 +320,7 @@ class AutoSizingIntegrationTest extends TestBase {
       testData.write
         .format("tantivy4spark")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "false")
+        .option("spark.indextables.autoSize.enabled", "false")
         .save(tempPath)
 
       val readBack = spark.read.format("tantivy4spark").load(tempPath)
@@ -347,8 +347,8 @@ class AutoSizingIntegrationTest extends TestBase {
       autoSizeData.write
         .format("tantivy4spark")
         .mode("overwrite")
-        .option("spark.tantivy4spark.autoSize.enabled", "true")
-        .option("spark.tantivy4spark.autoSize.targetSplitSize", "5M")
+        .option("spark.indextables.autoSize.enabled", "true")
+        .option("spark.indextables.autoSize.targetSplitSize", "5M")
         .save(tempPath)
 
       val readBack = spark.read.format("tantivy4spark").load(tempPath)

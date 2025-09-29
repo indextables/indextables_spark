@@ -55,7 +55,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure content field as text type
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -84,7 +84,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure score as fast field
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.fastfields", "score")
+        .option("spark.indextables.indexing.fastfields", "score")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -105,7 +105,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure metadata as store-only (not indexed)
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.storeonlyfields", "metadata")
+        .option("spark.indextables.indexing.storeonlyfields", "metadata")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -129,7 +129,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure searchField as index-only (not stored)
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.indexonlyfields", "searchField")
+        .option("spark.indextables.indexing.indexonlyfields", "searchField")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -153,8 +153,8 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure email field with text type and custom tokenizer
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.email", "text")
-        .option("spark.tantivy4spark.indexing.tokenizer.email", "whitespace")
+        .option("spark.indextables.indexing.typemap.email", "text")
+        .option("spark.indextables.indexing.tokenizer.email", "whitespace")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -175,7 +175,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure jsonData as json type
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.jsonData", "json")
+        .option("spark.indextables.indexing.typemap.jsonData", "json")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -199,7 +199,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // First write with text configuration
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       // Second write with conflicting string configuration should fail
@@ -210,7 +210,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
       assertThrows[IllegalArgumentException] {
         moreData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("append")
           .mode("append")
-          .option("spark.tantivy4spark.indexing.typemap.content", "string")
+          .option("spark.indextables.indexing.typemap.content", "string")
           .save(tablePath)
       }
     }
@@ -226,9 +226,9 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure mixed field types
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.exactField", "string")
-        .option("spark.tantivy4spark.indexing.typemap.textField", "text")
-        .option("spark.tantivy4spark.indexing.fastfields", "numField")
+        .option("spark.indextables.indexing.typemap.exactField", "string")
+        .option("spark.indextables.indexing.typemap.textField", "text")
+        .option("spark.indextables.indexing.fastfields", "numField")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)

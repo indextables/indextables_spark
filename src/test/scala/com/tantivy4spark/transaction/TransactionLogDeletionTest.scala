@@ -37,10 +37,10 @@ class TransactionLogDeletionTest extends TestBase {
       // Use very short retention to force deletion in tests
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
-          "spark.tantivy4spark.logRetention.duration" -> "50", // 50ms retention (very short)
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
+          "spark.indextables.logRetention.duration" -> "50", // 50ms retention (very short)
+          "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
 

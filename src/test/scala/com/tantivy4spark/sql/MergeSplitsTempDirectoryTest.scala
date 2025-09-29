@@ -73,7 +73,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     logger.info("Testing MERGE SPLITS with custom temp directory configuration")
 
     // Set custom temp directory configuration
-    spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", customTempDir)
+    spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
 
     // Create test data with multiple files for merging
     createTestDataForMerging()
@@ -108,7 +108,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Set invalid temp directory configuration
     val invalidTempDir = "/this/path/does/not/exist/and/should/not/be/created"
-    spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", invalidTempDir)
+    spark.conf.set("spark.indextables.merge.tempDirectoryPath", invalidTempDir)
 
     // Create test data
     createTestDataForMerging()
@@ -137,7 +137,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     logger.info("Testing MERGE SPLITS with default temp directory (no configuration)")
 
     // Ensure no custom temp directory is configured
-    spark.conf.unset("spark.tantivy4spark.merge.tempDirectoryPath")
+    spark.conf.unset("spark.indextables.merge.tempDirectoryPath")
 
     // Create test data
     createTestDataForMerging()
@@ -199,7 +199,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     logger.info("Testing temp directory validation logging")
 
     // Test with valid directory
-    spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", customTempDir)
+    spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
 
     // Create minimal test data
     val testData = spark.range(1, 11).select(
@@ -209,7 +209,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     testData.coalesce(1).write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexWriter.batchSize", "5")
+      .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
       .save(tempTablePath)
 
@@ -234,7 +234,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     logger.info("Testing configuration extraction with various sources")
 
     // Test Spark configuration
-    spark.conf.set("spark.tantivy4spark.merge.tempDirectoryPath", customTempDir)
+    spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
 
     // Create minimal test to trigger config extraction
     val testData = spark.range(1, 6).select(
@@ -276,7 +276,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
       batchData.coalesce(1).write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "25")
+        .option("spark.indextables.indexWriter.batchSize", "25")
         .mode("append")
         .save(tempTablePath)
 

@@ -42,12 +42,12 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
       .config("spark.driver.bindAddress", "127.0.0.1")
       .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
       // Set default AWS parameters to non-null values for all tests
-      .config("spark.tantivy4spark.aws.accessKey", "test-default-access-key")
-      .config("spark.tantivy4spark.aws.secretKey", "test-default-secret-key")
-      .config("spark.tantivy4spark.aws.sessionToken", "test-default-session-token")
-      .config("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .config("spark.tantivy4spark.aws.region", "us-east-1")
-      .config("spark.tantivy4spark.s3.endpoint", "http://localhost:10101")
+      .config("spark.indextables.aws.accessKey", "test-default-access-key")
+      .config("spark.indextables.aws.secretKey", "test-default-secret-key")
+      .config("spark.indextables.aws.sessionToken", "test-default-session-token")
+      .config("spark.indextables.s3.pathStyleAccess", "true")
+      .config("spark.indextables.aws.region", "us-east-1")
+      .config("spark.indextables.s3.endpoint", "http://localhost:10101")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

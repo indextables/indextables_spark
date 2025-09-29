@@ -38,7 +38,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     ))
 
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.indexing.fastfields" -> "count"
+      "spark.indextables.indexing.fastfields" -> "count"
     ).asJava)
 
     val transactionLog = createMockTransactionLog()

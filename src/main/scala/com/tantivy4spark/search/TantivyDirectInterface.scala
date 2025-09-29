@@ -377,10 +377,10 @@ class TantivyDirectInterface(
   }
   
   // Resolve index writer configuration
-  private val heapSize = getConfigValueSize("spark.tantivy4spark.indexWriter.heapSize", 100L * 1024 * 1024) // 100MB default
-  private val threadCount = getConfigValueInt("spark.tantivy4spark.indexWriter.threads", 2) // 2 threads default
-  private val batchSize = getConfigValueInt("spark.tantivy4spark.indexWriter.batchSize", 10000) // 10,000 records default
-  private val useBatch = getConfigValue("spark.tantivy4spark.indexWriter.useBatch", "true").toBoolean // Use batch by default
+  private val heapSize = getConfigValueSize("spark.indextables.indexWriter.heapSize", 100L * 1024 * 1024) // 100MB default
+  private val threadCount = getConfigValueInt("spark.indextables.indexWriter.threads", 2) // 2 threads default
+  private val batchSize = getConfigValueInt("spark.indextables.indexWriter.batchSize", 10000) // 10,000 records default
+  private val useBatch = getConfigValue("spark.indextables.indexWriter.useBatch", "true").toBoolean // Use batch by default
   
   logger.info(s"Index writer configuration: heapSize=${heapSize} bytes, threadCount=${threadCount}, batchSize=${batchSize}, useBatch=${useBatch}")
   

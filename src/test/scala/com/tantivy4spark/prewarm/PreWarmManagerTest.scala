@@ -84,7 +84,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     
     val filters: Array[Any] = Array(EqualTo("content", "test"))
     val broadcastConfig = spark.sparkContext.broadcast(Map(
-      "spark.tantivy4spark.cache.prewarm.enabled" -> "false"
+      "spark.indextables.cache.prewarm.enabled" -> "false"
     ))
     
     val result = PreWarmManager.executePreWarm(
@@ -116,8 +116,8 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     
     val filters: Array[Any] = Array(EqualTo("content", "test"))
     val broadcastConfig = spark.sparkContext.broadcast(Map(
-      "spark.tantivy4spark.cache.prewarm.enabled" -> "true",
-      "spark.tantivy4spark.cache.maxSize" -> "100000000"
+      "spark.indextables.cache.prewarm.enabled" -> "true",
+      "spark.indextables.cache.maxSize" -> "100000000"
     ))
     
     // No splits have preferred hosts (no locality information)
@@ -155,8 +155,8 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     
     val filters: Array[Any] = Array(EqualTo("content", "test"))
     val broadcastConfig = spark.sparkContext.broadcast(Map(
-      "spark.tantivy4spark.cache.prewarm.enabled" -> "true",
-      "spark.tantivy4spark.cache.maxSize" -> "100000000"
+      "spark.indextables.cache.prewarm.enabled" -> "true",
+      "spark.indextables.cache.maxSize" -> "100000000"
     ))
     
     val result = PreWarmManager.executePreWarm(
@@ -209,7 +209,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     
     val filters: Array[Any] = Array(EqualTo("content", "test"))
     val broadcastConfig = spark.sparkContext.broadcast(Map(
-      "spark.tantivy4spark.cache.prewarm.enabled" -> "true"
+      "spark.indextables.cache.prewarm.enabled" -> "true"
     ))
     
     val result = PreWarmManager.executePreWarm(
@@ -246,7 +246,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     
     val filters: Array[Any] = Array(EqualTo("content", "test"))
     val broadcastConfig = spark.sparkContext.broadcast(Map(
-      "spark.tantivy4spark.cache.prewarm.enabled" -> "true"
+      "spark.indextables.cache.prewarm.enabled" -> "true"
     ))
     
     // Execute pre-warm (even with no preferred hosts, stats should be recorded)

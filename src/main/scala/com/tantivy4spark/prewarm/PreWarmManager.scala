@@ -273,29 +273,29 @@ object PreWarmManager {
     
     SplitCacheConfig(
       cacheName = {
-        val configName = getConfig("spark.tantivy4spark.cache.name", "")
+        val configName = getConfig("spark.indextables.cache.name", "")
         if (configName.trim.nonEmpty) configName.trim
         else s"tantivy4spark-${tablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
       },
-      maxCacheSize = getConfig("spark.tantivy4spark.cache.maxSize", "200000000").toLong,
-      maxConcurrentLoads = getConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8").toInt,
-      enableQueryCache = getConfig("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
-      enableDocBatch = getConfig("spark.tantivy4spark.docBatch.enabled", "true").toBoolean,
-      docBatchMaxSize = getConfig("spark.tantivy4spark.docBatch.maxSize", "1000").toInt,
-      awsAccessKey = getConfigOption("spark.tantivy4spark.aws.accessKey"),
-      awsSecretKey = getConfigOption("spark.tantivy4spark.aws.secretKey"),
-      awsSessionToken = getConfigOption("spark.tantivy4spark.aws.sessionToken"),
-      awsRegion = getConfigOption("spark.tantivy4spark.aws.region"),
-      awsEndpoint = getConfigOption("spark.tantivy4spark.s3.endpoint"),
-      awsPathStyleAccess = getConfigOption("spark.tantivy4spark.s3.pathStyleAccess").map(_.toLowerCase == "true"),
-      azureAccountName = getConfigOption("spark.tantivy4spark.azure.accountName"),
-      azureAccountKey = getConfigOption("spark.tantivy4spark.azure.accountKey"),
-      azureConnectionString = getConfigOption("spark.tantivy4spark.azure.connectionString"),
-      azureEndpoint = getConfigOption("spark.tantivy4spark.azure.endpoint"),
-      gcpProjectId = getConfigOption("spark.tantivy4spark.gcp.projectId"),
-      gcpServiceAccountKey = getConfigOption("spark.tantivy4spark.gcp.serviceAccountKey"),
-      gcpCredentialsFile = getConfigOption("spark.tantivy4spark.gcp.credentialsFile"),
-      gcpEndpoint = getConfigOption("spark.tantivy4spark.gcp.endpoint")
+      maxCacheSize = getConfig("spark.indextables.cache.maxSize", "200000000").toLong,
+      maxConcurrentLoads = getConfig("spark.indextables.cache.maxConcurrentLoads", "8").toInt,
+      enableQueryCache = getConfig("spark.indextables.cache.queryCache", "true").toBoolean,
+      enableDocBatch = getConfig("spark.indextables.docBatch.enabled", "true").toBoolean,
+      docBatchMaxSize = getConfig("spark.indextables.docBatch.maxSize", "1000").toInt,
+      awsAccessKey = getConfigOption("spark.indextables.aws.accessKey"),
+      awsSecretKey = getConfigOption("spark.indextables.aws.secretKey"),
+      awsSessionToken = getConfigOption("spark.indextables.aws.sessionToken"),
+      awsRegion = getConfigOption("spark.indextables.aws.region"),
+      awsEndpoint = getConfigOption("spark.indextables.s3.endpoint"),
+      awsPathStyleAccess = getConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
+      azureAccountName = getConfigOption("spark.indextables.azure.accountName"),
+      azureAccountKey = getConfigOption("spark.indextables.azure.accountKey"),
+      azureConnectionString = getConfigOption("spark.indextables.azure.connectionString"),
+      azureEndpoint = getConfigOption("spark.indextables.azure.endpoint"),
+      gcpProjectId = getConfigOption("spark.indextables.gcp.projectId"),
+      gcpServiceAccountKey = getConfigOption("spark.indextables.gcp.serviceAccountKey"),
+      gcpCredentialsFile = getConfigOption("spark.indextables.gcp.credentialsFile"),
+      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint")
     )
   }
   

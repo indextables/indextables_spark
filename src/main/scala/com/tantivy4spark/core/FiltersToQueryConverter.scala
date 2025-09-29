@@ -1188,7 +1188,7 @@ object FiltersToQueryConverter {
         // Check if field is configured as a fast field - range queries only work on fast fields
         queryLog(s"🔍 DEBUG: Checking fast field config for '$attribute', options = $options")
         val isFastField = options.map { opts =>
-          val fastFieldsStr = Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+          val fastFieldsStr = Option(opts.get("spark.indextables.indexing.fastfields"))
           queryLog(s"🔍 DEBUG: fastfields config = '$fastFieldsStr'")
           fastFieldsStr
             .map(_.split(",").map(_.trim).contains(attribute))
@@ -1235,7 +1235,7 @@ object FiltersToQueryConverter {
 
         // Check if field is configured as a fast field - range queries only work on fast fields
         val isFastField = options.map { opts =>
-          Option(opts.get("spark.tantivy4spark.indexing.fastfields"))
+          Option(opts.get("spark.indextables.indexing.fastfields"))
             .map(_.split(",").map(_.trim).contains(attribute))
             .getOrElse(false)
         }.getOrElse(false)

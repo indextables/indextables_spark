@@ -132,8 +132,8 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     // Read with pre-warm explicitly enabled
     val df = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.cache.prewarm.enabled", "true")
-      .option("spark.tantivy4spark.cache.maxSize", "50000000")
+      .option("spark.indextables.cache.prewarm.enabled", "true")
+      .option("spark.indextables.cache.maxSize", "50000000")
       .load(tempTablePath)
     
     // Execute query that should benefit from pre-warming
@@ -165,7 +165,7 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     // Read with pre-warm explicitly disabled
     val df = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.cache.prewarm.enabled", "false")
+      .option("spark.indextables.cache.prewarm.enabled", "false")
       .load(tempTablePath)
     
     val results = df.filter(col("content").contains("learning")).collect()
@@ -195,7 +195,7 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     // Read with pre-warm enabled
     val df = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.cache.prewarm.enabled", "true")
+      .option("spark.indextables.cache.prewarm.enabled", "true")
       .load(tempTablePath)
     
     // Execute basic filter operation
@@ -226,8 +226,8 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     // Read with pre-warm enabled but with configuration that might cause issues
     val df = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.cache.prewarm.enabled", "true")
-      .option("spark.tantivy4spark.cache.maxSize", "1000") // Very small cache
+      .option("spark.indextables.cache.prewarm.enabled", "true")
+      .option("spark.indextables.cache.maxSize", "1000") // Very small cache
       .load(tempTablePath)
     
     // Execute query - should succeed despite potential pre-warm issues

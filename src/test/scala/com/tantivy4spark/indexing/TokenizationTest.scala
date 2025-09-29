@@ -60,7 +60,7 @@ class TokenizationTest extends TestBase with Matchers {
       // Write with explicit text type
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -85,8 +85,8 @@ class TokenizationTest extends TestBase with Matchers {
       // Configure title as string (exact) and content as text (tokenized)
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.title", "string")
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.title", "string")
+        .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)

@@ -30,8 +30,8 @@ class TestGroupBySumValidation extends AnyFunSuite {
 
       // Write data with category as fast field but NOT amount
       testData.write.format("tantivy4spark")
-        .option("spark.tantivy4spark.indexing.typemap.category", "string")
-        .option("spark.tantivy4spark.indexing.fastfields", "category")  // Only category, NOT amount
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "category")  // Only category, NOT amount
         .mode("overwrite")
         .save(tablePath)
 

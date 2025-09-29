@@ -75,12 +75,12 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     val tablePath = s"s3://$TEST_BUCKET/credential-test-table"
     
     // Set credentials in Spark session configuration
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    spark.conf.set("spark.tantivy4spark.aws.region", REGION)
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.indextables.aws.region", REGION)
+    spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
     
     // Create a test table first
     createTestTable(tablePath)
@@ -113,23 +113,23 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     val tablePath = s"s3://$TEST_BUCKET/credential-test-table-2"
     
     // Clear Spark session credentials to test read options exclusively
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     // Create test table first
     createTestTable(tablePath)
     
     // Create relation with credentials in read options
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> REGION,
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> REGION,
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     )
     
     val relation = new Tantivy4SparkRelation(
@@ -157,20 +157,20 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     val tablePath = s"s3://$TEST_BUCKET/credential-test-table-3"
     
     // Clear other credential sources
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     // Set credentials in Hadoop configuration
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    hadoopConf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    hadoopConf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    hadoopConf.set("spark.tantivy4spark.aws.region", REGION)
-    hadoopConf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    hadoopConf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    hadoopConf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    hadoopConf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    hadoopConf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    hadoopConf.set("spark.indextables.aws.region", REGION)
+    hadoopConf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    hadoopConf.set("spark.indextables.s3.pathStyleAccess", "true")
     
     // Create test table first
     createTestTable(tablePath)
@@ -200,19 +200,19 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     
     // Set different values in each source to test precedence
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "hadoop-key")
-    hadoopConf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    hadoopConf.set("spark.indextables.aws.accessKey", "hadoop-key")
+    hadoopConf.set("spark.indextables.aws.region", "us-east-1")
     
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "spark-key") 
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-west-1")
+    spark.conf.set("spark.indextables.aws.accessKey", "spark-key") 
+    spark.conf.set("spark.indextables.aws.region", "us-west-1")
     
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY, // This should win
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> REGION, // This should win  
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY, // This should win
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> REGION, // This should win  
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     )
     
     // Create test table
@@ -243,18 +243,18 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     val tablePath = s"s3://$TEST_BUCKET/missing-creds-table"
     
     // Clear all credential sources
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.unset("spark.tantivy4spark.aws.accessKey")
-    hadoopConf.unset("spark.tantivy4spark.aws.secretKey")
-    hadoopConf.unset("spark.tantivy4spark.aws.sessionToken")
-    hadoopConf.unset("spark.tantivy4spark.aws.region")
-    hadoopConf.unset("spark.tantivy4spark.s3.endpoint")
+    hadoopConf.unset("spark.indextables.aws.accessKey")
+    hadoopConf.unset("spark.indextables.aws.secretKey")
+    hadoopConf.unset("spark.indextables.aws.sessionToken")
+    hadoopConf.unset("spark.indextables.aws.region")
+    hadoopConf.unset("spark.indextables.s3.endpoint")
     
     val relation = new Tantivy4SparkRelation(
       path = tablePath,
@@ -282,12 +282,12 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     
     // Set credentials via read options (as would happen with DataFrame.read)
     val readOptions = Map(
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> REGION,
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true",
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> REGION,
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true",
       "path" -> tablePath
     )
     
@@ -322,21 +322,21 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     createTestTable(tablePath)
     
     // Clear session credentials to test only read options
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     try {
       // This simulates the full DataFrame.read path with credentials in options
       val df = spark.read.format("tantivy4spark")
-        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-        .option("spark.tantivy4spark.aws.region", REGION)
-        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+        .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+        .option("spark.indextables.aws.secretKey", SECRET_KEY)
+        .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.indextables.aws.region", REGION)
+        .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.indextables.s3.pathStyleAccess", "true")
         .load(tablePath)
       
       val schema = df.schema // This triggers the schema() method
@@ -359,22 +359,22 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     createTestTable(tablePath)
     
     // Clear session credentials to test only options parameter
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     // Test V2 DataSource inferSchema method directly
     val provider = new Tantivy4SparkTableProvider()
     val inferSchemaOptions = new CaseInsensitiveStringMap(Map(
       "path" -> tablePath,
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> REGION,
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> REGION,
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava)
     
     try {
@@ -401,24 +401,24 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     
     // Set different credentials in different sources to test hierarchy
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "hadoop-key")
-    hadoopConf.set("spark.tantivy4spark.aws.region", "us-east-1")
-    hadoopConf.set("spark.tantivy4spark.s3.endpoint", "http://hadoop.endpoint")
+    hadoopConf.set("spark.indextables.aws.accessKey", "hadoop-key")
+    hadoopConf.set("spark.indextables.aws.region", "us-east-1")
+    hadoopConf.set("spark.indextables.s3.endpoint", "http://hadoop.endpoint")
     
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "spark-key")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-west-1") 
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://spark.endpoint")
+    spark.conf.set("spark.indextables.aws.accessKey", "spark-key")
+    spark.conf.set("spark.indextables.aws.region", "us-west-1") 
+    spark.conf.set("spark.indextables.s3.endpoint", "http://spark.endpoint")
     
     // Options should have highest precedence and override the others
     val provider = new Tantivy4SparkTableProvider()
     val inferSchemaOptions = new CaseInsensitiveStringMap(Map(
       "path" -> tablePath,
-      "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY, // Should override hadoop-key and spark-key
-      "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-      "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.tantivy4spark.aws.region" -> REGION, // Should override us-east-1 and us-west-1
-      "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort", // Should override other endpoints
-      "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+      "spark.indextables.aws.accessKey" -> ACCESS_KEY, // Should override hadoop-key and spark-key
+      "spark.indextables.aws.secretKey" -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+      "spark.indextables.aws.region" -> REGION, // Should override us-east-1 and us-west-1
+      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort", // Should override other endpoints
+      "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava)
     
     try {
@@ -437,12 +437,12 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     }
     
     // Clean up test configurations
-    hadoopConf.unset("spark.tantivy4spark.aws.accessKey")
-    hadoopConf.unset("spark.tantivy4spark.aws.region")
-    hadoopConf.unset("spark.tantivy4spark.s3.endpoint")
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    hadoopConf.unset("spark.indextables.aws.accessKey")
+    hadoopConf.unset("spark.indextables.aws.region")
+    hadoopConf.unset("spark.indextables.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
   }
 
   test("should propagate credentials through spark.read.format(TableProvider) triggering inferSchema") {
@@ -452,21 +452,21 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     createTestTable(tablePath)
     
     // Clear session credentials to test only read options
-    spark.conf.unset("spark.tantivy4spark.aws.accessKey")
-    spark.conf.unset("spark.tantivy4spark.aws.secretKey")
-    spark.conf.unset("spark.tantivy4spark.aws.sessionToken")
-    spark.conf.unset("spark.tantivy4spark.aws.region")
-    spark.conf.unset("spark.tantivy4spark.s3.endpoint")
+    spark.conf.unset("spark.indextables.aws.accessKey")
+    spark.conf.unset("spark.indextables.aws.secretKey")
+    spark.conf.unset("spark.indextables.aws.sessionToken")
+    spark.conf.unset("spark.indextables.aws.region")
+    spark.conf.unset("spark.indextables.s3.endpoint")
     
     try {
       // This triggers the V2 TableProvider.inferSchema path - the exact scenario you mentioned
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-        .option("spark.tantivy4spark.aws.region", REGION)
-        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
+        .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+        .option("spark.indextables.aws.secretKey", SECRET_KEY)
+        .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.indextables.aws.region", REGION)
+        .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.indextables.s3.pathStyleAccess", "true")
         .load(tablePath)
       
       // This should trigger inferSchema with the fix applied
@@ -493,20 +493,20 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
       ))
       
       // Set temporary credentials for table creation
-      spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      spark.conf.set("spark.tantivy4spark.aws.region", REGION)
-      spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+      spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+      spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+      spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      spark.conf.set("spark.indextables.aws.region", REGION)
+      spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
       
       val options = new CaseInsensitiveStringMap(Map(
-        "spark.tantivy4spark.aws.accessKey" -> ACCESS_KEY,
-        "spark.tantivy4spark.aws.secretKey" -> SECRET_KEY,
-        "spark.tantivy4spark.aws.sessionToken" -> SESSION_TOKEN,
-        "spark.tantivy4spark.aws.region" -> REGION,
-        "spark.tantivy4spark.s3.endpoint" -> s"http://localhost:$s3MockPort",
-        "spark.tantivy4spark.s3.pathStyleAccess" -> "true"
+        "spark.indextables.aws.accessKey" -> ACCESS_KEY,
+        "spark.indextables.aws.secretKey" -> SECRET_KEY,
+        "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
+        "spark.indextables.aws.region" -> REGION,
+        "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+        "spark.indextables.s3.pathStyleAccess" -> "true"
       ).asJava)
       
       val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)

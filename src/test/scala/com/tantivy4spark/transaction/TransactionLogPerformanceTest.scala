@@ -38,8 +38,8 @@ class TransactionLogPerformanceTest extends TestBase {
       // Test without checkpoints
       val optionsWithoutCheckpoints = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "false",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+          "spark.indextables.checkpoint.enabled" -> "false",
+          "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
 
@@ -81,10 +81,10 @@ class TransactionLogPerformanceTest extends TestBase {
       // Test with checkpoints
       val optionsWithCheckpoints = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "100", // Create checkpoint less frequently to avoid interference
-          "spark.tantivy4spark.checkpoint.parallelism" -> "4",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "100", // Create checkpoint less frequently to avoid interference
+          "spark.indextables.checkpoint.parallelism" -> "4",
+          "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
 
@@ -150,9 +150,9 @@ class TransactionLogPerformanceTest extends TestBase {
 
       val optionsWithParallel = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "20", // No checkpoints during this test
-          "spark.tantivy4spark.checkpoint.parallelism" -> "4"
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "20", // No checkpoints during this test
+          "spark.indextables.checkpoint.parallelism" -> "4"
         ).asJava
       )
 
@@ -200,10 +200,10 @@ class TransactionLogPerformanceTest extends TestBase {
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "3",
-          "spark.tantivy4spark.checkpoint.parallelism" -> "2",
-          "spark.tantivy4spark.transaction.optimized.enabled" -> "false"  // Use standard transaction log for checkpoint testing
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "3",
+          "spark.indextables.checkpoint.parallelism" -> "2",
+          "spark.indextables.transaction.optimized.enabled" -> "false"  // Use standard transaction log for checkpoint testing
         ).asJava
       )
 
@@ -253,10 +253,10 @@ class TransactionLogPerformanceTest extends TestBase {
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "5", // Create checkpoint every 5 transactions
-          "spark.tantivy4spark.checkpoint.parallelism" -> "4",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false" // Disable cache to test actual checkpoint reading
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "5", // Create checkpoint every 5 transactions
+          "spark.indextables.checkpoint.parallelism" -> "4",
+          "spark.indextables.transaction.cache.enabled" -> "false" // Disable cache to test actual checkpoint reading
         ).asJava
       )
 
@@ -361,11 +361,11 @@ class TransactionLogPerformanceTest extends TestBase {
       // Use very short retention period to force cleanup in tests
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
-          "spark.tantivy4spark.logRetention.duration" -> "100", // 100ms retention (very short for testing)
-          "spark.tantivy4spark.checkpoint.parallelism" -> "2",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
+          "spark.indextables.logRetention.duration" -> "100", // 100ms retention (very short for testing)
+          "spark.indextables.checkpoint.parallelism" -> "2",
+          "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
 
@@ -454,11 +454,11 @@ class TransactionLogPerformanceTest extends TestBase {
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.tantivy4spark.checkpoint.enabled" -> "true",
-          "spark.tantivy4spark.checkpoint.interval" -> "3",
-          "spark.tantivy4spark.checkpoint.parallelism" -> "2",
-          "spark.tantivy4spark.transaction.cache.enabled" -> "false",
-          "spark.tantivy4spark.transaction.allowDirectUsage" -> "true"  // Allow direct usage for test
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "3",
+          "spark.indextables.checkpoint.parallelism" -> "2",
+          "spark.indextables.transaction.cache.enabled" -> "false",
+          "spark.indextables.transaction.allowDirectUsage" -> "true"  // Allow direct usage for test
         ).asJava
       )
 

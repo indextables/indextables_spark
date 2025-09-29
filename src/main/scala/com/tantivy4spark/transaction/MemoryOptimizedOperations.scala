@@ -49,7 +49,7 @@ class MemoryOptimizedOperations(
   private val memoryThreshold = 512 * 1024 * 1024L // 512MB threshold for external sorting
   private val bufferSize = 64 * 1024 // 64KB buffer for streaming operations
   private val batchSize = 10000 // Records per batch for streaming
-  private val tempDirectory = System.getProperty("spark.tantivy4spark.indexWriter.tempDirectoryPath",
+  private val tempDirectory = System.getProperty("spark.indextables.indexWriter.tempDirectoryPath",
                                                   System.getProperty("java.io.tmpdir"))
 
   // Note: Dataset-based reconstruction is not currently used.

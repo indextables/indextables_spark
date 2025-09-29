@@ -53,7 +53,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("cache can be disabled") {
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.transaction.cache.enabled" -> "false"
+      "spark.indextables.transaction.cache.enabled" -> "false"
     ).asJava)
     
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
@@ -65,7 +65,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
   test("cache expiration can be configured") {
     val customExpirationSeconds = 30L
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.transaction.cache.expirationSeconds" -> customExpirationSeconds.toString
+      "spark.indextables.transaction.cache.expirationSeconds" -> customExpirationSeconds.toString
     ).asJava)
     
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
@@ -144,7 +144,7 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
     // Use very short expiration for testing
     val shortExpirationSeconds = 1L
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.transaction.cache.expirationSeconds" -> shortExpirationSeconds.toString
+      "spark.indextables.transaction.cache.expirationSeconds" -> shortExpirationSeconds.toString
     ).asJava)
     
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)

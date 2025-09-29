@@ -29,19 +29,19 @@ import scala.collection.mutable
  * Utility object for normalizing Tantivy4Spark configuration keys.
  *
  * This utility provides a centralized approach for handling configuration key normalization
- * between the legacy "spark.tantivy4spark.*" prefix and the new "spark.indextables.*" prefix.
- * All "spark.indextables.*" keys are normalized to "spark.tantivy4spark.*" internally
+ * between the legacy "spark.indextables.*" prefix and the new "spark.indextables.*" prefix.
+ * All "spark.indextables.*" keys are normalized to "spark.indextables.*" internally
  * to maintain code cleanliness while supporting dual prefixes.
  */
 object ConfigNormalization {
 
   /**
-   * Normalizes a configuration key from spark.indextables.* to spark.tantivy4spark.*
+   * Normalizes a configuration key from spark.indextables.* to spark.indextables.*
    * if needed. Returns the key unchanged if it doesn't start with spark.indextables.
    */
   def normalizeKey(key: String): String = {
     if (key.startsWith("spark.indextables.")) {
-      key.replace("spark.indextables.", "spark.tantivy4spark.")
+      key.replace("spark.indextables.", "spark.indextables.")
     } else {
       key
     }
@@ -51,7 +51,7 @@ object ConfigNormalization {
    * Checks if a configuration key is a Tantivy4Spark-related key (either prefix).
    */
   def isTantivyKey(key: String): Boolean = {
-    key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")
+    key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
   }
 
   /**

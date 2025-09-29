@@ -72,7 +72,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
    * Whether to enable auto-sizing based on historical split data.
    */
   def autoSizeEnabled: Option[Boolean] = {
-    Option(options.get("spark.tantivy4spark.autoSize.enabled")).filter(_.trim.nonEmpty).map { valueStr =>
+    Option(options.get("spark.indextables.autoSize.enabled")).filter(_.trim.nonEmpty).map { valueStr =>
       val trimmedValue = valueStr.trim.toLowerCase
       trimmedValue match {
         case "true" | "1" | "yes" | "on" => true
@@ -87,7 +87,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
    * Supports formats: "123456" (bytes), "1M" (megabytes), "1G" (gigabytes).
    */
   def autoSizeTargetSplitSize: Option[String] = {
-    Option(options.get("spark.tantivy4spark.autoSize.targetSplitSize")).filter(_.trim.nonEmpty)
+    Option(options.get("spark.indextables.autoSize.targetSplitSize")).filter(_.trim.nonEmpty)
   }
 
   /**
@@ -95,7 +95,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
    * When provided, this exact count will be used for partitioning calculations.
    */
   def autoSizeInputRowCount: Option[Long] = {
-    Option(options.get("spark.tantivy4spark.autoSize.inputRowCount")).filter(_.trim.nonEmpty).map(_.toLong)
+    Option(options.get("spark.indextables.autoSize.inputRowCount")).filter(_.trim.nonEmpty).map(_.toLong)
   }
 
   /**
@@ -107,12 +107,12 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
     import scala.jdk.CollectionConverters._
     options.asCaseSensitiveMap().asScala.toMap
       .filter { case (key, _) =>
-        key.startsWith("spark.tantivy4spark.indexing.typemap.") ||
+        key.startsWith("spark.indextables.indexing.typemap.") ||
         key.startsWith("spark.indextables.indexing.typemap.")
       }
       .map { case (key, value) =>
-        val fieldName = if (key.startsWith("spark.tantivy4spark.indexing.typemap.")) {
-          key.substring("spark.tantivy4spark.indexing.typemap.".length)
+        val fieldName = if (key.startsWith("spark.indextables.indexing.typemap.")) {
+          key.substring("spark.indextables.indexing.typemap.".length)
         } else {
           key.substring("spark.indextables.indexing.typemap.".length)
         }
@@ -128,7 +128,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   def getFastFields: Set[String] = {
     // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.fastfields"))
-      .orElse(Option(options.get("spark.tantivy4spark.indexing.fastfields")))
+      .orElse(Option(options.get("spark.indextables.indexing.fastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -142,7 +142,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   def getNonFastFields: Set[String] = {
     // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.nonfastfields"))
-      .orElse(Option(options.get("spark.tantivy4spark.indexing.nonfastfields")))
+      .orElse(Option(options.get("spark.indextables.indexing.nonfastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -154,7 +154,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
    */
   def getStoreOnlyFields: Set[String] = {
     Option(options.get("spark.indextables.indexing.storeonlyfields"))
-      .orElse(Option(options.get("spark.tantivy4spark.indexing.storeonlyfields")))
+      .orElse(Option(options.get("spark.indextables.indexing.storeonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -166,7 +166,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
    */
   def getIndexOnlyFields: Set[String] = {
     Option(options.get("spark.indextables.indexing.indexonlyfields"))
-      .orElse(Option(options.get("spark.tantivy4spark.indexing.indexonlyfields")))
+      .orElse(Option(options.get("spark.indextables.indexing.indexonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
   }
@@ -180,12 +180,12 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
     import scala.jdk.CollectionConverters._
     options.asCaseSensitiveMap().asScala.toMap
       .filter { case (key, _) =>
-        key.startsWith("spark.tantivy4spark.indexing.tokenizer.") ||
+        key.startsWith("spark.indextables.indexing.tokenizer.") ||
         key.startsWith("spark.indextables.indexing.tokenizer.")
       }
       .map { case (key, value) =>
-        val fieldName = if (key.startsWith("spark.tantivy4spark.indexing.tokenizer.")) {
-          key.substring("spark.tantivy4spark.indexing.tokenizer.".length)
+        val fieldName = if (key.startsWith("spark.indextables.indexing.tokenizer.")) {
+          key.substring("spark.indextables.indexing.tokenizer.".length)
         } else {
           key.substring("spark.indextables.indexing.tokenizer.".length)
         }
@@ -245,15 +245,15 @@ object Tantivy4SparkOptions {
   val FORCE_STANDARD_STORAGE = "forceStandardStorage"
 
   // Auto-sizing option keys
-  val AUTO_SIZE_ENABLED = "spark.tantivy4spark.autoSize.enabled"
-  val AUTO_SIZE_TARGET_SPLIT_SIZE = "spark.tantivy4spark.autoSize.targetSplitSize"
-  val AUTO_SIZE_INPUT_ROW_COUNT = "spark.tantivy4spark.autoSize.inputRowCount"
+  val AUTO_SIZE_ENABLED = "spark.indextables.autoSize.enabled"
+  val AUTO_SIZE_TARGET_SPLIT_SIZE = "spark.indextables.autoSize.targetSplitSize"
+  val AUTO_SIZE_INPUT_ROW_COUNT = "spark.indextables.autoSize.inputRowCount"
 
   // Indexing configuration keys
-  val INDEXING_TYPEMAP_PREFIX = "spark.tantivy4spark.indexing.typemap."
-  val INDEXING_FASTFIELDS = "spark.tantivy4spark.indexing.fastfields"
-  val INDEXING_NONFASTFIELDS = "spark.tantivy4spark.indexing.nonfastfields"
-  val INDEXING_STOREONLY_FIELDS = "spark.tantivy4spark.indexing.storeonlyfields"
-  val INDEXING_INDEXONLY_FIELDS = "spark.tantivy4spark.indexing.indexonlyfields"
-  val INDEXING_TOKENIZER_PREFIX = "spark.tantivy4spark.indexing.tokenizer."
+  val INDEXING_TYPEMAP_PREFIX = "spark.indextables.indexing.typemap."
+  val INDEXING_FASTFIELDS = "spark.indextables.indexing.fastfields"
+  val INDEXING_NONFASTFIELDS = "spark.indextables.indexing.nonfastfields"
+  val INDEXING_STOREONLY_FIELDS = "spark.indextables.indexing.storeonlyfields"
+  val INDEXING_INDEXONLY_FIELDS = "spark.indextables.indexing.indexonlyfields"
+  val INDEXING_TOKENIZER_PREFIX = "spark.indextables.indexing.tokenizer."
 }

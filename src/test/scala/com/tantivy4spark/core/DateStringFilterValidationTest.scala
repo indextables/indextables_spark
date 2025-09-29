@@ -48,7 +48,7 @@ class DateStringFilterValidationTest extends TestBase {
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
+        .option("spark.indextables.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
@@ -120,7 +120,7 @@ class DateStringFilterValidationTest extends TestBase {
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
+        .option("spark.indextables.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 
@@ -156,7 +156,7 @@ class DateStringFilterValidationTest extends TestBase {
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.fastfields", "event_date")
+        .option("spark.indextables.indexing.fastfields", "event_date")
         .partitionBy("event_date")
         .save(tablePath)
 

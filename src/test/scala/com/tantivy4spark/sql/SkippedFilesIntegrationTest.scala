@@ -142,8 +142,8 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"\n🔧 Testing configuration handling for skipped files")
 
       // Step 1: Test with tracking disabled
-      spark.conf.set("spark.tantivy4spark.skippedFiles.trackingEnabled", "false")
-      spark.conf.set("spark.tantivy4spark.skippedFiles.cooldownDuration", "48")
+      spark.conf.set("spark.indextables.skippedFiles.trackingEnabled", "false")
+      spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "48")
 
       val initialData = spark.range(5).select(
         col("id"),
@@ -158,8 +158,8 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
 
       // When tracking is disabled, the configuration should still be readable
-      val cooldownHours = spark.conf.get("spark.tantivy4spark.skippedFiles.cooldownDuration", "24").toInt
-      val trackingEnabled = spark.conf.get("spark.tantivy4spark.skippedFiles.trackingEnabled", "true").toBoolean
+      val cooldownHours = spark.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
+      val trackingEnabled = spark.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
 
       cooldownHours shouldBe 48
       trackingEnabled shouldBe false
@@ -167,15 +167,15 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"✅ Configuration correctly read: cooldown=$cooldownHours hours, tracking=$trackingEnabled")
 
       // Step 2: Test with tracking enabled and custom cooldown
-      spark.conf.set("spark.tantivy4spark.skippedFiles.trackingEnabled", "true")
-      spark.conf.set("spark.tantivy4spark.skippedFiles.cooldownDuration", "2")
+      spark.conf.set("spark.indextables.skippedFiles.trackingEnabled", "true")
+      spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "2")
 
       val testFile = "config/test_file.split"
       val skipVersion = transactionLog.recordSkippedFile(
         filePath = testFile,
         reason = "Configuration test",
         operation = "merge",
-        cooldownHours = spark.conf.get("spark.tantivy4spark.skippedFiles.cooldownDuration", "24").toInt
+        cooldownHours = spark.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
       )
 
       val skippedFiles = transactionLog.getSkippedFiles()
@@ -192,8 +192,8 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"✅ Custom cooldown period correctly applied: ${actualCooldownMs / 1000 / 60 / 60} hours")
 
       // Cleanup configuration
-      spark.conf.unset("spark.tantivy4spark.skippedFiles.trackingEnabled")
-      spark.conf.unset("spark.tantivy4spark.skippedFiles.cooldownDuration")
+      spark.conf.unset("spark.indextables.skippedFiles.trackingEnabled")
+      spark.conf.unset("spark.indextables.skippedFiles.cooldownDuration")
     }
   }
 

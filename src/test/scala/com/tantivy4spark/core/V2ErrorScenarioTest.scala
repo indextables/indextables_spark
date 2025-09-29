@@ -109,7 +109,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       val exception1 = intercept[Exception] {
         spark.read
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.cache.maxSize", "invalid-number")
+          .option("spark.indextables.cache.maxSize", "invalid-number")
           .load(path)
           .count()
       }

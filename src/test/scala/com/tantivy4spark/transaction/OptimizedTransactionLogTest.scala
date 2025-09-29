@@ -142,8 +142,8 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
 
   test("OptimizedTransactionLog should handle overwrite operations") {
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.tantivy4spark.transaction.optimized.enabled" -> "true",
-      "spark.tantivy4spark.parallel.read.enabled" -> "false"  // Disable parallel read to avoid caching issues
+      "spark.indextables.transaction.optimized.enabled" -> "true",
+      "spark.indextables.parallel.read.enabled" -> "false"  // Disable parallel read to avoid caching issues
     ).asJava)
 
     val tablePath = new Path(testDir, "test_table")

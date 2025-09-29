@@ -20,8 +20,8 @@ class SimpleIndexQueryTest extends TestBase {
     // Write with text fields for title (same as working tantivy4java test)
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")    // tokenized search
-      .option("spark.tantivy4spark.indexing.typemap.category", "string") // exact matching
+      .option("spark.indextables.indexing.typemap.title", "text")    // tokenized search
+      .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .mode("overwrite")
       .save(testPath)
 

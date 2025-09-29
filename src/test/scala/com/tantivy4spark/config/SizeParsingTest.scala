@@ -81,8 +81,8 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
       // This should not throw an exception
       testDF.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.tantivy4spark.indexWriter.heapSize", sizeValue)
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexWriter.heapSize", sizeValue)
+        .option("spark.indextables.indexing.typemap.content", "text")
         .mode("overwrite")
         .save(testPath)
 
@@ -131,8 +131,8 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
       try {
         testDF.write
           .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.tantivy4spark.indexWriter.heapSize", sizeValue)
-          .option("spark.tantivy4spark.indexing.typemap.content", "text")
+          .option("spark.indextables.indexWriter.heapSize", sizeValue)
+          .option("spark.indextables.indexing.typemap.content", "text")
           .mode("overwrite")
           .save(testPath)
 

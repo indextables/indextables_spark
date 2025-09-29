@@ -13,18 +13,18 @@ class CredentialDebugTest extends TestBase {
 
   test("debug credential extraction from Spark config") {
     // Set credentials in Spark configuration
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", "test-access-key")
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", "test-secret-key")
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://localhost:9090")
-    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.indextables.aws.accessKey", "test-access-key")
+    spark.conf.set("spark.indextables.aws.secretKey", "test-secret-key")
+    spark.conf.set("spark.indextables.s3.endpoint", "http://localhost:9090")
+    spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
     
     println(s"✅ Set Spark config values")
-    println(s"   - accessKey: ${spark.conf.get("spark.tantivy4spark.aws.accessKey")}")
-    println(s"   - endpoint: ${spark.conf.get("spark.tantivy4spark.s3.endpoint")}")
+    println(s"   - accessKey: ${spark.conf.get("spark.indextables.aws.accessKey")}")
+    println(s"   - endpoint: ${spark.conf.get("spark.indextables.s3.endpoint")}")
     
     // Try different ways to read the pathStyleAccess config
     try {
-      val pathStyleDirect = spark.conf.get("spark.tantivy4spark.s3.pathStyleAccess")
+      val pathStyleDirect = spark.conf.get("spark.indextables.s3.pathStyleAccess")
       println(s"   - pathStyleAccess (direct): $pathStyleDirect")
     } catch {
       case ex: Exception =>
@@ -32,7 +32,7 @@ class CredentialDebugTest extends TestBase {
     }
     
     try {
-      val pathStyleWithDefault = spark.conf.get("spark.tantivy4spark.s3.pathStyleAccess", "default-false")
+      val pathStyleWithDefault = spark.conf.get("spark.indextables.s3.pathStyleAccess", "default-false")
       println(s"   - pathStyleAccess (with default): $pathStyleWithDefault")
     } catch {
       case ex: Exception =>
@@ -41,7 +41,7 @@ class CredentialDebugTest extends TestBase {
     
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     println(s"✅ Hadoop config before:")
-    println(s"   - spark.tantivy4spark.aws.accessKey: ${hadoopConf.get("spark.tantivy4spark.aws.accessKey")}")
+    println(s"   - spark.indextables.aws.accessKey: ${hadoopConf.get("spark.indextables.aws.accessKey")}")
     println(s"   - spark.hadoop.fs.s3a.access.key: ${hadoopConf.get("spark.hadoop.fs.s3a.access.key")}")
     
     // Test direct config creation

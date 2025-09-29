@@ -30,11 +30,11 @@ class CloudStorageProviderTest extends TestBase {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // Set S3 configuration in Hadoop config (simulating Spark conf)
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "test-access-key")
-    hadoopConf.set("spark.tantivy4spark.aws.secretKey", "test-secret-key")
-    hadoopConf.set("spark.tantivy4spark.s3.endpoint", "http://localhost:9090")
-    hadoopConf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
-    hadoopConf.set("spark.tantivy4spark.aws.region", "us-west-2")
+    hadoopConf.set("spark.indextables.aws.accessKey", "test-access-key")
+    hadoopConf.set("spark.indextables.aws.secretKey", "test-secret-key")
+    hadoopConf.set("spark.indextables.s3.endpoint", "http://localhost:9090")
+    hadoopConf.set("spark.indextables.s3.pathStyleAccess", "true")
+    hadoopConf.set("spark.indextables.aws.region", "us-west-2")
     
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     
@@ -57,14 +57,14 @@ class CloudStorageProviderTest extends TestBase {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     
     // Set S3 configuration in Hadoop config
-    hadoopConf.set("spark.tantivy4spark.aws.accessKey", "hadoop-access-key")
-    hadoopConf.set("spark.tantivy4spark.aws.secretKey", "hadoop-secret-key")
+    hadoopConf.set("spark.indextables.aws.accessKey", "hadoop-access-key")
+    hadoopConf.set("spark.indextables.aws.secretKey", "hadoop-secret-key")
     
     // Set different values in DataFrame options
     val optionsMap = new java.util.HashMap[String, String]()
-    optionsMap.put("spark.tantivy4spark.aws.accessKey", "options-access-key")
-    optionsMap.put("spark.tantivy4spark.aws.secretKey", "options-secret-key")
-    optionsMap.put("spark.tantivy4spark.s3.endpoint", "http://localhost:8080")
+    optionsMap.put("spark.indextables.aws.accessKey", "options-access-key")
+    optionsMap.put("spark.indextables.aws.secretKey", "options-secret-key")
+    optionsMap.put("spark.indextables.s3.endpoint", "http://localhost:8080")
     
     val options = new CaseInsensitiveStringMap(optionsMap)
     

@@ -40,7 +40,7 @@ class PartitionVsDataDateTest extends TestBase with Matchers {
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.fastfields", "partition_date,data_date")
+        .option("spark.indextables.indexing.fastfields", "partition_date,data_date")
         .partitionBy("partition_date")
         .save(tablePath)
 

@@ -183,14 +183,14 @@ Additional configuration options for advanced performance tuning:
 
 | Configuration | Default | Description |
 |---------------|---------|-------------|
-| `spark.tantivy4spark.split.maxAge` | `2d` | Maximum age for split cache entries before eviction |
-| `spark.tantivy4spark.split.cacheQuota.maxBytes` | `1GB` | Maximum total bytes for split cache across all executors |
-| `spark.tantivy4spark.split.cacheQuota.maxCount` | `1000` | Maximum number of splits to cache per executor |
-| `spark.tantivy4spark.merge.concurrency` | `4` | Number of concurrent merge operations |
-| `spark.tantivy4spark.merge.policy` | `log` | Merge policy: `log`, `temporal`, or `no_merge` |
-| `spark.tantivy4spark.io.bandwidth.limit` | - | I/O bandwidth limit per executor (e.g., `100MB/s`) |
-| `spark.tantivy4spark.indexWriter.directBuffer` | `true` | Use direct ByteBuffers for zero-copy batch operations |
-| `spark.tantivy4spark.indexWriter.bufferPoolSize` | `10` | Number of reusable direct buffers to pool |
+| `spark.indextables.split.maxAge` | `2d` | Maximum age for split cache entries before eviction |
+| `spark.indextables.split.cacheQuota.maxBytes` | `1GB` | Maximum total bytes for split cache across all executors |
+| `spark.indextables.split.cacheQuota.maxCount` | `1000` | Maximum number of splits to cache per executor |
+| `spark.indextables.merge.concurrency` | `4` | Number of concurrent merge operations |
+| `spark.indextables.merge.policy` | `log` | Merge policy: `log`, `temporal`, or `no_merge` |
+| `spark.indextables.io.bandwidth.limit` | - | I/O bandwidth limit per executor (e.g., `100MB/s`) |
+| `spark.indextables.indexWriter.directBuffer` | `true` | Use direct ByteBuffers for zero-copy batch operations |
+| `spark.indextables.indexWriter.bufferPoolSize` | `10` | Number of reusable direct buffers to pool |
 
 #### Optimized Writes Configuration
 
@@ -203,8 +203,8 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
   .save("s3://bucket/path")
 
 // Configure via Spark session (applies to all writes)
-spark.conf.set("spark.tantivy4spark.optimizeWrite.enabled", "true")
-spark.conf.set("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "2000000")
+spark.conf.set("spark.indextables.optimizeWrite.enabled", "true")
+spark.conf.set("spark.indextables.optimizeWrite.targetRecordsPerSplit", "2000000")
 
 // Configure per write operation (overrides session config)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
@@ -227,7 +227,7 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://
 
 // Force standard Hadoop operations
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.storage.force.standard", "true")
+  .option("spark.indextables.storage.force.standard", "true")
   .save("s3://bucket/path")
 
 // Standard operations (automatic for other protocols)
@@ -241,27 +241,27 @@ Configure indexWriter for optimal batch processing performance:
 
 ```scala
 // Configure index writer performance settings via Spark session
-spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "200000000") // 200MB heap
-spark.conf.set("spark.tantivy4spark.indexWriter.threads", "4") // 4 indexing threads
-spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "20000") // 20,000 documents per batch
-spark.conf.set("spark.tantivy4spark.indexWriter.useBatch", "true") // Enable batch writing
+spark.conf.set("spark.indextables.indexWriter.heapSize", "200000000") // 200MB heap
+spark.conf.set("spark.indextables.indexWriter.threads", "4") // 4 indexing threads
+spark.conf.set("spark.indextables.indexWriter.batchSize", "20000") // 20,000 documents per batch
+spark.conf.set("spark.indextables.indexWriter.useBatch", "true") // Enable batch writing
 
 // Configure per DataFrame write operation (overrides session config)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.indexWriter.heapSize", "150000000") // 150MB heap
-  .option("spark.tantivy4spark.indexWriter.threads", "3") // 3 indexing threads
-  .option("spark.tantivy4spark.indexWriter.batchSize", "15000") // 15,000 documents per batch
+  .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB heap
+  .option("spark.indextables.indexWriter.threads", "3") // 3 indexing threads
+  .option("spark.indextables.indexWriter.batchSize", "15000") // 15,000 documents per batch
   .save("s3://bucket/path")
 
 // Disable batch writing for debugging (use individual document indexing)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.indexWriter.useBatch", "false")
+  .option("spark.indextables.indexWriter.useBatch", "false")
   .save("s3://bucket/path")
 
 // High-throughput configuration for large datasets
-spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "500000000") // 500MB heap
-spark.conf.set("spark.tantivy4spark.indexWriter.threads", "8") // 8 indexing threads
-spark.conf.set("spark.tantivy4spark.indexWriter.batchSize", "50000") // 50,000 documents per batch
+spark.conf.set("spark.indextables.indexWriter.heapSize", "500000000") // 500MB heap
+spark.conf.set("spark.indextables.indexWriter.threads", "8") // 8 indexing threads
+spark.conf.set("spark.indextables.indexWriter.batchSize", "50000") // 50,000 documents per batch
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/large-dataset")
 ```
 
@@ -271,15 +271,15 @@ Configure AWS credentials for S3 operations:
 
 ```scala
 // Standard AWS credentials
-spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
-spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
-spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")
+spark.conf.set("spark.indextables.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.indextables.aws.region", "us-west-2")
 
 // AWS credentials with session token (temporary credentials from STS)
-spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-temporary-access-key")
-spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-temporary-secret-key")
-spark.conf.set("spark.tantivy4spark.aws.sessionToken", "your-session-token")
-spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+spark.conf.set("spark.indextables.aws.accessKey", "your-temporary-access-key")
+spark.conf.set("spark.indextables.aws.secretKey", "your-temporary-secret-key")
+spark.conf.set("spark.indextables.aws.sessionToken", "your-session-token")
+spark.conf.set("spark.indextables.aws.region", "us-west-2")
 
 // Custom S3 endpoint (for S3-compatible services like MinIO, LocalStack)
 spark.conf.set("spark.indextables.aws.endpoint", "https://s3.custom-provider.com")
@@ -638,12 +638,12 @@ The system supports multiple cloud storage providers:
 
 ```scala
 // Azure Blob Storage
-spark.conf.set("spark.tantivy4spark.azure.accountName", "yourstorageaccount")
-spark.conf.set("spark.tantivy4spark.azure.accountKey", "your-account-key")
+spark.conf.set("spark.indextables.azure.accountName", "yourstorageaccount")
+spark.conf.set("spark.indextables.azure.accountKey", "your-account-key")
 
 // Google Cloud Storage
-spark.conf.set("spark.tantivy4spark.gcp.projectId", "your-project-id")
-spark.conf.set("spark.tantivy4spark.gcp.credentialsFile", "/path/to/service-account.json")
+spark.conf.set("spark.indextables.gcp.projectId", "your-project-id")
+spark.conf.set("spark.indextables.gcp.credentialsFile", "/path/to/service-account.json")
 
 // Write to different cloud providers
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("abfss://container@account.dfs.core.windows.net/path")
@@ -784,18 +784,18 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 **Solution**: The system includes automatic broadcast mechanisms to distribute configuration:
 
 1. **V2 DataSource API**: Uses Spark broadcast variables to distribute configuration to executors
-2. **V1 DataSource API**: Automatically copies `spark.tantivy4spark.*` configurations from driver to executor Hadoop configuration
+2. **V1 DataSource API**: Automatically copies `spark.indextables.*` configurations from driver to executor Hadoop configuration
 
 **Best Practices**:
 ```scala
 // Set configuration in Spark session (automatically broadcast to executors)
-spark.conf.set("spark.tantivy4spark.aws.accessKey", "your-access-key")
-spark.conf.set("spark.tantivy4spark.aws.secretKey", "your-secret-key")
-spark.conf.set("spark.tantivy4spark.aws.region", "us-west-2")
+spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")
+spark.conf.set("spark.indextables.aws.secretKey", "your-secret-key")
+spark.conf.set("spark.indextables.aws.region", "us-west-2")
 
 // Or set via DataFrame options (automatically propagated)
 df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.tantivy4spark.aws.region", "us-west-2")
+  .option("spark.indextables.aws.region", "us-west-2")
   .save("s3://bucket/path")
 ```
 
@@ -805,8 +805,8 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
 
 **Workaround**: Use standard AWS regions even with custom endpoints:
 ```scala
-spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")  // Standard region
-spark.conf.set("spark.tantivy4spark.s3.endpoint", "http://localhost:9000")  // Custom endpoint
+spark.conf.set("spark.indextables.aws.region", "us-east-1")  // Standard region
+spark.conf.set("spark.indextables.s3.endpoint", "http://localhost:9000")  // Custom endpoint
 ```
 
 ### Boolean Filtering with S3 Storage (Disabled Test)

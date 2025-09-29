@@ -49,8 +49,8 @@ class IndexWriterConfigTest extends TestBase {
   test("should use custom index writer configuration from Spark config") {
     withTempPath { tempPath =>
       // Set custom index writer configuration via Spark session
-      spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "200000000") // 200MB
-      spark.conf.set("spark.tantivy4spark.indexWriter.threads", "4") // 4 threads
+      spark.conf.set("spark.indextables.indexWriter.heapSize", "200000000") // 200MB
+      spark.conf.set("spark.indextables.indexWriter.threads", "4") // 4 threads
       
       try {
         // Generate simple test data
@@ -73,8 +73,8 @@ class IndexWriterConfigTest extends TestBase {
         readData.count() shouldBe 100
       } finally {
         // Clean up configuration
-        spark.conf.unset("spark.tantivy4spark.indexWriter.heapSize")
-        spark.conf.unset("spark.tantivy4spark.indexWriter.threads")
+        spark.conf.unset("spark.indextables.indexWriter.heapSize")
+        spark.conf.unset("spark.indextables.indexWriter.threads")
       }
     }
   }
@@ -90,8 +90,8 @@ class IndexWriterConfigTest extends TestBase {
       // Write with custom configuration via DataFrame options (highest precedence)
       testData.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexWriter.heapSize", "150000000") // 150MB
-        .option("spark.tantivy4spark.indexWriter.threads", "3") // 3 threads
+        .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB
+        .option("spark.indextables.indexWriter.threads", "3") // 3 threads
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
@@ -107,8 +107,8 @@ class IndexWriterConfigTest extends TestBase {
   test("should override Spark config with DataFrame options") {
     withTempPath { tempPath =>
       // Set Spark session configuration
-      spark.conf.set("spark.tantivy4spark.indexWriter.heapSize", "200000000") // 200MB
-      spark.conf.set("spark.tantivy4spark.indexWriter.threads", "4") // 4 threads
+      spark.conf.set("spark.indextables.indexWriter.heapSize", "200000000") // 200MB
+      spark.conf.set("spark.indextables.indexWriter.threads", "4") // 4 threads
       
       try {
         // Generate simple test data
@@ -120,8 +120,8 @@ class IndexWriterConfigTest extends TestBase {
         // DataFrame options should override Spark config
         testData.write
           .format("tantivy4spark")
-          .option("spark.tantivy4spark.indexWriter.heapSize", "50000000") // 50MB (overrides 200MB)
-          .option("spark.tantivy4spark.indexWriter.threads", "1") // 1 thread (overrides 4)
+          .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (overrides 200MB)
+          .option("spark.indextables.indexWriter.threads", "1") // 1 thread (overrides 4)
           .mode(SaveMode.Overwrite)
           .save(tempPath)
         
@@ -133,8 +133,8 @@ class IndexWriterConfigTest extends TestBase {
         readData.count() shouldBe 100
       } finally {
         // Clean up configuration
-        spark.conf.unset("spark.tantivy4spark.indexWriter.heapSize")
-        spark.conf.unset("spark.tantivy4spark.indexWriter.threads")
+        spark.conf.unset("spark.indextables.indexWriter.heapSize")
+        spark.conf.unset("spark.indextables.indexWriter.threads")
       }
     }
   }
@@ -173,8 +173,8 @@ class IndexWriterConfigTest extends TestBase {
       // Write with custom batch size (smaller for testing)
       testData.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexWriter.batchSize", "100") // Small batch size
-        .option("spark.tantivy4spark.indexWriter.useBatch", "true")
+        .option("spark.indextables.indexWriter.batchSize", "100") // Small batch size
+        .option("spark.indextables.indexWriter.useBatch", "true")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       
@@ -198,7 +198,7 @@ class IndexWriterConfigTest extends TestBase {
       // Write with batch writing disabled
       testData.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.indexWriter.useBatch", "false") // Disable batch writing
+        .option("spark.indextables.indexWriter.useBatch", "false") // Disable batch writing
         .mode(SaveMode.Overwrite)
         .save(tempPath)
       

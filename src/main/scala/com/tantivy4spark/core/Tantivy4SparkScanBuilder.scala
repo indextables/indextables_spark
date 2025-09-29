@@ -400,7 +400,7 @@ class Tantivy4SparkScanBuilder(
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
     // Check the field type configuration from broadcast options
     val broadcastConfigMap = broadcastConfig.value
-    val fieldTypeKey = s"spark.tantivy4spark.indexing.typemap.$attribute"
+    val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
     val fieldType = broadcastConfigMap.get(fieldTypeKey)
 
     fieldType match {
@@ -691,7 +691,7 @@ class Tantivy4SparkScanBuilder(
         // Fall back to configuration-based validation for new tables
         val mergedConfig = broadcastConfig.value
         val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-          .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+          .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -705,7 +705,7 @@ class Tantivy4SparkScanBuilder(
         // Fall back to configuration-based validation
         val mergedConfig = broadcastConfig.value
         val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-          .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+          .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -970,7 +970,7 @@ class Tantivy4SparkScanBuilder(
     // Use broadcast config instead of options for merged configuration
     val mergedConfig = broadcastConfig.value
     val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+      .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
       .getOrElse("")
 
     val fastFields = if (fastFieldsStr.nonEmpty) {
@@ -1024,7 +1024,7 @@ class Tantivy4SparkScanBuilder(
     // Use broadcast config instead of options for merged configuration
     val mergedConfig = broadcastConfig.value
     val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-      .orElse(mergedConfig.get("spark.tantivy4spark.indexing.fastfields"))
+      .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
       .getOrElse("")
 
     val fastFields = if (fastFieldsStr.nonEmpty) {

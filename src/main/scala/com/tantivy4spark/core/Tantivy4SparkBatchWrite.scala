@@ -47,9 +47,9 @@ class Tantivy4SparkBatchWrite(
     options.entrySet().asScala.foreach { entry =>
       val key = entry.getKey
       val value = entry.getValue
-      if (key.startsWith("spark.tantivy4spark.") || key.startsWith("spark.indextables.")) {
+      if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
         val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.tantivy4spark.")
+          key.replace("spark.indextables.", "spark.indextables.")
         } else key
         enrichedHadoopConf.set(normalizedKey, value)
         serializedOptions.put(normalizedKey, value)
@@ -63,9 +63,9 @@ class Tantivy4SparkBatchWrite(
       val iter = enrichedHadoopConf.iterator()
       while (iter.hasNext) {
         val entry = iter.next()
-        if (entry.getKey.startsWith("spark.tantivy4spark.") || entry.getKey.startsWith("spark.indextables.")) {
+        if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
           val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-            entry.getKey.replace("spark.indextables.", "spark.tantivy4spark.")
+            entry.getKey.replace("spark.indextables.", "spark.indextables.")
           } else entry.getKey
           props.put(normalizedKey, entry.getValue)
         }

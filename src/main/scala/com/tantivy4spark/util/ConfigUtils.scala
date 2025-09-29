@@ -58,7 +58,7 @@ object ConfigUtils {
 
     SplitCacheConfig(
       cacheName = {
-        val configName = getBroadcastConfig("spark.tantivy4spark.cache.name", "")
+        val configName = getBroadcastConfig("spark.indextables.cache.name", "")
         if (configName.trim().nonEmpty) {
           configName.trim()
         } else {
@@ -72,45 +72,45 @@ object ConfigUtils {
         }
       },
       maxCacheSize = {
-        val value = getBroadcastConfig("spark.tantivy4spark.cache.maxSize", "200000000")
+        val value = getBroadcastConfig("spark.indextables.cache.maxSize", "200000000")
         try {
           value.toLong
         } catch {
           case e: NumberFormatException =>
-            logger.error(s"Invalid numeric value for spark.tantivy4spark.cache.maxSize: '$value'")
+            logger.error(s"Invalid numeric value for spark.indextables.cache.maxSize: '$value'")
             throw e
         }
       },
       maxConcurrentLoads = {
-        val value = getBroadcastConfig("spark.tantivy4spark.cache.maxConcurrentLoads", "8")
+        val value = getBroadcastConfig("spark.indextables.cache.maxConcurrentLoads", "8")
         try {
           value.toInt
         } catch {
           case e: NumberFormatException =>
-            logger.error(s"Invalid numeric value for spark.tantivy4spark.cache.maxConcurrentLoads: '$value'")
+            logger.error(s"Invalid numeric value for spark.indextables.cache.maxConcurrentLoads: '$value'")
             throw e
         }
       },
-      enableQueryCache = getBroadcastConfig("spark.tantivy4spark.cache.queryCache", "true").toBoolean,
-      splitCachePath = getBroadcastConfigOption("spark.tantivy4spark.cache.directoryPath")
+      enableQueryCache = getBroadcastConfig("spark.indextables.cache.queryCache", "true").toBoolean,
+      splitCachePath = getBroadcastConfigOption("spark.indextables.cache.directoryPath")
         .orElse(SplitCacheConfig.getDefaultCachePath()),
       // AWS configuration from broadcast
-      awsAccessKey = getBroadcastConfigOption("spark.tantivy4spark.aws.accessKey"),
-      awsSecretKey = getBroadcastConfigOption("spark.tantivy4spark.aws.secretKey"),
-      awsSessionToken = getBroadcastConfigOption("spark.tantivy4spark.aws.sessionToken"),
-      awsRegion = getBroadcastConfigOption("spark.tantivy4spark.aws.region"),
-      awsEndpoint = getBroadcastConfigOption("spark.tantivy4spark.s3.endpoint"),
-      awsPathStyleAccess = getBroadcastConfigOption("spark.tantivy4spark.s3.pathStyleAccess").map(_.toBoolean),
+      awsAccessKey = getBroadcastConfigOption("spark.indextables.aws.accessKey"),
+      awsSecretKey = getBroadcastConfigOption("spark.indextables.aws.secretKey"),
+      awsSessionToken = getBroadcastConfigOption("spark.indextables.aws.sessionToken"),
+      awsRegion = getBroadcastConfigOption("spark.indextables.aws.region"),
+      awsEndpoint = getBroadcastConfigOption("spark.indextables.s3.endpoint"),
+      awsPathStyleAccess = getBroadcastConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toBoolean),
       // Azure configuration from broadcast
-      azureAccountName = getBroadcastConfigOption("spark.tantivy4spark.azure.accountName"),
-      azureAccountKey = getBroadcastConfigOption("spark.tantivy4spark.azure.accountKey"),
-      azureConnectionString = getBroadcastConfigOption("spark.tantivy4spark.azure.connectionString"),
-      azureEndpoint = getBroadcastConfigOption("spark.tantivy4spark.azure.endpoint"),
+      azureAccountName = getBroadcastConfigOption("spark.indextables.azure.accountName"),
+      azureAccountKey = getBroadcastConfigOption("spark.indextables.azure.accountKey"),
+      azureConnectionString = getBroadcastConfigOption("spark.indextables.azure.connectionString"),
+      azureEndpoint = getBroadcastConfigOption("spark.indextables.azure.endpoint"),
       // GCP configuration from broadcast
-      gcpProjectId = getBroadcastConfigOption("spark.tantivy4spark.gcp.projectId"),
-      gcpServiceAccountKey = getBroadcastConfigOption("spark.tantivy4spark.gcp.serviceAccountKey"),
-      gcpCredentialsFile = getBroadcastConfigOption("spark.tantivy4spark.gcp.credentialsFile"),
-      gcpEndpoint = getBroadcastConfigOption("spark.tantivy4spark.gcp.endpoint")
+      gcpProjectId = getBroadcastConfigOption("spark.indextables.gcp.projectId"),
+      gcpServiceAccountKey = getBroadcastConfigOption("spark.indextables.gcp.serviceAccountKey"),
+      gcpCredentialsFile = getBroadcastConfigOption("spark.indextables.gcp.credentialsFile"),
+      gcpEndpoint = getBroadcastConfigOption("spark.indextables.gcp.endpoint")
     )
   }
 }

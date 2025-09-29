@@ -109,12 +109,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // System.setProperty("aws.region", "us-east-1")
     
     // Configure Spark to use mock S3 - using cloud-aware configuration with all 3 credentials
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-    spark.conf.set("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-    spark.conf.set("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-    spark.conf.set("spark.tantivy4spark.s3.pathStyleAccess", "true")
-    spark.conf.set("spark.tantivy4spark.aws.region", "us-east-1")
+    spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
+    spark.conf.set("spark.indextables.aws.secretKey", SECRET_KEY)
+    spark.conf.set("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+    spark.conf.set("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+    spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
+    spark.conf.set("spark.indextables.aws.region", "us-east-1")
     
     // Set Hadoop config for components that still use Hadoop filesystem
     spark.conf.set("spark.hadoop.fs.s3a.access.key", ACCESS_KEY)
@@ -217,12 +217,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // Write DataFrame to S3 using Tantivy4Spark - pass all 3 credentials as options for executor distribution
     data.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-2")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-2")
       .mode("overwrite")
       .save(s3Path)
     
@@ -231,12 +231,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // Read DataFrame back from S3 - pass same credentials as write for consistency
     val result = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-2")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-2")
       .load(s3Path)
     
     val count = result.count()
@@ -300,12 +300,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // Write to S3 - pass all 3 credentials as options for executor distribution
     data.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort") 
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-2")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort") 
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-2")
       .mode("overwrite")
       .save(s3Path)
       
@@ -314,12 +314,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // Read back and verify - pass same credentials as write for consistency
     val result = spark.read
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-      .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-      .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-      .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-      .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-      .option("spark.tantivy4spark.aws.region", "us-east-2")
+      .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+      .option("spark.indextables.aws.secretKey", SECRET_KEY)
+      .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+      .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+      .option("spark.indextables.s3.pathStyleAccess", "true")
+      .option("spark.indextables.aws.region", "us-east-2")
       .load(s3Path)
       
     val count = result.count()
@@ -371,12 +371,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     datasets.foreach { case (data, path) =>
       data.write
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-        .option("spark.tantivy4spark.aws.region", "us-east-2")
+        .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+        .option("spark.indextables.aws.secretKey", SECRET_KEY)
+        .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.indextables.s3.pathStyleAccess", "true")
+        .option("spark.indextables.aws.region", "us-east-2")
         .mode("overwrite") 
         .save(path)
       println(s"✅ Wrote dataset to: $path")
@@ -386,12 +386,12 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     val totalRecords = datasets.map { case (_, path) =>
       val df = spark.read
         .format("tantivy4spark")
-        .option("spark.tantivy4spark.aws.accessKey", ACCESS_KEY)
-        .option("spark.tantivy4spark.aws.secretKey", SECRET_KEY)
-        .option("spark.tantivy4spark.aws.sessionToken", SESSION_TOKEN)
-        .option("spark.tantivy4spark.s3.endpoint", s"http://localhost:$s3MockPort")
-        .option("spark.tantivy4spark.s3.pathStyleAccess", "true")
-        .option("spark.tantivy4spark.aws.region", "us-east-2")
+        .option("spark.indextables.aws.accessKey", ACCESS_KEY)
+        .option("spark.indextables.aws.secretKey", SECRET_KEY)
+        .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
+        .option("spark.indextables.s3.endpoint", s"http://localhost:$s3MockPort")
+        .option("spark.indextables.s3.pathStyleAccess", "true")
+        .option("spark.indextables.aws.region", "us-east-2")
         .load(path)
       val count = df.count()
       count shouldBe 20

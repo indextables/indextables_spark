@@ -67,7 +67,7 @@ class Tantivy4SparkWriteBuilder(
     // Check DataFrame write options first
     val optimizeWriteEnabled = tantivyOptions.optimizeWrite.getOrElse {
       // Check Spark session configuration
-      spark.conf.getOption("spark.tantivy4spark.optimizeWrite.enabled")
+      spark.conf.getOption("spark.indextables.optimizeWrite.enabled")
         .map(_.toBoolean)
         .getOrElse {
           // Check table properties or use default

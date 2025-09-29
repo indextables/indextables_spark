@@ -66,15 +66,15 @@ class V2LocalDateFilterTest extends TestBase {
     // Write data locally using V2 DataSource - force local storage
     df.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.storage.force.standard", "true") // Force local storage
+      .option("spark.indextables.storage.force.standard", "true") // Force local storage
       .mode("overwrite")
       .save(localPath)
     
     // Read data back locally - force local storage and disable data skipping for debugging
     val readDf = spark.read
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.storage.force.standard", "true") // Force local storage
-      .option("spark.tantivy4spark.dataSkipping.enabled", "false") // Disable data skipping for debugging
+      .option("spark.indextables.storage.force.standard", "true") // Force local storage
+      .option("spark.indextables.dataSkipping.enabled", "false") // Disable data skipping for debugging
       .load(localPath)
     
     println(s"🔍 TEST: Read data with schema: ${readDf.schema}")

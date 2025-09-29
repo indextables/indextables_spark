@@ -133,7 +133,7 @@ object SplitManager {
           val fileSize = Files.size(splitFile)
 
           // Configurable threshold for streaming uploads (default 100MB)
-          val streamingThreshold = options.getLong("spark.tantivy4spark.s3.streamingThreshold", 100L * 1024 * 1024)
+          val streamingThreshold = options.getLong("spark.indextables.s3.streamingThreshold", 100L * 1024 * 1024)
 
           if (fileSize > streamingThreshold) {
             logger.info(s"🚀 Using streaming upload for large split: $outputPath (${fileSize / (1024 * 1024)} MB)")

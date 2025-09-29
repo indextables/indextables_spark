@@ -157,8 +157,8 @@ class TransactionLog(/* existing parameters */) {
   private val checkpointReader = new CheckpointReader(this)
   
   // Configuration
-  private val checkpointInterval = options.getInt("spark.tantivy4spark.checkpoint.interval", 10)
-  private val enableCheckpoints = options.getBoolean("spark.tantivy4spark.checkpoint.enabled", true)
+  private val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
+  private val enableCheckpoints = options.getBoolean("spark.indextables.checkpoint.enabled", true)
   
   override def addFiles(addActions: Seq[AddAction]): Long = {
     val version = super.addFiles(addActions)
@@ -181,7 +181,7 @@ class TransactionLog(/* existing parameters */) {
   }
   
   private def cleanupOldTransactionFiles(checkpointVersion: Long): Unit = {
-    val retentionVersions = options.getInt("spark.tantivy4spark.checkpoint.retention", 30)
+    val retentionVersions = options.getInt("spark.indextables.checkpoint.retention", 30)
     val deleteBeforeVersion = checkpointVersion - retentionVersions
     
     if (deleteBeforeVersion > 0) {
@@ -214,11 +214,11 @@ table_path/
 
 | Configuration | Default | Description |
 |---------------|---------|-------------|
-| `spark.tantivy4spark.checkpoint.enabled` | `true` | Enable/disable checkpoint creation |
-| `spark.tantivy4spark.checkpoint.interval` | `10` | Create checkpoint every N transactions |
-| `spark.tantivy4spark.checkpoint.retention` | `30` | Keep N transactions before cleanup |
-| `spark.tantivy4spark.checkpoint.compression` | `snappy` | Parquet compression codec |
-| `spark.tantivy4spark.checkpoint.maxFileSize` | `134217728` | Max checkpoint file size (128MB) |
+| `spark.indextables.checkpoint.enabled` | `true` | Enable/disable checkpoint creation |
+| `spark.indextables.checkpoint.interval` | `10` | Create checkpoint every N transactions |
+| `spark.indextables.checkpoint.retention` | `30` | Keep N transactions before cleanup |
+| `spark.indextables.checkpoint.compression` | `snappy` | Parquet compression codec |
+| `spark.indextables.checkpoint.maxFileSize` | `134217728` | Max checkpoint file size (128MB) |
 
 ## Implementation Plan
 
@@ -281,7 +281,7 @@ test("checkpoint reading should be faster than JSON replay") {
   
   val jsonReplayTime = time {
     new TransactionLog(new Path(tablePath), spark, 
-      new CaseInsensitiveStringMap(Map("spark.tantivy4spark.checkpoint.enabled" -> "false").asJava))
+      new CaseInsensitiveStringMap(Map("spark.indextables.checkpoint.enabled" -> "false").asJava))
       .listFiles()
   }
   

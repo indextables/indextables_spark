@@ -148,12 +148,12 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     }
     
     // Configure Tantivy4Spark S3 settings
-    spark.conf.set("spark.tantivy4spark.aws.accessKey", creds.accessKey)
-    spark.conf.set("spark.tantivy4spark.aws.secretKey", creds.secretKey)
-    spark.conf.set("spark.tantivy4spark.aws.region", S3_REGION)
+    spark.conf.set("spark.indextables.aws.accessKey", creds.accessKey)
+    spark.conf.set("spark.indextables.aws.secretKey", creds.secretKey)
+    spark.conf.set("spark.indextables.aws.region", S3_REGION)
     
     creds.sessionToken.foreach { token =>
-      spark.conf.set("spark.tantivy4spark.aws.sessionToken", token)
+      spark.conf.set("spark.indextables.aws.sessionToken", token)
     }
     
     // Enable S3A optimizations
@@ -207,7 +207,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     println(s"✍️  Step 1: Writing data to S3...")
     testData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.optimizeWrite.targetRecordsPerSplit", "250") // Create multiple splits
+      .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "250") // Create multiple splits
       .mode("overwrite")
       .save(testTablePath)
     

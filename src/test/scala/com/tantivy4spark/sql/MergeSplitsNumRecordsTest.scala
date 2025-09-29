@@ -92,7 +92,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     batch1DF.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Second batch: 2 documents (append)
@@ -106,7 +106,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     batch2DF.write
       .format("tantivy4spark")
       .mode("append")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Third batch: 2 documents (append)
@@ -120,7 +120,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     batch3DF.write
       .format("tantivy4spark")
       .mode("append")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Fourth batch: 2 documents (append)
@@ -134,7 +134,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     batch4DF.write
       .format("tantivy4spark")
       .mode("append")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Read back to verify we have all 8 records
@@ -235,7 +235,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     testData.write
       .format("tantivy4spark")
-      .option("spark.tantivy4spark.indexing.typemap.content", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Get initial state

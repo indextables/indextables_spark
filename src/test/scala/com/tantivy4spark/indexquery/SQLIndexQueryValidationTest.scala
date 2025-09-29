@@ -52,17 +52,17 @@ class SQLIndexQueryValidationTest extends TestBase {
 
     // Write using V2 DataSource API with text fields for tokenized search
     // Set field type configurations at Spark session level as well
-    spark.conf.set("spark.tantivy4spark.indexing.typemap.title", "text")
-    spark.conf.set("spark.tantivy4spark.indexing.typemap.category", "string")
-    spark.conf.set("spark.tantivy4spark.indexing.typemap.author", "string")
-    spark.conf.set("spark.tantivy4spark.indexing.typemap.tags", "text")
+    spark.conf.set("spark.indextables.indexing.typemap.title", "text")
+    spark.conf.set("spark.indextables.indexing.typemap.category", "string")
+    spark.conf.set("spark.indextables.indexing.typemap.author", "string")
+    spark.conf.set("spark.indextables.indexing.typemap.tags", "text")
 
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.tantivy4spark.indexing.typemap.category", "string")  // exact matching
-      .option("spark.tantivy4spark.indexing.typemap.title", "text")       // tokenized search
-      .option("spark.tantivy4spark.indexing.typemap.author", "string")    // exact matching
-      .option("spark.tantivy4spark.indexing.typemap.tags", "text")        // tokenized search
+      .option("spark.indextables.indexing.typemap.category", "string")  // exact matching
+      .option("spark.indextables.indexing.typemap.title", "text")       // tokenized search
+      .option("spark.indextables.indexing.typemap.author", "string")    // exact matching
+      .option("spark.indextables.indexing.typemap.tags", "text")        // tokenized search
       .mode("overwrite")
       .save(testDataPath)
 

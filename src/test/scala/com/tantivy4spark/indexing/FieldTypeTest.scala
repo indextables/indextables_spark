@@ -32,7 +32,7 @@ class FieldTypeTest extends TestBase with Matchers {
       // Configure content field as text type explicitly
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.content", "text")
+        .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
@@ -55,7 +55,7 @@ class FieldTypeTest extends TestBase with Matchers {
       // Configure content field as string type explicitly
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.tantivy4spark.indexing.typemap.content", "string")
+        .option("spark.indextables.indexing.typemap.content", "string")
         .save(tablePath)
 
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
