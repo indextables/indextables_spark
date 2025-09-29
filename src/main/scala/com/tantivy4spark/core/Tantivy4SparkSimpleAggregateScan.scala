@@ -351,20 +351,24 @@ class Tantivy4SparkSimpleAggregateReader(
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Creating searcher for split: ${partition.split.path}")
+      logger.info(s"🔍 PATH DEBUG: partition.split.path = '${partition.split.path}'")
+      logger.info(s"🔍 PATH DEBUG: partition.tablePath = '${partition.tablePath}'")
+      logger.info(s"🔍 PATH DEBUG: startsWith('/') = ${partition.split.path.startsWith("/")}")
+      logger.info(s"🔍 PATH DEBUG: contains('://') = ${partition.split.path.contains("://")}")
 
-      // Resolve relative path from AddAction against table path
-      val resolvedPath = if (partition.split.path.startsWith("/") || partition.split.path.contains("://")) {
-        // Already absolute path
-        new org.apache.hadoop.fs.Path(partition.split.path)
-      } else {
-        // Relative path, resolve against table path
-        new org.apache.hadoop.fs.Path(partition.tablePath, partition.split.path)
-      }
+      // Resolve relative path from AddAction against table path using utility
+      val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
+        partition.split.path,
+        partition.tablePath.toString
+      )
+
+      logger.info(s"🔍 PATH DEBUG: resolvedPath = '${resolvedPath}'")
 
       // Convert s3a:// to s3:// for tantivy4java compatibility
-      val splitPath = resolvedPath.toString.replace("s3a://", "s3://")
+      val splitPath = resolvedPath.replace("s3a://", "s3://")
 
       logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Resolved split path: ${splitPath}")
+      logger.info(s"🔍 PATH DEBUG: final splitPath = '${splitPath}'")
 
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()

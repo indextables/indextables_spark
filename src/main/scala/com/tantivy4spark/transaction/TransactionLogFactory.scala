@@ -44,6 +44,7 @@ object TransactionLogFactory {
       spark: SparkSession,
       options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
   ): TransactionLog = {
+    println(s"[DEBUG FACTORY] create method called for path: $tablePath")
 
     // Check if optimization is explicitly disabled
     val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
@@ -59,6 +60,7 @@ object TransactionLogFactory {
 
     val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
 
+    println(s"[DEBUG FACTORY] Creating transaction log for $tablePath (shouldUseOptimized: $shouldUseOptimized)")
     logger.info(s"Creating transaction log for $tablePath (useOptimized: $useOptimized, cacheEnabled: $cacheEnabled, expirationSeconds: $expirationSeconds, useStandardForShortExpiration: $useStandardForShortExpiration, shouldUseOptimized: $shouldUseOptimized)")
 
     if (shouldUseOptimized) {
@@ -66,6 +68,8 @@ object TransactionLogFactory {
       new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
     } else {
       // Create standard TransactionLog for testing/compatibility
+      logger.info(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
+      println(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
       new TransactionLog(tablePath, spark, new CaseInsensitiveStringMap(
         (options.asCaseSensitiveMap().asScala + ("spark.tantivy4spark.transaction.allowDirectUsage" -> "true")).asJava
       ))
@@ -106,15 +110,25 @@ class TransactionLogAdapter(
   }
 
   override def addFile(addAction: AddAction): Long = {
-    optimizedLog.addFiles(Seq(addAction))
+    val result = optimizedLog.addFiles(Seq(addAction))
+    // Invalidate adapter's cache after add operation
+    super.invalidateCache()
+    result
   }
 
   override def addFiles(addActions: Seq[AddAction]): Long = {
-    optimizedLog.addFiles(addActions)
+    val result = optimizedLog.addFiles(addActions)
+    // Invalidate adapter's cache after add operation
+    super.invalidateCache()
+    result
   }
 
   override def overwriteFiles(addActions: Seq[AddAction]): Long = {
-    optimizedLog.overwriteFiles(addActions)
+    println(s"[DEBUG ADAPTER] overwriteFiles called with ${addActions.size} actions")
+    val result = optimizedLog.overwriteFiles(addActions)
+    // Invalidate adapter's cache after overwrite operation
+    super.invalidateCache()
+    result
   }
 
   override def listFiles(): Seq[AddAction] = {
@@ -176,7 +190,10 @@ class TransactionLogAdapter(
   }
 
   override def invalidateCache(): Unit = {
+    println(s"[DEBUG ADAPTER] invalidateCache called")
+    // Invalidate both the optimized log cache and the parent TransactionLog cache
     optimizedLog.invalidateCache(getTablePath().toString)
+    super.invalidateCache()
   }
 
   // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions

@@ -37,6 +37,71 @@ import org.slf4j.LoggerFactory
 import java.io.{IOException, ByteArrayOutputStream}
 import scala.jdk.CollectionConverters._
 
+/**
+ * Utility for consistent path resolution across different scan types.
+ */
+object PathResolutionUtils {
+
+  /**
+   * Resolves a path from AddAction against a table path, handling absolute and relative paths correctly.
+   *
+   * @param splitPath Path from AddAction (could be relative like "part-00000-xxx.split" or absolute)
+   * @param tablePath Base table path for resolving relative paths
+   * @return Resolved Hadoop Path object
+   */
+  def resolveSplitPath(splitPath: String, tablePath: String): Path = {
+    if (isAbsolutePath(splitPath)) {
+      // Already absolute path - handle file:/ URIs properly
+      if (splitPath.startsWith("file:")) {
+        // For file:/ URIs, use the URI directly rather than Hadoop Path constructor
+        // to avoid path resolution issues
+        new Path(java.net.URI.create(splitPath))
+      } else {
+        new Path(splitPath)
+      }
+    } else {
+      // Relative path, resolve against table path
+      new Path(tablePath, splitPath)
+    }
+  }
+
+  /**
+   * Resolves a path and returns it as a string suitable for tantivy4java.
+   *
+   * @param splitPath Path from AddAction
+   * @param tablePath Base table path for resolving relative paths
+   * @return Resolved path as string
+   */
+  def resolveSplitPathAsString(splitPath: String, tablePath: String): String = {
+    if (isAbsolutePath(splitPath)) {
+      // Already absolute path - handle file:/ URIs properly
+      if (splitPath.startsWith("file:")) {
+        // Keep file URIs as URIs for tantivy4java to avoid working directory resolution issues
+        splitPath
+      } else {
+        splitPath
+      }
+    } else {
+      // Relative path, resolve against table path
+      // Handle case where tablePath might already be a file:/ URI to avoid double-prefixing
+      if (tablePath.startsWith("file:")) {
+        // Convert file URI to local path, resolve, then convert back to avoid Path constructor issues
+        val tableDirPath = new java.io.File(java.net.URI.create(tablePath)).getAbsolutePath
+        new java.io.File(tableDirPath, splitPath).getAbsolutePath
+      } else {
+        new Path(tablePath, splitPath).toString
+      }
+    }
+  }
+
+  /**
+   * Checks if a path is absolute (starts with "/", contains "://" for URLs, or starts with "file:").
+   */
+  private def isAbsolutePath(path: String): Boolean = {
+    path.startsWith("/") || path.contains("://") || path.startsWith("file:")
+  }
+}
+
 class Tantivy4SparkInputPartition(
     val addAction: AddAction,
     val readSchema: StructType,
@@ -115,13 +180,7 @@ class Tantivy4SparkPartitionReader(
   private val effectiveLimit: Int = limit.getOrElse(5000)
 
   // Resolve relative path from AddAction against table path
-  private val filePath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
-    // Already absolute path
-    new Path(addAction.path)
-  } else {
-    // Relative path, resolve against table path
-    new Path(tablePath, addAction.path)
-  }
+  private val filePath = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
 
   private var splitSearchEngine: SplitSearchEngine = _
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
@@ -253,8 +312,8 @@ class Tantivy4SparkPartitionReader(
         // Create split search engine using footer offset optimization when available
         // Use raw filesystem path for tantivy4java compatibility
         val actualPath = if (filePath.toString.startsWith("file:")) {
-          // Extract local filesystem path for tantivy4java
-          new java.io.File(filePath.toUri).getAbsolutePath
+          // Keep file URIs as URIs for tantivy4java to avoid working directory resolution issues
+          filePath.toString
         } else if (filePath.toString.startsWith("s3a://") || filePath.toString.startsWith("s3n://")) {
           // Normalize s3 paths for tantivy4java compatibility (s3a:// -> s3://)
           filePath.toString.replaceFirst("^s3[an]://", "s3://")

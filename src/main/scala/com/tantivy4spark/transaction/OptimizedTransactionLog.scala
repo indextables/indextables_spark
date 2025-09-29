@@ -174,8 +174,8 @@ class OptimizedTransactionLog(
       writeActions(version, addActions)
     }
 
-    // Invalidate caches
-    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
+    enhancedCache.invalidateTable(tablePath.toString)
 
     // Schedule async snapshot update if enabled
     if (asyncUpdatesEnabled) {
@@ -225,10 +225,12 @@ class OptimizedTransactionLog(
    * 4. Write both removes and adds in the same transaction
    */
   def overwriteFiles(addActions: Seq[AddAction]): Long = {
+    println(s"[DEBUG OVERWRITE] Starting overwrite operation with ${addActions.size} files")
     logger.info(s"Starting overwrite operation with ${addActions.size} files")
 
     // Get existing files using optimized listing
     val existingFiles = listFilesOptimized()
+    println(s"[DEBUG OVERWRITE] Found ${existingFiles.size} existing files to remove: ${existingFiles.map(_.path).mkString(", ")}")
     val removeActions = existingFiles.map { file =>
       RemoveAction(
         path = file.path,
@@ -240,9 +242,12 @@ class OptimizedTransactionLog(
       )
     }
 
-    val version = getLatestVersion() + 1
+    // Use atomic version generation to prevent race conditions (same as addFiles)
+    val version = getNextVersion()
+    println(s"[DEBUG OVERWRITE] Using atomic version assignment: $version")
     // Write removes first, then adds - this ensures proper overwrite semantics
     val allActions: Seq[Action] = removeActions ++ addActions
+    println(s"[DEBUG OVERWRITE] Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
 
     // Use parallel write for large batches
     if (allActions.size > 100 && parallelReadEnabled) {
@@ -482,6 +487,9 @@ class OptimizedTransactionLog(
     println(s"[DEBUG] Writing version $version to $versionFilePath with ${actions.size} actions")
     cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
     println(s"[DEBUG] Successfully wrote version $version")
+    // Add a small delay to ensure file system consistency for local file systems
+    // This helps with race conditions where listFiles() is called immediately after writeFile()
+    Thread.sleep(10) // 10ms should be sufficient for local file system consistency
 
     // Write-through cache management: proactively update caches with new data
     enhancedCache.putVersionActions(tablePath.toString, version, actions)

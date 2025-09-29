@@ -912,30 +912,14 @@ class Tantivy4SparkRelation(
       
       // Create serializable (path, metadata) pairs from AddAction entries
       val serializableFilesWithMetadata = files.map { addAction =>
-        val resolvedPath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
-          // Already absolute path - normalize protocol if needed
-          if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
-            addAction.path.replaceFirst("^s3[an]://", "s3://")
-          } else {
-            addAction.path
-          }
+        // Use centralized path resolution utility to avoid file:/ double-prefixing
+        val resolvedPath = if (addAction.path.contains("___")) {
+          // This is a flattened S3Mock path - reconstruct the S3 path directly
+          val tableUri = java.net.URI.create(tablePath.toString)
+          s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
         } else {
-          // Relative path, resolve against normalized table path
-          // Check if this is a flattened S3Mock path (contains ___) 
-          if (addAction.path.contains("___")) {
-            // This is a flattened key - reconstruct the S3 path directly
-            val tableUri = java.net.URI.create(tablePath.toString)
-            s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
-          } else {
-            // Standard relative path resolution
-            val fullPath = new Path(tablePath, addAction.path)
-            if (fullPath.toString.startsWith("file:")) {
-              // Extract local filesystem path for tantivy4java compatibility
-              new java.io.File(fullPath.toUri).getAbsolutePath
-            } else {
-              fullPath.toString
-            }
-          }
+          // Use PathResolutionUtils for consistent path resolution
+          PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
         }
         
         // Extract serializable metadata from AddAction - required for tantivy4java operations
@@ -1123,30 +1107,14 @@ class Tantivy4SparkRelation(
       
       // Create serializable (path, metadata) pairs from AddAction entries
       val serializableFilesWithMetadata = files.map { addAction =>
-        val resolvedPath = if (addAction.path.startsWith("/") || addAction.path.contains("://")) {
-          // Already absolute path - normalize protocol if needed
-          if (addAction.path.startsWith("s3a://") || addAction.path.startsWith("s3n://")) {
-            addAction.path.replaceFirst("^s3[an]://", "s3://")
-          } else {
-            addAction.path
-          }
+        // Use centralized path resolution utility to avoid file:/ double-prefixing
+        val resolvedPath = if (addAction.path.contains("___")) {
+          // This is a flattened S3Mock path - reconstruct the S3 path directly
+          val tableUri = java.net.URI.create(tablePath.toString)
+          s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
         } else {
-          // Relative path, resolve against normalized table path
-          // Check if this is a flattened S3Mock path (contains ___) 
-          if (addAction.path.contains("___")) {
-            // This is a flattened key - reconstruct the S3 path directly
-            val tableUri = java.net.URI.create(tablePath.toString)
-            s"${tableUri.getScheme}://${tableUri.getHost}/${addAction.path}"
-          } else {
-            // Standard relative path resolution
-            val fullPath = new Path(tablePath, addAction.path)
-            if (fullPath.toString.startsWith("file:")) {
-              // Extract local filesystem path for tantivy4java compatibility
-              new java.io.File(fullPath.toUri).getAbsolutePath
-            } else {
-              fullPath.toString
-            }
-          }
+          // Use PathResolutionUtils for consistent path resolution
+          PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
         }
         
         // Extract serializable metadata from AddAction - required for tantivy4java operations

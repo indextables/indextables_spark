@@ -27,6 +27,7 @@ import com.tantivy4spark.io.{ProtocolBasedIOFactory, CloudStorageProviderFactory
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ListBuffer
 import scala.util.{Try, Success, Failure}
+import java.util.concurrent.atomic.AtomicLong
 
 class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())) extends AutoCloseable {
 
@@ -61,6 +62,9 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
   // Checkpoint configuration and initialization
   private val checkpointEnabled = options.getBoolean("spark.tantivy4spark.checkpoint.enabled", true)
   private val checkpoint = if (checkpointEnabled) Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)) else None
+
+  // Atomic version counter for thread-safe version assignment
+  private val versionCounter = new AtomicLong(-1L)
 
   def getTablePath(): Path = tablePath
 
@@ -110,7 +114,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   def addFile(addAction: AddAction): Long = {
         // Legacy Hadoop implementation
-        val version = getLatestVersion() + 1
+        val version = getNextVersion()
         writeAction(version, addAction)
         version
   }
@@ -124,8 +128,8 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
         if (addActions.isEmpty) {
           return getLatestVersion()
         }
-        
-        val version = getLatestVersion() + 1
+
+        val version = getNextVersion()
         writeActions(version, addActions)
         version
   }
@@ -152,7 +156,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
       )
     }
     
-    val version = getLatestVersion() + 1
+    val version = getNextVersion()
     
     // Write both REMOVE and ADD actions in a single transaction
     val allActions = removeActions ++ addActions
@@ -285,7 +289,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
         // Legacy Hadoop implementation
-        val version = getLatestVersion() + 1
+        val version = getNextVersion()
         val removeAction = RemoveAction(
           path = path,
           deletionTimestamp = Some(deletionTimestamp),
@@ -308,7 +312,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
    * @return The new version number
    */
   def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
-    val version = getLatestVersion() + 1
+    val version = getNextVersion()
     val actions = removeActions ++ addActions
     writeActions(version, actions)
     version
@@ -534,7 +538,21 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
 
   private def getLatestVersion(): Long = {
     val versions = getVersions()
-    if (versions.nonEmpty) versions.max else -1L
+    val latest = if (versions.nonEmpty) versions.max else -1L
+
+    // Update version counter if we found a higher version
+    versionCounter.updateAndGet(current => math.max(current, latest))
+    latest
+  }
+
+  private def getNextVersion(): Long = {
+    // First, ensure version counter is initialized
+    if (versionCounter.get() == -1L) {
+      getLatestVersion()
+    }
+
+    // Atomically increment and return
+    versionCounter.incrementAndGet()
   }
   
   /**
@@ -595,7 +613,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
       skipCount = skipCount
     )
 
-    val version = getLatestVersion() + 1
+    val version = getNextVersion()
     writeActions(version, Seq(skipAction))
 
     logger.info(s"Recorded skipped file: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
@@ -636,7 +654,7 @@ class TransactionLog(tablePath: Path, spark: SparkSession, options: CaseInsensit
       skipCount = skipCount
     )
 
-    val version = getLatestVersion() + 1
+    val version = getNextVersion()
     writeActions(version, Seq(skipAction))
 
     logger.info(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")

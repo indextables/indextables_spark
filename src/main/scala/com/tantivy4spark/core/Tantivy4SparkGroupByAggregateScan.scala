@@ -384,17 +384,14 @@ class Tantivy4SparkGroupByAggregateReader(
 
       logger.info(s"🔍 GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
 
-      // Resolve relative path from AddAction against table path (same logic as regular partition reader)
-      val resolvedPath = if (partition.split.path.startsWith("/") || partition.split.path.contains("://")) {
-        // Already absolute path
-        new org.apache.hadoop.fs.Path(partition.split.path)
-      } else {
-        // Relative path, resolve against table path
-        new org.apache.hadoop.fs.Path(partition.tablePath, partition.split.path)
-      }
+      // Resolve relative path from AddAction against table path using utility
+      val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
+        partition.split.path,
+        partition.tablePath.toString
+      )
 
       // Convert s3a:// to s3:// for tantivy4java compatibility
-      val splitPath = resolvedPath.toString.replace("s3a://", "s3://")
+      val splitPath = resolvedPath.replace("s3a://", "s3://")
 
       logger.info(s"🔍 GROUP BY EXECUTION: Resolved split path: ${splitPath}")
 

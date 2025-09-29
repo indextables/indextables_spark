@@ -17,11 +17,11 @@
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'` and `_indexall indexquery 'query'`)
 - **Optimized writes**: Automatic split sizing with adaptive shuffle
 - **Auto-sizing**: Intelligent DataFrame partitioning based on historical split analysis with 28/28 tests passing
-- **V1/V2 DataSource compatibility**: Both legacy and modern Spark DataSource APIs fully supported
+- **V1/V2 DataSource compatibility**: Both legacy and modern Spark DataSource APIs fully supported (V2 recommended for partition column indexing)
 - **S3-optimized storage**: Intelligent caching and session token support with parallel streaming uploads
 - **Working directory configuration**: Custom root working areas for index creation and split operations
 - **Parallel upload performance**: Multi-threaded S3 uploads with configurable concurrency and memory-efficient streaming
-- **Schema-aware filtering**: Field validation prevents native crashes and ensures compatibility
+- **Schema-aware filtering**: Field validation prevents native crashes and ensures compatibility with unified data skipping across all scan types
 - **High-performance I/O**: Parallel transaction log reading with configurable concurrency and retry policies
 - **Enterprise-grade configurability**: Comprehensive configuration hierarchy with validation and fallback mechanisms
 - **100% test coverage**: 205 tests passing, 0 failing, comprehensive partitioned dataset test suite, aggregate pushdown validation, and custom credential provider integration tests
@@ -609,9 +609,15 @@ Skipped files are recorded in the transaction log using `SkipAction` with:
 ## Usage Examples
 
 ### Write
+
+**DataSource API Recommendation**: Use V2 API (`"com.tantivy4spark.core.Tantivy4SparkTableProvider"`) for new projects to ensure partition columns are properly indexed. V1 API (`"tantivy4spark"`) is maintained for compatibility but excludes partition columns from indexing.
+
 ```scala
-// Basic write (string fields by default)
+// Basic write (string fields by default) - V1 API
 df.write.format("tantivy4spark").save("s3://bucket/path")
+
+// Recommended: V2 API for new projects (proper partition column indexing)
+df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
 
 // With field type configuration
 df.write.format("tantivy4spark")
@@ -954,9 +960,21 @@ df.write.format("tantivy4spark")
 - ✅ **Parallel streaming uploads**: Multi-threaded S3 uploads with configurable concurrency and memory-efficient buffering
 - ✅ **Enterprise configuration hierarchy**: Complete write option/spark property/table property configuration chain with validation
 - ✅ **Custom credential providers**: Full AWS credential provider integration with table-level URI validation and comprehensive real S3 testing (4/4 tests passing)
+- ✅ **Data skipping optimization**: Unified data skipping logic across all scan types with proper schema awareness and field type detection
+- ✅ **Aggregate cache locality**: Full cache locality support for both simple and GROUP BY aggregate operations
 - **Next**: Enhanced GroupBy aggregation optimization, additional performance improvements
 
 ## Latest Updates
+
+### **v1.12 - Data Skipping & Aggregate Optimization**
+- **Unified data skipping architecture**: All scan types (regular, simple aggregate, GROUP BY aggregate) now use shared data skipping logic with proper schema awareness
+- **Fixed date field filtering**: Resolved critical schema passing issue where aggregate scans used empty schemas, causing date field type detection to fail
+- **Corrected filter logic**: Fixed AND vs OR logic error in `canFileMatchFilters` that was incorrectly using `filters.exists` instead of `filters.forall`
+- **V2 DataSource API consistency**: Updated all tests to use V2 API ("com.tantivy4spark.core.Tantivy4SparkTableProvider") for proper partition column indexing
+- **Cache locality for aggregates**: Implemented `preferredLocations()` for both `Tantivy4SparkSimpleAggregatePartition` and `Tantivy4SparkGroupByAggregatePartition`
+- **Schema-aware field detection**: Proper `DateType` detection enables correct date-to-days-since-epoch conversion for accurate comparison
+- **Aggregate pushdown reliability**: COUNT operations now return correct results instead of 0, with proper data skipping applied
+- **Production validation**: All date filtering tests now pass with correct aggregate behavior and optimized performance
 
 ### **v1.11 - Optimized Transaction Log Implementation**
 - **Complete optimization framework**: OptimizedTransactionLog with advanced caching, parallel operations, and memory optimizations
@@ -1267,10 +1285,10 @@ spark.conf.set("spark.indextables.indexWriter.heapSize", "1000000000") // 1GB he
 - **Error handling**: Comprehensive validation with descriptive error messages
 - **Merge resilience**: Robust handling of corrupted files with automatic skipping, cooldown tracking, and eventual retry
 - **Process-based parallel merge**: Revolutionary architecture with 99.5-100% scaling efficiency, memory isolation, and configurable execution modes
-- **Performance**: Batch processing, predictive I/O, smart caching, broadcast locality, parallel transaction log processing, configurable working directories
+- **Performance**: Batch processing, predictive I/O, smart caching, broadcast locality, parallel transaction log processing, configurable working directories, unified data skipping across all scan types
 - **Transaction log performance**: Delta Lake-level performance with parallel operations, advanced caching, and streaming optimizations
 - **Data safety**: Multiple safety gates prevent data loss, graceful failure handling for all operations, skipped files never marked as removed
-- **Production readiness**: Complete test coverage for all major features including parallel uploads, working directory configuration, and skipped files handling
+- **Production readiness**: Complete test coverage for all major features including parallel uploads, working directory configuration, skipped files handling, and aggregate cache locality optimization
 
 ---
 
