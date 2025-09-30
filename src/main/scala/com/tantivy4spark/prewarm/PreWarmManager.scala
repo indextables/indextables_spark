@@ -61,7 +61,7 @@ object PreWarmManager {
       addActions: Seq[AddAction],
       readSchema: StructType,
       allFilters: Array[Any],
-      broadcastConfig: Broadcast[Map[String, String]],
+      config: Map[String, String],  // Direct config instead of broadcast
       isPreWarmEnabled: Boolean
   ): PreWarmResult = {
     
@@ -84,7 +84,7 @@ object PreWarmManager {
     val queryHash = generateQueryHash(allFilters)
     
     // Distribute warmup tasks to executors
-    val warmupAssignments = distributePreWarmTasks(sc, splitsByHost, readSchema, allFilters, broadcastConfig, queryHash)
+    val warmupAssignments = distributePreWarmTasks(sc, splitsByHost, readSchema, allFilters, config, queryHash)
     
     val endTime = System.currentTimeMillis()
     val stats = PreWarmStats(
@@ -159,7 +159,7 @@ object PreWarmManager {
       splitsByHost: Map[String, Seq[AddAction]],
       readSchema: StructType,
       allFilters: Array[Any],
-      broadcastConfig: Broadcast[Map[String, String]],
+      config: Map[String, String],  // Direct config instead of broadcast
       queryHash: String
   ): Map[String, Int] = {
     
@@ -174,14 +174,17 @@ object PreWarmManager {
     }.toSeq
     
     logger.info(s"🔥 Distributing ${preWarmTasks.length} pre-warm tasks across ${splitsByHost.size} hosts")
-    
+
+    // Broadcast config for executor access
+    val broadcastConfig = sc.broadcast(config)
+
     // Execute pre-warm tasks on executors with descriptive Spark UI names
     val stageName = s"Pre-warm Cache: ${preWarmTasks.length} splits across ${splitsByHost.size} hosts"
     val jobGroup = s"tantivy4spark-prewarm-${queryHash}"
     val jobDescription = s"Pre-warming Tantivy split caches for query ${queryHash.take(8)}... (${preWarmTasks.length} splits)"
-    
+
     sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
-    
+
     val taskResults = try {
       sc.parallelize(preWarmTasks, math.min(preWarmTasks.length, sc.defaultParallelism))
         .setName(stageName) // This shows up in Spark UI as the RDD name

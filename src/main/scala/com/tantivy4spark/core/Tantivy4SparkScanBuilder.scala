@@ -34,7 +34,7 @@ class Tantivy4SparkScanBuilder(
     transactionLog: TransactionLog,
     schema: StructType,
     options: CaseInsensitiveStringMap,
-    broadcastConfig: Broadcast[Map[String, String]]
+    config: Map[String, String]  // Direct config instead of broadcast
 ) extends ScanBuilder
     with SupportsPushDownFilters
     with SupportsPushDownV2Filters
@@ -85,7 +85,7 @@ class Tantivy4SparkScanBuilder(
 
         println(s"🔍 BUILD DEBUG: Creating Tantivy4SparkScan with ${_pushedFilters.length} pushed filters")
         _pushedFilters.foreach(filter => println(s"  - Creating scan with filter: $filter"))
-        new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, broadcastConfig, extractedIndexQueryFilters)
+        new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, config, extractedIndexQueryFilters)
     }
   }
 
@@ -129,7 +129,7 @@ class Tantivy4SparkScanBuilder(
       schema,
       _pushedFilters,
       options,
-      broadcastConfig,
+      config,
       aggregation,
       groupByColumns
     )
@@ -142,7 +142,7 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan for: ${aggregation.aggregateExpressions.mkString(", ")}")
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, schema, _pushedFilters, options, broadcastConfig, aggregation)
+    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, schema, _pushedFilters, options, config, aggregation)
   }
 
   /**
@@ -181,7 +181,7 @@ class Tantivy4SparkScanBuilder(
    * Create a specialized scan that returns count from transaction log.
    */
   private def createTransactionLogCountScan(aggregation: Aggregation): Scan = {
-    new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, broadcastConfig)
+    new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, config)
   }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
@@ -398,10 +398,9 @@ class Tantivy4SparkScanBuilder(
    * Text fields (default tokenizer) should be filtered by Spark for exact matches.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
-    // Check the field type configuration from broadcast options
-    val broadcastConfigMap = broadcastConfig.value
+    // Check the field type configuration
     val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
-    val fieldType = broadcastConfigMap.get(fieldTypeKey)
+    val fieldType = config.get(fieldTypeKey)
 
     fieldType match {
       case Some("string") =>
@@ -670,9 +669,7 @@ class Tantivy4SparkScanBuilder(
       } else {
         logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
         // Fall back to configuration-based validation for new tables
-        val mergedConfig = broadcastConfig.value
-        val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-          .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
+        val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -684,9 +681,7 @@ class Tantivy4SparkScanBuilder(
       case e: Exception =>
         logger.warn(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
         // Fall back to configuration-based validation
-        val mergedConfig = broadcastConfig.value
-        val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-          .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
+        val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -1003,9 +998,7 @@ class Tantivy4SparkScanBuilder(
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
     // Use broadcast config instead of options for merged configuration
-    val mergedConfig = broadcastConfig.value
-    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-      .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
+    val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
       .getOrElse("")
 
     val fastFields = if (fastFieldsStr.nonEmpty) {

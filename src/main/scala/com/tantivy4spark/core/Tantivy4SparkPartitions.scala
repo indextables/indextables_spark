@@ -142,7 +142,7 @@ class Tantivy4SparkInputPartition(
 class Tantivy4SparkReaderFactory(
     readSchema: StructType,
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]],
+    config: Map[String, String],  // Direct config instead of broadcast
     tablePath: Path
 ) extends PartitionReaderFactory {
 
@@ -157,7 +157,7 @@ class Tantivy4SparkReaderFactory(
       readSchema,
       tantivyPartition.filters,
       tantivyPartition.limit.orElse(limit),
-      broadcastConfig,
+      config,
       tablePath,
       tantivyPartition.indexQueryFilters
     )
@@ -169,7 +169,7 @@ class Tantivy4SparkPartitionReader(
     readSchema: StructType,
     filters: Array[Filter],
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]],
+    config: Map[String, String],  // Direct config instead of broadcast
     tablePath: Path,
     indexQueryFilters: Array[Any] = Array.empty
 ) extends PartitionReader[InternalRow] {
@@ -191,7 +191,7 @@ class Tantivy4SparkPartitionReader(
     logger.error(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
 
     // Access the broadcast configuration in executor
-    val broadcasted = broadcastConfig.value
+    val broadcasted = config
 
     // Debug: Log broadcast configuration received in executor
     logger.error(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
@@ -290,7 +290,7 @@ class Tantivy4SparkPartitionReader(
         logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
 
         // Check if pre-warm is enabled and try to join warmup future
-        val broadcasted = broadcastConfig.value
+        val broadcasted = config
         val isPreWarmEnabled = broadcasted.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
         if (isPreWarmEnabled) {
           // Generate query hash from filters for warmup future lookup
@@ -400,7 +400,7 @@ class Tantivy4SparkPartitionReader(
         val splitQuery = if (allFilters.nonEmpty) {
           // Create options map from broadcast config for field configuration
           import scala.jdk.CollectionConverters._
-          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(broadcastConfig.value.asJava)
+          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
 
           val queryObj = if (splitFieldNames.nonEmpty) {
             // Use mixed filter converter to handle both Spark filters and IndexQuery filters

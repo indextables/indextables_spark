@@ -92,7 +92,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       addActions,
       schema,
       filters,
-      broadcastConfig,
+      broadcastConfig.value,
       isPreWarmEnabled = false
     )
     
@@ -126,7 +126,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       addActions,
       schema,
       filters,
-      broadcastConfig,
+      broadcastConfig.value,
       isPreWarmEnabled = true
     )
     
@@ -164,7 +164,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       addActions,
       schema,
       filters,
-      broadcastConfig,
+      broadcastConfig.value,
       isPreWarmEnabled = true
     )
     
@@ -217,7 +217,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       addActions,
       schema,
       filters,
-      broadcastConfig,
+      broadcastConfig.value,
       isPreWarmEnabled = true
     )
     
@@ -255,7 +255,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       addActions,
       schema,
       filters,
-      broadcastConfig,
+      broadcastConfig.value,
       isPreWarmEnabled = true
     )
     

@@ -36,7 +36,7 @@ class TransactionLogCountScan(
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]]
+  config: Map[String, String]  // Direct config instead of broadcast
 ) extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountScan])
@@ -47,7 +47,7 @@ class TransactionLogCountScan(
   }
 
   override def toBatch: Batch = {
-    new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, broadcastConfig)
+    new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, config)
   }
 
   override def description(): String = {
@@ -63,7 +63,7 @@ class TransactionLogCountBatch(
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]]
+  config: Map[String, String]  // Direct config instead of broadcast
 ) extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountBatch])
@@ -190,7 +190,7 @@ class TransactionLogCountBatch(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    new TransactionLogCountReaderFactory(broadcastConfig)
+    new TransactionLogCountReaderFactory(config)
   }
 }
 
@@ -206,13 +206,13 @@ case class TransactionLogCountPartition(
  * Reader factory for transaction log count.
  */
 class TransactionLogCountReaderFactory(
-  broadcastConfig: Broadcast[Map[String, String]]
+  config: Map[String, String]  // Direct config instead of broadcast
 ) extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case countPartition: TransactionLogCountPartition =>
-        new TransactionLogCountPartitionReader(countPartition, broadcastConfig)
+        new TransactionLogCountPartitionReader(countPartition, config)
       case _ =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${partition.getClass}")
     }
@@ -224,7 +224,7 @@ class TransactionLogCountReaderFactory(
  */
 class TransactionLogCountPartitionReader(
   partition: TransactionLogCountPartition,
-  broadcastConfig: Broadcast[Map[String, String]]
+  config: Map[String, String]  // Direct config instead of broadcast
 ) extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountPartitionReader])

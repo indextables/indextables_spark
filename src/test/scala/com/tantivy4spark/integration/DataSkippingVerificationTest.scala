@@ -243,7 +243,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
       filters,
       options,
       None,
-      emptyBroadcastConfig
+      emptyBroadcastConfig.value
     )
   }
 }

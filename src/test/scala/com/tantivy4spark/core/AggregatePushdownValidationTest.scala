@@ -61,7 +61,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig
+        spark, transactionLog, testSchema, options, broadcastConfig.value
       )
 
       // Verify interface implementation
@@ -98,7 +98,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig1 = spark.sparkContext.broadcast(optionsWithFastFields)
 
       val scanBuilder1 = new Tantivy4SparkScanBuilder(
-        spark, transactionLog1, testSchema, options1, broadcastConfig1
+        spark, transactionLog1, testSchema, options1, broadcastConfig1.value
       )
 
       // Test Tantivy4SparkOptions fast field detection
@@ -180,7 +180,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig
+        spark, transactionLog, testSchema, options, broadcastConfig.value
       )
 
       // Test numeric type detection using reflection since the method is private
@@ -229,11 +229,11 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig
+        spark, transactionLog, testSchema, options, broadcastConfig.value
       )
 
       // Test TransactionLogCountScan creation
-      val countScan = new TransactionLogCountScan(spark, transactionLog, Array.empty, options, broadcastConfig)
+      val countScan = new TransactionLogCountScan(spark, transactionLog, Array.empty, options, broadcastConfig.value)
       assert(countScan != null, "TransactionLogCountScan should be created successfully")
 
       val readSchema = countScan.readSchema()

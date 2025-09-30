@@ -46,7 +46,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
 
     // Test that we can create the scan builder
     val scanBuilder = new Tantivy4SparkScanBuilder(
-      spark, transactionLog, schema, options, broadcastConfig
+      spark, transactionLog, schema, options, broadcastConfig.value
     )
 
     // Test scan builder creation
@@ -76,7 +76,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
     val scanBuilder = new Tantivy4SparkScanBuilder(
-      spark, transactionLog, schema, options, broadcastConfig
+      spark, transactionLog, schema, options, broadcastConfig.value
     )
 
     // Verify that the class has the expected Tantivy4SparkOptions integration

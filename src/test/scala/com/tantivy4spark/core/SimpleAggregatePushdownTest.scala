@@ -359,7 +359,7 @@ class SimpleAggregatePushdownTest extends TestBase {
 
     // Test that we can create the scan builder
     val scanBuilder = new Tantivy4SparkScanBuilder(
-      spark, transactionLog, schema, options, broadcastConfig
+      spark, transactionLog, schema, options, broadcastConfig.value
     )
 
     assert(scanBuilder != null, "ScanBuilder should be created successfully")

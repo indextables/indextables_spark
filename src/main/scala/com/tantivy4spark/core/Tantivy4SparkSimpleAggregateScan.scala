@@ -39,7 +39,7 @@ class Tantivy4SparkSimpleAggregateScan(
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast
   aggregation: Aggregation
 ) extends Scan {
 
@@ -60,7 +60,7 @@ class Tantivy4SparkSimpleAggregateScan(
       schema,
       pushedFilters,
       options,
-      broadcastConfig,
+      config,
       aggregation
     )
   }
@@ -157,7 +157,7 @@ class Tantivy4SparkSimpleAggregateBatch(
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast
   aggregation: Aggregation
 ) extends Batch {
 
@@ -175,7 +175,7 @@ class Tantivy4SparkSimpleAggregateBatch(
     // Apply data skipping using the same logic as regular scan by creating a helper scan instance
     // Use the full table schema to ensure proper field type detection for data skipping
     val helperScan = new Tantivy4SparkScan(
-      sparkSession, transactionLog, schema, pushedFilters, options, None, broadcastConfig, Array.empty
+      sparkSession, transactionLog, schema, pushedFilters, options, None, config, Array.empty
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.info(s"🔍 SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
@@ -186,7 +186,7 @@ class Tantivy4SparkSimpleAggregateBatch(
         split,
         schema,
         pushedFilters,
-        broadcastConfig,
+        config,
         aggregation,
         transactionLog.getTablePath()
       )
@@ -199,7 +199,7 @@ class Tantivy4SparkSimpleAggregateBatch(
     new Tantivy4SparkSimpleAggregateReaderFactory(
       sparkSession,
       pushedFilters,
-      broadcastConfig,
+      config,
       aggregation
     )
   }
@@ -212,7 +212,7 @@ class Tantivy4SparkSimpleAggregatePartition(
   val split: com.tantivy4spark.transaction.AddAction,
   val schema: StructType,
   val pushedFilters: Array[Filter],
-  val broadcastConfig: Broadcast[Map[String, String]],
+  val config: Map[String, String],  // Direct config instead of broadcast
   val aggregation: Aggregation,
   val tablePath: org.apache.hadoop.fs.Path
 ) extends InputPartition {
@@ -258,7 +258,7 @@ class Tantivy4SparkSimpleAggregatePartition(
 class Tantivy4SparkSimpleAggregateReaderFactory(
   sparkSession: SparkSession,
   pushedFilters: Array[Filter],
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast
   aggregation: Aggregation
 ) extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
@@ -291,10 +291,9 @@ class Tantivy4SparkSimpleAggregateReader(
   private var aggregateResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
   private var isInitialized = false
 
-  // Helper function to get config from broadcast with defaults
-  private def getBroadcastConfig(configKey: String, default: String = ""): String = {
-    val broadcasted = partition.broadcastConfig.value
-    val value = broadcasted.getOrElse(configKey, default)
+  // Helper function to get config with defaults
+  private def getConfig(configKey: String, default: String = ""): String = {
+    val value = partition.config.getOrElse(configKey, default)
     Option(value).getOrElse(default)
   }
 
@@ -348,9 +347,9 @@ class Tantivy4SparkSimpleAggregateReader(
     logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Aggregation expressions: ${partition.aggregation.aggregateExpressions.length}")
 
     try {
-      // Create cache configuration from broadcast config
-      val cacheConfig = com.tantivy4spark.util.ConfigUtils.createSplitCacheConfigFromBroadcast(
-        partition.broadcastConfig,
+      // Create cache configuration from config
+      val cacheConfig = com.tantivy4spark.util.ConfigUtils.createSplitCacheConfig(
+        partition.config,
         Some(partition.tablePath.toString)
       )
 
@@ -405,19 +404,19 @@ class Tantivy4SparkSimpleAggregateReader(
       partition.pushedFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Filter: $f"))
 
       val splitQuery = if (partition.pushedFilters.nonEmpty) {
-        // Create options map from broadcast config for field configuration
+        // Create options map from config for field configuration
         import scala.jdk.CollectionConverters._
-        val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.broadcastConfig.value.asJava)
+        val optionsFromConfig = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
 
         val queryObj = if (splitFieldNames.nonEmpty) {
           val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(
-            partition.pushedFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast)
+            partition.pushedFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromConfig)
           )
           logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery with schema validation: ${validatedQuery.getClass.getSimpleName}")
           validatedQuery
         } else {
           val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(
-            partition.pushedFilters, splitSearchEngine, None, Some(optionsFromBroadcast)
+            partition.pushedFilters, splitSearchEngine, None, Some(optionsFromConfig)
           )
           logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery without schema validation: ${fallbackQuery.getClass.getSimpleName}")
           fallbackQuery

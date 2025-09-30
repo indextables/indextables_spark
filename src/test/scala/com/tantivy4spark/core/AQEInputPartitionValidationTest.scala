@@ -155,7 +155,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
       val readerFactory = new Tantivy4SparkReaderFactory(
         readSchema = readSchema,
         limit = Some(15),
-        broadcastConfig = emptyBroadcastConfig,
+        config = emptyBroadcastConfig.value,
         tablePath = new Path(tempPath)
       )
 

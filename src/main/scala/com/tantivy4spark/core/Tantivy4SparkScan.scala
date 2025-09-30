@@ -37,7 +37,7 @@ class Tantivy4SparkScan(
     pushedFilters: Array[Filter],
     options: CaseInsensitiveStringMap,
     limit: Option[Int] = None,
-    broadcastConfig: Broadcast[Map[String, String]],
+    config: Map[String, String],  // Direct config instead of broadcast
     indexQueryFilters: Array[Any] = Array.empty
 ) extends Scan with Batch with SupportsReportStatistics {
 
@@ -69,24 +69,23 @@ class Tantivy4SparkScan(
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
     
     // Check if pre-warm is enabled
-    val broadcastConfigMap = broadcastConfig.value
-    val isPreWarmEnabled = broadcastConfigMap.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
-    
+    val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
+
     // Execute pre-warm phase if enabled
     if (isPreWarmEnabled && filteredActions.nonEmpty) {
       try {
         val sparkContext = sparkSession.sparkContext
         logger.info(s"🔥 Pre-warm enabled: initiating cache warming for ${filteredActions.length} splits")
-        
+
         // Combine regular filters with IndexQuery filters for pre-warming
         val allFilters = pushedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        
+
         val preWarmResult = PreWarmManager.executePreWarm(
           sparkContext,
           filteredActions,
           readSchema,
           allFilters,
-          broadcastConfig,
+          config,
           isPreWarmEnabled
         )
         
@@ -128,7 +127,7 @@ class Tantivy4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new Tantivy4SparkReaderFactory(readSchema, limit, broadcastConfig, tablePath)
+    new Tantivy4SparkReaderFactory(readSchema, limit, config, tablePath)
   }
 
   override def estimateStatistics(): Statistics = {

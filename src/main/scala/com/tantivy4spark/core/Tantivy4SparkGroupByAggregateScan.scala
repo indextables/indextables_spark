@@ -39,7 +39,7 @@ class Tantivy4SparkGroupByAggregateScan(
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast,
   aggregation: Aggregation,
   groupByColumns: Array[String]
 ) extends Scan {
@@ -57,7 +57,7 @@ class Tantivy4SparkGroupByAggregateScan(
       schema,
       pushedFilters,
       options,
-      broadcastConfig,
+      config,
       aggregation,
       groupByColumns
     )
@@ -171,7 +171,7 @@ class Tantivy4SparkGroupByAggregateBatch(
   schema: StructType,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast
   aggregation: Aggregation,
   groupByColumns: Array[String]
 ) extends Batch {
@@ -188,7 +188,7 @@ class Tantivy4SparkGroupByAggregateBatch(
     // Apply data skipping using the same logic as simple aggregate scan
     // Use the full table schema to ensure proper field type detection for data skipping
     val helperScan = new Tantivy4SparkScan(
-      sparkSession, transactionLog, schema, pushedFilters, options, None, broadcastConfig, Array.empty
+      sparkSession, transactionLog, schema, pushedFilters, options, None, config, Array.empty
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.info(s"🔍 GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
@@ -198,7 +198,7 @@ class Tantivy4SparkGroupByAggregateBatch(
       new Tantivy4SparkGroupByAggregatePartition(
         split,
         pushedFilters,
-        broadcastConfig,
+        config,
         aggregation,
         groupByColumns,
         transactionLog.getTablePath()
@@ -212,7 +212,7 @@ class Tantivy4SparkGroupByAggregateBatch(
     new Tantivy4SparkGroupByAggregateReaderFactory(
       sparkSession,
       pushedFilters,
-      broadcastConfig,
+      config,
       aggregation,
       groupByColumns
     )
@@ -225,7 +225,7 @@ class Tantivy4SparkGroupByAggregateBatch(
 class Tantivy4SparkGroupByAggregatePartition(
   val split: com.tantivy4spark.transaction.AddAction,
   val pushedFilters: Array[Filter],
-  val broadcastConfig: Broadcast[Map[String, String]],
+  val config: Map[String, String],  // Direct config instead of broadcast
   val aggregation: Aggregation,
   val groupByColumns: Array[String],
   val tablePath: org.apache.hadoop.fs.Path
@@ -273,7 +273,7 @@ class Tantivy4SparkGroupByAggregatePartition(
 class Tantivy4SparkGroupByAggregateReaderFactory(
   sparkSession: SparkSession,
   pushedFilters: Array[Filter],
-  broadcastConfig: Broadcast[Map[String, String]],
+  config: Map[String, String],  // Direct config instead of broadcast
   aggregation: Aggregation,
   groupByColumns: Array[String]
 ) extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
@@ -308,14 +308,14 @@ class Tantivy4SparkGroupByAggregateReader(
   private var isInitialized = false
 
   // Helper function to get config from broadcast with defaults
-  private def getBroadcastConfig(configKey: String, default: String = ""): String = {
-    val broadcasted = partition.broadcastConfig.value
+  private def getConfig(configKey: String, default: String = ""): String = {
+    val broadcasted = partition.config
     val value = broadcasted.getOrElse(configKey, default)
     Option(value).getOrElse(default)
   }
 
-  private def getBroadcastConfigOption(configKey: String): Option[String] = {
-    val broadcasted = partition.broadcastConfig.value
+  private def getConfigOption(configKey: String): Option[String] = {
+    val broadcasted = partition.config
     // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
     broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
   }
@@ -615,7 +615,7 @@ class Tantivy4SparkGroupByAggregateReader(
    */
   private def createCacheConfig(): SplitCacheManager.CacheConfig = {
     val cacheName = s"groupby-cache-${System.currentTimeMillis()}"
-    val maxCacheSize = getBroadcastConfig("spark.indextables.cache.maxSize", "50000000").toLong
+    val maxCacheSize = getConfig("spark.indextables.cache.maxSize", "50000000").toLong
 
     new SplitCacheManager.CacheConfig(cacheName)
       .withMaxCacheSize(maxCacheSize)
