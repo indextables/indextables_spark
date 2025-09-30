@@ -72,7 +72,7 @@ object RowConverter {
     case DoubleType => row.getDouble(index)
     case BooleanType => row.getBoolean(index)
     case BinaryType => row.getBinary(index)
-    case TimestampType => row.getLong(index) // Assuming microseconds since epoch
+    case TimestampType => row.getLong(index) // Spark stores as microseconds since epoch
     case DateType => row.getInt(index) // Days since epoch
     case ArrayType(elementType, _) =>
       val arrayData = row.getArray(index)

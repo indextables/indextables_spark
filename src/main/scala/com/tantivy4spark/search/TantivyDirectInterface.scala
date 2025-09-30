@@ -199,7 +199,7 @@ object TantivyDirectInterface {
           case org.apache.spark.sql.types.BinaryType =>
             builder.addBytesField(fieldName, stored, indexed, fast, "position")
           case org.apache.spark.sql.types.TimestampType =>
-            builder.addIntegerField(fieldName, stored, indexed, fast) // Store as epoch millis
+            builder.addIntegerField(fieldName, stored, indexed, fast) // Store as microseconds since epoch
           case org.apache.spark.sql.types.DateType =>
             builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
           case _ =>
@@ -634,7 +634,7 @@ class TantivyDirectInterface(
       case org.apache.spark.sql.types.BinaryType =>
         document.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
       case org.apache.spark.sql.types.TimestampType =>
-        // Store timestamp as-is (already in correct units)
+        // Store timestamp as microseconds since epoch (Spark's internal format)
         val timestampValue = value.asInstanceOf[Long]
         document.addInteger(fieldName, timestampValue)
       case org.apache.spark.sql.types.DateType =>
@@ -669,7 +669,7 @@ class TantivyDirectInterface(
       case org.apache.spark.sql.types.BinaryType =>
         batchDocument.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
       case org.apache.spark.sql.types.TimestampType =>
-        // Store timestamp as-is (already in correct units)
+        // Store timestamp as microseconds since epoch (Spark's internal format)
         val timestampValue = value.asInstanceOf[Long]
         batchDocument.addInteger(fieldName, timestampValue)
       case org.apache.spark.sql.types.DateType =>

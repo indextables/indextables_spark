@@ -236,12 +236,12 @@ object SchemaMapping {
             case other => throw new IllegalArgumentException(s"Cannot convert $other to Date")
           }
           
-        // INTEGER -> TimestampType (stored as microseconds in tantivy, convert to milliseconds for Spark)
+        // INTEGER -> TimestampType (stored as microseconds since epoch in Spark)
         case (FieldType.INTEGER, TimestampType) =>
           rawValue match {
-            case l: java.lang.Long => l.longValue() / 1000L // Convert microseconds to milliseconds
-            case i: java.lang.Integer => i.longValue() / 1000L
-            case s: String => s.toLong / 1000L
+            case l: java.lang.Long => l.longValue() // Already in microseconds, no conversion needed
+            case i: java.lang.Integer => i.longValue()
+            case s: String => s.toLong
             case other => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
           
