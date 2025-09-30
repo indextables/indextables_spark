@@ -51,6 +51,20 @@ class Tantivy4SparkGroupByAggregateScan(
   }
 
   override def toBatch: Batch = {
+    // Update broadcast locality information before partition planning
+    // This helps ensure preferred locations are accurate for GROUP BY operations
+    try {
+      val sparkContext = sparkSession.sparkContext
+      println(s"🔄 [DRIVER-GROUP-BY-AGG] Updating broadcast locality before partition planning")
+      com.tantivy4spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
+      println(s"🔄 [DRIVER-GROUP-BY-AGG] Broadcast locality update completed")
+      logger.debug("Updated broadcast locality information for GROUP BY aggregate partition planning")
+    } catch {
+      case ex: Exception =>
+        println(s"❌ [DRIVER-GROUP-BY-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn("Failed to update broadcast locality information for GROUP BY aggregate", ex)
+    }
+
     new Tantivy4SparkGroupByAggregateBatch(
       sparkSession,
       transactionLog,

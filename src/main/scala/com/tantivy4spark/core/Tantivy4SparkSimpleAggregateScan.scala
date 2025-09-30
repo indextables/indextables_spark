@@ -54,6 +54,21 @@ class Tantivy4SparkSimpleAggregateScan(
 
   override def toBatch: Batch = {
     println(s"🔍 SIMPLE AGGREGATE SCAN: toBatch() called, creating batch")
+
+    // Update broadcast locality information before partition planning
+    // This helps ensure preferred locations are accurate for aggregate operations
+    try {
+      val sparkContext = sparkSession.sparkContext
+      println(s"🔄 [DRIVER-SIMPLE-AGG] Updating broadcast locality before partition planning")
+      com.tantivy4spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
+      println(s"🔄 [DRIVER-SIMPLE-AGG] Broadcast locality update completed")
+      logger.debug("Updated broadcast locality information for simple aggregate partition planning")
+    } catch {
+      case ex: Exception =>
+        println(s"❌ [DRIVER-SIMPLE-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn("Failed to update broadcast locality information for simple aggregate", ex)
+    }
+
     new Tantivy4SparkSimpleAggregateBatch(
       sparkSession,
       transactionLog,
