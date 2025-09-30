@@ -109,7 +109,17 @@ object SplitManager {
         // Create split file locally
         val metadata = QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
         logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
-        
+
+        // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
+        val docMappingJson = metadata.getDocMappingJson()
+        logger.warn(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
+        logger.warn(s"🔍 SPLIT CREATED: $docMappingJson")
+        if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
+          logger.error(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+        } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
+          logger.warn(s"✅ SPLIT CREATED WITH fast=true - correct!")
+        }
+
         // PROOF: Log exactly what tantivy4java returns
         logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath returned metadata:")
         logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")
@@ -172,7 +182,17 @@ object SplitManager {
       try {
         val metadata = QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
         logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
-        
+
+        // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
+        val docMappingJson = metadata.getDocMappingJson()
+        println(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
+        println(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
+        if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
+          println(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+        } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
+          println(s"✅ SPLIT CREATED WITH fast=true - correct!")
+        }
+
         // PROOF: Log exactly what tantivy4java returns for non-S3 paths
         logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath (non-S3) returned metadata:")
         logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")

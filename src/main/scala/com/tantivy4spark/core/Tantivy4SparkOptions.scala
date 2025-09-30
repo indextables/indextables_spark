@@ -203,6 +203,13 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
     val indexOnlyFields = getIndexOnlyFields
     val tokenizerOverrides = getTokenizerOverrides
 
+    // DEBUG: Log what we're checking
+    import org.slf4j.LoggerFactory
+    val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptions])
+    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fieldName=$fieldName")
+    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
+    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
+
     FieldIndexingConfig(
       fieldType = fieldTypeMapping.get(fieldName),
       isFast = fastFields.contains(fieldName),

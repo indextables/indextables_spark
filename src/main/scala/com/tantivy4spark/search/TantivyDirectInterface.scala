@@ -24,6 +24,7 @@ import java.io.File
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
 import scala.util.Using
+import scala.jdk.CollectionConverters._
 
 /**
  * Direct tantivy4java interface that eliminates Long handles and thread safety issues.
@@ -65,20 +66,29 @@ object TantivyDirectInterface {
     val currentFastFields = tantivyOptions.getFastFields
     val currentNonFastFields = tantivyOptions.getNonFastFields
 
+    // DEBUG: WHERE IS THE CONFIGURATION COMING FROM?
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: currentFastFields = ${currentFastFields.mkString(", ")}")
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: currentNonFastFields = ${currentNonFastFields.mkString(", ")}")
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}")
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: ALL options keys = ${options.entrySet().asScala.map(_.getKey).mkString(", ")}")
+
     // If fast fields are already configured, return original options
     if (currentFastFields.nonEmpty) {
-      logger.debug(s"Fast fields already configured: ${currentFastFields.mkString(", ")}")
+      logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: Fast fields already configured, skipping auto-configuration")
       return options
     }
+
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: No fast fields configured, checking schema for eligible fields...")
 
     // Find all fields that should be fast by default
     val defaultFastFields = sparkSchema.fields.filter { field =>
       field.dataType match {
-        // Numeric and date fields are fast by default
+        // Numeric, boolean, and date fields are fast by default
         case org.apache.spark.sql.types.IntegerType |
              org.apache.spark.sql.types.LongType |
              org.apache.spark.sql.types.FloatType |
              org.apache.spark.sql.types.DoubleType |
+             org.apache.spark.sql.types.BooleanType |
              org.apache.spark.sql.types.DateType |
              org.apache.spark.sql.types.TimestampType => true
         // String fields with raw tokenizer (default behavior) are fast by default
@@ -95,6 +105,9 @@ object TantivyDirectInterface {
 
     // Remove any fields explicitly configured as non-fast
     val finalFastFields = defaultFastFields -- currentNonFastFields
+
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: defaultFastFields = ${defaultFastFields.mkString(", ")}")
+    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: finalFastFields = ${finalFastFields.mkString(", ")}")
 
     if (finalFastFields.nonEmpty) {
       logger.info(s"🔧 AUTO-FAST-FIELD: No fast fields configured, automatically making fields fast by default: ${finalFastFields.mkString(", ")}")
@@ -116,6 +129,7 @@ object TantivyDirectInterface {
 
   private def createSchemaThreadSafe(sparkSchema: StructType, options: org.apache.spark.sql.util.CaseInsensitiveStringMap): (com.tantivy4java.Schema, SchemaBuilder) = {
     schemaCreationLock.synchronized {
+      logger.warn(s"🔍 CREATE SCHEMA CALLED: Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
       logger.debug(s"Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
 
       val builder = new SchemaBuilder()
@@ -123,7 +137,18 @@ object TantivyDirectInterface {
 
       // Auto-configure fast fields if none are configured
       val autoConfiguredOptions = autoConfigureFastFields(sparkSchema, options, tantivyOptions)
+
+      // DEBUG: Verify what's in the options map after auto-configuration
+      import scala.jdk.CollectionConverters._
+      val autoConfiguredMap = autoConfiguredOptions.asCaseSensitiveMap().asScala.toMap
+      logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: Keys in autoConfiguredOptions: ${autoConfiguredMap.keys.mkString(", ")}")
+      logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}")
+
       val finalTantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(autoConfiguredOptions)
+
+      // DEBUG: Verify what getFastFields returns
+      val retrievedFastFields = finalTantivyOptions.getFastFields
+      logger.warn(s"🔍 FINAL OPTIONS DEBUG: getFastFields() returned: ${retrievedFastFields.mkString(", ")}")
 
       sparkSchema.fields.foreach { field =>
         val fieldName = field.name
@@ -142,6 +167,8 @@ object TantivyDirectInterface {
         val indexed = !indexingConfig.isStoreOnly
         val fast = indexingConfig.isFast
 
+        logger.warn(s"🔍 BUILDER CALL DEBUG: Field $fieldName: stored=$stored, indexed=$indexed, fast=$fast")
+
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
             // Default to "string" (raw tokenizer for exact matching). Only explicit "text" config uses default tokenizer.
@@ -151,6 +178,7 @@ object TantivyDirectInterface {
             // after the "keyword" type bug was fixed in the schema conversion logic
             fieldTypeOverride match {
               case "string" =>
+                logger.warn(s"🔍 CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
                 builder.addStringField(fieldName, stored, indexed, fast)
               case "text" =>
                   val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
@@ -162,6 +190,7 @@ object TantivyDirectInterface {
                 throw new IllegalArgumentException(s"Unsupported field type override for field $fieldName: $other. Supported types: string, text, json")
             }
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
+            logger.warn(s"🔍 CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
             builder.addIntegerField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
             builder.addFloatField(fieldName, stored, indexed, fast)
@@ -179,6 +208,7 @@ object TantivyDirectInterface {
       }
 
       val tantivySchema = builder.build()
+      logger.warn(s"🔍 CREATE SCHEMA COMPLETED: Built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
       logger.info(s"Successfully built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
 
       (tantivySchema, builder)

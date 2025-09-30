@@ -1445,7 +1445,10 @@ class Tantivy4SparkTable(
     
     // Copy write options to Hadoop configuration so they're available in executors
     // Write options from info.options() should override any existing configuration
+    // IMPORTANT: Create a COPY of hadoopConf to avoid polluting the shared Spark session configuration
     import scala.jdk.CollectionConverters._
+    val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
+
     val writeOptions = info.options()
     logger.info(s"🔧 V2 Write: DataFrame options to copy:")
     val writeOptionTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromOptions(writeOptions)
@@ -1453,17 +1456,17 @@ class Tantivy4SparkTable(
       val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
       logger.info(s"  $key = $displayValue")
     }
-    
+
     // Apply normalization to ensure both spark.indextables.* and spark.indextables.* are handled
     val normalizedWriteConfigs = ConfigNormalization.extractTantivyConfigsFromOptions(writeOptions)
     normalizedWriteConfigs.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
+      enrichedHadoopConf.set(key, value)
       logger.info(s"🔧 V2 Write: Set Hadoop config from write options: $key = ${if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value}")
     }
-    
+
     // Debug: Log final hadoop config after modification (including normalized indextables configs)
     logger.info(s"🔧 V2 Write: Final Hadoop config tantivy4spark properties:")
-    val finalTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val finalTantivyConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(enrichedHadoopConf)
     finalTantivyConfigs.foreach { case (key, value) =>
       val displayValue = if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
       logger.info(s"  $key = $displayValue")
@@ -1519,7 +1522,7 @@ class Tantivy4SparkTable(
       options
     }
 
-    new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, hadoopConf)
+    new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, enrichedHadoopConf)
   }
 
   override def partitioning(): Array[org.apache.spark.sql.connector.expressions.Transform] = {

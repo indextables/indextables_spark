@@ -957,17 +957,8 @@ class Tantivy4SparkScanBuilder(
   private def validateGroupByColumnsOrThrow(groupByColumns: Array[String]): Unit = {
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
-    // Use broadcast config instead of options for merged configuration
-    val mergedConfig = broadcastConfig.value
-    val fastFieldsStr = mergedConfig.get("spark.indextables.indexing.fastfields")
-      .orElse(mergedConfig.get("spark.indextables.indexing.fastfields"))
-      .getOrElse("")
-
-    val fastFields = if (fastFieldsStr.nonEmpty) {
-      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-    } else {
-      Set.empty[String]
-    }
+    // Read actual fast fields from transaction log (docMappingJson), not from configuration
+    val fastFields = getActualFastFieldsFromSchema()
 
 
     groupByColumns.foreach { columnName =>

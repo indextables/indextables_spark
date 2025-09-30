@@ -740,6 +740,15 @@ class MergeSplitsExecutor(
           }
           val docMapping = Option(mergedMetadata.getDocMappingJson())
 
+          // CRITICAL DEBUG: Verify docMappingJson returned from tantivy4java merge
+          docMapping match {
+            case Some(json) =>
+              logger.warn(s"✅ MERGE RESULT: docMappingJson extracted from merged split (${json.length} chars)")
+              logger.warn(s"✅ MERGE RESULT: docMappingJson content: $json")
+            case None =>
+              logger.error(s"❌ MERGE RESULT: No docMappingJson in merged split metadata - tantivy4java did not preserve it!")
+          }
+
           if (mergedMetadata.hasFooterOffsets) {
             (Some(mergedMetadata.getFooterStartOffset()),
              Some(mergedMetadata.getFooterEndOffset()),
@@ -760,6 +769,15 @@ class MergeSplitsExecutor(
         } else {
           throw new IllegalStateException(s"Failed to extract metadata from merged split ${result.mergedSplitInfo.path}. This indicates a problem with the merge operation or tantivy4java library.")
         }
+
+      // CRITICAL DEBUG: Verify docMappingJson being saved to AddAction
+      docMappingJson match {
+        case Some(json) =>
+          logger.warn(s"✅ TRANSACTION LOG: Saving AddAction with docMappingJson (${json.length} chars)")
+          logger.warn(s"✅ TRANSACTION LOG: docMappingJson being saved: $json")
+        case None =>
+          logger.error(s"❌ TRANSACTION LOG: AddAction has NO docMappingJson - fast fields will be lost!")
+      }
 
       val addAction = AddAction(
         path = result.mergedSplitInfo.path,
@@ -1191,17 +1209,39 @@ class MergeSplitsExecutor(
 
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
+    // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
+    logger.warn(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
+    mergeGroup.files.zipWithIndex.foreach { case (file, idx) =>
+      file.docMappingJson match {
+        case Some(json) =>
+          logger.warn(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
+          logger.warn(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
+        case None =>
+          logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
+      }
+    }
+
+    // Extract docMappingJson from first file to preserve fast fields configuration
+    val docMappingJson = mergeGroup.files.headOption
+      .flatMap(_.docMappingJson)
+      .getOrElse {
+        val errorMsg = "[EXECUTOR] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
+        logger.error(errorMsg)
+        throw new IllegalStateException(errorMsg)
+      }
+    logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
+
     // Create merge configuration with broadcast AWS credentials
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId
       "merge-node",      // nodeId
-      "default-doc-mapping", // docMappingUid
+      docMappingJson,    // docMappingUid - extracted from source splits to preserve fast fields
       0L,                // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
     )
-    
+
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
     val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
@@ -1312,23 +1352,33 @@ class MergeSplitsExecutor(
     
     logger.info(s"Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
     logger.debug(s"Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-    
+
     logger.info("Attempting to merge splits using Tantivy4Java merge functionality")
-    
+
     // Extract AWS configuration from SparkSession
     val awsConfig = extractAwsConfig()
+
+    // Extract docMappingJson from first file to preserve fast fields configuration
+    val docMappingJson = mergeGroup.files.headOption
+      .flatMap(_.docMappingJson)
+      .getOrElse {
+        val errorMsg = "[DRIVER] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
+        logger.error(errorMsg)
+        throw new IllegalStateException(errorMsg)
+      }
+    logger.info(s"[DRIVER] Using docMappingJson from source splits: ${if (docMappingJson.length > 100) docMappingJson.take(100) + "..." else docMappingJson}")
 
     // Create merge configuration with AWS credentials
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId
       "merge-node",      // nodeId
-      "default-doc-mapping", // docMappingUid
+      docMappingJson,    // docMappingUid - extracted from source splits to preserve fast fields
       0L,                // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePath.toString) // AWS configuration for S3 access
     )
-    
+
     // Perform the actual merge using direct/in-process merge
     println(s"⚙️  [DRIVER] Executing direct merge with ${inputSplitPaths.size()} input paths")
     println(s"📁 [DRIVER] Output path: $outputSplitPath")
@@ -1642,17 +1692,39 @@ object MergeSplitsExecutor {
 
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
+    // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
+    logger.warn(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
+    mergeGroup.files.zipWithIndex.foreach { case (file, idx) =>
+      file.docMappingJson match {
+        case Some(json) =>
+          logger.warn(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
+          logger.warn(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
+        case None =>
+          logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
+      }
+    }
+
+    // Extract docMappingJson from first file to preserve fast fields configuration
+    val docMappingJson = mergeGroup.files.headOption
+      .flatMap(_.docMappingJson)
+      .getOrElse {
+        val errorMsg = "[EXECUTOR] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
+        logger.error(errorMsg)
+        throw new IllegalStateException(errorMsg)
+      }
+    logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
+
     // Create merge configuration with broadcast AWS credentials
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid", // indexUid
       "tantivy4spark",   // sourceId
       "merge-node",      // nodeId
-      "default-doc-mapping", // docMappingUid
+      docMappingJson,    // docMappingUid - extracted from source splits to preserve fast fields
       0L,                // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
     )
-    
+
     // Perform the actual merge using direct/in-process merge
     logger.warn(s"⚙️  [EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
     logger.warn(s"📁 [EXECUTOR] Input paths:")
