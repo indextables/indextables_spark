@@ -33,7 +33,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.ThreadLocalRandom
-import com.tantivy4java.{QuickwitSplit, MergeBinaryExtractor, Index}
+import com.tantivy4java.{QuickwitSplit, Index}
 import com.tantivy4spark.util.ConfigNormalization
 import scala.jdk.CollectionConverters._
 
@@ -225,9 +225,6 @@ case class SerializableAwsConfig(
     endpoint: Option[String],
     pathStyleAccess: Boolean,
     tempDirectoryPath: Option[String] = None,
-    mergeMode: String = "direct",
-    heapSize: Long = 50L * 1024L * 1024L, // 50MB default
-    debugEnabled: Boolean = false, // Debug mode disabled by default
     credentialsProviderClass: Option[String] = None // Custom credential provider class name
 ) extends Serializable {
   
@@ -303,7 +300,7 @@ case class SerializableAwsConfig(
   }
 
   /**
-   * Execute merge operation using the configured merge mode.
+   * Execute merge operation using direct/in-process merge.
    * Returns the result as SerializableSplitMetadata for consistency.
    */
   def executeMerge(
@@ -311,22 +308,9 @@ case class SerializableAwsConfig(
       outputSplitPath: String,
       mergeConfig: QuickwitSplit.MergeConfig
   ): SerializableSplitMetadata = {
-    mergeMode.toLowerCase match {
-      case "process" =>
-        // Use process-based merging with MergeBinaryExtractor
-        // Note: Heap size and temp directory should be configured in the mergeConfig
-        val result = MergeBinaryExtractor.executeMerge(
-          inputSplitPaths,
-          outputSplitPath,
-          mergeConfig
-        )
-        SerializableSplitMetadata.fromQuickwitSplitMetadata(result.toSplitMetadata())
-
-      case "direct" | _ =>
-        // Fallback to direct merging using QuickwitSplit.mergeSplits
-        val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
-        SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
-    }
+    // Direct merging using QuickwitSplit.mergeSplits
+    val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+    SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
   }
 }
 
@@ -381,15 +365,6 @@ class MergeSplitsExecutor(
       val tempDirectoryPath = getConfigWithFallback("spark.indextables.merge.tempDirectoryPath")
         .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
-      // Extract merge mode configuration (process-based vs direct)
-      val mergeMode = getConfigWithFallback("spark.indextables.merge.mode").getOrElse("direct")
-      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
-        .map(_.toLong).getOrElse(50L * 1024L * 1024L) // Default 50MB
-
-      // Extract debug configuration for process-based merging
-      val debugEnabled = getConfigWithFallback("spark.indextables.merge.debug")
-        .map(_.toLowerCase == "true").getOrElse(false)
-
       // Extract custom credential provider class name
       val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
 
@@ -397,12 +372,10 @@ class MergeSplitsExecutor(
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       println(s"🔍 [DRIVER] Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
       println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-      println(s"🔍 [DRIVER] Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
       logger.info(s"🔍 Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
       logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-      logger.info(s"🔍 Merge mode: $mergeMode (heap size: ${heapSize / (1024 * 1024)}MB, debug: $debugEnabled)")
 
       // Validate temp directory path if specified
       tempDirectoryPath.foreach { path =>
@@ -432,16 +405,13 @@ class MergeSplitsExecutor(
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
         tempDirectoryPath, // Custom temp directory path for merge operations
-        mergeMode, // Merge mode: "process" or "direct"
-        heapSize, // Heap size for process-based merging
-        debugEnabled, // Debug mode for process-based merging
         credentialsProviderClass // Custom credential provider class name
       )
     } catch {
       case ex: Exception =>
         logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
         // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, "direct", 50L * 1024L * 1024L, false, None)
+        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, None)
     }
   }
   
@@ -1221,37 +1191,16 @@ class MergeSplitsExecutor(
 
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
-    // Create merge configuration with broadcast AWS credentials and temp directory
-    val mergeConfig = awsConfig.tempDirectoryPath match {
-      case Some(tempDir) =>
-        // Use full constructor with custom temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-          tempDir,           // tempDirectoryPath
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-      case None =>
-        // Use full constructor with system default temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-          null,              // tempDirectoryPath (use system default)
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-    }
+    // Create merge configuration with broadcast AWS credentials
+    val mergeConfig = new QuickwitSplit.MergeConfig(
+      "merged-index-uid", // indexUid
+      "tantivy4spark",   // sourceId
+      "merge-node",      // nodeId
+      "default-doc-mapping", // docMappingUid
+      0L,                // partitionId
+      java.util.Collections.emptyList[String](), // deleteQueries
+      awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
+    )
     
     // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
@@ -1369,53 +1318,31 @@ class MergeSplitsExecutor(
     // Extract AWS configuration from SparkSession
     val awsConfig = extractAwsConfig()
 
-    // Create merge configuration with AWS credentials and temp directory
-    val mergeConfig = awsConfig.tempDirectoryPath match {
-      case Some(tempDir) =>
-        // Use full constructor with custom temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
-          tempDir,           // tempDirectoryPath
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-      case None =>
-        // Use full constructor with system default temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
-          null,              // tempDirectoryPath (use system default)
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-    }
+    // Create merge configuration with AWS credentials
+    val mergeConfig = new QuickwitSplit.MergeConfig(
+      "merged-index-uid", // indexUid
+      "tantivy4spark",   // sourceId
+      "merge-node",      // nodeId
+      "default-doc-mapping", // docMappingUid
+      0L,                // partitionId
+      java.util.Collections.emptyList[String](), // deleteQueries
+      awsConfig.toQuickwitSplitAwsConfig(tablePath.toString) // AWS configuration for S3 access
+    )
     
-    // Perform the actual merge using configured merge mode (process-based by default)
-    println(s"⚙️  [DRIVER] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+    // Perform the actual merge using direct/in-process merge
+    println(s"⚙️  [DRIVER] Executing direct merge with ${inputSplitPaths.size()} input paths")
     println(s"📁 [DRIVER] Output path: $outputSplitPath")
     println(s"📁 [DRIVER] Relative path for transaction log: $mergedPath")
-    println(s"📁 [DRIVER] Heap size: ${awsConfig.heapSize / (1024 * 1024)}MB")
-    logger.info(s"Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+    logger.info(s"Executing direct merge with ${inputSplitPaths.size()} input paths")
 
     val serializedMetadata = try {
       awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
     } catch {
       case ex: Exception =>
-        println(s"💥 [DRIVER] CRITICAL: ${awsConfig.mergeMode} merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
-        logger.error(s"[DRIVER] ${awsConfig.mergeMode} merge failed", ex)
+        println(s"💥 [DRIVER] CRITICAL: Direct merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        logger.error(s"[DRIVER] Direct merge failed", ex)
         ex.printStackTrace()
-        throw new RuntimeException(s"${awsConfig.mergeMode} merge operation failed: ${ex.getMessage}", ex)
+        throw new RuntimeException(s"Direct merge operation failed: ${ex.getMessage}", ex)
     }
     
     println(s"📊 [DRIVER] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
@@ -1715,57 +1642,35 @@ object MergeSplitsExecutor {
 
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
-    // Create merge configuration with broadcast AWS credentials and temp directory
-    val mergeConfig = awsConfig.tempDirectoryPath match {
-      case Some(tempDir) =>
-        // Use full constructor with custom temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-          tempDir,           // tempDirectoryPath
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-      case None =>
-        // Use full constructor with system default temp directory and debug support
-        new QuickwitSplit.MergeConfig(
-          "merged-index-uid", // indexUid
-          "tantivy4spark",   // sourceId
-          "merge-node",      // nodeId
-          "default-doc-mapping", // docMappingUid
-          0L,                // partitionId
-          java.util.Collections.emptyList[String](), // deleteQueries
-          awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-          null,              // tempDirectoryPath (use system default)
-          awsConfig.heapSize, // heapSizeBytes
-          awsConfig.debugEnabled // debugEnabled
-        )
-    }
+    // Create merge configuration with broadcast AWS credentials
+    val mergeConfig = new QuickwitSplit.MergeConfig(
+      "merged-index-uid", // indexUid
+      "tantivy4spark",   // sourceId
+      "merge-node",      // nodeId
+      "default-doc-mapping", // docMappingUid
+      0L,                // partitionId
+      java.util.Collections.emptyList[String](), // deleteQueries
+      awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
+    )
     
-    // Perform the actual merge using configured merge mode (process-based by default)
-    logger.warn(s"⚙️  [EXECUTOR] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+    // Perform the actual merge using direct/in-process merge
+    logger.warn(s"⚙️  [EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
     logger.warn(s"📁 [EXECUTOR] Input paths:")
     inputSplitPaths.asScala.zipWithIndex.foreach { case (path, idx) =>
       logger.warn(s"📁 [EXECUTOR]   [$idx]: $path")
     }
     logger.warn(s"📁 [EXECUTOR] Output path: $outputSplitPath")
     logger.warn(s"📁 [EXECUTOR] Relative path for transaction log: $mergedPath")
-    logger.warn(s"📁 [EXECUTOR] Heap size: ${awsConfig.heapSize / (1024 * 1024)}MB")
-    logger.info(s"[EXECUTOR] Executing ${awsConfig.mergeMode} merge with ${inputSplitPaths.size()} input paths")
+    logger.info(s"[EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
 
     val serializedMetadata = try {
       awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
     } catch {
       case ex: Exception =>
-        println(s"💥 [EXECUTOR] CRITICAL: ${awsConfig.mergeMode} merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
-        logger.error(s"[EXECUTOR] ${awsConfig.mergeMode} merge failed", ex)
+        println(s"💥 [EXECUTOR] CRITICAL: Direct merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
+        logger.error(s"[EXECUTOR] Direct merge failed", ex)
         ex.printStackTrace()
-        throw new RuntimeException(s"${awsConfig.mergeMode} merge operation failed: ${ex.getMessage}", ex)
+        throw new RuntimeException(s"Direct merge operation failed: ${ex.getMessage}", ex)
     }
     
     println(s"📊 [EXECUTOR] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
