@@ -559,10 +559,16 @@ class Tantivy4SparkScanBuilder(
 
   /**
    * Check if current filters are compatible with aggregate pushdown.
+   * This validates fast field configuration and throws exceptions for validation failures.
    */
   private def areFiltersCompatibleWithAggregation(): Boolean = {
+    // If there are no filters, aggregation is compatible
+    if (_pushedFilters.isEmpty) {
+      return true
+    }
+
     // Check if filter types are supported and if filter fields are fast fields
-    _pushedFilters.forall { filter =>
+    _pushedFilters.foreach { filter =>
       val isFilterTypeSupported = filter match {
         // Supported filter types
         case _: org.apache.spark.sql.sources.EqualTo => true
@@ -588,42 +594,17 @@ class Tantivy4SparkScanBuilder(
           true
       }
 
-      // If filter type is supported, check if it requires fast fields
+      // If filter type is supported, validate that filter fields are fast fields
+      // For aggregate pushdown, ALL filters require fast field configuration to ensure correctness
+      // This will throw IllegalArgumentException if validation fails
       if (isFilterTypeSupported) {
-        // Only range operations require fast fields, not equality operations
-        val requiresFastFields = filter match {
-          // Range operations require fast fields
-          case _: org.apache.spark.sql.sources.GreaterThan => true
-          case _: org.apache.spark.sql.sources.LessThan => true
-          case _: org.apache.spark.sql.sources.GreaterThanOrEqual => true
-          case _: org.apache.spark.sql.sources.LessThanOrEqual => true
-
-          // Equality and containment operations do NOT require fast fields
-          case _: org.apache.spark.sql.sources.EqualTo => false
-          case _: org.apache.spark.sql.sources.In => false
-          case _: org.apache.spark.sql.sources.IsNull => false
-          case _: org.apache.spark.sql.sources.IsNotNull => false
-          case _: org.apache.spark.sql.sources.StringContains => false
-          case _: org.apache.spark.sql.sources.StringStartsWith => false
-          case _: org.apache.spark.sql.sources.StringEndsWith => false
-
-          // Compound operations: validate recursively
-          case _: org.apache.spark.sql.sources.And => true // Will validate children
-          case _: org.apache.spark.sql.sources.Or => true  // Will validate children
-
-          // Unknown operations: assume they don't require fast fields
-          case _ => false
-        }
-
-        if (requiresFastFields) {
-          validateFilterFieldsAreFast(filter)
-        } else {
-          true // Filter is supported and doesn't require fast fields
-        }
+        validateFilterFieldsAreFast(filter)
       } else {
-        false
+        throw new IllegalArgumentException(s"Filter type not supported for aggregation pushdown: $filter")
       }
     }
+
+    true
   }
 
   /**
@@ -731,9 +712,18 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"🔍 FILTER VALIDATION: All filter fields: ${filterFields.mkString(", ")}")
     logger.info(s"🔍 FILTER VALIDATION: Partition columns: ${partitionColumns.mkString(", ")}")
     logger.info(s"🔍 FILTER VALIDATION: Non-partition filter fields: ${nonPartitionFilterFields.mkString(", ")}")
+    logger.info(s"🔍 FILTER VALIDATION: Fast fields from schema: ${fastFields.mkString(", ")}")
+    println(s"🔍 FILTER VALIDATION DEBUG: filterFields=$filterFields, partitionColumns=$partitionColumns, nonPartitionFilterFields=$nonPartitionFilterFields, fastFields=$fastFields")
+
+    // If all filter fields are partition columns, we don't need fast fields (transaction log optimization)
+    if (nonPartitionFilterFields.isEmpty) {
+      logger.info(s"🔍 FILTER VALIDATION: All filters are on partition columns - no fast fields required")
+      return true
+    }
 
     // Check if all non-partition filter fields are configured as fast fields
     val missingFastFields = nonPartitionFilterFields.filterNot(fastFields.contains)
+    println(s"🔍 FILTER VALIDATION DEBUG: missingFastFields=$missingFastFields")
 
     if (missingFastFields.nonEmpty) {
       val columnList = missingFastFields.mkString("'", "', '", "'")
