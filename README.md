@@ -6,29 +6,67 @@ On Spark—the only supported platform today (with potential future support for 
 
 IndexTables leverages [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet as its underlying storage format. This hybrid of row and columnar storage, combined with powerful indexing technology, enables extremely fast keyword searches across massive datasets.
 
-To contact the orginal author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a Github issue or connect on Linkedin.
+To contact the original author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a GitHub issue or connect on LinkedIn.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [OSS Spark](#oss-spark)
+  - [Databricks](#databricks)
+  - [Usage](#usage)
+    - [Field Indexing Configuration](#field-indexing-configuration-write-options)
+  - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
+    - [Auto-Sizing Configuration](#auto-sizing-configuration)
+    - [S3 Upload Configuration](#s3-upload-configuration)
+    - [Transaction Log Configuration](#transaction-log-configuration)
+    - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
+    - [AWS Configuration](#aws-configuration)
+    - [Split Cache Configuration](#split-cache-configuration)
+    - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
+      - [SQL Usage](#sql-usage)
+      - [Programmatic Usage](#programmatic-usage)
+    - [IndexQueryAll Operator](#indexqueryall-operator)
+      - [SQL Usage](#sql-usage-1)
+      - [Programmatic Usage](#programmatic-usage-1)
+    - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
+      - [SQL Syntax](#sql-syntax)
+      - [Scala/DataFrame API](#scaladataframe-api)
+- [File Format](#file-format)
+  - [Split Files](#split-files)
+  - [Transaction Log](#transaction-log)
+- [Development](#development)
+  - [Project Structure](#project-structure)
+  - [Contributing](#contributing)
+  - [Optimization Tips](#optimization-tips)
+  - [Optimization Features](#optimization-features)
+- [Roadmap](#roadmap)
+  - [Planned Features](#planned-features)
+- [Known Issues and Solutions](#known-issues-and-solutions)
+- [License](#license)
+- [Support](#support)
 
 ## Features
 
-- **Embedded Search**: Runs directly within Spark executors without additonal infrastructure
+- **Embedded Search**: Runs directly within Spark executors without additional infrastructure
 - **AWS S3 Backend**: Persists and consumes search indexes from inexpensive object storage
-- **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support  efficient query pruning based on "where" predicates
+- **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support efficient query pruning based on "where" predicates
 - **Custom Query Operators**: "indexquery" SQL operand to provide access to the full Quickwit search syntax
 - **Extensive Predicate Acceleration**: Most where-clause components are automatically translated to search operations for fast retrieval
 - **Fast Aggregates**: Accelerated count, sum, min, max, and average operators with and without aggregation
-- **AWS Session Support**: Support for AWS credentials though instance profile, programmatic access, and custom credential providers
+- **AWS Session Support**: Support for AWS credentials through instance profile, programmatic access, and custom credential providers
 
 ## Installation
 ### OSS Spark
- 1. Install the proper [platform jar](https://provide.mavencentral.link) file for indextables in your boot classpath for your spark executors and driver
- 2. Enable custom SQL extenstions by setting the appropriate spark property (`spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`)
- 3. Configure your driver and worker memory to use only 1/2 of the regular memory amount for spark (the search system runs mostly in native heap)
- 4. Assure that your spark instance is using at least Java 11.
+ 1. Install the proper [platform JAR](https://provide.mavencentral.link) file for IndexTables in your boot classpath for your Spark executors and driver
+ 2. Enable custom SQL extensions by setting the appropriate Spark property (`spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`)
+ 3. Configure your driver and worker memory to use only 1/2 of the regular memory amount for Spark (the search system runs mostly in native heap)
+ 4. Assure that your Spark instance is using at least Java 11.
 
 ### Databricks
- On Databricks, you will want to
-  1) install the appropriate platform-specific jar files to your workspace root (ex: /Workspace/Users/me/indextables_x86_64_0.0.1.jar)
-  2) create a startup script in your workspace called "add_indextables_to_classpath.sh" with the following text (to add to classpath)
+ On Databricks, you will want to:
+  1) Install the appropriate platform-specific JAR files to your workspace root (ex: /Workspace/Users/me/indextables_x86_64_0.0.1.jar)
+  2) Create a startup script in your workspace called "add_indextables_to_classpath.sh" with the following text (to add to classpath)
 
 ```
 #!/bin/bash
@@ -36,14 +74,14 @@ cp /Workspace/Users/me/indextables_x86_64_0.0.1.jar /databricks/jars
 ```
 
   3) Add the startup script to your server startup configuration
-  4) Add the following spark properties to your server config: 
+  4) Add the following Spark properties to your server config: 
 
 ```
-spark.executor memory 27016m <-- this is the setting for an r6id.2xlarge server, you will want to set it to 1/2 of the default settings
+spark.executor.memory=27016m  # This is the setting for an r6id.2xlarge server, set to 1/2 of the default
 spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 ```
 
-  5) Add the following environment variable if on DBX 15.4 to up-version java to 17 (JNAME=zulu17-ca-amd64)
+  5) Add the following environment variable if on DBX 15.4 to upgrade Java to 17 (JNAME=zulu17-ca-amd64)
 
 
 ### Usage
@@ -60,7 +98,7 @@ df.write
   .format("io.indextables.provider.IndexTablesProvider")
   .mode("append")
   // Index the field "message" for full-text search instead
-  // of the default exact matching,
+  // of the default exact matching
   .option("spark.indextables.indexing.typemap.message", "text")
   .save("s3://bucket/path/table")
 
@@ -76,9 +114,9 @@ val df = spark.read
 // Query with filters (automatically converted to Tantivy queries)
 df.filter($"name".contains("John") && $"age" > 25).show()
 
-// SQL queries including full spark sql syntax plus quickwit filters via "indexquery" operand
+// SQL queries including full Spark SQL syntax plus Quickwit filters via "indexquery" operand
 df.createOrReplaceTempView("my_table")
-spark.sql("SELECT * FROM my_table WHERE category = 'technology' and message indexquery 'critical AND infrastrucuture' LIMIT 10")
+spark.sql("SELECT * FROM my_table WHERE category = 'technology' and message indexquery 'critical AND infrastructure' LIMIT 10")
 spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND score > 85")
 
 // Cross-field search - any record containing the text "mytable"
@@ -464,56 +502,12 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
 // Limit the number of merge groups created
 spark.sql("MERGE SPLITS 's3://bucket/path' MAX GROUPS 10")
 
-// Combined size and group constraints
-spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5")
+// Combined size and job constraints
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 4G MAX GROUPS 5")
 
 // With partition filtering
 spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 ```
-
-##### Key Features
-
-- **Intelligent Bin Packing**: Automatically groups small files within target size limits
-- **Group Limiting**: `MAX GROUPS` parameter constrains the number of merge operations per command
-- **Size Suffixes**: Supports `M` (megabytes) and `G` (gigabytes) for readable size specifications
-- **Partition Filtering**: `WHERE` clauses allow selective merging of specific partitions
-- **Transaction Safety**: Uses Delta Lake-style REMOVE+ADD transaction patterns
-- **Data Integrity**: Preserves all data while consolidating storage files
-- **S3 Optimized**: Efficient merge operations for object storage environments
-
-##### Use Cases
-
-```sql
--- Consolidate daily partitions to 1GB files, max 10 operations
-MERGE SPLITS 's3://data-lake/events' WHERE date >= '2023-12-01' TARGET SIZE 1G MAX GROUPS 10;
-
--- Quick cleanup of small files with group limit to avoid overwhelming the cluster
-MERGE SPLITS 's3://data-lake/logs' MAX GROUPS 5;
-
--- Size-based consolidation for optimal query performance
-MERGE SPLITS 's3://data-lake/analytics' TARGET SIZE 500M;
-```
-
-The `MAX GROUPS` parameter is particularly useful for limiting resource usage when merging large datasets, ensuring that a single merge command doesn't create too many concurrent operations.
-
-#### Multi-Cloud Support
-
-The system supports multiple cloud storage providers:
-
-```scala
-// Azure Blob Storage
-spark.conf.set("spark.indextables.azure.accountName", "yourstorageaccount")
-spark.conf.set("spark.indextables.azure.accountKey", "your-account-key")
-
-// Google Cloud Storage
-spark.conf.set("spark.indextables.gcp.projectId", "your-project-id")
-spark.conf.set("spark.indextables.gcp.credentialsFile", "/path/to/service-account.json")
-
-// Write to different cloud providers
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("abfss://container@account.dfs.core.windows.net/path")
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("gs://bucket/path")
-```
-
 
 ## File Format
 
@@ -544,19 +538,63 @@ Located in `_transaction_log/` directory (Delta Lake compatible):
 ### Project Structure
 
 ```
-src/main/scala/com/tantivy4spark/
-├── core/           # Spark DataSource V2 integration
-├── search/         # Tantivy search engine wrapper via tantivy4java
-├── storage/        # S3-optimized storage layer
-└── transaction/    # Transaction log system
+src/main/scala/
+├── com/tantivy4spark/
+│   ├── catalyst/       # Spark Catalyst optimizer integration
+│   ├── config/         # Configuration management
+│   ├── conversion/     # Type conversion utilities
+│   ├── core/           # Spark DataSource V2 integration
+│   ├── expressions/    # IndexQuery expression support
+│   ├── extensions/     # Spark SQL extensions (MERGE SPLITS, etc.)
+│   ├── filters/        # Query filter handling
+│   ├── io/             # I/O utilities and cloud storage support
+│   ├── optimize/       # Write optimization and auto-sizing
+│   ├── prewarm/        # Cache pre-warming management
+│   ├── schema/         # Schema mapping and conversion
+│   ├── search/         # Tantivy search engine wrapper via tantivy4java
+│   ├── sql/            # SQL command implementations
+│   ├── storage/        # S3-optimized storage layer
+│   ├── transaction/    # Transaction log system
+│   ├── util/           # General utilities
+│   └── utils/          # Additional utility classes
+└── io/indextables/     # Alias namespace for vendor-neutral interface
+    ├── extensions/     # IndexTablesSparkExtensions alias
+    └── provider/       # IndexTablesProvider alias
 
-src/test/scala/     # Comprehensive test suite (179 tests passing, 0 failing)
-├── core/           # Core functionality tests including SQL pushdown verification
-├── integration/    # End-to-end integration tests  
-├── optimize/       # Optimized writes tests
-├── storage/        # Storage protocol tests
-├── transaction/    # Transaction log tests
-└── debug/          # Debug and diagnostic tests
+src/main/java/com/tantivy4spark/
+└── auth/
+    └── unity/          # Unity Catalog credential provider
+
+src/main/antlr4/        # ANTLR grammar definitions
+└── com/tantivy4spark/sql/parser/
+    └── Tantivy4SparkSqlBase.g4  # SQL parser grammar for custom commands
+
+src/test/scala/         # Comprehensive test suite (205+ tests passing)
+├── com/tantivy4spark/
+│   ├── autosize/       # Auto-sizing feature tests
+│   ├── comprehensive/  # Comprehensive integration tests
+│   ├── config/         # Configuration tests
+│   ├── core/           # Core functionality tests including SQL pushdown
+│   ├── debug/          # Debug and diagnostic tests
+│   ├── demo/           # Demo and example tests
+│   ├── expressions/    # IndexQuery expression tests
+│   ├── filters/        # Filter pushdown tests
+│   ├── indexing/       # Indexing behavior tests
+│   ├── indexquery/     # IndexQuery operator tests
+│   ├── integration/    # End-to-end integration tests
+│   ├── io/             # I/O and cloud storage tests
+│   ├── locality/       # Cache locality tests
+│   ├── optimize/       # Optimized writes tests
+│   ├── performance/    # Performance benchmark tests
+│   ├── prewarm/        # Cache pre-warming tests
+│   ├── schema/         # Schema mapping tests
+│   ├── search/         # Search engine tests
+│   ├── sql/            # SQL command tests
+│   ├── storage/        # Storage protocol tests
+│   ├── transaction/    # Transaction log tests
+│   └── util/           # Utility tests
+└── io/indextables/
+    └── extensions/     # Alias extension tests
 ```
 
 ### Contributing
@@ -587,12 +625,12 @@ src/test/scala/     # Comprehensive test suite (179 tests passing, 0 failing)
 See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 
 ### Planned Features
-- **Table hygene**: Capability similar to delta "VACUUM" command
+- **Table hygiene**: Capability similar to Delta "VACUUM" command
 - **Multi-cloud Enhancements**: Expanded Azure and GCP support
-- **Catalog support**: Support for hive catalogs
+- **Catalog support**: Support for Hive catalogs
 - **Schema migration**: Support for updating schemas and indexing schemes
-- **Re-indexing support**: Support for chanigng indexing types of fields from plain strings to full-text search
-- **Prewarming enhancements**: Better support for pre-warming caches on new clustres
+- **Re-indexing support**: Support for changing indexing types of fields from plain strings to full-text search
+- **Prewarming enhancements**: Better support for pre-warming caches on new clusters
 - **Memory auto-tuning**: Better support for automatically tuning native heaps for indexing, merging, and queries
 - **VARIANT Data types**: Support for JSON fields
 - **Arrays and embedded structures**: Support for complex column types
