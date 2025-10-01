@@ -1,10 +1,10 @@
 # IndexTables for Spark
 
-IndexTables is an experimental open-table format that provides a transactional layer on top of indexed storage. It enables fast search, retrieval, and aggregation across terabytes of data, often with sub-second performance. Originally designed for interactive log observability and cybersecurity investigations, IndexTables is versatile enough to support many other use cases requiring extremely fast retrieval.
+IndexTables is an experimental open-table format for Apache Spark that enables fast full-text search and retrieval across large-scale data—often with sub-second performance. It integrates seamlessly with Spark SQL, allowing you to combine powerful search capabilities with joins, aggregations, and standard SQL operations. Originally built for log observability and cybersecurity investigations, IndexTables works well for any use case requiring fast data retrieval.
 
-On Spark—the only supported platform today (with potential future support for Presto, Trino, and others)—IndexTables requires no additional components beyond a Spark cluster and object storage (currently tested on AWS S3). It has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. We welcome community feedback on other working distributions and are happy to collaborate on resolving any issues that prevent broader adoption.
+IndexTables runs entirely within your existing Spark cluster with no additional infrastructure. It stores data in object storage (tested on AWS S3) and has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. While Spark is the only supported platform today, we're exploring future support for Presto and Trino. We welcome community feedback on other Spark distributions.
 
-IndexTables leverages [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet as its underlying storage format. This hybrid of row and columnar storage, combined with powerful indexing technology, enables extremely fast keyword searches across massive datasets.
+Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet. This hybrid row and columnar storage format, combined with advanced indexing, delivers extremely fast keyword searches across massive datasets.
 
 To contact the original author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a GitHub issue or connect on LinkedIn.
 
@@ -175,113 +175,109 @@ spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'mytable'")
 ## Common Use Cases
 
 ### 📊 Log Analysis and Observability
-```scala
-// Search application logs for errors and exceptions
-val errors = logs
-  .filter($"level" === "ERROR" &&
-          $"timestamp" > current_timestamp() - expr("INTERVAL 1 HOUR") &&
-          $"message" indexquery "OutOfMemory OR StackOverflow OR NullPointerException")
-  .select("timestamp", "service", "message", "stack_trace")
-  .show()
+```sql
+-- Search application logs for errors and exceptions
+SELECT timestamp, service, message, stack_trace
+FROM logs
+WHERE level = 'ERROR'
+  AND timestamp > current_timestamp() - INTERVAL 1 HOUR
+  AND message indexquery 'OutOfMemory OR StackOverflow OR NullPointerException';
 
-// Aggregate errors by service
-logs.filter($"level" === "ERROR" &&
-            $"message" indexquery "exception OR failed OR timeout")
-    .groupBy(window($"timestamp", "5 minutes"), $"service")
-    .count()
-    .orderBy($"window".desc)
-    .show()
+-- Aggregate errors by service and time
+SELECT date, hour, minute,
+       service,
+       COUNT(*) as error_count
+FROM logs
+WHERE level = 'ERROR'
+  AND message indexquery 'exception OR failed OR timeout'
+GROUP BY date, hour, minute, service
+ORDER BY date DESC, hour DESC, minute DESC;
 ```
 
 ### 🔐 Security Investigation and SIEM
-```scala
-// Find all login attempts from suspicious IPs in the last 24 hours
-val suspicious_activity = security_logs
-  .filter($"event_type".isin("login", "auth_attempt", "access") &&
-          $"timestamp" > current_timestamp() - expr("INTERVAL 24 HOURS") &&
-          ($"ip_address".isin(suspicious_ips: _*) ||
-           $"_indexall" indexquery "failed OR unauthorized OR denied"))
-  .select("timestamp", "user", "ip_address", "event_type", "outcome")
+```sql
+-- Find all login attempts from suspicious IPs in the last 24 hours
+SELECT timestamp, user, ip_address, event_type, outcome
+FROM security_logs
+WHERE event_type IN ('login', 'auth_attempt', 'access')
+  AND timestamp > current_timestamp() - INTERVAL 24 HOURS
+  AND (ip_address IN ('192.168.1.100', '10.0.0.50')  -- suspicious IPs
+       OR _indexall indexquery 'failed OR unauthorized OR denied');
 
-// Identify potential brute force attempts
-security_logs
-  .filter($"event_type" === "login" && $"outcome" === "failed")
-  .groupBy($"ip_address", window($"timestamp", "1 minute"))
-  .agg(
-    count("*").as("attempts"),
-    collect_set("user").as("targeted_users")
-  )
-  .filter($"attempts" > 5)  // More than 5 attempts per minute
-  .orderBy($"window".desc)
-  .show()
+-- Identify potential brute force attempts
+SELECT ip_address,
+       date, hour, minute,
+       COUNT(*) as attempts,
+       collect_set(user) as targeted_users
+FROM security_logs
+WHERE event_type = 'login'
+  AND outcome = 'failed'
+GROUP BY ip_address, date, hour, minute
+ORDER BY date DESC, hour DESC, minute DESC;
 ```
 
 ### 📈 Application Performance Monitoring (APM)
-```scala
-// Find slow API calls with specific error patterns
-val slow_apis = api_logs
-  .filter($"response_time" > 1000 &&  // Response time > 1 second
-          $"endpoint" indexquery "GET OR POST" &&
-          ($"response_body" indexquery "timeout" || $"status_code" >= 500))
-  .select("timestamp", "endpoint", "response_time", "status_code", "trace_id")
-  .orderBy($"response_time".desc)
-  .show(50)
+```sql
+-- Find slow API calls with specific error patterns
+SELECT timestamp, endpoint, response_time, status_code, trace_id
+FROM api_logs
+WHERE response_time > 1000  -- Response time > 1 second
+  AND endpoint indexquery 'GET OR POST'
+  AND (response_body indexquery 'timeout' OR status_code >= 500)
+ORDER BY response_time DESC
+LIMIT 50;
 
-// Analyze error patterns in microservices
-api_logs
-  .filter($"trace_id".isNotNull &&
-          $"_indexall" indexquery "error OR exception OR failed")
-  .groupBy("service_name", "endpoint")
-  .agg(
-    count("*").as("error_count"),
-    avg("response_time").as("avg_response_time"),
-    percentile_approx($"response_time", 0.95).as("p95_response_time")
-  )
-  .orderBy($"error_count".desc)
-  .show()
+-- Analyze error patterns in microservices
+SELECT service_name,
+       endpoint,
+       COUNT(*) as error_count,
+       AVG(response_time) as avg_response_time,
+       percentile_approx(response_time, 0.95) as p95_response_time
+FROM api_logs
+WHERE trace_id IS NOT NULL
+  AND _indexall indexquery 'error OR exception OR failed'
+GROUP BY service_name, endpoint
+ORDER BY error_count DESC;
 ```
 
 ### 🔍 Full-Text Search in Documents
-```scala
-// Search knowledge base for relevant documents
-val relevant_docs = documents
-  .filter($"content" indexquery "machine learning AND (tensorflow OR pytorch)")
-  .filter($"published_date" >= "2023-01-01")
-  .select("title", "author", "published_date", "abstract")
-  .show()
+```sql
+-- Search knowledge base for relevant documents
+SELECT title, author, published_date, abstract
+FROM documents
+WHERE content indexquery 'machine learning AND (tensorflow OR pytorch)'
+  AND published_date >= '2023-01-01';
 
-// Find documents with complex boolean queries
-documents
-  .filter($"content" indexquery """
-    (artificial intelligence OR machine learning) AND
-    (python OR scala) AND
-    NOT deprecated AND
-    "neural network"
-  """)
-  .select("title", "tags", "last_updated")
-  .show()
+-- Find documents with complex boolean queries
+SELECT title, tags, last_updated
+FROM documents
+WHERE content indexquery '
+  (artificial intelligence OR machine learning) AND
+  (python OR scala) AND
+  NOT deprecated AND
+  "neural network"
+';
 ```
 
 ### 📊 Business Intelligence and Analytics
-```scala
-// Search customer feedback for specific issues
-val customer_issues = feedback
-  .filter($"_indexall" indexquery "refund OR complaint OR dissatisfied")
-  .filter($"rating" <= 3)
-  .groupBy("product_category", "issue_type")
-  .agg(
-    count("*").as("issue_count"),
-    avg("rating").as("avg_rating")
-  )
-  .orderBy($"issue_count".desc)
+```sql
+-- Search customer feedback for specific issues
+SELECT product_category,
+       issue_type,
+       COUNT(*) as issue_count,
+       AVG(rating) as avg_rating
+FROM feedback
+WHERE _indexall indexquery 'refund OR complaint OR dissatisfied'
+  AND rating <= 3
+GROUP BY product_category, issue_type
+ORDER BY issue_count DESC;
 
-// Analyze support tickets with natural language queries
-support_tickets
-  .filter($"status" === "open" &&
-          $"description" indexquery "billing problem OR payment failed" &&
-          $"priority" === "high")
-  .select("ticket_id", "customer_id", "created_at", "description")
-  .show()
+-- Analyze support tickets with natural language queries
+SELECT ticket_id, customer_id, created_at, description
+FROM support_tickets
+WHERE status = 'open'
+  AND description indexquery 'billing problem OR payment failed'
+  AND priority = 'high';
 ```
 
 ---
@@ -1008,12 +1004,99 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Re-indexing support**: Support for changing indexing types of fields from plain strings to full-text search
 - **Prewarming enhancements**: Better support for pre-warming caches on new clusters
 - **Memory auto-tuning**: Better support for automatically tuning native heaps for indexing, merging, and queries
+- **Enhanced windowing functions**: Improved support for time-based windowing and tumbling window aggregations
 - **VARIANT Data types**: Support for JSON fields
 - **Arrays and embedded structures**: Support for complex column types
 
 
 ## Known Issues and Solutions
 - TBD
+
+## ❓ Frequently Asked Questions (FAQ)
+
+### General Questions
+
+**Q: What's the difference between Tantivy4Spark and traditional Spark DataSources like Parquet?**
+A: Tantivy4Spark is optimized for full-text search and analytical queries with features like IndexQuery operators, aggregate pushdown, and native Tantivy search. Parquet excels at columnar analytics but lacks built-in search capabilities.
+
+**Q: Can I use Tantivy4Spark alongside Delta Lake or Parquet?**
+A: Yes! Tantivy4Spark can read from and write to any Spark-compatible data source. You can easily migrate data or use it in hybrid architectures.
+
+**Q: What's the relationship between Tantivy4Spark and IndexTables?**
+A: IndexTables is a vendor-neutral alias for Tantivy4Spark. Use `io.indextables.extensions.IndexTablesSparkExtensions` and `io.indextables.provider.IndexTablesProvider` for the same functionality with a generic namespace.
+
+### Performance Questions
+
+**Q: How does aggregate pushdown improve performance?**
+A: Aggregate pushdown executes COUNT(), SUM(), AVG(), MIN(), MAX() directly in Tantivy instead of pulling all data through Spark. This provides 10-100x speedup for aggregation queries.
+
+**Q: Why are my COUNT queries so fast?**
+A: COUNT queries without filters use transaction log metadata optimization, which reads only metadata instead of accessing splits. This provides near-instant results.
+
+**Q: How do I optimize upload performance for large datasets?**
+A: Use parallel streaming uploads with `spark.indextables.s3.maxConcurrency=16` and configure fast storage like `/local_disk0` or NVMe SSDs for temporary directories.
+
+**Q: What's the benefit of checkpoint compaction?**
+A: Checkpoint compaction reduces transaction log read times by 60% (2.5x speedup) by consolidating transaction history into snapshot files, especially beneficial for tables with 50+ transactions.
+
+### Configuration Questions
+
+**Q: What's the difference between V1 and V2 DataSource APIs?**
+A: V2 API (`com.tantivy4spark.core.Tantivy4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`tantivy4spark`) is maintained for backward compatibility.
+
+**Q: How do I configure auto-sizing?**
+A: Enable auto-sizing with `spark.indextables.autoSize.enabled=true` and set `spark.indextables.autoSize.targetSplitSize=100M`. V1 API automatically counts DataFrames; V2 API requires explicit row count.
+
+**Q: What's the difference between string and text field types?**
+A: String fields use raw tokenization for exact matching (pushed to data source). Text fields use tokenization for full-text search with IndexQuery operators (best-effort filtering).
+
+**Q: How do I use custom AWS credential providers?**
+A: Set `spark.indextables.aws.credentialsProviderClass` to your provider class name. The provider must implement AWS SDK v1 or v2 credential interfaces with a specific constructor signature.
+
+### Operational Questions
+
+**Q: How does MERGE SPLITS work?**
+A: MERGE SPLITS consolidates small split files into larger ones to reduce overhead. Use `MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M` to merge splits up to 100MB each.
+
+**Q: What happens when a merge operation encounters corrupted files?**
+A: Corrupted files are automatically skipped with cooldown tracking (default: 24 hours). Original files remain accessible and the operation continues gracefully without failing.
+
+**Q: How do I invalidate cached splits across the cluster?**
+A: Use `INVALIDATE TRANSACTION LOG CACHE 's3://bucket/path'` for table-level invalidation or `INVALIDATE TRANSACTION LOG CACHE` for global cache invalidation.
+
+**Q: How long are transaction log files retained?**
+A: Default retention is 30 days. Files are only deleted when they're older than retention period AND included in a checkpoint AND not actively being written.
+
+### Migration Questions
+
+**Q: How do I migrate from Parquet to Tantivy4Spark?**
+A: Simply read from Parquet and write to Tantivy4Spark:
+```scala
+val df = spark.read.parquet("s3://bucket/parquet-data")
+df.write.format("tantivy4spark")
+  .option("spark.indextables.indexing.typemap.content", "text")
+  .save("s3://bucket/tantivy-data")
+```
+
+**Q: Can I do incremental migration?**
+A: Yes! Use a hybrid query approach where you union results from both old (Parquet) and new (Tantivy4Spark) data sources during migration.
+
+**Q: How do I handle schema evolution?**
+A: Currently schema migration is planned but not implemented. For now, create a new table with the updated schema and migrate data.
+
+### Troubleshooting Questions
+
+**Q: Why am I getting UnsupportedOperationException for Arrays/Maps/Structs?**
+A: Complex types (Arrays, Maps, Structs) are not yet supported. Flatten these into primitive fields or use JSON serialization for the json field type.
+
+**Q: Why are my exact match filters on text fields not working?**
+A: Text fields are tokenized, so exact matching requires Spark post-processing. Use string field type for exact matching with full filter pushdown support.
+
+**Q: Why is my upload failing with OutOfMemoryError?**
+A: Large files (4GB+) require streaming upload. Ensure `spark.indextables.s3.streamingThreshold` is set appropriately (default: 100MB) and reduce batch sizes if needed.
+
+**Q: How do I debug cache locality issues?**
+A: Enable debug logging and look for `[DRIVER]` and `[EXECUTOR]` prefixed messages showing broadcast locality updates and preferred location assignments.
 
 ## License
 
@@ -1025,3 +1108,7 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 - Documentation: Comprehensive test suite with 179 tests demonstrating usage patterns
 - Community: Check the test files in `src/test/scala/` for detailed usage examples
 - SQL Pushdown: See `SqlPushdownTest.scala` for detailed examples of predicate and limit pushdown verification
+
+## 🙏 Acknowledgments
+
+This project was developed with coding assistance from **Anthropic Claude**, an AI assistant that helped with implementation, testing, documentation, and architectural design decisions throughout the development process.
