@@ -47,14 +47,14 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
     // Create Spark session with S3 configuration
     spark = SparkSession
       .builder()
-      .appName("Tantivy4Spark MERGE SPLITS S3 Tests")
+      .appName("IndexTables4Spark MERGE SPLITS S3 Tests")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
-      // Configure Tantivy4Spark S3 settings (used by CloudStorageProvider)
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Configure IndexTables4Spark S3 settings (used by CloudStorageProvider)
       .config("spark.indextables.aws.accessKey", ACCESS_KEY)
       .config("spark.indextables.aws.secretKey", SECRET_KEY)
       .config("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -63,7 +63,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .config("spark.indextables.aws.region", "us-east-1")
       // Hadoop S3A config - ONLY needed because Spark itself needs to parse s3a:// URLs
       // when passed as path arguments to .save() and .load()
-      // Tantivy4Spark itself doesn't use Hadoop - it uses CloudStorageProvider
+      // IndexTables4Spark itself doesn't use Hadoop - it uses CloudStorageProvider
       .config("spark.hadoop.fs.s3a.access.key", ACCESS_KEY)
       .config("spark.hadoop.fs.s3a.secret.key", SECRET_KEY)
       .config("spark.hadoop.fs.s3a.endpoint", s"http://localhost:$s3MockPort")
@@ -205,7 +205,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .save(s3TablePath)
 
     // Now test MERGE SPLITS command
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$s3TablePath' TARGET SIZE 1048576")
       .asInstanceOf[MergeSplitsCommand]
@@ -250,7 +250,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .save(s3TablePath)
 
     // Execute MERGE SPLITS without partition predicate (since partition metadata wasn't stored properly)
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(
         s"MERGE SPLITS '$s3TablePath' TARGET SIZE 1048576"
@@ -285,7 +285,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       .save(s3aPath)
 
     // Parse MERGE SPLITS with s3:// scheme (without 'a')
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Note: In test environment, s3:// might not work without proper setup,
     // but we can verify the command parsing and path handling
@@ -401,7 +401,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
       }
 
       // Now execute merge - should do REAL merge since local files "exist"
-      val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+      val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
       val mergeCommand = sqlParser
         .parsePlan(s"MERGE SPLITS '$s3TablePath' TARGET SIZE 1048576")
         .asInstanceOf[MergeSplitsCommand]
@@ -600,7 +600,7 @@ class MergeSplitsS3Test extends TestBase with BeforeAndAfterAll with BeforeAndAf
   ignore("MERGE SPLITS should handle non-existent S3 paths gracefully") {
     val nonExistentPath = s"s3a://$TEST_BUCKET/does-not-exist"
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$nonExistentPath'")
       .asInstanceOf[MergeSplitsCommand]

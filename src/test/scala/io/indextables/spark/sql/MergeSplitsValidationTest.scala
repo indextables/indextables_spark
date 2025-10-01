@@ -147,7 +147,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("Target size validation should enforce minimum and maximum limits") {
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test cases for different target sizes
     val testCases = Seq(
@@ -200,7 +200,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "50")
         .mode("append")
         .save(tempTablePath)
@@ -236,7 +236,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateMergedFilesCanBeRead()
 
     // Validate that data is still readable and complete
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 300L // 3 writes * 100 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -257,7 +257,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "75")
         .mode("append")
         .save(tempTablePath)
@@ -297,7 +297,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     )
 
     // Validate data integrity
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 300L // 2 writes * 150 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -318,7 +318,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "40")
         .mode("append")
         .save(tempTablePath)
@@ -344,7 +344,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate data integrity
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 320L // 4 writes * 80 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -367,7 +367,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "20")
         .mode("append")
         .save(tempTablePath)
@@ -404,7 +404,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate that data is still readable and complete
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 320L // 8 writes * 40 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -436,7 +436,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "15")
         .mode("append")
         .save(tempTablePath)
@@ -490,7 +490,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     validateAllFilesExist()
 
     // Validate that all data is preserved despite the grouping limit
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 360L // 12 writes * 30 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -536,7 +536,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "50")
         .mode("append")
         .save(tempTablePath)
@@ -595,7 +595,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     }
 
     // Validate that data is still readable and complete
-    val mergedData    = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     val actualCount   = mergedData.count()
     val expectedCount = 300L // 3 writes * 100 records each
     assert(actualCount == expectedCount, s"Should preserve all data: expected $expectedCount, got $actualCount")
@@ -616,7 +616,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       data
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "25")
         .mode("append")
         .save(tempTablePath)
@@ -646,7 +646,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
     // CRITICAL: Validate the merged file actually contains the expected data
     logger.info("🔍 Validating merged file contents...")
-    val mergedData = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    val mergedData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
 
     val actualCount   = mergedData.count()
     val expectedCount = 250L // 5 writes * 50 records each
@@ -700,7 +700,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     add1Data
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
@@ -716,14 +716,14 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     add2Data
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
 
     // Verify we have data from add1 and add2 (IDs 1-200)
     transactionLog.invalidateCache()
-    var currentData  = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    var currentData  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     var currentCount = currentData.count()
     assert(currentCount == 200, s"After add1+add2: expected 200 records, got $currentCount")
     println(s"🧪 [TEST] After add1+add2: $currentCount records confirmed")
@@ -739,7 +739,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     add3Data
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("overwrite")
       .save(tempTablePath)
@@ -752,7 +752,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     println(s"🧪 [DEBUG] Transaction log has ${filesAfterOverwrite.length} files after add3(overwrite):")
     filesAfterOverwrite.foreach(file => println(s"🧪 [DEBUG]   File: ${file.path} (${file.size} bytes)"))
 
-    currentData = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    currentData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     currentCount = currentData.count()
     assert(currentCount == 100, s"After add3(overwrite): expected 100 records, got $currentCount")
 
@@ -771,7 +771,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     add4Data
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
@@ -792,7 +792,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     println(s"🧪 [DEBUG] Transaction log has ${currentFiles.length} files after add4:")
     currentFiles.foreach(file => println(s"🧪 [DEBUG]   File: ${file.path} (${file.size} bytes)"))
 
-    currentData = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    currentData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     currentCount = currentData.count()
     assert(currentCount == 200, s"After add3+add4: expected 200 records, got $currentCount")
 
@@ -843,7 +843,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
     // Verify merge preserved add3 and add4 data (IDs 201-400)
     transactionLog.invalidateCache()
-    currentData = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    currentData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     currentCount = currentData.count()
     assert(currentCount == 200, s"After merge: expected 200 records, got $currentCount")
 
@@ -868,14 +868,14 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     add5Data
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("append")
       .save(tempTablePath)
 
     // Final validation: Should see data from merge (add3+add4) + add5
     transactionLog.invalidateCache()
-    currentData = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempTablePath)
+    currentData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
     currentCount = currentData.count()
     assert(currentCount == 300, s"Final: expected 300 records, got $currentCount")
 
@@ -944,10 +944,10 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
         baseData
       }
 
-      // Write using Tantivy4Spark format with small batch size to force separate splits
+      // Write using IndexTables4Spark format with small batch size to force separate splits
       df.coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "50") // Small batch size
         .mode("append")
         .save(tempTablePath)

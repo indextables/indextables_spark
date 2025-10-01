@@ -19,14 +19,14 @@ class SimpleIndexQueryTest extends TestBase {
 
     // Write with text fields for title (same as working tantivy4java test)
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "text")      // tokenized search
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .mode("overwrite")
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     df.createOrReplaceTempView("simple_test")

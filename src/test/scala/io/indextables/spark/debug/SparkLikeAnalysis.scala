@@ -9,7 +9,7 @@ package io.indextables.spark.debug
 // 3. LIKE '%contains%' -> StringContains filter
 // 4. Complex patterns with _ or mixed % -> No pushdown (stays as Filter in Spark)
 //
-// The issue is that our current implementation in Tantivy4SparkScanBuilder
+// The issue is that our current implementation in IndexTables4SparkScanBuilder
 // already supports StringStartsWith, StringEndsWith, and StringContains.
 // So the problem might be elsewhere - possibly in how we're registering
 // our DataSource or how Spark's optimizer sees our capabilities.

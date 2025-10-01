@@ -43,7 +43,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
       .appName("ZeroRecordsFilterTest")
       .master("local[2]")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -65,7 +65,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     file.delete()
   }
 
-  "Tantivy4Spark write operations" should "not create transaction log entries for files with zero records" in {
+  "IndexTables4Spark write operations" should "not create transaction log entries for files with zero records" in {
     val tablePath = new File(tempDir, "zero_records_test").getAbsolutePath
 
     // Create an empty DataFrame (zero records)
@@ -117,7 +117,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     println("✅ Verified: Empty table can be read successfully")
   }
 
-  "Tantivy4Spark write operations" should "handle mixed empty and non-empty partitions correctly" in {
+  "IndexTables4Spark write operations" should "handle mixed empty and non-empty partitions correctly" in {
     val tablePath = new File(tempDir, "mixed_partitions_test").getAbsolutePath
 
     // Create a DataFrame with some data

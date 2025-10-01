@@ -141,7 +141,7 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
         .set("fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider")
     }
 
-    // Configure Tantivy4Spark S3 settings
+    // Configure IndexTables4Spark S3 settings
     spark.conf.set("spark.indextables.aws.accessKey", creds.accessKey)
     spark.conf.set("spark.indextables.aws.secretKey", creds.secretKey)
     spark.conf.set("spark.indextables.aws.region", S3_REGION)

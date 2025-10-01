@@ -24,7 +24,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.slf4j.LoggerFactory
 
-class Tantivy4SparkBatchWrite(
+class IndexTables4SparkBatchWrite(
   transactionLog: TransactionLog,
   tablePath: Path,
   writeInfo: LogicalWriteInfo,
@@ -33,7 +33,7 @@ class Tantivy4SparkBatchWrite(
     extends BatchWrite
     with org.apache.spark.sql.connector.write.Write {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkBatchWrite])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkBatchWrite])
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
@@ -76,7 +76,7 @@ class Tantivy4SparkBatchWrite(
       props.toMap
     }
 
-    new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig)
+    new IndexTables4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -105,7 +105,7 @@ class Tantivy4SparkBatchWrite(
     transactionLog.initialize(writeInfo.schema(), partitionColumns)
 
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                               => Seq.empty[AddAction]
     }
 
@@ -127,7 +127,7 @@ class Tantivy4SparkBatchWrite(
 
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                               => Seq.empty[AddAction]
     }
 
@@ -136,4 +136,4 @@ class Tantivy4SparkBatchWrite(
   }
 }
 
-case class Tantivy4SparkCommitMessage(addActions: Seq[AddAction]) extends WriterCommitMessage
+case class IndexTables4SparkCommitMessage(addActions: Seq[AddAction]) extends WriterCommitMessage

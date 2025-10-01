@@ -28,7 +28,7 @@ import org.scalatest.matchers.should.Matchers
  */
 class UnsupportedTypesTest extends TestBase with Matchers {
 
-  test("should reject array types when writing to Tantivy4Spark") {
+  test("should reject array types when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -53,7 +53,7 @@ class UnsupportedTypesTest extends TestBase with Matchers {
     }
   }
 
-  test("should reject map types when writing to Tantivy4Spark") {
+  test("should reject map types when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -79,7 +79,7 @@ class UnsupportedTypesTest extends TestBase with Matchers {
     }
   }
 
-  test("should reject struct types when writing to Tantivy4Spark") {
+  test("should reject struct types when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._

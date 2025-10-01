@@ -1,4 +1,4 @@
-# Tantivy4Spark Development Backlog
+# IndexTables4Spark Development Backlog
 
 ## High Priority Features
 

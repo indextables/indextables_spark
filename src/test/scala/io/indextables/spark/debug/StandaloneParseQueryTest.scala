@@ -23,7 +23,7 @@ class StandaloneParseQueryTest extends TestBase {
 
     // Write with text fields
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.content", "text")
       .mode("overwrite")
@@ -31,7 +31,7 @@ class StandaloneParseQueryTest extends TestBase {
 
     // Force creation of splits
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
     df.count()
 
@@ -45,7 +45,7 @@ class StandaloneParseQueryTest extends TestBase {
 
     // Use the working SplitSearchEngine approach since direct API has metadata issues
     val dfRead = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     dfRead.createOrReplaceTempView("parsequery_debug")

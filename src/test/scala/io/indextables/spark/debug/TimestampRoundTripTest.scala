@@ -62,7 +62,7 @@ class TimestampRoundTripTest extends TestBase {
       // Write using V2 table provider
       println("💾 Writing data using V2 table provider...")
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -71,7 +71,7 @@ class TimestampRoundTripTest extends TestBase {
       // Read back using V2 table provider
       println("📖 Reading data back using V2 table provider...")
       val readData = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       println("📋 Read schema:")
@@ -140,12 +140,12 @@ class TimestampRoundTripTest extends TestBase {
 
       // Write and read back
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       val readData = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       println("📝 Read data:")

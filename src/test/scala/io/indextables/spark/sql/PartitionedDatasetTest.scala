@@ -365,10 +365,10 @@ class PartitionedDatasetTest extends TestBase {
       .mode("overwrite")
       .save(testDataV1)
 
-    // Test V2 path (io.indextables.spark.core.Tantivy4SparkTableProvider)
-    println("Testing V2 path: format('io.indextables.spark.core.Tantivy4SparkTableProvider')")
+    // Test V2 path (io.indextables.spark.core.IndexTables4SparkTableProvider)
+    println("Testing V2 path: format('io.indextables.spark.core.IndexTables4SparkTableProvider')")
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .mode("overwrite")
       .save(testDataV2)
@@ -392,7 +392,7 @@ class PartitionedDatasetTest extends TestBase {
 
     // Verify both datasets are readable
     val dfV1 = spark.read.format("tantivy4spark").load(testDataV1)
-    val dfV2 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(testDataV2)
+    val dfV2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataV2)
 
     assert(dfV1.count() == 200, "V1 dataset should have 200 records")
     assert(dfV2.count() == 200, "V2 dataset should have 200 records")
@@ -506,7 +506,7 @@ class PartitionedDatasetTest extends TestBase {
           }
         }
       } else {
-        // Maybe Tantivy4Spark doesn't use physical partitioning like Delta Lake
+        // Maybe IndexTables4Spark doesn't use physical partitioning like Delta Lake
         // Let's check if there are just split files at the root level
         val splitFiles = allFiles.filter(_.getName.endsWith(".split"))
         val logDir     = allFiles.find(_.getName == "_transaction_log")
@@ -516,7 +516,7 @@ class PartitionedDatasetTest extends TestBase {
           println("Transaction log directory exists")
         }
 
-        // For now, just warn instead of failing - maybe Tantivy4Spark uses logical partitioning
+        // For now, just warn instead of failing - maybe IndexTables4Spark uses logical partitioning
         println("WARNING: Physical partitioning might not be implemented the same way as Delta Lake")
       }
     } else {

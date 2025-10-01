@@ -168,7 +168,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
 
     logger.info(s"Executing MERGE SPLITS with target size: $targetSizeBytes bytes")
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeSplitsCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $targetSizeBytes")
       .asInstanceOf[MergeSplitsCommand]
@@ -538,7 +538,7 @@ class DocumentPreservationValidationTest extends TestBase with BeforeAndAfterEac
     val beforeCount = spark.read.format("tantivy4spark").load(tempTablePath).count()
 
     // Execute merge
-    val mergeSplitsCommand = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val mergeSplitsCommand = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
       .parsePlan(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${10 * 1024 * 1024}") // 10MB
       .asInstanceOf[MergeSplitsCommand]
 

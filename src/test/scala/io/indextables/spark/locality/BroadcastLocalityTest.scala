@@ -81,7 +81,7 @@ class BroadcastLocalityTest extends TestBase with BeforeAndAfterEach {
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
-      // Write data using Tantivy4Spark
+      // Write data using IndexTables4Spark
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing data to: $tablePath")
       df.write.format("tantivy4spark").save(tablePath)
@@ -92,7 +92,7 @@ class BroadcastLocalityTest extends TestBase with BeforeAndAfterEach {
 
       // Read data back using V2 API - this should trigger locality tracking and preferredLocations calls
       println("🧪 [TEST] Reading data back using V2 DataSource API...")
-      val readDf  = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
 
       // Verify data was read correctly

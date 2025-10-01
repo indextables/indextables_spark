@@ -34,13 +34,13 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
   override def beforeAll(): Unit = {
     spark = SparkSession
       .builder()
-      .appName("Tantivy4Spark Tests")
+      .appName("IndexTables4Spark Tests")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       // Set default AWS parameters to non-null values for all tests
       .config("spark.indextables.aws.accessKey", "test-default-access-key")
       .config("spark.indextables.aws.secretKey", "test-default-secret-key")

@@ -96,7 +96,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val mergedData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     val totalCount = mergedData.count()
@@ -126,7 +126,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val mergedData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     val totalCount = mergedData.count()
@@ -155,7 +155,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val mergedData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     val totalCount = mergedData.count()
@@ -218,7 +218,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     testData
       .coalesce(1)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
       .save(tempTablePath)
@@ -232,7 +232,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Verify the operation succeeded (indirect validation that temp directory was accepted)
     val data = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     assert(data.count() == 10, "Merge should succeed with valid temp directory")
@@ -255,7 +255,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       )
 
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tempTablePath)
 
@@ -264,7 +264,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Verify success
     val data = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     assert(data.count() == 5, "Should successfully extract and use temp directory configuration")
@@ -291,7 +291,7 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       batchData
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "25")
         .mode("append")
         .save(tempTablePath)

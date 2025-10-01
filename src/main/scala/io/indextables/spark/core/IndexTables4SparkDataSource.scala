@@ -55,7 +55,7 @@ import java.util
 import scala.collection.JavaConverters._
 import io.indextables.spark.io.CloudStorageProviderFactory
 
-object Tantivy4SparkRelation {
+object IndexTables4SparkRelation {
   def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {
     val bais = new java.io.ByteArrayInputStream(zipData)
     val zis  = new java.util.zip.ZipInputStream(bais)
@@ -194,7 +194,7 @@ object Tantivy4SparkRelation {
     import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
     // Create local logger for executor to avoid serialization issues
-    val executorLogger = LoggerFactory.getLogger(Tantivy4SparkRelation.getClass)
+    val executorLogger = LoggerFactory.getLogger(IndexTables4SparkRelation.getClass)
 
     // Recreate Hadoop configuration in executor context
     val localHadoopConf = new org.apache.hadoop.conf.Configuration()
@@ -511,8 +511,8 @@ object Tantivy4SparkRelation {
   }
 }
 
-class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider with CreatableRelationProvider {
-  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
+class IndexTables4SparkDataSource extends DataSourceRegister with RelationProvider with CreatableRelationProvider {
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkDataSource])
 
   override def shortName(): String = "tantivy4spark"
 
@@ -522,7 +522,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
   ): BaseRelation = {
     // For reads, create a relation that can handle queries
     val path = parameters.getOrElse("path", throw new IllegalArgumentException("Path is required"))
-    new Tantivy4SparkRelation(path, sqlContext, parameters)
+    new IndexTables4SparkRelation(path, sqlContext, parameters)
   }
 
   override def createRelation(
@@ -571,7 +571,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
         }
     }
     val writeOptions  = new CaseInsensitiveStringMap(finalOptions.asJava)
-    val tableProvider = new Tantivy4SparkTableProvider()
+    val tableProvider = new IndexTables4SparkTableProvider()
 
     // Get or create the table
     val table = tableProvider.getTable(data.schema, Array.empty, writeOptions)
@@ -584,14 +584,14 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     }
 
     // Get the write builder and execute the write
-    val writeBuilder = table.asInstanceOf[Tantivy4SparkTable].newWriteBuilder(writeInfo)
+    val writeBuilder = table.asInstanceOf[IndexTables4SparkTable].newWriteBuilder(writeInfo)
 
     // Handle SaveMode for V1 DataSource API
     val finalWriteBuilder = mode match {
       case SaveMode.Overwrite =>
         logger.info("V1 API: SaveMode.Overwrite detected, enabling overwrite mode")
         // For V1 API, SaveMode.Overwrite should call truncate() to enable overwrite behavior
-        writeBuilder.asInstanceOf[Tantivy4SparkWriteBuilder].truncate()
+        writeBuilder.asInstanceOf[IndexTables4SparkWriteBuilder].truncate()
       case _ =>
         logger.info(s"V1 API: SaveMode detected: $mode")
         writeBuilder
@@ -619,7 +619,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
       "fs.s3a.impl"              -> hadoopConf.get("fs.s3a.impl", ""),
       "fs.hdfs.impl"             -> hadoopConf.get("fs.hdfs.impl", ""),
       "fs.file.impl"             -> hadoopConf.get("fs.file.impl", ""),
-      // Add Tantivy4Spark-specific configurations for executor distribution
+      // Add IndexTables4Spark-specific configurations for executor distribution
       "spark.indextables.aws.accessKey"      -> hadoopConf.get("spark.indextables.aws.accessKey", ""),
       "spark.indextables.aws.secretKey"      -> hadoopConf.get("spark.indextables.aws.secretKey", ""),
       "spark.indextables.aws.sessionToken"   -> hadoopConf.get("spark.indextables.aws.sessionToken", ""),
@@ -638,10 +638,10 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
 
     // Check if optimized write is enabled and apply repartitioning if needed
     val finalData = if (enrichedOptions.getOrElse("optimizeWrite", "true").toBoolean) {
-      // Use Tantivy4SparkOptions for proper validation
+      // Use IndexTables4SparkOptions for proper validation
       import scala.jdk.CollectionConverters._
       val optionsMap     = new org.apache.spark.sql.util.CaseInsensitiveStringMap(enrichedOptions.asJava)
-      val tantivyOptions = Tantivy4SparkOptions(optionsMap)
+      val tantivyOptions = IndexTables4SparkOptions(optionsMap)
 
       // Determine target records per split with auto-sizing support
       val (targetRecords, totalRecords) = if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
@@ -765,7 +765,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
     val commitMessages = finalData.queryExecution.toRdd
       .mapPartitionsWithIndex { (partitionId, iterator) =>
         // Create a local logger inside the closure to avoid serialization issues
-        val executorLogger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataSource])
+        val executorLogger = LoggerFactory.getLogger(classOf[IndexTables4SparkDataSource])
 
         // Recreate Hadoop configuration with essential properties in the executor
         val localHadoopConf = new org.apache.hadoop.conf.Configuration()
@@ -819,7 +819,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
           props.toMap
         }
 
-        val localWriterFactory = new io.indextables.spark.core.Tantivy4SparkWriterFactory(
+        val localWriterFactory = new io.indextables.spark.core.IndexTables4SparkWriterFactory(
           new Path(serializablePath),
           serializableSchema,
           // Filter options and normalize keys
@@ -858,7 +858,7 @@ class Tantivy4SparkDataSource extends DataSourceRegister with RelationProvider w
   }
 }
 
-class Tantivy4SparkRelation(
+class IndexTables4SparkRelation(
   path: String,
   val sqlContext: SQLContext,
   readOptions: Map[String, String] = Map.empty)
@@ -867,7 +867,7 @@ class Tantivy4SparkRelation(
     with PrunedFilteredScan
     with CatalystScan {
 
-  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkRelation])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkRelation])
 
   override def schema: StructType = {
     import scala.jdk.CollectionConverters._
@@ -1040,7 +1040,7 @@ class Tantivy4SparkRelation(
 
         // Extract serializable metadata from AddAction - required for tantivy4java operations
         val serializableMetadata = if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
-          Some(Tantivy4SparkRelation.createSerializableMetadataFromAddAction(addAction))
+          Some(IndexTables4SparkRelation.createSerializableMetadataFromAddAction(addAction))
         } else {
           throw new RuntimeException(
             s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata."
@@ -1068,7 +1068,7 @@ class Tantivy4SparkRelation(
         logger.info(s"V1 API: Required columns: ${requiredColumns.mkString(", ")}")
       }
 
-      // Use Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
+      // Use Hadoop configuration from driver context - include both traditional Hadoop configs and IndexTables4Spark configs
       val baseHadoopProps = Map(
         "fs.defaultFS"             -> hadoopConf.get("fs.defaultFS", ""),
         "fs.s3a.access.key"        -> hadoopConf.get("fs.s3a.access.key", ""),
@@ -1155,8 +1155,8 @@ class Tantivy4SparkRelation(
       // Create RDD from file paths using standalone object method for proper serialization
       // Now with proper filter pushdown support via PrunedFilteredScan
       spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap {
-        case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
-          Tantivy4SparkRelation.processFileWithCustomFilters(
+        case (filePath: String, splitMetadata: Option[IndexTables4SparkRelation.SerializableSplitMetadata]) =>
+          IndexTables4SparkRelation.processFileWithCustomFilters(
             filePath,
             serializableSchema,
             hadoopConfProps,
@@ -1274,7 +1274,7 @@ class Tantivy4SparkRelation(
 
         // Extract serializable metadata from AddAction - required for tantivy4java operations
         val serializableMetadata = if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
-          Some(Tantivy4SparkRelation.createSerializableMetadataFromAddAction(addAction))
+          Some(IndexTables4SparkRelation.createSerializableMetadataFromAddAction(addAction))
         } else {
           throw new RuntimeException(
             s"AddAction for ${addAction.path} does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata."
@@ -1302,7 +1302,7 @@ class Tantivy4SparkRelation(
         logger.info(s"V1 API: Required columns: ${requiredColumns.mkString(", ")}")
       }
 
-      // Use Hadoop configuration from driver context - include both traditional Hadoop configs and Tantivy4Spark configs
+      // Use Hadoop configuration from driver context - include both traditional Hadoop configs and IndexTables4Spark configs
       val baseHadoopProps = Map(
         "fs.defaultFS"             -> hadoopConf.get("fs.defaultFS", ""),
         "fs.s3a.access.key"        -> hadoopConf.get("fs.s3a.access.key", ""),
@@ -1396,8 +1396,8 @@ class Tantivy4SparkRelation(
       // Create RDD from file paths using standalone object method for proper serialization
       // Pass all filters to processFile method
       spark.sparkContext.parallelize(serializableFilesWithMetadata).flatMap {
-        case (filePath: String, splitMetadata: Option[Tantivy4SparkRelation.SerializableSplitMetadata]) =>
-          Tantivy4SparkRelation.processFileWithCustomFilters(
+        case (filePath: String, splitMetadata: Option[IndexTables4SparkRelation.SerializableSplitMetadata]) =>
+          IndexTables4SparkRelation.processFileWithCustomFilters(
             filePath,
             serializableSchema,
             hadoopConfProps,
@@ -1468,7 +1468,7 @@ class Tantivy4SparkRelation(
   }
 }
 
-class Tantivy4SparkTable(
+class IndexTables4SparkTable(
   path: String,
   schema: StructType,
   options: CaseInsensitiveStringMap,
@@ -1477,7 +1477,7 @@ class Tantivy4SparkTable(
     with SupportsWrite
     with org.apache.spark.sql.connector.catalog.SupportsMetadataColumns {
 
-  private val logger         = LoggerFactory.getLogger(classOf[Tantivy4SparkTable])
+  private val logger         = LoggerFactory.getLogger(classOf[IndexTables4SparkTable])
   private val spark          = SparkSession.active
   private val tablePath      = new Path(path)
   private val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
@@ -1634,10 +1634,10 @@ class Tantivy4SparkTable(
     }
 
     // Debug: Log final configuration passed to scan builder
-    logger.info(s"🔧 Passing ${tantivyConfigs.size} Tantivy4Spark configurations to scan builder")
+    logger.info(s"🔧 Passing ${tantivyConfigs.size} IndexTables4Spark configurations to scan builder")
     logger.info(s"🔧 Sources: Hadoop(${hadoopTantivyConfigs.size}), Spark(${sparkTantivyConfigs.size}), Options(${readTantivyConfigs.size})")
 
-    new Tantivy4SparkScanBuilder(spark, transactionLog, schema(), options, tantivyConfigs)
+    new IndexTables4SparkScanBuilder(spark, transactionLog, schema(), options, tantivyConfigs)
   }
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
@@ -1741,7 +1741,7 @@ class Tantivy4SparkTable(
       options
     }
 
-    new Tantivy4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, enrichedHadoopConf)
+    new IndexTables4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, enrichedHadoopConf)
   }
 
   override def partitioning(): Array[org.apache.spark.sql.connector.expressions.Transform] =
@@ -1769,7 +1769,7 @@ class Tantivy4SparkTable(
 
 }
 
-class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.TableProvider {
+class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.catalog.TableProvider {
 
   /**
    * Extracts paths from options, supporting both direct path parameters and multiple paths. Handles paths from
@@ -1887,7 +1887,7 @@ class Tantivy4SparkTableProvider extends org.apache.spark.sql.connector.catalog.
     val mergedOptions   = new CaseInsensitiveStringMap(mergedConfigMap.asJava)
 
     // Use the first path as the primary table path (support for multiple paths can be added later)
-    new Tantivy4SparkTable(paths.head, schema, mergedOptions, partitioning)
+    new IndexTables4SparkTable(paths.head, schema, mergedOptions, partitioning)
   }
 
   override def supportsExternalMetadata(): Boolean = true

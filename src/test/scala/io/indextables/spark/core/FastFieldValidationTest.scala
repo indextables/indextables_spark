@@ -39,13 +39,13 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data WITHOUT configuring batch as fast field
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       // This should work - unfiltered count (uses transaction log optimization)
@@ -70,14 +70,14 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data WITHOUT configuring batch as fast field (explicitly exclude it from auto-fast-field)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.nonfastfields", "batch")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       // This should FAIL - filtered count without fast field configuration
@@ -108,14 +108,14 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data WITH batch configured as fast field
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.fastfields", "batch")
         .mode("overwrite")
         .save(path)
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       // This should work - filtered count with fast field configuration
@@ -145,7 +145,7 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Write data with only one fast field configured (explicitly exclude type from auto-fast-field)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.fastfields", "batch")   // Only batch, not type
         .option("spark.indextables.indexing.nonfastfields", "type") // Explicitly exclude type
         .mode("overwrite")
@@ -153,7 +153,7 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
 
       // Read data back
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       // This should work - filter only on fast field

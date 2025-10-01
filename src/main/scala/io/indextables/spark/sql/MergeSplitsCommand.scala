@@ -140,7 +140,7 @@ case class MergeSplitsCommand(
 
       if (!hasMetadata) {
         logger.info(s"No transaction log found at: $tablePath")
-        return Seq(Row(tablePath.toString, "No splits merged - not a valid Tantivy4Spark table"))
+        return Seq(Row(tablePath.toString, "No splits merged - not a valid IndexTables4Spark table"))
       }
 
       // Validate table has files

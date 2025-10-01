@@ -19,7 +19,7 @@ package io.indextables.spark.demo
 
 import io.indextables.spark.TestBase
 import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
-import io.indextables.spark.core.Tantivy4SparkScan
+import io.indextables.spark.core.IndexTables4SparkScan
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.sources._
@@ -27,7 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.jdk.CollectionConverters._
 
 /**
- * Demonstration of data skipping functionality in Tantivy4Spark.
+ * Demonstration of data skipping functionality in IndexTables4Spark.
  *
  * This demo shows how the query engine automatically skips reading files that cannot contain matching data based on
  * min/max statistics.
@@ -35,7 +35,7 @@ import scala.jdk.CollectionConverters._
 object DataSkippingDemo extends TestBase {
 
   def main(args: Array[String]): Unit = {
-    println("🚀 Tantivy4Spark Data Skipping Demo")
+    println("🚀 IndexTables4Spark Data Skipping Demo")
     println("=====================================")
 
     // Initialize Spark and test environment
@@ -197,7 +197,7 @@ object DataSkippingDemo extends TestBase {
 
     val options              = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
     val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-    val scan = new Tantivy4SparkScan(spark, transactionLog, schema, filters, options, None, emptyBroadcastConfig.value)
+    val scan = new IndexTables4SparkScan(spark, transactionLog, schema, filters, options, None, emptyBroadcastConfig.value)
 
     val totalFiles   = transactionLog.listFiles().length
     val partitions   = scan.planInputPartitions()

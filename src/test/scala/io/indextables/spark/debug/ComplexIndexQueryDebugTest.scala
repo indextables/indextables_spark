@@ -20,7 +20,7 @@ class ComplexIndexQueryDebugTest extends TestBase {
 
     // Same configuration as failing test
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .option("spark.indextables.indexing.typemap.title", "text")      // tokenized search
       .option("spark.indextables.indexing.typemap.author", "string")   // exact matching
@@ -29,7 +29,7 @@ class ComplexIndexQueryDebugTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     df.createOrReplaceTempView("debug_test")

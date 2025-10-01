@@ -234,7 +234,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     // S3 path for testing
     val s3Path = s"s3a://$TEST_BUCKET/tantivy4spark-test-data"
 
-    // Write DataFrame to S3 using Tantivy4Spark - pass all 3 credentials as options for executor distribution
+    // Write DataFrame to S3 using IndexTables4Spark - pass all 3 credentials as options for executor distribution
     data.write
       .format("tantivy4spark")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)

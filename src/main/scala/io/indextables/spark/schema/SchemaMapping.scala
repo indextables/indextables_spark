@@ -22,7 +22,7 @@ import org.apache.spark.sql.types._
 import org.slf4j.LoggerFactory
 
 /**
- * Comprehensive schema mapping system for Tantivy4Spark.
+ * Comprehensive schema mapping system for IndexTables4Spark.
  *
  * Responsibilities:
  *   - Write-side: Handle schema for new vs existing datasets

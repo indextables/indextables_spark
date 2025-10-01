@@ -36,10 +36,10 @@ class IndexingConfigurationTest extends TestBase with Matchers {
         .toDF("id", "content")
 
       // Write without any field type configuration - should default to string
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read back and verify we can query with exact matching (string behavior)
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.filter(df("content") === "content one").collect()
 
       results should have length 1
@@ -61,12 +61,12 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure content field as text type
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Text fields with === should still use exact matching (not tokenized)
       // For exact phrase search, the full phrase must match exactly
@@ -95,12 +95,12 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure score as fast field
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.fastfields", "score")
         .save(tablePath)
 
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.filter(df("score") > 150).collect()
 
       results should have length 1
@@ -121,12 +121,12 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure metadata as store-only (not indexed)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.storeonlyfields", "metadata")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Should be able to filter on indexed content field
       val contentResults = df.filter(df("content") === "searchable content").collect()
@@ -150,12 +150,12 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure searchField as index-only (not stored)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.indexonlyfields", "searchField")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Should be able to filter on indexed field
       val results = df.filter(df("searchField") === "searchable").collect()
@@ -179,13 +179,13 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure email field with text type and custom tokenizer
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.email", "text")
         .option("spark.indextables.indexing.tokenizer.email", "whitespace")
         .save(tablePath)
 
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.filter(df("email") === "test@example.com").collect()
 
       results should have length 1
@@ -206,12 +206,12 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure jsonData as json type
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.jsonData", "json")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Test exact equality on JSON fields (like other field types)
       val exactResults = df.filter(df("jsonData") === """{"name": "john", "age": 30}""").collect()
@@ -235,7 +235,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // First write with text configuration
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
@@ -251,7 +251,7 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       assertThrows[IllegalArgumentException] {
         moreData.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("append")
           .mode("append")
           .option("spark.indextables.indexing.typemap.content", "string")
@@ -273,14 +273,14 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Configure mixed field types
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.exactField", "string")
         .option("spark.indextables.indexing.typemap.textField", "text")
         .option("spark.indextables.indexing.fastfields", "numField")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // String field should match exactly
       val exactResults = df.filter(df("exactField") === "exact match").collect()

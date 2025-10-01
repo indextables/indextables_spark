@@ -47,7 +47,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       .appName("MergeSplitsNumRecordsTest")
       .master("local[2]")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")

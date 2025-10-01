@@ -57,7 +57,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API to ensure we test distributed aggregation
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tablePath)
@@ -65,7 +65,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
       println(s"✅ AVG Simple Test: Data written to $tablePath")
 
       // Read back the data
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Verify we have multiple partitions
       val partitionCount = df.rdd.getNumPartitions
@@ -130,7 +130,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data using V2 API
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")          // String field for GROUP BY
         .option("spark.indextables.indexing.fastfields", "category,score,rating") // All fields must be fast
         .mode(SaveMode.Overwrite)
@@ -138,7 +138,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       println(s"✅ AVG GROUP BY Test: Data written to $tablePath")
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Verify we have multiple partitions
       val partitionCount = df.rdd.getNumPartitions
@@ -214,7 +214,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       // Write data
       largeTestData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category,score,rating")
         .mode(SaveMode.Overwrite)
@@ -222,7 +222,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
 
       println(s"✅ AVG Distributed Test: Large dataset written to $tablePath")
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Test both simple and GROUP BY AVG on the same large dataset
       println("🔍 AVG Distributed Test: Testing simple AVG on large dataset...")

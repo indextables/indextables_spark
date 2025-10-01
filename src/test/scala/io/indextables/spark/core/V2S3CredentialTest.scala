@@ -26,7 +26,7 @@ import org.apache.spark.sql.functions._
 
 /**
  * Test to demonstrate the credential propagation issue in V2 read path. Specifically tests that AWS credentials are
- * properly passed from driver to executors when using SplitSearchEngine.fromSplitFile in Tantivy4SparkPartitionReader.
+ * properly passed from driver to executors when using SplitSearchEngine.fromSplitFile in IndexTables4SparkPartitionReader.
  */
 class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -134,7 +134,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
     // Write using V2 API (this should work since write path was already fixed)
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Force V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Force V2 API
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -147,7 +147,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
     // Read using V2 API - this is where the credential propagation issue should manifest
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Force V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Force V2 API
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -183,7 +183,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
     // Write data first
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -205,7 +205,7 @@ class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // This read should rely entirely on broadcast config from read options
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.aws.accessKey", ACCESS_KEY)
         .option("spark.indextables.aws.secretKey", SECRET_KEY)
         .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-grammar Tantivy4SparkSqlBase;
+grammar IndexTables4SparkSqlBase;
 
 @members {
   /**
@@ -47,13 +47,13 @@ statement
         (TARGET SIZE targetSize=alphanumericValue)?
         (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
-    | FLUSH tantivyKeyword SEARCHER CACHE                       #flushTantivyCache
-    | INVALIDATE tantivyKeyword TRANSACTION LOG CACHE
-        (FOR (path=STRING | table=qualifiedName))?             #invalidateTantivyTransactionLogCache
+    | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
+    | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
+        (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
     | .*?                                                       #passThrough
     ;
 
-tantivyKeyword
+indexTablesKeyword
     : TANTIVY4SPARK | INDEXTABLES
     ;
 

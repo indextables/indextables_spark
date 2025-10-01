@@ -63,7 +63,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
-      val scanBuilder = new Tantivy4SparkScanBuilder(
+      val scanBuilder = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog,
         testSchema,
@@ -104,7 +104,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig1 = spark.sparkContext.broadcast(optionsWithFastFields)
 
-      val scanBuilder1 = new Tantivy4SparkScanBuilder(
+      val scanBuilder1 = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog1,
         testSchema,
@@ -112,8 +112,8 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
         broadcastConfig1.value
       )
 
-      // Test Tantivy4SparkOptions fast field detection
-      val tantivyOptions1 = new Tantivy4SparkOptions(options1)
+      // Test IndexTables4SparkOptions fast field detection
+      val tantivyOptions1 = new IndexTables4SparkOptions(options1)
       val fastFields1     = tantivyOptions1.getFastFields
       assert(fastFields1.contains("score"), "score should be detected as fast field")
       assert(fastFields1.contains("value"), "value should be detected as fast field")
@@ -127,7 +127,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val options2 = new CaseInsensitiveStringMap(optionsWithoutFastFields.asJava)
 
-      val tantivyOptions2 = new Tantivy4SparkOptions(options2)
+      val tantivyOptions2 = new IndexTables4SparkOptions(options2)
       val fastFields2     = tantivyOptions2.getFastFields
       assert(!fastFields2.contains("score"), "score should not be detected as fast field")
       assert(fastFields2.contains("value"), "value should be detected as fast field")
@@ -157,7 +157,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
-      val tantivyOptions   = new Tantivy4SparkOptions(options)
+      val tantivyOptions   = new IndexTables4SparkOptions(options)
       val fieldTypeMapping = tantivyOptions.getFieldTypeMapping
 
       assert(fieldTypeMapping.contains("content"), "content field type mapping should be present")
@@ -190,7 +190,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
-      val scanBuilder = new Tantivy4SparkScanBuilder(
+      val scanBuilder = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog,
         testSchema,
@@ -250,7 +250,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
-      val scanBuilder = new Tantivy4SparkScanBuilder(
+      val scanBuilder = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog,
         testSchema,
@@ -300,7 +300,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
 
       // Test indextables configuration (preferred)
       val options1        = new CaseInsensitiveStringMap(indextablesOptions.asJava)
-      val tantivyOptions1 = new Tantivy4SparkOptions(options1)
+      val tantivyOptions1 = new IndexTables4SparkOptions(options1)
 
       // Both should work, but indextables is the preferred configuration
       val fastFields1 = tantivyOptions1.getFastFields
@@ -311,7 +311,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
 
       // Test tantivy4spark configuration (legacy)
       val options2        = new CaseInsensitiveStringMap(tantivyOptions.asJava)
-      val tantivyOptions2 = new Tantivy4SparkOptions(options2)
+      val tantivyOptions2 = new IndexTables4SparkOptions(options2)
 
       val fastFields2 = tantivyOptions2.getFastFields
       assert(fastFields2.contains("score"), "tantivy4spark config should still work for backward compatibility")

@@ -207,7 +207,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
       val reconstructedMetadata =
         try
-          // This simulates the SplitMetadata reconstruction in Tantivy4SparkPartitions.scala
+          // This simulates the SplitMetadata reconstruction in IndexTables4SparkPartitions.scala
           new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
             addAction.path,                     // splitId
             "tantivy4spark-index",              // indexUid (NEW - required)
@@ -271,7 +271,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
-      // Write data using Tantivy4Spark
+      // Write data using IndexTables4Spark
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing data to: $tablePath")
       df.write.format("tantivy4spark").save(tablePath)
@@ -340,7 +340,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       // Write data using V2 DataSource with full provider class name
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing V2 data to: $tablePath")
-      df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read transaction log to check for footer offset metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
@@ -366,7 +366,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       }
 
       // Verify data can be read back correctly using V2 DataSource
-      val readDf  = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
 
       assert(results.length == 3)
@@ -407,10 +407,10 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       // Write data using V2 DataSource
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing V2 IndexQuery test data to: $tablePath")
-      df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read back and perform IndexQuery operations
-      val readDf = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Test basic read first
       val allResults = readDf.collect()
@@ -457,7 +457,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       // Write using V2 DataSource
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing V2 metadata test to: $tablePath")
-      df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read transaction log and analyze metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
@@ -492,7 +492,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       }
 
       // Verify data integrity after read
-      val readDf  = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
 
       assert(results.length == 5)

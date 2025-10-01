@@ -43,7 +43,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
     // Attempt to read non-existent table using V2 API
     val exception = intercept[RuntimeException] {
       spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(nonExistentPath)
         .count()
     }
@@ -64,13 +64,13 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
         )
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Verify table works initially
       val initialResult = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
       initialResult.count() shouldBe 10
 
@@ -87,7 +87,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       // Attempt to read corrupted table
       val exception = intercept[Exception] {
         spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(path)
           .count()
       }
@@ -105,14 +105,14 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       val data = spark.range(5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Test with invalid cache size
       val exception1 = intercept[Exception] {
         spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "invalid-number")
           .load(path)
           .count()
@@ -135,7 +135,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       // This should fail during write with clear error message
       val exception = intercept[UnsupportedOperationException] {
         data.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(path)
       }
@@ -157,13 +157,13 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
 
       // Write empty dataset
       emptyData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read empty dataset
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 0
@@ -181,7 +181,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
         )
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -189,7 +189,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       val futures = (1 to 3).map { _ =>
         scala.concurrent.Future {
           val result = spark.read
-            .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .load(path)
           result.count()
         }(scala.concurrent.ExecutionContext.global)
@@ -217,7 +217,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
         )
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -239,7 +239,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       // Attempt to read corrupted table
       val exception = intercept[Exception] {
         spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(path)
           .collect()
       }
@@ -261,7 +261,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
     invalidPaths.foreach { invalidPath =>
       val exception = intercept[Exception] {
         spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(invalidPath)
           .count()
       }
@@ -277,7 +277,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       val data = spark.range(5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -289,7 +289,7 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       // This test may not always trigger a permission error in all environments
       try
         spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load("/root/cannot-access-this-path")
           .count()
 

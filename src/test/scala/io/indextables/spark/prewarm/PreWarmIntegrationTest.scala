@@ -28,7 +28,7 @@ import java.nio.file.{Files, Paths}
 import org.apache.commons.io.FileUtils
 
 /**
- * Integration test for the pre-warm functionality with actual Tantivy4Spark DataSource. This test verifies the complete
+ * Integration test for the pre-warm functionality with actual IndexTables4Spark DataSource. This test verifies the complete
  * pre-warm flow from write to read with cache warming.
  */
 class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
@@ -76,7 +76,7 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     BroadcastSplitLocalityManager.clearAll()
   }
 
-  // Note: These are integration tests that would require the full Tantivy4Spark implementation
+  // Note: These are integration tests that would require the full IndexTables4Spark implementation
   // For now, they serve as documentation of the expected behavior
 
   test("Pre-warm should be enabled by default") {

@@ -1,9 +1,9 @@
 package io.indextables.provider
 
-import io.indextables.spark.core.Tantivy4SparkTableProvider
+import io.indextables.spark.core.IndexTables4SparkTableProvider
 
 /**
- * Alias for Tantivy4SparkTableProvider to provide a more generic interface. This allows users to access Tantivy4Spark
+ * Alias for IndexTables4SparkTableProvider to provide a more generic interface. This allows users to access IndexTables4Spark
  * functionality using the io.indextables.provider.IndexTablesProvider format. Configuration uses spark.indextables
  * prefix which is interchangeable with spark.indextables.
  *
@@ -14,7 +14,7 @@ import io.indextables.spark.core.Tantivy4SparkTableProvider
  * spark.indextables.indexing.typemap.content spark.conf.set("spark.indextables.merge.debug", "true") // Same as
  * spark.indextables.merge.debug
  */
-class IndexTablesProvider extends Tantivy4SparkTableProvider {
-  // This class inherits all functionality from Tantivy4SparkTableProvider
+class IndexTablesProvider extends IndexTables4SparkTableProvider {
+  // This class inherits all functionality from IndexTables4SparkTableProvider
   // No additional implementation needed - it serves as a pure alias
 }

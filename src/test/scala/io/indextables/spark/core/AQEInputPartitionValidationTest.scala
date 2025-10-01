@@ -27,7 +27,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 
 /**
- * Tests to validate that Tantivy4SparkInputPartition correctly preserves footer metadata during AQE stage-wise
+ * Tests to validate that IndexTables4SparkInputPartition correctly preserves footer metadata during AQE stage-wise
  * execution. InputPartitions are serialized and sent to executors, so this test ensures footer metadata survives this
  * process.
  */
@@ -40,7 +40,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
     println("🔧 AQE enabled for InputPartition validation tests")
   }
 
-  test("should serialize Tantivy4SparkInputPartition with footer metadata") {
+  test("should serialize IndexTables4SparkInputPartition with footer metadata") {
     withTempPath { tempPath =>
       // Create test data
       val data = spark
@@ -91,7 +91,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           println(s"   AddAction docMapping: ${originalDocMapping.length} chars")
 
           // Create InputPartition
-          val inputPartition = new Tantivy4SparkInputPartition(
+          val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
             filters = filters,
@@ -163,7 +163,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
 
       // Create reader factory with broadcast config
       val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-      val readerFactory = new Tantivy4SparkReaderFactory(
+      val readerFactory = new IndexTables4SparkReaderFactory(
         readSchema = readSchema,
         limit = Some(15),
         config = emptyBroadcastConfig.value,
@@ -175,7 +175,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           println(s"\n🧪 Testing PartitionReader creation for partition $index:")
 
           // Create InputPartition
-          val inputPartition = new Tantivy4SparkInputPartition(
+          val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
             filters = Array.empty,
@@ -245,7 +245,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
       addActions.zipWithIndex.foreach {
         case (addAction, index) =>
           // Create InputPartition
-          val inputPartition = new Tantivy4SparkInputPartition(
+          val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
             filters = Array.empty,
@@ -328,8 +328,8 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
   }
 
   /** Helper method to serialize and deserialize InputPartition */
-  private def serializeDeserializeInputPartition(partition: Tantivy4SparkInputPartition)
-    : Tantivy4SparkInputPartition = {
+  private def serializeDeserializeInputPartition(partition: IndexTables4SparkInputPartition)
+    : IndexTables4SparkInputPartition = {
     val baos = new ByteArrayOutputStream()
     val oos  = new ObjectOutputStream(baos)
 
@@ -340,7 +340,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
       val bais = new ByteArrayInputStream(baos.toByteArray)
       val ois  = new ObjectInputStream(bais)
 
-      val deserialized = ois.readObject().asInstanceOf[Tantivy4SparkInputPartition]
+      val deserialized = ois.readObject().asInstanceOf[IndexTables4SparkInputPartition]
       ois.close()
       deserialized
     } finally
@@ -400,7 +400,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
         // Test serialization of InputPartition containing this AddAction
-        val inputPartition = new Tantivy4SparkInputPartition(
+        val inputPartition = new IndexTables4SparkInputPartition(
           addAction = addAction,
           readSchema = data.schema,
           filters = Array.empty,

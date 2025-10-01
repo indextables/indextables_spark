@@ -47,13 +47,13 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       try {
         // Write with session config
         data.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(path)
 
         // Read with option override (highest precedence)
         val result = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "500000000") // Should override session config
           .load(path)
 
@@ -71,7 +71,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -85,7 +85,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
       testCases.foreach { configKey =>
         val result = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option(configKey, "200000000")
           .load(path)
 
@@ -101,12 +101,12 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 50).select(col("id"), concat(lit("item_"), col("id")).as("name"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Verify the table has data
-      val verifyResult = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(path)
+      val verifyResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       verifyResult.count() shouldBe 50
 
       // Test invalid numeric values
@@ -119,7 +119,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
         case (key, value) =>
           val exception = intercept[Exception] {
             spark.read
-              .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+              .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
               .option(key, value)
               .load(path)
               .count()
@@ -131,7 +131,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
       // Test invalid boolean values (should use defaults)
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.cache.queryCache", "maybe") // Invalid boolean
         .load(path)
 
@@ -155,13 +155,13 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
         // Write inherits session config
         data.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(path)
 
         // First read with partial override
         val result1 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "300000000") // Override one setting
           // cache.name should inherit from session config
           .load(path)
@@ -170,7 +170,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
         // Second read with complete override
         val result2 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.name", "custom-cache")
           .option("spark.indextables.cache.maxSize", "400000000")
           .load(path)
@@ -189,13 +189,13 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Test empty string configurations
       val result1 = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.cache.name", "") // Empty string
         .load(path)
 
@@ -203,7 +203,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
       // Test configurations with whitespace
       val result2 = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.cache.name", "   ") // Whitespace only
         .load(path)
 
@@ -216,7 +216,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 3).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -239,7 +239,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       )
 
       awsConfigTests.foreach { configMap =>
-        val reader = configMap.foldLeft(spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider")) {
+        val reader = configMap.foldLeft(spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")) {
           case (r, (key, value)) => r.option(key, value)
         }
 
@@ -254,7 +254,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -270,7 +270,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
         case (maxSize, maxLoads) =>
           try {
             val result = spark.read
-              .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+              .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
               .option("spark.indextables.cache.maxSize", maxSize)
               .option("spark.indextables.cache.maxConcurrentLoads", maxLoads)
               .load(path)
@@ -291,7 +291,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 4).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -322,7 +322,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       )
 
       protocolConfigs.foreach { configMap =>
-        val reader = configMap.foldLeft(spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider")) {
+        val reader = configMap.foldLeft(spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")) {
           case (r, (key, value)) => r.option(key, value)
         }
 
@@ -337,7 +337,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 5).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -357,7 +357,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       aliasTests.foreach {
         case (key, value) =>
           val result = spark.read
-            .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .option(key, value)
             .load(path)
 
@@ -371,7 +371,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       val data = spark.range(0, 6).select(col("id"))
 
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -382,7 +382,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
       try {
         // Read with conflicting option values (options should win)
         val result = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "300000000") // Conflicts with session config
           .option("spark.indextables.cache.queryCache", "true")   // Conflicts with session config
           .load(path)
@@ -391,7 +391,7 @@ class V2ConfigurationEdgeCaseTest extends TestBase with BeforeAndAfterAll with B
 
         // Test multiple conflicting options (last one should win or implementation-defined)
         val result2 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "200000000") // First value
           .option("spark.indextables.cache.maxSize", "400000000") // Second value (should override)
           .load(path)

@@ -46,13 +46,13 @@ class BulkLoadValidationTest extends TestBase {
 
       // Write using V2 provider
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back using V2 provider
       val readData = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .limit(9999999)
 

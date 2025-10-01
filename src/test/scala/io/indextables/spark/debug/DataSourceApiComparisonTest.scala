@@ -37,7 +37,7 @@ class DataSourceApiComparisonTest extends TestBase {
     }
 
     // Check which DataSource API is being used
-    if (planString.contains("Tantivy4SparkRelation")) {
+    if (planString.contains("IndexTables4SparkRelation")) {
       println(s"📋 Using DataSource V1 API (RelationProvider)")
     } else if (planString.contains("BatchScanExec") || planString.contains("Scan tantivy4spark")) {
       println(s"📋 Using DataSource V2 API (TableProvider)")

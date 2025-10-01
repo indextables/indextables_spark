@@ -40,7 +40,7 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
       .builder()
       .appName("OptimizedTransactionLogTest")
       .master("local[*]")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
       .getOrCreate()
   }

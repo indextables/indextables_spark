@@ -165,9 +165,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
       case _                          => expr.children.exists(containsIndexQueryExpression)
     }
 
-  /** Check if this is a compatible V2 DataSource (Tantivy4Spark) */
+  /** Check if this is a compatible V2 DataSource (IndexTables4Spark) */
   private def isCompatibleV2DataSource(relation: DataSourceV2Relation): Boolean =
-    // Check if this is a Tantivy4Spark V2 table
+    // Check if this is a IndexTables4Spark V2 table
     relation.table.getClass.getName.contains("tantivy4spark") ||
       relation.table.name().contains("tantivy4spark")
 
@@ -235,8 +235,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
     // Store the collected IndexQueries for this instance
     if (indexQueries.nonEmpty) {
-      import io.indextables.spark.core.Tantivy4SparkScanBuilder
-      Tantivy4SparkScanBuilder.storeIndexQueries(instanceKey, indexQueries.toSeq)
+      import io.indextables.spark.core.IndexTables4SparkScanBuilder
+      IndexTables4SparkScanBuilder.storeIndexQueries(instanceKey, indexQueries.toSeq)
       println(
         s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey"
       )
@@ -275,20 +275,20 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
   /** Generate an instance key for a DataSourceV2Relation that matches the ScanBuilder's key. */
   private def generateInstanceKeyForRelation(relation: DataSourceV2Relation): String = {
-    // Extract the actual path from the Tantivy4Spark table
+    // Extract the actual path from the IndexTables4Spark table
     val tablePath =
       try {
         val table = relation.table
 
-        // For Tantivy4Spark tables, extract path from table name which is in format: tantivy4spark.`/actual/path`
+        // For IndexTables4Spark tables, extract path from table name which is in format: tantivy4spark.`/actual/path`
         val tableName = table.name()
         if (tableName.startsWith("tantivy4spark.`") && tableName.endsWith("`")) {
           // Remove "tantivy4spark.`" prefix and "`" suffix to get the actual path
           tableName.substring("tantivy4spark.`".length, tableName.length - 1)
         } else {
-          // Fallback - try direct access to Tantivy4SparkTable path field
+          // Fallback - try direct access to IndexTables4SparkTable path field
           table match {
-            case t4sTable: io.indextables.spark.core.Tantivy4SparkTable =>
+            case t4sTable: io.indextables.spark.core.IndexTables4SparkTable =>
               // Use reflection to get the private path field
               val field = t4sTable.getClass.getDeclaredField("path")
               field.setAccessible(true)
@@ -311,8 +311,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         case _: Exception => None
       }
 
-    import io.indextables.spark.core.Tantivy4SparkScanBuilder
-    Tantivy4SparkScanBuilder.generateInstanceKey(tablePath, executionIdOpt)
+    import io.indextables.spark.core.IndexTables4SparkScanBuilder
+    IndexTables4SparkScanBuilder.generateInstanceKey(tablePath, executionIdOpt)
   }
 
 }

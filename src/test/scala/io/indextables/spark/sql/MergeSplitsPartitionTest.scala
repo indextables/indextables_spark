@@ -97,7 +97,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         data1
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.indexWriter.batchSize", "25")
           .partitionBy("year", "quarter")
           .mode("append")
@@ -116,7 +116,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
         data2
           .coalesce(1)
           .write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.indexWriter.batchSize", "25")
           .partitionBy("year", "quarter")
           .mode("append")
@@ -192,7 +192,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Verify no cross-partition contamination by checking data integrity
     val finalData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     val totalCount = finalData.count()
@@ -424,7 +424,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
           chunkData
             .coalesce(1)
             .write
-            .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .option("spark.indextables.indexWriter.batchSize", "20")
             .partitionBy("year", "quarter")
             .mode("append")
@@ -480,7 +480,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Verify data integrity
     val finalData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
     val totalCount = finalData.count()

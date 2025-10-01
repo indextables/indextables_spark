@@ -48,13 +48,13 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read with column pruning - select only 2 out of 6 columns
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .select("id", "name") // Should prune other columns
 
@@ -87,13 +87,13 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read with limit - should push down limit to scan
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .limit(10)
 
@@ -122,13 +122,13 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read with both filter and limit
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .filter(col("category") === 1) // Should push down filter
         .limit(5)                      // Should push down limit
@@ -165,13 +165,13 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read with complex projection involving expressions
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .select(
           col("id"),
@@ -202,13 +202,13 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
       // Read with filter that matches no records
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .filter(col("group_id") === -1) // No records match this
         .select("id", "value")          // Column pruning
@@ -242,7 +242,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
       // Write using V2 API
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
@@ -251,7 +251,7 @@ class V2AdvancedScanTest extends TestBase with BeforeAndAfterAll with BeforeAndA
       // - Filter pushdown (multiple conditions)
       // - Limit pushdown
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
         .filter(col("status_code") === 1)         // Filter pushdown
         .filter(col("partition_key") < 50)        // Additional filter

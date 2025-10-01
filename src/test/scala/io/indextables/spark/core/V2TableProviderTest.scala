@@ -40,7 +40,7 @@ class V2TableProviderTest extends TestBase {
       testData.write.format("tantivy4spark").save(tempPath)
 
       // Test inferSchema method directly
-      val tableProvider = new Tantivy4SparkTableProvider()
+      val tableProvider = new IndexTables4SparkTableProvider()
 
       import scala.jdk.CollectionConverters._
       val options = new CaseInsensitiveStringMap(Map("path" -> tempPath).asJava)
@@ -77,7 +77,7 @@ class V2TableProviderTest extends TestBase {
         val pathsJson = s"""["$tempPath1", "$tempPath2"]"""
 
         val multiPathData = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("paths", pathsJson)
           .load()
 
@@ -91,7 +91,7 @@ class V2TableProviderTest extends TestBase {
   }
 
   ignore("should handle invalid JSON paths format") {
-    val tableProvider = new Tantivy4SparkTableProvider()
+    val tableProvider = new IndexTables4SparkTableProvider()
 
     import scala.jdk.CollectionConverters._
     val invalidOptions = new CaseInsensitiveStringMap(
@@ -115,7 +115,7 @@ class V2TableProviderTest extends TestBase {
       testData.write.format("tantivy4spark").save(tempPath)
 
       // Get table via V2 API
-      val tableProvider = new Tantivy4SparkTableProvider()
+      val tableProvider = new IndexTables4SparkTableProvider()
       import scala.jdk.CollectionConverters._
       val options = new CaseInsensitiveStringMap(Map("path" -> tempPath).asJava)
 
@@ -134,7 +134,7 @@ class V2TableProviderTest extends TestBase {
   }
 
   ignore("should handle missing path parameter") {
-    val tableProvider = new Tantivy4SparkTableProvider()
+    val tableProvider = new IndexTables4SparkTableProvider()
 
     import scala.jdk.CollectionConverters._
     val emptyOptions = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)

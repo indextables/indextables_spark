@@ -174,7 +174,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Write to real S3 with explicit credentials using V2 provider
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -184,7 +184,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read back from S3 with explicit credentials using V2 provider
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -221,7 +221,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Write to real S3 with explicit credentials
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -231,7 +231,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read back and verify with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -275,7 +275,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     datasets.foreach {
       case (data, path) =>
         data.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .options(writeOptions)
           .mode("overwrite")
           .save(path)
@@ -287,7 +287,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     val totalRecords = datasets.map {
       case (_, path) =>
         val df = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .options(readOptions)
           .load(path)
         val count = df.count()
@@ -321,7 +321,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -331,7 +331,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read and test complex queries with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -401,7 +401,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -411,7 +411,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read and test IndexQuery operations with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -452,7 +452,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     val writeOptions = getWriteOptions()
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -462,7 +462,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read multiple times to test cache behavior with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -503,7 +503,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     val writeOptions = getWriteOptions()
     data1.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .option("spark.indextables.indexing.fastfields", "batch") // Configure batch as fast field
       .mode("overwrite")
@@ -521,7 +521,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     println(s"✍️  Appending second batch to S3...")
 
     data2.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .option("spark.indextables.indexing.fastfields", "batch") // Configure batch as fast field for append
       .mode("append")
@@ -530,7 +530,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Read final result with explicit credentials
     val readOptions = getReadOptions()
     val result = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -604,7 +604,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     )
 
     data.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(s3Path)
@@ -616,8 +616,8 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     println(s"🔧 Testing MERGE SPLITS with s3a:// scheme...")
     // Use direct parser approach like working tests
-    import io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$s3aPath' TARGET SIZE 1048576")
       .asInstanceOf[io.indextables.spark.sql.MergeSplitsCommand]
@@ -646,8 +646,8 @@ class RealS3IntegrationTest extends RealS3TestBase {
     println(s"🔧 Testing MERGE SPLITS with non-existent path...")
 
     // This should complete gracefully without errors
-    import io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser2 = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser2 = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand3 = sqlParser2
       .parsePlan(s"MERGE SPLITS '$nonExistentPath' TARGET SIZE 1048576")
       .asInstanceOf[io.indextables.spark.sql.MergeSplitsCommand]
@@ -686,7 +686,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -694,7 +694,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -704,7 +704,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
     // Verify data exists before merge
     val readOptions = getReadOptions()
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -715,8 +715,8 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     // Execute MERGE SPLITS command
     println(s"🔧 Executing MERGE SPLITS operation...")
-    import io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser3 = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser3 = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand4 = sqlParser3
       .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[io.indextables.spark.sql.MergeSplitsCommand]
@@ -726,7 +726,7 @@ class RealS3IntegrationTest extends RealS3TestBase {
 
     // Verify data integrity after merge
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 

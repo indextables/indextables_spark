@@ -20,7 +20,7 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.SparkSessionExtensions
 
 /**
- * Spark SQL extension for Tantivy4Spark to support custom SQL commands.
+ * Spark SQL extension for IndexTables4Spark to support custom SQL commands.
  *
  * Usage:
  * {{{
@@ -28,13 +28,13 @@ import org.apache.spark.sql.SparkSessionExtensions
  *       .builder()
  *       .appName("...")
  *       .master("...")
- *       .config("spark.sql.extensions", "io.indextables.spark.sql.Tantivy4SparkSessionExtension")
+ *       .config("spark.sql.extensions", "io.indextables.spark.sql.IndexTables4SparkSessionExtension")
  *       .getOrCreate()
  * }}}
  */
-class Tantivy4SparkSessionExtension extends (SparkSessionExtensions => Unit) {
+class IndexTables4SparkSessionExtension extends (SparkSessionExtensions => Unit) {
 
   override def apply(extensions: SparkSessionExtensions): Unit =
-    // Register our SQL parser for Tantivy4Spark commands
-    extensions.injectParser((session, parser) => new Tantivy4SparkSqlParser(parser))
+    // Register our SQL parser for IndexTables4Spark commands
+    extensions.injectParser((session, parser) => new IndexTables4SparkSqlParser(parser))
 }

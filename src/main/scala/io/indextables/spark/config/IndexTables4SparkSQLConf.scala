@@ -17,8 +17,8 @@
 
 package io.indextables.spark.config
 
-/** SQL configuration settings for Tantivy4Spark. */
-object Tantivy4SparkSQLConf {
+/** SQL configuration settings for IndexTables4Spark. */
+object IndexTables4SparkSQLConf {
 
   /////////////////////
   // Optimized Write

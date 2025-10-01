@@ -59,7 +59,7 @@ object TantivyDirectInterface {
   private def autoConfigureFastFields(
     sparkSchema: StructType,
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
-    tantivyOptions: io.indextables.spark.core.Tantivy4SparkOptions
+    tantivyOptions: io.indextables.spark.core.IndexTables4SparkOptions
   ): org.apache.spark.sql.util.CaseInsensitiveStringMap = {
 
     val currentFastFields    = tantivyOptions.getFastFields
@@ -140,7 +140,7 @@ object TantivyDirectInterface {
       )
 
       val builder        = new SchemaBuilder()
-      val tantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(options)
+      val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(options)
 
       // Auto-configure fast fields if none are configured
       val autoConfiguredOptions = autoConfigureFastFields(sparkSchema, options, tantivyOptions)
@@ -151,7 +151,7 @@ object TantivyDirectInterface {
       logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: Keys in autoConfiguredOptions: ${autoConfiguredMap.keys.mkString(", ")}")
       logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}")
 
-      val finalTantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(autoConfiguredOptions)
+      val finalTantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(autoConfiguredOptions)
 
       // DEBUG: Verify what getFastFields returns
       val retrievedFastFields = finalTantivyOptions.getFastFields
@@ -213,7 +213,7 @@ object TantivyDirectInterface {
             builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
           case _ =>
             throw new UnsupportedOperationException(
-              s"Unsupported field type for field $fieldName: $fieldType. Tantivy4Spark does not support complex types like arrays, maps, or structs."
+              s"Unsupported field type for field $fieldName: $fieldType. IndexTables4Spark does not support complex types like arrays, maps, or structs."
             )
         }
       }
@@ -275,7 +275,7 @@ class TantivyDirectInterface(
         return
       }
 
-      val tantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(options)
+      val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(options)
       val errors         = scala.collection.mutable.ListBuffer[String]()
 
       // For each field in the current schema, check if configuration matches existing
@@ -341,7 +341,7 @@ class TantivyDirectInterface(
 
   // Configuration resolution with proper hierarchy: options -> table props -> spark props -> defaults
   private def getConfigValue(key: String, defaultValue: String): String = {
-    import io.indextables.spark.config.Tantivy4SparkSQLConf._
+    import io.indextables.spark.config.IndexTables4SparkSQLConf._
 
     // First try options (highest precedence)
     Option(options.get(key)).filter(_.nonEmpty).getOrElse {
@@ -846,7 +846,7 @@ class TantivyDirectInterface(
    * to use tokenized or exact matching.
    */
   def getFieldIndexingConfig(fieldName: String): io.indextables.spark.core.FieldIndexingConfig = {
-    val tantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(options)
+    val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(options)
     tantivyOptions.getFieldIndexingConfig(fieldName)
   }
 

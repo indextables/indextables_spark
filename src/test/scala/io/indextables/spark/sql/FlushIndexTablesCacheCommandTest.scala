@@ -5,10 +5,10 @@ import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegis
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
-class FlushTantivyCacheCommandTest extends TestBase {
+class FlushIndexTablesCacheCommandTest extends TestBase {
 
-  test("FlushTantivyCacheCommand should execute successfully") {
-    val command = FlushTantivyCacheCommand()
+  test("FlushIndexTablesCacheCommand should execute successfully") {
+    val command = FlushIndexTablesCacheCommand()
     val results = command.run(spark)
 
     // Should return at least 3 results (split_cache, location_registry, tantivy_java_cache)
@@ -48,7 +48,7 @@ class FlushTantivyCacheCommandTest extends TestBase {
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
-      // Write data using Tantivy4Spark - this will create cache managers
+      // Write data using IndexTables4Spark - this will create cache managers
       val tablePath = tempDir.toString
       df.write.format("tantivy4spark").save(tablePath)
 
@@ -57,7 +57,7 @@ class FlushTantivyCacheCommandTest extends TestBase {
       readDf.collect() // Force execution
 
       // Now flush the cache
-      val command = FlushTantivyCacheCommand()
+      val command = FlushIndexTablesCacheCommand()
       val results = command.run(spark)
 
       // Verify results - access by index instead of field name
@@ -81,18 +81,18 @@ class FlushTantivyCacheCommandTest extends TestBase {
     val sqlText = "FLUSH TANTIVY4SPARK SEARCHER CACHE"
 
     // This test verifies that the parser can handle the command
-    val parser     = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser     = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val parsedPlan = parser.parsePlan(sqlText)
 
-    assert(parsedPlan.isInstanceOf[FlushTantivyCacheCommand])
+    assert(parsedPlan.isInstanceOf[FlushIndexTablesCacheCommand])
 
     // Also test parseQuery method
     val parsedQuery = parser.parseQuery(sqlText)
-    assert(parsedQuery.isInstanceOf[FlushTantivyCacheCommand])
+    assert(parsedQuery.isInstanceOf[FlushIndexTablesCacheCommand])
   }
 
   test("SQL command should be case insensitive") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     val variations = Seq(
       "flush tantivy4spark searcher cache",
@@ -102,15 +102,15 @@ class FlushTantivyCacheCommandTest extends TestBase {
 
     variations.foreach { sql =>
       val parsedPlan = parser.parsePlan(sql)
-      assert(parsedPlan.isInstanceOf[FlushTantivyCacheCommand])
+      assert(parsedPlan.isInstanceOf[FlushIndexTablesCacheCommand])
     }
   }
 
   test("non-matching SQL should delegate to default parser") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // This should be handled by the default Spark SQL parser
     val parsedPlan = parser.parsePlan("SELECT 1 as test")
-    assert(!parsedPlan.isInstanceOf[FlushTantivyCacheCommand])
+    assert(!parsedPlan.isInstanceOf[FlushIndexTablesCacheCommand])
   }
 }

@@ -28,16 +28,16 @@ class V2IndexQueryAllValidationTest extends TestBase {
 
       // Write test data using V2 DataSource
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(testDataPath)
 
       val df = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(testDataPath)
 
       // Create temp view for SQL testing
-      spark.sql(s"CREATE OR REPLACE TEMPORARY VIEW tantivy_table USING io.indextables.spark.core.Tantivy4SparkTableProvider OPTIONS (path '$testDataPath')")
+      spark.sql(s"CREATE OR REPLACE TEMPORARY VIEW tantivy_table USING io.indextables.spark.core.IndexTables4SparkTableProvider OPTIONS (path '$testDataPath')")
 
       val searchTerm = "spark" // This term appears in different fields across documents
 

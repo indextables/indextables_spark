@@ -21,7 +21,7 @@ import org.apache.spark.sql.{SparkSession, DataFrame}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 import io.indextables.spark.TestBase
-import io.indextables.spark.config.Tantivy4SparkSQLConf
+import io.indextables.spark.config.IndexTables4SparkSQLConf
 import java.nio.file.Files
 
 /**
@@ -55,7 +55,7 @@ class V2OptimizeWriteTest extends TestBase {
 
     // Write using V2 DataSource with optimizeWrite enabled via option
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
       .mode("overwrite")
       .option("optimizeWrite", "true")
       .option("targetRecordsPerSplit", "40000")       // 40K records per split
@@ -64,7 +64,7 @@ class V2OptimizeWriteTest extends TestBase {
 
     // Read back using V2 DataSource
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
       .load(tempPath)
 
     // Verify data integrity
@@ -100,14 +100,14 @@ class V2OptimizeWriteTest extends TestBase {
 
     // Write with optimizeWrite explicitly disabled
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
       .mode("overwrite")
       .option("optimizeWrite", "false")
       .save(tempPath)
 
     // Read back to verify data integrity
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
       .load(tempPath)
 
     assert(readDf.count() == 10000, "Should read back all 10K rows")
@@ -127,12 +127,12 @@ class V2OptimizeWriteTest extends TestBase {
     val tempPath = Files.createTempDirectory("v2_optimize_session_test_").toFile.getAbsolutePath
 
     // Clear any existing session configuration first to ensure clean test environment
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
 
     // Set session configuration
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "50000")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "50000")
 
     try {
       // Create test data - use a smaller, more predictable dataset
@@ -146,14 +146,14 @@ class V2OptimizeWriteTest extends TestBase {
 
       // Write without specifying options (should use session config)
       df.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .mode("overwrite")
         .option("estimatedRowCount", "100000") // Match actual DataFrame size
         .save(tempPath)
 
       // Verify data
       val readDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .load(tempPath)
 
       assert(readDf.limit(Int.MaxValue).count() == 100000, "Should read back all 100K rows")
@@ -170,8 +170,8 @@ class V2OptimizeWriteTest extends TestBase {
 
     } finally {
       // Clean up session configuration
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
     }
   }
 
@@ -179,12 +179,12 @@ class V2OptimizeWriteTest extends TestBase {
     val tempPath = Files.createTempDirectory("v2_optimize_override_test_").toFile.getAbsolutePath
 
     // Clear any existing session configuration first
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
 
     // Set session configuration for larger splits
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "200000")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "200000")
 
     try {
       // Create test data
@@ -198,7 +198,7 @@ class V2OptimizeWriteTest extends TestBase {
 
       // Write with options that override session config (smaller splits)
       df.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .mode("overwrite")
         .option("targetRecordsPerSplit", "25000") // Override to smaller splits
         .option("estimatedRowCount", "100000")    // Pass row count for V2
@@ -206,7 +206,7 @@ class V2OptimizeWriteTest extends TestBase {
 
       // Verify data
       val readDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .load(tempPath)
 
       assert(readDf.count() == 100000, "Should read back all 100K rows")
@@ -223,8 +223,8 @@ class V2OptimizeWriteTest extends TestBase {
 
     } finally {
       // Clean up session configuration
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
     }
   }
 
@@ -232,12 +232,12 @@ class V2OptimizeWriteTest extends TestBase {
     val tempPath = Files.createTempDirectory("v2_optimize_session_verify_").toFile.getAbsolutePath
 
     // Clear any existing session configuration first
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
 
     // Set session config for optimized writes
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
-    spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "100000")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED, "true")
+    spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT, "100000")
 
     try {
       // Create simple test data
@@ -251,13 +251,13 @@ class V2OptimizeWriteTest extends TestBase {
 
       // Write using V2 DataSource (session config should be recognized)
       df.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .mode("overwrite")
         .save(tempPath)
 
       // Verify data integrity
       val readDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Use V2 API
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Use V2 API
         .load(tempPath)
 
       assert(readDf.count() == 10000, "Should read back all 10K rows")
@@ -270,8 +270,8 @@ class V2OptimizeWriteTest extends TestBase {
       println(s"   Note: V2 API cannot modify execution plan, so actual partitioning follows Spark defaults")
 
     } finally {
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
-      spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+      spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
     }
   }
 }

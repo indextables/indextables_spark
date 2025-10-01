@@ -105,7 +105,7 @@ object PathResolutionUtils {
     path.startsWith("/") || path.contains("://") || path.startsWith("file:")
 }
 
-class Tantivy4SparkInputPartition(
+class IndexTables4SparkInputPartition(
   val addAction: AddAction,
   val readSchema: StructType,
   val filters: Array[Filter],
@@ -142,20 +142,20 @@ class Tantivy4SparkInputPartition(
   }
 }
 
-class Tantivy4SparkReaderFactory(
+class IndexTables4SparkReaderFactory(
   readSchema: StructType,
   limit: Option[Int] = None,
   config: Map[String, String], // Direct config instead of broadcast
   tablePath: Path)
     extends PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkReaderFactory])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkReaderFactory])
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
-    val tantivyPartition = partition.asInstanceOf[Tantivy4SparkInputPartition]
+    val tantivyPartition = partition.asInstanceOf[IndexTables4SparkInputPartition]
     logger.info(s"Creating reader for partition ${tantivyPartition.partitionId}")
 
-    new Tantivy4SparkPartitionReader(
+    new IndexTables4SparkPartitionReader(
       tantivyPartition.addAction,
       readSchema,
       tantivyPartition.filters,
@@ -167,7 +167,7 @@ class Tantivy4SparkReaderFactory(
   }
 }
 
-class Tantivy4SparkPartitionReader(
+class IndexTables4SparkPartitionReader(
   addAction: AddAction,
   readSchema: StructType,
   filters: Array[Filter],
@@ -177,7 +177,7 @@ class Tantivy4SparkPartitionReader(
   indexQueryFilters: Array[Any] = Array.empty)
     extends PartitionReader[InternalRow] {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
 
   // Calculate effective limit: use pushed limit or fall back to default 5000
   private val effectiveLimit: Int = limit.getOrElse(5000)
@@ -501,7 +501,7 @@ class Tantivy4SparkPartitionReader(
   }
 }
 
-class Tantivy4SparkWriterFactory(
+class IndexTables4SparkWriterFactory(
   tablePath: Path,
   writeSchema: StructType,
   serializedOptions: Map[String, String],
@@ -509,7 +509,7 @@ class Tantivy4SparkWriterFactory(
   partitionColumns: Seq[String] = Seq.empty)
     extends DataWriterFactory {
 
-  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkWriterFactory])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkWriterFactory])
 
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
     logger.info(s"Creating writer for partition $partitionId, task $taskId")
@@ -524,7 +524,7 @@ class Tantivy4SparkWriterFactory(
         reconstructedHadoopConf.set(key, value)
     }
 
-    new Tantivy4SparkDataWriter(
+    new IndexTables4SparkDataWriter(
       tablePath,
       writeSchema,
       partitionId,
@@ -536,7 +536,7 @@ class Tantivy4SparkWriterFactory(
   }
 }
 
-class Tantivy4SparkDataWriter(
+class IndexTables4SparkDataWriter(
   tablePath: Path,
   writeSchema: StructType,
   partitionId: Int,
@@ -546,7 +546,7 @@ class Tantivy4SparkDataWriter(
   partitionColumns: Seq[String] = Seq.empty // Partition columns from metadata
 ) extends DataWriter[InternalRow] {
 
-  @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkDataWriter])
 
   // Create CaseInsensitiveStringMap from serialized options for components that need it
   private lazy val options: CaseInsensitiveStringMap = {
@@ -567,12 +567,12 @@ class Tantivy4SparkDataWriter(
 
   // Debug: Log options and hadoop config available in executor
   if (logger.isDebugEnabled) {
-    logger.debug("Tantivy4SparkDataWriter executor options:")
+    logger.debug("IndexTables4SparkDataWriter executor options:")
     options.entrySet().asScala.foreach { entry =>
       val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
       logger.debug(s"  ${entry.getKey} = $value")
     }
-    logger.debug("Tantivy4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
+    logger.debug("IndexTables4SparkDataWriter hadoop config keys containing 'tantivy4spark':")
     hadoopConf.iterator().asScala.filter(_.getKey.contains("tantivy4spark")).foreach { entry =>
       val value = if (entry.getKey.contains("secretKey")) "***" else entry.getValue
       logger.debug(s"  ${entry.getKey} = $value")
@@ -651,7 +651,7 @@ class Tantivy4SparkDataWriter(
       val (searchEngine, statistics, recordCount) = singleWriter.get
       if (recordCount == 0) {
         logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
-        return Tantivy4SparkCommitMessage(Seq.empty)
+        return IndexTables4SparkCommitMessage(Seq.empty)
       }
 
       val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
@@ -676,11 +676,11 @@ class Tantivy4SparkDataWriter(
 
     if (allAddActions.isEmpty) {
       logger.info(s"⚠️  No records written in partition $partitionId")
-      return Tantivy4SparkCommitMessage(Seq.empty)
+      return IndexTables4SparkCommitMessage(Seq.empty)
     }
 
     logger.info(s"Committed partition $partitionId with ${allAddActions.size} split(s)")
-    Tantivy4SparkCommitMessage(allAddActions.toSeq)
+    IndexTables4SparkCommitMessage(allAddActions.toSeq)
   }
 
   private def parsePartitionKey(partitionKey: String): Map[String, String] =

@@ -33,7 +33,7 @@ import java.io.File
 import java.nio.file.{Files, Paths}
 
 /**
- * Manager for Tantivy4Spark split operations using tantivy4java's QuickwitSplit functionality.
+ * Manager for IndexTables4Spark split operations using tantivy4java's QuickwitSplit functionality.
  *
  * Replaces the previous zip-based archive system with split files (.split) that use tantivy4java's optimized storage
  * format and caching system.
@@ -479,7 +479,7 @@ object SplitLocationRegistry {
 /**
  * Global manager for split cache instances.
  *
- * Maintains JVM-wide split cache managers that are shared across all Tantivy4Spark operations within a single JVM
+ * Maintains JVM-wide split cache managers that are shared across all IndexTables4Spark operations within a single JVM
  * (e.g., all tasks in a Spark executor).
  */
 object GlobalSplitCacheManager {

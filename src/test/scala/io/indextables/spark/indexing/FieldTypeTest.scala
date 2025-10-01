@@ -35,12 +35,12 @@ class FieldTypeTest extends TestBase with Matchers {
 
       // Configure content field as text type explicitly
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 2
@@ -63,12 +63,12 @@ class FieldTypeTest extends TestBase with Matchers {
 
       // Configure content field as string type explicitly
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "string")
         .save(tablePath)
 
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 2

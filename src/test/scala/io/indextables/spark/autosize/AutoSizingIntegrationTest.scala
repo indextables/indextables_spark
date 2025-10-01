@@ -18,7 +18,7 @@
 package io.indextables.spark.autosize
 
 import io.indextables.spark.TestBase
-import io.indextables.spark.config.Tantivy4SparkSQLConf
+import io.indextables.spark.config.IndexTables4SparkSQLConf
 import java.nio.file.Files
 
 /** Comprehensive integration tests for auto-sizing feature covering both V1 and V2 APIs. */
@@ -82,7 +82,7 @@ class AutoSizingIntegrationTest extends TestBase {
 
       // V2 API auto-sizing with explicit row count
       autoSizeData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.autoSize.enabled", "true")
         .option("spark.indextables.autoSize.targetSplitSize", "2M")
@@ -91,7 +91,7 @@ class AutoSizingIntegrationTest extends TestBase {
 
       // Verify auto-sized write
       val readBack = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       assert(readBack.count() == 25000, "V2 auto-sized write should contain 25K records")
@@ -119,7 +119,7 @@ class AutoSizingIntegrationTest extends TestBase {
       val warningData = createLargeTestDataFrame(5000)
 
       warningData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.autoSize.enabled", "true")
         .option("spark.indextables.autoSize.targetSplitSize", "500K")
@@ -128,7 +128,7 @@ class AutoSizingIntegrationTest extends TestBase {
 
       // Should still work but with warning
       val readBack = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       assert(readBack.count() == 5000, "Should complete despite missing row count")
@@ -191,8 +191,8 @@ class AutoSizingIntegrationTest extends TestBase {
 
   test("Auto-sizing configuration hierarchy should work correctly") {
     // Clear any existing session config
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
-    spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+    spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE)
 
     withTempPath { tempPath =>
       val testData = createLargeTestDataFrame(3000)
@@ -205,8 +205,8 @@ class AutoSizingIntegrationTest extends TestBase {
 
       try {
         // Test 1: Session configuration
-        spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED, "true")
-        spark.conf.set(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE, "1M")
+        spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED, "true")
+        spark.conf.set(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE, "1M")
 
         val sessionData = createLargeTestDataFrame(4000)
         sessionData.write
@@ -233,8 +233,8 @@ class AutoSizingIntegrationTest extends TestBase {
 
       } finally {
         // Clean up session config
-        spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
-        spark.conf.unset(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE)
+        spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+        spark.conf.unset(IndexTables4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE)
       }
     }
   }

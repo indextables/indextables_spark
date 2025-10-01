@@ -138,13 +138,13 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
 
     // Write data locally using V2 DataSource
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(localPath)
 
     // Read data back locally
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(localPath)
 
     println(s"🔍 TEST: Read data with schema: ${readDf.schema}")
@@ -235,7 +235,7 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     val df = initialDf.withColumn("signup_date", to_date(col("signup_date"), "yyyy-MM-dd"))
 
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -246,7 +246,7 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
       .save(s3Path)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -289,7 +289,7 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
     val df = initialDf.withColumn("signup_date", to_date(col("signup_date"), "yyyy-MM-dd"))
 
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -300,7 +300,7 @@ class V2S3ReviewDataTest extends TestBase with BeforeAndAfterAll with BeforeAndA
       .save(s3Path)
 
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)

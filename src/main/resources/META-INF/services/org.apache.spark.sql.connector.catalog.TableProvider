@@ -1,1 +1,1 @@
-io.indextables.spark.core.Tantivy4SparkTableProvider
+io.indextables.spark.core.IndexTables4SparkTableProvider

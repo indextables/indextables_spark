@@ -35,13 +35,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write without any custom configuration - should use defaults (100MB heap, 2 threads)
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 100

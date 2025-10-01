@@ -48,7 +48,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
     // Test that we can create the scan builder
-    val scanBuilder = new Tantivy4SparkScanBuilder(
+    val scanBuilder = new IndexTables4SparkScanBuilder(
       spark,
       transactionLog,
       schema,
@@ -90,7 +90,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     val transactionLog  = createMockTransactionLog()
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
-    val scanBuilder = new Tantivy4SparkScanBuilder(
+    val scanBuilder = new IndexTables4SparkScanBuilder(
       spark,
       transactionLog,
       schema,
@@ -98,13 +98,13 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
       broadcastConfig.value
     )
 
-    // Verify that the class has the expected Tantivy4SparkOptions integration
-    val optionsClass = Class.forName("io.indextables.spark.core.Tantivy4SparkOptions")
-    assert(optionsClass != null, "Tantivy4SparkOptions class should be available")
+    // Verify that the class has the expected IndexTables4SparkOptions integration
+    val optionsClass = Class.forName("io.indextables.spark.core.IndexTables4SparkOptions")
+    assert(optionsClass != null, "IndexTables4SparkOptions class should be available")
 
     // Verify we can create options instance
     val tantivyOptions = optionsClass.getConstructor(classOf[CaseInsensitiveStringMap]).newInstance(options)
-    assert(tantivyOptions != null, "Should be able to create Tantivy4SparkOptions instance")
+    assert(tantivyOptions != null, "Should be able to create IndexTables4SparkOptions instance")
   }
 
   // Helper methods for creating mock objects

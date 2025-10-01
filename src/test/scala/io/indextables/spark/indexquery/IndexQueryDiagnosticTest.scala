@@ -38,7 +38,7 @@ class IndexQueryDiagnosticTest extends TestBase {
 
     // Write using V2 DataSource API with text fields
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.category", "text")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.author", "string")
@@ -49,7 +49,7 @@ class IndexQueryDiagnosticTest extends TestBase {
 
     // Read it back and verify
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(s"$tempDir/diagnostic_test")
 
     println("=== Reading Data Back ===")

@@ -492,7 +492,7 @@ The system supports several configuration options for performance tuning:
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.indextables.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
-| `spark.indextables.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
+| `spark.indextables.cache.name` | `"indextables-cache"` | Name of the JVM-wide split cache |
 | `spark.indextables.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
 | `spark.indextables.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
 | `spark.indextables.cache.queryCache` | `true` | Enable query result caching |
@@ -583,14 +583,14 @@ spark.conf.set("spark.indextables.indexWriter.batchSize", "20000") // 20,000 doc
 spark.conf.set("spark.indextables.indexWriter.useBatch", "true") // Enable batch writing
 
 // Configure per DataFrame write operation (overrides session config)
-df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB heap
   .option("spark.indextables.indexWriter.threads", "3") // 3 indexing threads
   .option("spark.indextables.indexWriter.batchSize", "15000") // 15,000 documents per batch
   .save("s3://bucket/path")
 
 // Disable batch writing for debugging (use individual document indexing)
-df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.useBatch", "false")
   .save("s3://bucket/path")
 
@@ -598,7 +598,7 @@ df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
 spark.conf.set("spark.indextables.indexWriter.heapSize", "500000000") // 500MB heap
 spark.conf.set("spark.indextables.indexWriter.threads", "8") // 8 indexing threads
 spark.conf.set("spark.indextables.indexWriter.batchSize", "50000") // 50,000 documents per batch
-df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").save("s3://bucket/large-dataset")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/large-dataset")
 ```
 
 #### AWS Configuration
@@ -662,7 +662,7 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 
 #### IndexQuery and IndexQueryAll Operators
 
-Tantivy4Spark supports powerful query operators for native Tantivy query syntax with full filter pushdown:
+IndexTables4Spark supports powerful query operators for native Tantivy query syntax with full filter pushdown:
 
 - **IndexQuery**: Field-specific search with column specification
 - **IndexQueryAll**: All-fields search using virtual `_indexall` column
@@ -670,10 +670,10 @@ Tantivy4Spark supports powerful query operators for native Tantivy query syntax 
 ##### SQL Usage
 
 ```sql
--- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Create table/view from Tantivy4Spark data
+-- Create table/view from IndexTables4Spark data
 CREATE TEMPORARY VIEW my_documents
 USING io.indextables.provider.IndexTablesProvider
 OPTIONS (path 's3://bucket/my-data');
@@ -750,15 +750,15 @@ patterns.foreach { pattern =>
 
 #### IndexQueryAll Operator
 
-Tantivy4Spark supports searching across all fields using the virtual `_indexall` column with the `indexquery` operator:
+IndexTables4Spark supports searching across all fields using the virtual `_indexall` column with the `indexquery` operator:
 
 ##### SQL Usage
 
 ```sql
--- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Create table/view from Tantivy4Spark data
+-- Create table/view from IndexTables4Spark data
 CREATE TEMPORARY VIEW my_documents
 USING io.indextables.provider.IndexTablesProvider
 OPTIONS (path 's3://bucket/my-data');
@@ -827,13 +827,13 @@ spark.sql("SELECT * FROM my_docs WHERE _indexall indexquery 'apache AND spark'")
 
 #### Split Optimization with MERGE SPLITS
 
-Tantivy4Spark provides SQL-based split consolidation to reduce small file overhead and optimize query performance:
+IndexTables4Spark provides SQL-based split consolidation to reduce small file overhead and optimize query performance:
 
 ##### SQL Syntax
 
 ```sql
--- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
 -- Basic merge splits command
 MERGE SPLITS 's3://bucket/path';
@@ -931,7 +931,7 @@ src/main/java/io/indextables/spark/
 
 src/main/antlr4/        # ANTLR grammar definitions
 └── io/indextables/spark/sql/parser/
-    └── Tantivy4SparkSqlBase.g4  # SQL parser grammar for custom commands
+    └── IndexTables4SparkSqlBase.g4  # SQL parser grammar for custom commands
 
 src/test/scala/         # Comprehensive test suite (205+ tests passing)
 ├── io/indextables/spark/
@@ -1010,14 +1010,14 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 
 ### General Questions
 
-**Q: What's the difference between Tantivy4Spark and traditional Spark DataSources like Parquet?**
-A: Tantivy4Spark is optimized for full-text search and analytical queries with features like IndexQuery operators, aggregate pushdown, and native Tantivy search. Parquet excels at columnar analytics but lacks built-in search capabilities.
+**Q: What's the difference between IndexTables4Spark and traditional Spark DataSources like Parquet?**
+A: IndexTables4Spark is optimized for full-text search and analytical queries with features like IndexQuery operators, aggregate pushdown, and native Tantivy search. Parquet excels at columnar analytics but lacks built-in search capabilities.
 
-**Q: Can I use Tantivy4Spark alongside Delta Lake or Parquet?**
-A: Yes! Tantivy4Spark can read from and write to any Spark-compatible data source. You can easily migrate data or use it in hybrid architectures.
+**Q: Can I use IndexTables4Spark alongside Delta Lake or Parquet?**
+A: Yes! IndexTables4Spark can read from and write to any Spark-compatible data source. You can easily migrate data or use it in hybrid architectures.
 
-**Q: What's the relationship between Tantivy4Spark and IndexTables?**
-A: IndexTables is a vendor-neutral alias for Tantivy4Spark. Use `io.indextables.extensions.IndexTablesSparkExtensions` and `io.indextables.provider.IndexTablesProvider` for the same functionality with a generic namespace.
+**Q: What's the relationship between IndexTables4Spark and IndexTables?**
+A: IndexTables is a vendor-neutral alias for IndexTables4Spark. Use `io.indextables.extensions.IndexTablesSparkExtensions` and `io.indextables.provider.IndexTablesProvider` for the same functionality with a generic namespace.
 
 ### Performance Questions
 
@@ -1036,7 +1036,7 @@ A: Checkpoint compaction reduces transaction log read times by 60% (2.5x speedup
 ### Configuration Questions
 
 **Q: What's the difference between V1 and V2 DataSource APIs?**
-A: V2 API (`io.indextables.spark.core.Tantivy4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`tantivy4spark`) is maintained for backward compatibility.
+A: V2 API (`io.indextables.spark.core.IndexTables4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`indextables`) is maintained for backward compatibility.
 
 **Q: How do I configure auto-sizing?**
 A: Enable auto-sizing with `spark.indextables.autoSize.enabled=true` and set `spark.indextables.autoSize.targetSplitSize=100M`. V1 API automatically counts DataFrames; V2 API requires explicit row count.
@@ -1063,17 +1063,17 @@ A: Default retention is 30 days. Files are only deleted when they're older than 
 
 ### Migration Questions
 
-**Q: How do I migrate from Parquet to Tantivy4Spark?**
-A: Simply read from Parquet and write to Tantivy4Spark:
+**Q: How do I migrate from Parquet to IndexTables4Spark?**
+A: Simply read from Parquet and write to IndexTables4Spark:
 ```scala
 val df = spark.read.parquet("s3://bucket/parquet-data")
-df.write.format("tantivy4spark")
+df.write.format("indextables")
   .option("spark.indextables.indexing.typemap.content", "text")
   .save("s3://bucket/tantivy-data")
 ```
 
 **Q: Can I do incremental migration?**
-A: Yes! Use a hybrid query approach where you union results from both old (Parquet) and new (Tantivy4Spark) data sources during migration.
+A: Yes! Use a hybrid query approach where you union results from both old (Parquet) and new (IndexTables4Spark) data sources during migration.
 
 **Q: How do I handle schema evolution?**
 A: Currently schema migration is planned but not implemented. For now, create a new table with the updated schema and migrate data.

@@ -18,7 +18,7 @@ class SimpleIndexQueryDebugTest extends TestBase {
 
     // Write with string fields for exact matching
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "string")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
@@ -26,7 +26,7 @@ class SimpleIndexQueryDebugTest extends TestBase {
 
     // Read and create temp view
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     df.createOrReplaceTempView("test_docs")

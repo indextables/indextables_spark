@@ -132,7 +132,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -145,7 +145,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -157,7 +157,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // EXACT SAME PRE-MERGE VERIFICATION AS TEST 647 (lines 685-695)
     println(s"🔍 Pre-merge data verification...")
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
     val preMergeCount = preMergeData.count()
@@ -168,8 +168,8 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
 
     // EXACT SAME MERGE OPERATION AS TEST 647 (lines 697-703)
     println(s"🔧 Executing MERGE SPLITS operation...")
-    import _root_.io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import _root_.io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[_root_.io.indextables.spark.sql.MergeSplitsCommand]
@@ -181,7 +181,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // EXACT SAME POST-MERGE VERIFICATION AS TEST 647 (lines 707-723)
     println(s"🔍 Post-merge data verification...")
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
     val postMergeCount = postMergeData.count()
@@ -241,7 +241,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -253,7 +253,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -271,7 +271,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
 
     println(s"🔍 Pre-merge data verification...")
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -283,8 +283,8 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
 
     // Execute MERGE SPLITS command
     println(s"🔧 Executing MERGE SPLITS operation on S3...")
-    import _root_.io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import _root_.io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[_root_.io.indextables.spark.sql.MergeSplitsCommand]
@@ -296,7 +296,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     // Verify data integrity after merge
     println(s"🔍 Post-merge data verification...")
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 

@@ -86,7 +86,7 @@ class IndexQueryBehaviorTest extends TestBase {
       testData.write.format("tantivy4spark").mode("overwrite").save(tempPath)
 
       // Verify metadata column implementation
-      val tableProvider = new Tantivy4SparkTableProvider()
+      val tableProvider = new IndexTables4SparkTableProvider()
       import scala.jdk.CollectionConverters._
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(Map("path" -> tempPath).asJava)
 

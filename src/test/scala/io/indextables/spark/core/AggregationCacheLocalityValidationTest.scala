@@ -57,7 +57,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Write using V2 API for proper partition column indexing
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "value")
       .mode("overwrite")
       .save(tablePath)
@@ -85,7 +85,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Now perform aggregation queries that should use cache locality
     val aggDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
     // Test simple aggregations - COUNT, SUM, AVG, MIN, MAX
@@ -147,7 +147,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Write using V2 API - category needs to be a fast field for GROUP BY
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "category,value")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
@@ -174,7 +174,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Now perform GROUP BY aggregation queries that should use cache locality
     val aggDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
     // Test GROUP BY aggregations
@@ -233,14 +233,14 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Write using V2 API
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "value")
       .mode("overwrite")
       .save(tablePath)
 
     // Read and perform aggregation without any cache locality info
     val aggDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
     // Simple aggregation should still work without cache locality
@@ -257,14 +257,14 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val dfWithCategory = spark.createDataFrame(testDataWithCategory).toDF("id", "category", "name", "value")
 
     dfWithCategory.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "category,value")
       .option("spark.indextables.indexing.typemap.category", "string")
       .mode("overwrite")
       .save(tablePath + "_groupby")
 
     val groupByDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath + "_groupby")
 
     val groupByResult = groupByDf

@@ -78,14 +78,14 @@ class DateTimeTypeConversionTest extends TestBase with Matchers {
       // Write data to tantivy4spark format using V2 API for consistency
       println("💾 Writing data with date/timestamp fields...")
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
 
       // Read data back using V2 API
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       println("📊 Read back data:")

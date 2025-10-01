@@ -21,12 +21,12 @@ class FastFieldScalaReproTest extends AnyFunSuite {
 
       // Create index and write document
       val indexPath = tempDir.resolve("test_index").toString
-      // Test with reuse=false like Tantivy4Spark does
+      // Test with reuse=false like IndexTables4Spark does
       val index = new Index(schema, indexPath, false)
 
       val writer = index.writer(Index.Memory.DEFAULT_HEAP_SIZE, 1)
 
-      // Use BatchDocumentBuilder like Tantivy4Spark does
+      // Use BatchDocumentBuilder like IndexTables4Spark does
       val batch    = new BatchDocumentBuilder()
       val batchDoc = new BatchDocument()
       batchDoc.addText("title", "Test Document")
@@ -39,12 +39,12 @@ class FastFieldScalaReproTest extends AnyFunSuite {
       writer.commit()
       writer.close()
 
-      // CRITICAL: This is what Tantivy4Spark does - reload after commit
+      // CRITICAL: This is what IndexTables4Spark does - reload after commit
       println("🔍 BEFORE reload()")
       index.reload()
       println("🔍 AFTER reload()")
 
-      // Convert to split - using EXACT Tantivy4Spark pattern
+      // Convert to split - using EXACT IndexTables4Spark pattern
       val splitPath     = tempDir.resolve("test.split").toString
       val indexUid      = s"tantivy4spark-${java.util.UUID.randomUUID().toString}"
       val sourceId      = "tantivy4spark"

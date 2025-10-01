@@ -1,1 +1,1 @@
-io.indextables.spark.core.Tantivy4SparkDataSource
+io.indextables.spark.core.IndexTables4SparkDataSource

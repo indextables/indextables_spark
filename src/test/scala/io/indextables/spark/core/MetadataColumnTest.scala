@@ -77,7 +77,7 @@ class MetadataColumnTest extends TestBase {
       testData.write.format("tantivy4spark").mode("overwrite").save(tempPath)
 
       // Create the table through the V2 DataSource API
-      val tableProvider = new Tantivy4SparkTableProvider()
+      val tableProvider = new IndexTables4SparkTableProvider()
       import scala.jdk.CollectionConverters._
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(Map("path" -> tempPath).asJava)
 

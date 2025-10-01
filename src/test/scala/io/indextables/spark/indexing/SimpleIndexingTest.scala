@@ -33,10 +33,10 @@ class SimpleIndexingTest extends TestBase with Matchers {
         .toDF("id", "content")
 
       // Write data using V2 provider
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read back using V2 provider
-      val df      = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 1

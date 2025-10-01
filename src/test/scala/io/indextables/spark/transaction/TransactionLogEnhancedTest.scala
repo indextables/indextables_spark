@@ -202,12 +202,12 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
 
     // Write data - this should create split files and then the transaction log
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Overwrite)
       .save(testPath)
 
     // Read back to verify transaction log was created after splits
-    val readDf = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(testPath)
+    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
     assert(readDf.count() == 100, "Should read back all 100 rows")
 
     // Access transaction log to verify it references existing split files
@@ -291,12 +291,12 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
       .withColumn("type", lit("initial"))
 
     df1.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Overwrite)
       .save(testPath)
 
     // Verify initial data
-    val read1 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(testPath)
+    val read1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
     assert(read1.count() == 50)
     assert(read1.filter(col("type") === "initial").count() == 50)
 
@@ -307,12 +307,12 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
       .withColumn("type", lit("overwritten"))
 
     df2.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Overwrite)
       .save(testPath)
 
     // Verify overwritten data
-    val read2 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(testPath)
+    val read2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
     assert(read2.count() == 100, s"Expected 100 rows after overwrite, got ${read2.count()}")
     assert(read2.filter(col("type") === "overwritten").count() == 100)
     assert(read2.filter(col("type") === "initial").count() == 0, "Initial data should be gone after overwrite")
@@ -336,7 +336,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
       .withColumn("batch", lit(1))
 
     df1.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Overwrite)
       .save(testPath)
 
@@ -347,7 +347,7 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
       .withColumn("batch", lit(2))
 
     df2.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Append)
       .save(testPath)
 
@@ -358,12 +358,12 @@ class TransactionLogEnhancedTest extends TestBase with BeforeAndAfterEach {
       .withColumn("batch", lit(3))
 
     df3.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Append)
       .save(testPath)
 
     // Read and verify all data is present
-    val readDf = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(testPath)
+    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
     assert(readDf.count() == 100, s"Expected 100 total rows, got ${readDf.count()}")
 
     // Verify data from each batch

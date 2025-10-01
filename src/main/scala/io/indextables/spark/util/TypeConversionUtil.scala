@@ -45,13 +45,13 @@ object TypeConversionUtil {
     case TimestampType => "i64"  // Store as epoch millis
     case DateType      => "date" // Use proper Tantivy date field
     case ArrayType(_, _) =>
-      throw new UnsupportedOperationException(s"Array types are not supported by Tantivy4Spark: $dataType")
+      throw new UnsupportedOperationException(s"Array types are not supported by IndexTables4Spark: $dataType")
     case MapType(_, _, _) =>
-      throw new UnsupportedOperationException(s"Map types are not supported by Tantivy4Spark: $dataType")
+      throw new UnsupportedOperationException(s"Map types are not supported by IndexTables4Spark: $dataType")
     case StructType(_) =>
-      throw new UnsupportedOperationException(s"Struct types are not supported by Tantivy4Spark: $dataType")
+      throw new UnsupportedOperationException(s"Struct types are not supported by IndexTables4Spark: $dataType")
     case _ =>
-      throw new UnsupportedOperationException(s"Unsupported data type for Tantivy4Spark: $dataType")
+      throw new UnsupportedOperationException(s"Unsupported data type for IndexTables4Spark: $dataType")
   }
 
   def tantivyTypeToSparkType(tantivyType: String): DataType = tantivyType match {

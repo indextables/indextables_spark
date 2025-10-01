@@ -24,10 +24,10 @@ import java.util.{OptionalLong, Map => JavaMap, HashMap => JavaHashMap, Optional
 import io.indextables.spark.transaction.AddAction
 
 /**
- * Implementation of Spark's Statistics interface for Tantivy4Spark. Provides table-level statistics including size in
+ * Implementation of Spark's Statistics interface for IndexTables4Spark. Provides table-level statistics including size in
  * bytes, number of rows, and column-level statistics where available.
  */
-class Tantivy4SparkStatistics(
+class IndexTables4SparkStatistics(
   totalSizeInBytes: Option[Long],
   totalNumRows: Option[Long],
   columnStats: Map[String, ColumnStatistics] = Map.empty)
@@ -56,7 +56,7 @@ class Tantivy4SparkStatistics(
   }
 }
 
-object Tantivy4SparkStatistics {
+object IndexTables4SparkStatistics {
 
   /** Simple column statistics implementation for basic min/max and null count information. */
   private class SimpleColumnStatistics(
@@ -95,9 +95,9 @@ object Tantivy4SparkStatistics {
    * Creates statistics from a collection of AddAction entries from the transaction log. This aggregates information
    * from all splits to provide table-level statistics.
    */
-  def fromAddActions(addActions: Seq[AddAction]): Tantivy4SparkStatistics = {
+  def fromAddActions(addActions: Seq[AddAction]): IndexTables4SparkStatistics = {
     if (addActions.isEmpty) {
-      return new Tantivy4SparkStatistics(Some(0L), Some(0L))
+      return new IndexTables4SparkStatistics(Some(0L), Some(0L))
     }
 
     // Aggregate size information
@@ -109,7 +109,7 @@ object Tantivy4SparkStatistics {
     // Aggregate column-level statistics from min/max values in AddActions
     val columnStats = aggregateColumnStatistics(addActions, totalRows)
 
-    new Tantivy4SparkStatistics(
+    new IndexTables4SparkStatistics(
       totalSizeInBytes = if (totalSize > 0) Some(totalSize) else None,
       totalNumRows = if (totalRows > 0) Some(totalRows) else None,
       columnStats = columnStats
@@ -167,10 +167,10 @@ object Tantivy4SparkStatistics {
   }
 
   /** Creates statistics for an empty table. */
-  def empty(): Tantivy4SparkStatistics =
-    new Tantivy4SparkStatistics(Some(0L), Some(0L))
+  def empty(): IndexTables4SparkStatistics =
+    new IndexTables4SparkStatistics(Some(0L), Some(0L))
 
   /** Creates statistics with unknown values. Used when statistics cannot be computed reliably. */
-  def unknown(): Tantivy4SparkStatistics =
-    new Tantivy4SparkStatistics(None, None)
+  def unknown(): IndexTables4SparkStatistics =
+    new IndexTables4SparkStatistics(None, None)
 }

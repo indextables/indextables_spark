@@ -34,7 +34,7 @@ import scala.jdk.CollectionConverters._
  * Specialized scan for simple aggregations (no GROUP BY). Handles queries like SELECT COUNT(*) FROM table, SELECT
  * SUM(price) FROM table, etc.
  */
-class Tantivy4SparkSimpleAggregateScan(
+class IndexTables4SparkSimpleAggregateScan(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   schema: StructType,
@@ -44,7 +44,7 @@ class Tantivy4SparkSimpleAggregateScan(
   aggregation: Aggregation)
     extends Scan {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateScan])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateScan])
 
   println(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters")
   pushedFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: Filter: $f"))
@@ -69,7 +69,7 @@ class Tantivy4SparkSimpleAggregateScan(
         logger.warn("Failed to update broadcast locality information for simple aggregate", ex)
     }
 
-    new Tantivy4SparkSimpleAggregateBatch(
+    new IndexTables4SparkSimpleAggregateBatch(
       sparkSession,
       transactionLog,
       schema,
@@ -82,7 +82,7 @@ class Tantivy4SparkSimpleAggregateScan(
 
   override def description(): String = {
     val aggDesc = aggregation.aggregateExpressions.map(_.toString).mkString(", ")
-    s"Tantivy4SparkSimpleAggregateScan[aggregations=[$aggDesc]]"
+    s"IndexTables4SparkSimpleAggregateScan[aggregations=[$aggDesc]]"
   }
 
   /** Create schema for simple aggregation results. */
@@ -163,7 +163,7 @@ class Tantivy4SparkSimpleAggregateScan(
 }
 
 /** Batch implementation for simple aggregations. */
-class Tantivy4SparkSimpleAggregateBatch(
+class IndexTables4SparkSimpleAggregateBatch(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   schema: StructType,
@@ -173,7 +173,7 @@ class Tantivy4SparkSimpleAggregateBatch(
   aggregation: Aggregation)
     extends Batch {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateBatch])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateBatch])
 
   println(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters")
 
@@ -186,7 +186,7 @@ class Tantivy4SparkSimpleAggregateBatch(
 
     // Apply data skipping using the same logic as regular scan by creating a helper scan instance
     // Use the full table schema to ensure proper field type detection for data skipping
-    val helperScan = new Tantivy4SparkScan(
+    val helperScan = new IndexTables4SparkScan(
       sparkSession,
       transactionLog,
       schema,
@@ -201,7 +201,7 @@ class Tantivy4SparkSimpleAggregateBatch(
 
     // Create one partition per filtered split for distributed aggregation processing
     filteredSplits.map { split =>
-      new Tantivy4SparkSimpleAggregatePartition(
+      new IndexTables4SparkSimpleAggregatePartition(
         split,
         schema,
         pushedFilters,
@@ -215,7 +215,7 @@ class Tantivy4SparkSimpleAggregateBatch(
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {
     logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Creating reader factory for simple aggregation")
 
-    new Tantivy4SparkSimpleAggregateReaderFactory(
+    new IndexTables4SparkSimpleAggregateReaderFactory(
       sparkSession,
       pushedFilters,
       config,
@@ -225,7 +225,7 @@ class Tantivy4SparkSimpleAggregateBatch(
 }
 
 /** Input partition for simple aggregation processing. */
-class Tantivy4SparkSimpleAggregatePartition(
+class IndexTables4SparkSimpleAggregatePartition(
   val split: io.indextables.spark.transaction.AddAction,
   val schema: StructType,
   val pushedFilters: Array[Filter],
@@ -234,7 +234,7 @@ class Tantivy4SparkSimpleAggregatePartition(
   val tablePath: org.apache.hadoop.fs.Path)
     extends InputPartition {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregatePartition])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregatePartition])
 
   logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Created partition for split: ${split.path}")
   logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Table path: $tablePath")
@@ -272,22 +272,22 @@ class Tantivy4SparkSimpleAggregatePartition(
 }
 
 /** Reader factory for simple aggregation partitions. */
-class Tantivy4SparkSimpleAggregateReaderFactory(
+class IndexTables4SparkSimpleAggregateReaderFactory(
   sparkSession: SparkSession,
   pushedFilters: Array[Filter],
   config: Map[String, String], // Direct config instead of broadcast
   aggregation: Aggregation)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateReaderFactory])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
-      case simpleAggPartition: Tantivy4SparkSimpleAggregatePartition =>
+      case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
         logger.info(s"🔍 SIMPLE AGGREGATE READER FACTORY: Creating reader for simple aggregate partition")
 
-        new Tantivy4SparkSimpleAggregateReader(
+        new IndexTables4SparkSimpleAggregateReader(
           simpleAggPartition,
           sparkSession
         )
@@ -297,12 +297,12 @@ class Tantivy4SparkSimpleAggregateReaderFactory(
 }
 
 /** Reader for simple aggregation partitions that executes aggregations using tantivy4java. */
-class Tantivy4SparkSimpleAggregateReader(
-  partition: Tantivy4SparkSimpleAggregatePartition,
+class IndexTables4SparkSimpleAggregateReader(
+  partition: IndexTables4SparkSimpleAggregatePartition,
   sparkSession: SparkSession)
     extends org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkSimpleAggregateReader])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReader])
   private var aggregateResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
   private var isInitialized                                                         = false
 
@@ -489,7 +489,7 @@ class Tantivy4SparkSimpleAggregateReader(
               throw new IllegalStateException(
                 s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
                   s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                  s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+                  s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
               )
 
             case min: Min =>

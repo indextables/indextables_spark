@@ -37,7 +37,7 @@ class TestGroupBySumSuccess extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // This should NOT throw an exception because both "category" and "amount" are fast fields
       val query = df.groupBy("category").agg(org.apache.spark.sql.functions.sum("amount"))
@@ -48,7 +48,7 @@ class TestGroupBySumSuccess extends AnyFunSuite {
         println("🔍 Physical plan:")
         println(physicalPlan)
 
-        if (physicalPlan.contains("Tantivy4SparkGroupByAggregateScan")) {
+        if (physicalPlan.contains("IndexTables4SparkGroupByAggregateScan")) {
           println("✅ EXPECTED: GROUP BY + SUM pushdown was accepted")
           println("✅ REASON: Both 'category' and 'amount' are configured as fast fields")
         } else if (physicalPlan.contains("HashAggregate")) {

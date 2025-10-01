@@ -46,7 +46,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
 
   test("IndexQueryFilter should be recognized as supported filter") {
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import io.indextables.spark.core.Tantivy4SparkScanBuilder
+    import io.indextables.spark.core.IndexTables4SparkScanBuilder
     import io.indextables.spark.transaction.TransactionLog
 
     val testSchema = StructType(
@@ -235,17 +235,17 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
         (4, "Natural language processing", "ai", "nlp processing"),
         (5, "Distributed computing systems", "technology", "distributed AND computing")
       ).toDF("id", "title", "category", "tags")
-      // Write test data using Tantivy4Spark V2 DataSource
+      // Write test data using IndexTables4Spark V2 DataSource
       // Configure title field as text type for tokenized IndexQuery search
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.title", "text")
         .mode("overwrite")
         .save(tempPath)
 
       // Read data back using V2 DataSource API
       val df = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Create temporary view
@@ -280,7 +280,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
 
       // Verify the SQL plan shows our data source is being used
       val planString = sqlResult.queryExecution.executedPlan.toString()
-      assert(planString.contains("Tantivy4SparkScan"), "Query plan should use Tantivy4SparkScan")
+      assert(planString.contains("IndexTables4SparkScan"), "Query plan should use IndexTables4SparkScan")
 
       // Test another query pattern
       val sqlResult2 = spark.sql("""

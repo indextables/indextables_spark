@@ -53,18 +53,18 @@ class V2IndexQueryPushdownTest extends AnyFunSuite with TestBase with BeforeAndA
 
     // Write using V2 DataSource API
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // Explicit V2 provider
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // Explicit V2 provider
       .mode("overwrite")
       .option("path", tablePath)
       .save()
 
     // Read back using V2 DataSource API
     val tantivyDF = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("path", tablePath)
       .load()
 
-    println("Data read back from Tantivy4Spark:")
+    println("Data read back from IndexTables4Spark:")
     tantivyDF.show(truncate = false)
 
     // Test 1: Programmatic IndexQueryExpression with V2

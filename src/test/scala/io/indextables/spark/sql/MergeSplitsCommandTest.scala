@@ -55,7 +55,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("MERGE SPLITS SQL parser should parse basic syntax correctly") {
     import io.indextables.spark.sql.MergeSplitsCommand
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test basic path syntax
     val basicCommand = "MERGE SPLITS '/path/to/table'"
@@ -137,7 +137,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("MERGE SPLITS should handle non-existent table gracefully") {
     // Test with a non-existent table path
     val nonExistentPath = "/tmp/does-not-exist"
-    val sqlParser       = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser       = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val command         = sqlParser.parsePlan(s"MERGE SPLITS '$nonExistentPath'").asInstanceOf[MergeSplitsCommand]
 
     // Should handle gracefully by returning appropriate message
@@ -149,7 +149,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MERGE SPLITS should validate target size parameter") {
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test with invalid (too small) target size
     val tooSmallCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 1024" // 1KB, below 1MB minimum
@@ -171,12 +171,12 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
   // Skip the complex table test for now to focus on core functionality
   ignore("MERGE SPLITS should handle table with small files") {
-    // This test would create actual Tantivy4Spark data and test merge functionality
+    // This test would create actual IndexTables4Spark data and test merge functionality
     // Skipped for now to avoid compilation issues with DataFrame creation
   }
 
   test("MERGE SPLITS should handle table identifier syntax") {
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test table identifier parsing (without quotes) - Delta Lake OPTIMIZE style
     val tableIdCommand = "MERGE SPLITS my_database.my_table"
@@ -210,7 +210,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MERGE SPLITS should reject invalid syntax") {
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test missing table specification
     assertThrows[IllegalArgumentException] {
@@ -236,7 +236,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("Default target size should be 5GB") {
     import io.indextables.spark.sql.MergeSplitsCommand
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val command   = "MERGE SPLITS '/path/to/table'"
     val parsed    = sqlParser.parsePlan(command).asInstanceOf[MergeSplitsCommand]
 
@@ -250,7 +250,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("PRECOMMIT option should be parsed correctly") {
     import io.indextables.spark.sql.MergeSplitsCommand
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test basic PRECOMMIT syntax
     val precommitCommand = "MERGE SPLITS '/path/to/table' PRECOMMIT"
@@ -279,7 +279,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("PRECOMMIT execution should return appropriate message") {
     import io.indextables.spark.sql.MergeSplitsCommand
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val command   = sqlParser.parsePlan(s"MERGE SPLITS '$tempTablePath' PRECOMMIT").asInstanceOf[MergeSplitsCommand]
 
     // Verify preCommitMerge flag is set correctly
@@ -302,7 +302,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     // Test S3 path handling without actual S3 connection
     val s3TablePath = "s3://test-bucket/test-table"
-    val sqlParser   = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser   = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test that S3 paths are parsed correctly
     val s3Command = sqlParser.parsePlan(s"MERGE SPLITS '$s3TablePath'").asInstanceOf[MergeSplitsCommand]
@@ -399,7 +399,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   test("MERGE SPLITS should handle both s3:// and s3a:// schemes") {
     import io.indextables.spark.sql.MergeSplitsCommand
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test s3:// scheme
     val s3Command = sqlParser.parsePlan("MERGE SPLITS 's3://bucket/path'").asInstanceOf[MergeSplitsCommand]

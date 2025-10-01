@@ -24,13 +24,13 @@ import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.{SparkPlan, UnaryExecNode}
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
 import org.slf4j.LoggerFactory
-import io.indextables.spark.config.Tantivy4SparkSQLConf
+import io.indextables.spark.config.IndexTables4SparkSQLConf
 
 /**
- * An execution node that optimizes writes to Tantivy4Spark tables by adding an adaptive shuffle to target a specific
+ * An execution node that optimizes writes to IndexTables4Spark tables by adding an adaptive shuffle to target a specific
  * number of records per split file.
  *
- * This is similar to Delta Lake's DeltaOptimizedWriterExec, but adapted for Tantivy4Spark's split-based architecture.
+ * This is similar to Delta Lake's DeltaOptimizedWriterExec, but adapted for IndexTables4Spark's split-based architecture.
  *
  * @param child
  *   The child execution plan
@@ -39,13 +39,13 @@ import io.indextables.spark.config.Tantivy4SparkSQLConf
  * @param targetRecordsPerSplit
  *   Target number of records per output split file
  */
-case class Tantivy4SparkOptimizedWriterExec(
+case class IndexTables4SparkOptimizedWriterExec(
   child: SparkPlan,
   partitionColumns: Seq[String] = Seq.empty,
   targetRecordsPerSplit: Long = 1000000L)
     extends UnaryExecNode {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWriterExec])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkOptimizedWriterExec])
 
   override def output: Seq[Attribute] = child.output
 
@@ -90,11 +90,11 @@ case class Tantivy4SparkOptimizedWriterExec(
 
     // Apply min/max constraints from configuration
     val maxPartitions = spark.conf
-      .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_MAX_SHUFFLE_PARTITIONS)
+      .getOption(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_MAX_SHUFFLE_PARTITIONS)
       .map(_.toInt)
       .getOrElse(2000)
     val minPartitions = spark.conf
-      .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_MIN_SHUFFLE_PARTITIONS)
+      .getOption(IndexTables4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_MIN_SHUFFLE_PARTITIONS)
       .map(_.toInt)
       .getOrElse(1)
 
@@ -174,7 +174,7 @@ case class Tantivy4SparkOptimizedWriterExec(
     optimizedRDD
   }
 
-  override protected def withNewChildInternal(newChild: SparkPlan): Tantivy4SparkOptimizedWriterExec =
+  override protected def withNewChildInternal(newChild: SparkPlan): IndexTables4SparkOptimizedWriterExec =
     copy(child = newChild)
 
   override def verboseStringWithOperatorId(): String =

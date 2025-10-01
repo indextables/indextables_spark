@@ -28,8 +28,8 @@ case class FieldIndexingConfig(
   tokenizerOverride: Option[String] = None // Custom tokenizer for text fields
 )
 
-/** Utilities for handling Tantivy4Spark write and read options. Similar to Delta Lake's DeltaOptions. */
-class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
+/** Utilities for handling IndexTables4Spark write and read options. Similar to Delta Lake's DeltaOptions. */
+class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /** Whether to enable optimized writes. */
   def optimizeWrite: Option[Boolean] =
@@ -183,7 +183,7 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
 
     // DEBUG: Log what we're checking
     import org.slf4j.LoggerFactory
-    val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptions])
+    val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkOptions])
     logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fieldName=$fieldName")
     logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
     logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
@@ -204,16 +204,16 @@ class Tantivy4SparkOptions(options: CaseInsensitiveStringMap) {
   }
 }
 
-object Tantivy4SparkOptions {
+object IndexTables4SparkOptions {
 
-  /** Create Tantivy4SparkOptions from a CaseInsensitiveStringMap. */
-  def apply(options: CaseInsensitiveStringMap): Tantivy4SparkOptions =
-    new Tantivy4SparkOptions(options)
+  /** Create IndexTables4SparkOptions from a CaseInsensitiveStringMap. */
+  def apply(options: CaseInsensitiveStringMap): IndexTables4SparkOptions =
+    new IndexTables4SparkOptions(options)
 
-  /** Create Tantivy4SparkOptions from a Map. */
-  def apply(options: Map[String, String]): Tantivy4SparkOptions = {
+  /** Create IndexTables4SparkOptions from a Map. */
+  def apply(options: Map[String, String]): IndexTables4SparkOptions = {
     import scala.jdk.CollectionConverters._
-    new Tantivy4SparkOptions(new CaseInsensitiveStringMap(options.asJava))
+    new IndexTables4SparkOptions(new CaseInsensitiveStringMap(options.asJava))
   }
 
   // Option keys

@@ -229,7 +229,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
     normalized("spark.indextables.indexWriter.batchSize") should equal("5000")
   }
 
-  test("Tantivy4SparkOptions should handle spark.indextables configurations") {
+  test("IndexTables4SparkOptions should handle spark.indextables configurations") {
     import scala.collection.JavaConverters._
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -241,7 +241,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
       ).asJava
     )
 
-    val tantivyOptions = new Tantivy4SparkOptions(options)
+    val tantivyOptions = new IndexTables4SparkOptions(options)
 
     // Field type mapping should extract both prefixes
     val fieldTypes = tantivyOptions.getFieldTypeMapping

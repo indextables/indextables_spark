@@ -188,7 +188,7 @@ object CloudStorageProviderFactory {
           val enriched  = new Configuration(hadoopConf)
           val sparkConf = session.conf
 
-          // Copy Tantivy4Spark specific configurations
+          // Copy IndexTables4Spark specific configurations
           // String configurations - check both prefixes
           val stringConfigs = Seq(
             "spark.indextables.aws.accessKey",

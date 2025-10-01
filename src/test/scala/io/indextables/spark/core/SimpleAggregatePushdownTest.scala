@@ -380,7 +380,7 @@ class SimpleAggregatePushdownTest extends TestBase {
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
     // Test that we can create the scan builder
-    val scanBuilder = new Tantivy4SparkScanBuilder(
+    val scanBuilder = new IndexTables4SparkScanBuilder(
       spark,
       transactionLog,
       schema,
@@ -445,7 +445,7 @@ class SimpleAggregatePushdownTest extends TestBase {
     println("✅ Aggregation pushdown decision logic test passed")
   }
 
-  test("Physical plan should use Tantivy4SparkSimpleAggregateScan for simple aggregations") {
+  test("Physical plan should use IndexTables4SparkSimpleAggregateScan for simple aggregations") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
 
     withTempPath { tempPath =>
@@ -472,7 +472,7 @@ class SimpleAggregatePushdownTest extends TestBase {
       println(physicalPlan)
 
       // Check if our simple aggregate scan appears in the plan
-      val hasSimpleAggregateScan = physicalPlan.contains("Tantivy4SparkSimpleAggregateScan") ||
+      val hasSimpleAggregateScan = physicalPlan.contains("IndexTables4SparkSimpleAggregateScan") ||
         physicalPlan.contains("SimpleAggregateScan")
 
       if (hasSimpleAggregateScan) {
@@ -544,14 +544,14 @@ class SimpleAggregatePushdownTest extends TestBase {
       testData
         .coalesce(1)
         .write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data using V2 API
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // First verify we have all the data
       val totalCount = df.count()
@@ -586,14 +586,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data using V2 API - DO NOT coalesce, let it create multiple partitions
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data using V2 API
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Verify we have all the data
       val totalCount = df.count()
@@ -674,7 +674,7 @@ class SimpleAggregatePushdownTest extends TestBase {
             println(physicalPlan)
 
             // Check for our scan classes in the plan
-            val hasTantivyScan = physicalPlan.contains("Tantivy4Spark") ||
+            val hasTantivyScan = physicalPlan.contains("IndexTables4Spark") ||
               physicalPlan.contains("SimpleAggregateScan") ||
               physicalPlan.contains("AggregateScan")
 

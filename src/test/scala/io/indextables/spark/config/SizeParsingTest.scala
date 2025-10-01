@@ -23,7 +23,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
       .appName("SizeParsingTest")
       .master("local[2]")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -45,7 +45,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     file.delete()
   }
 
-  "Tantivy4Spark indexWriter.heapSize configuration" should "accept human-readable size formats" in {
+  "IndexTables4Spark indexWriter.heapSize configuration" should "accept human-readable size formats" in {
     val tablePath = new File(tempDir, "size_test").getAbsolutePath
 
     import org.apache.spark.sql.types._
@@ -82,7 +82,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         // This should not throw an exception
         testDF.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.indexWriter.heapSize", sizeValue)
           .option("spark.indextables.indexing.typemap.content", "text")
           .mode("overwrite")
@@ -90,7 +90,7 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         // Verify the data was written successfully
         val readBack = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(testPath)
 
         val count = readBack.count()
@@ -135,14 +135,14 @@ class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
         try {
           testDF.write
-            .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .option("spark.indextables.indexWriter.heapSize", sizeValue)
             .option("spark.indextables.indexing.typemap.content", "text")
             .mode("overwrite")
             .save(testPath)
 
           val readBack = spark.read
-            .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+            .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .load(testPath)
 
           readBack.count() shouldBe 1

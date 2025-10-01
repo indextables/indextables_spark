@@ -35,7 +35,7 @@ import scala.jdk.CollectionConverters._
  * Specialized scan for GROUP BY aggregation operations. Implements distributed GROUP BY aggregation using tantivy's
  * terms aggregation capabilities.
  */
-class Tantivy4SparkGroupByAggregateScan(
+class IndexTables4SparkGroupByAggregateScan(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   schema: StructType,
@@ -46,7 +46,7 @@ class Tantivy4SparkGroupByAggregateScan(
   groupByColumns: Array[String])
     extends Scan {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkGroupByAggregateScan])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateScan])
 
   override def readSchema(): StructType =
     createGroupBySchema(aggregation, groupByColumns)
@@ -66,7 +66,7 @@ class Tantivy4SparkGroupByAggregateScan(
         logger.warn("Failed to update broadcast locality information for GROUP BY aggregate", ex)
     }
 
-    new Tantivy4SparkGroupByAggregateBatch(
+    new IndexTables4SparkGroupByAggregateBatch(
       sparkSession,
       transactionLog,
       schema,
@@ -81,7 +81,7 @@ class Tantivy4SparkGroupByAggregateScan(
   override def description(): String = {
     val groupByDesc = groupByColumns.mkString(", ")
     val aggDesc     = aggregation.aggregateExpressions.map(_.toString).mkString(", ")
-    s"Tantivy4SparkGroupByAggregateScan[groupBy=[$groupByDesc], aggregations=[$aggDesc]]"
+    s"IndexTables4SparkGroupByAggregateScan[groupBy=[$groupByDesc], aggregations=[$aggDesc]]"
   }
 
   /** Create schema for GROUP BY aggregation results. */
@@ -117,7 +117,7 @@ class Tantivy4SparkGroupByAggregateScan(
             throw new IllegalStateException(
               s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
                 s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+                s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
             )
           case min: Min =>
             // For Min, data type matches the column
@@ -175,7 +175,7 @@ class Tantivy4SparkGroupByAggregateScan(
 }
 
 /** Batch implementation for GROUP BY aggregations. */
-class Tantivy4SparkGroupByAggregateBatch(
+class IndexTables4SparkGroupByAggregateBatch(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   schema: StructType,
@@ -186,7 +186,7 @@ class Tantivy4SparkGroupByAggregateBatch(
   groupByColumns: Array[String])
     extends Batch {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkGroupByAggregateBatch])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateBatch])
 
   override def planInputPartitions(): Array[InputPartition] = {
     logger.info(s"🔍 GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
@@ -197,7 +197,7 @@ class Tantivy4SparkGroupByAggregateBatch(
 
     // Apply data skipping using the same logic as simple aggregate scan
     // Use the full table schema to ensure proper field type detection for data skipping
-    val helperScan = new Tantivy4SparkScan(
+    val helperScan = new IndexTables4SparkScan(
       sparkSession,
       transactionLog,
       schema,
@@ -212,7 +212,7 @@ class Tantivy4SparkGroupByAggregateBatch(
 
     // Create one partition per filtered split for distributed GROUP BY processing
     filteredSplits.map { split =>
-      new Tantivy4SparkGroupByAggregatePartition(
+      new IndexTables4SparkGroupByAggregatePartition(
         split,
         pushedFilters,
         config,
@@ -226,7 +226,7 @@ class Tantivy4SparkGroupByAggregateBatch(
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {
     logger.info(s"🔍 GROUP BY BATCH: Creating reader factory for GROUP BY aggregation")
 
-    new Tantivy4SparkGroupByAggregateReaderFactory(
+    new IndexTables4SparkGroupByAggregateReaderFactory(
       sparkSession,
       pushedFilters,
       config,
@@ -237,7 +237,7 @@ class Tantivy4SparkGroupByAggregateBatch(
 }
 
 /** Input partition for GROUP BY aggregation processing. */
-class Tantivy4SparkGroupByAggregatePartition(
+class IndexTables4SparkGroupByAggregatePartition(
   val split: io.indextables.spark.transaction.AddAction,
   val pushedFilters: Array[Filter],
   val config: Map[String, String], // Direct config instead of broadcast
@@ -246,7 +246,7 @@ class Tantivy4SparkGroupByAggregatePartition(
   val tablePath: org.apache.hadoop.fs.Path)
     extends InputPartition {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkGroupByAggregatePartition])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregatePartition])
 
   logger.info(s"🔍 GROUP BY PARTITION: Created partition for split: ${split.path}")
   logger.info(s"🔍 GROUP BY PARTITION: Table path: $tablePath")
@@ -283,7 +283,7 @@ class Tantivy4SparkGroupByAggregatePartition(
 }
 
 /** Reader factory for GROUP BY aggregation partitions. */
-class Tantivy4SparkGroupByAggregateReaderFactory(
+class IndexTables4SparkGroupByAggregateReaderFactory(
   sparkSession: SparkSession,
   pushedFilters: Array[Filter],
   config: Map[String, String], // Direct config instead of broadcast
@@ -291,15 +291,15 @@ class Tantivy4SparkGroupByAggregateReaderFactory(
   groupByColumns: Array[String])
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkGroupByAggregateReaderFactory])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
-      case groupByPartition: Tantivy4SparkGroupByAggregatePartition =>
+      case groupByPartition: IndexTables4SparkGroupByAggregatePartition =>
         logger.info(s"🔍 GROUP BY READER FACTORY: Creating reader for GROUP BY partition")
 
-        new Tantivy4SparkGroupByAggregateReader(
+        new IndexTables4SparkGroupByAggregateReader(
           groupByPartition,
           sparkSession
         )
@@ -309,12 +309,12 @@ class Tantivy4SparkGroupByAggregateReaderFactory(
 }
 
 /** Reader for GROUP BY aggregation partitions that executes terms aggregations using tantivy4java. */
-class Tantivy4SparkGroupByAggregateReader(
-  partition: Tantivy4SparkGroupByAggregatePartition,
+class IndexTables4SparkGroupByAggregateReader(
+  partition: IndexTables4SparkGroupByAggregatePartition,
   sparkSession: SparkSession)
     extends org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkGroupByAggregateReader])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReader])
   private var groupByResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
   private var isInitialized                                                       = false
 
@@ -456,7 +456,7 @@ class Tantivy4SparkGroupByAggregateReader(
                 throw new IllegalStateException(
                   s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
                     s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                    s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+                    s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
                 )
 
               case min: Min =>
@@ -864,7 +864,7 @@ class Tantivy4SparkGroupByAggregateReader(
               throw new IllegalStateException(
                 s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
                   s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                  s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+                  s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
               )
 
             case _: Min =>
@@ -951,7 +951,7 @@ class Tantivy4SparkGroupByAggregateReader(
               throw new IllegalStateException(
                 s"AVG aggregation should have been transformed by Spark into SUM + COUNT. " +
                   s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                  s"Check the SupportsPushDownAggregates implementation in Tantivy4SparkScanBuilder."
+                  s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
               )
 
             case _: Min =>

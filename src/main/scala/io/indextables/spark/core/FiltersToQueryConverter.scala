@@ -1426,7 +1426,7 @@ object FiltersToQueryConverter {
     try
       options match {
         case Some(opts) =>
-          val tantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(opts)
+          val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(opts)
           val fieldConfig    = tantivyOptions.getFieldIndexingConfig(fieldName)
 
           // According to tantivy4java team:

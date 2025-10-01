@@ -62,7 +62,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     println(s"Original test data (${testData.length} rows):")
     df.show(false)
 
-    // Write to Tantivy4Spark format
+    // Write to IndexTables4Spark format
     val tantivyPath = testDataPath + "/indexquery_debug_data"
     df.write
       .format("tantivy4spark")
@@ -72,7 +72,7 @@ class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeA
     // Read back the data
     val tantivyDF = spark.read.format("tantivy4spark").load(tantivyPath)
 
-    println("Data read back from Tantivy4Spark:")
+    println("Data read back from IndexTables4Spark:")
     tantivyDF.show(false)
 
     // Test 1: Create IndexQueryExpression manually (programmatic way)

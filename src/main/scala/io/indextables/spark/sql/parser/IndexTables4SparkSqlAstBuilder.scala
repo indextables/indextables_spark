@@ -17,17 +17,17 @@
 
 package io.indextables.spark.sql.parser
 
-import io.indextables.spark.sql.{FlushTantivyCacheCommand, MergeSplitsCommand, InvalidateTransactionLogCacheCommand}
+import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, MergeSplitsCommand, InvalidateTransactionLogCacheCommand}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.parser.ParserUtils
-import io.indextables.spark.sql.parser.Tantivy4SparkSqlBaseParser._
+import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 
 /** Builder that converts ANTLR parse trees into Catalyst logical plans. */
-class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef] {
+class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor[AnyRef] {
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def visit(tree: org.antlr.v4.runtime.tree.ParseTree): AnyRef = {
@@ -146,10 +146,10 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     }
   }
 
-  override def visitFlushTantivyCache(ctx: FlushTantivyCacheContext): LogicalPlan =
-    FlushTantivyCacheCommand()
+  override def visitFlushIndexTablesCache(ctx: FlushIndexTablesCacheContext): LogicalPlan =
+    FlushIndexTablesCacheCommand()
 
-  override def visitInvalidateTantivyTransactionLogCache(ctx: InvalidateTantivyTransactionLogCacheContext)
+  override def visitInvalidateIndexTablesTransactionLogCache(ctx: InvalidateIndexTablesTransactionLogCacheContext)
     : LogicalPlan = {
     logger.debug(s"visitInvalidateTantivyTransactionLogCache called with context: $ctx")
 

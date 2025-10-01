@@ -37,7 +37,7 @@ class TestGroupBySumValidation extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // This should throw an exception because neither "category" nor "amount" are properly configured as fast fields
       val query = df.groupBy("category").agg(org.apache.spark.sql.functions.sum("amount"))

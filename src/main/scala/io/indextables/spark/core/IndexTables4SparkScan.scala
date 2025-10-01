@@ -36,7 +36,7 @@ import org.apache.spark.broadcast.Broadcast
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
-class Tantivy4SparkScan(
+class IndexTables4SparkScan(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   readSchema: StructType,
@@ -49,7 +49,7 @@ class Tantivy4SparkScan(
     with Batch
     with SupportsReportStatistics {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScan])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
   override def readSchema(): StructType = readSchema
 
@@ -116,7 +116,7 @@ class Tantivy4SparkScan(
       case (addAction, index) =>
         println(s"🗺️  [DRIVER-SCAN] Creating partition $index for split: ${addAction.path}")
         val partition =
-          new Tantivy4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
+          new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()
         if (preferredHosts.nonEmpty) {
           println(s"🗺️  [DRIVER-SCAN] Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
@@ -139,19 +139,19 @@ class Tantivy4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new Tantivy4SparkReaderFactory(readSchema, limit, config, tablePath)
+    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath)
   }
 
   override def estimateStatistics(): Statistics =
     try {
-      logger.info("Estimating statistics for Tantivy4Spark table")
+      logger.info("Estimating statistics for IndexTables4Spark table")
       val addActions = transactionLog.listFiles()
 
       // Apply the same data skipping logic used in planInputPartitions to get accurate statistics
       // for the filtered dataset that will actually be read
       val filteredActions = applyDataSkipping(addActions, pushedFilters)
 
-      val statistics = Tantivy4SparkStatistics.fromAddActions(filteredActions)
+      val statistics = IndexTables4SparkStatistics.fromAddActions(filteredActions)
 
       logger.info(
         s"Table statistics: ${statistics.sizeInBytes().orElse(0L)} bytes, ${statistics.numRows().orElse(0L)} rows"
@@ -162,7 +162,7 @@ class Tantivy4SparkScan(
       case ex: Exception =>
         logger.warn(s"Failed to estimate statistics: ${ex.getMessage}", ex)
         // Return unknown statistics rather than failing the query
-        Tantivy4SparkStatistics.unknown()
+        IndexTables4SparkStatistics.unknown()
     }
 
   def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {

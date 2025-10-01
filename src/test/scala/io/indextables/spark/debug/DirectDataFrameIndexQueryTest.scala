@@ -20,7 +20,7 @@ class DirectDataFrameIndexQueryTest extends TestBase {
 
     // Same field configuration
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.author", "string")
@@ -29,7 +29,7 @@ class DirectDataFrameIndexQueryTest extends TestBase {
       .save(testPath)
 
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     println("=== Direct DataFrame IndexQuery Test ===")

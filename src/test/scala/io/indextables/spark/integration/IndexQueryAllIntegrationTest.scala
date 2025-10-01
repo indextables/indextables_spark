@@ -39,7 +39,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     super.beforeEach()
     testDataPath = Files.createTempDirectory("indexqueryall_test_").toString
 
-    // Register Tantivy4Spark extensions for SQL parsing
+    // Register IndexTables4Spark extensions for SQL parsing
     spark.experimental.extraOptimizations = Seq.empty
   }
 
@@ -126,10 +126,10 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
 
   test("End-to-end SQL integration with V2 DataSource and temp view") {
     // Test SQL parsing and expression creation for indexqueryall function
-    import io.indextables.spark.sql.Tantivy4SparkSqlParser
+    import io.indextables.spark.sql.IndexTables4SparkSqlParser
     import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
 
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     // Test parsing indexqueryall function syntax
     val testQueries = Seq(
@@ -173,9 +173,9 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
 
     // Register the custom SQL parser with Spark session
     spark.sessionState.sqlParser match {
-      case parser if !parser.isInstanceOf[Tantivy4SparkSqlParser] =>
+      case parser if !parser.isInstanceOf[IndexTables4SparkSqlParser] =>
         // Only register if not already registered
-        val newParser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+        val newParser = new IndexTables4SparkSqlParser(CatalystSqlParser)
       // Note: Cannot directly replace sessionState.sqlParser, so we test parsing directly
       case _ => // Already registered or is instance of our parser
     }
@@ -321,8 +321,8 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(invalidValidation.isLeft)
   }
 
-  test("Real SQL indexqueryall() function with Tantivy4Spark DataSource") {
-    // Create a real Tantivy4Spark dataset to test SQL queries with indexqueryall()
+  test("Real SQL indexqueryall() function with IndexTables4Spark DataSource") {
+    // Create a real IndexTables4Spark dataset to test SQL queries with indexqueryall()
     val testData = Seq(
       (1, "Apache Spark Guide", "Comprehensive Apache Spark documentation and tutorials", "tech"),
       (2, "VERIZON Network Architecture", "VERIZON telecom infrastructure and network solutions", "telecom"),
@@ -333,7 +333,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
 
     val df = spark.createDataFrame(testData).toDF("id", "title", "description", "category")
 
-    // Write to Tantivy4Spark format for proper SQL integration
+    // Write to IndexTables4Spark format for proper SQL integration
     val tantivy4sparkPath = testDataPath + "/sql_test_data"
     df.write
       .format("tantivy4spark")
@@ -341,7 +341,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
       .save(tantivy4sparkPath)
 
     try {
-      // Create a table using Tantivy4Spark DataSource
+      // Create a table using IndexTables4Spark DataSource
       spark.sql(s"""
         CREATE OR REPLACE TEMPORARY VIEW indexqueryall_test_table
         USING tantivy4spark
@@ -372,7 +372,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
           // Test programmatic usage with Column wrapper
           val column = new org.apache.spark.sql.Column(indexQueryAllExpr)
 
-          // Read the Tantivy4Spark data and apply the IndexQueryAll filter
+          // Read the IndexTables4Spark data and apply the IndexQueryAll filter
           val tantivyDF = spark.read.format("tantivy4spark").load(tantivy4sparkPath)
 
           // Apply the IndexQueryAll filter - in production this would be pushed down

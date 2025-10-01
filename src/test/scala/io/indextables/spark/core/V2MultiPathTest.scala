@@ -44,14 +44,14 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
       val data3 = spark.range(30, 40).select(col("id"), lit("table3").as("source"))
 
       // Write to multiple paths
-      data1.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path1)
-      data2.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path2)
-      data3.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path3)
+      data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path1)
+      data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path2)
+      data3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path3)
 
       // Read from individual paths
-      val result1 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(path1)
-      val result2 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(path2)
-      val result3 = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(path3)
+      val result1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path1)
+      val result2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path2)
+      val result3 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path3)
 
       // Verify each table individually
       result1.count() shouldBe 10
@@ -99,12 +99,12 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           (col("id") * 2.0).as("value")
         )
 
-      data1.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path1)
-      data2.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path2)
+      data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path1)
+      data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path2)
 
       // Read from multiple paths using array notation
       val multiPathResult = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path1, path2)
 
       // Verify combined results
@@ -139,12 +139,12 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("text").as("data_type")
         )
 
-      numericData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(numericPath)
-      textData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(textPath)
+      numericData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(numericPath)
+      textData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(textPath)
 
       // Read both paths together
       val combinedResult = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(numericPath, textPath)
 
       combinedResult.count() shouldBe 50
@@ -190,14 +190,14 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("sibling").as("location")
         )
 
-      parentData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(parentPath)
-      childData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(childPath)
-      siblingData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(siblingPath)
+      parentData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(parentPath)
+      childData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(childPath)
+      siblingData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(siblingPath)
 
       // Read each path individually to verify separation
-      val parentResult  = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(parentPath)
-      val childResult   = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(childPath)
-      val siblingResult = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(siblingPath)
+      val parentResult  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(parentPath)
+      val childResult   = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(childPath)
+      val siblingResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(siblingPath)
 
       // Verify each dataset is distinct
       parentResult.count() shouldBe 30
@@ -210,7 +210,7 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
 
       // Read multiple non-overlapping paths
       val combinedResult = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(childPath, siblingPath)
 
       combinedResult.count() shouldBe 30 // child + sibling
@@ -231,7 +231,7 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           col("id"),
           concat(lit("item_"), col("id")).as("name")
         )
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(dataPath)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(dataPath)
 
       // Create empty path
       val emptyData = spark.emptyDataFrame
@@ -240,11 +240,11 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("").as("name")
         )
         .filter(lit(false)) // Filter out all rows
-      emptyData.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(emptyPath)
+      emptyData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(emptyPath)
 
       // Read both paths together
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(dataPath, emptyPath)
 
       // Should get data from non-empty path only
@@ -262,15 +262,15 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
       val data = spark.range(0, 10).select(col("id"))
 
       // Write to paths with various naming patterns
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(normalPath)
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(pathWithSpaces)
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(pathWithSpecialChars)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(normalPath)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(pathWithSpaces)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(pathWithSpecialChars)
 
       // Read from each path
-      val normalResult = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(normalPath)
-      val spacesResult = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(pathWithSpaces)
+      val normalResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(normalPath)
+      val spacesResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(pathWithSpaces)
       val specialResult =
-        spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(pathWithSpecialChars)
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(pathWithSpecialChars)
 
       // All should work
       normalResult.count() shouldBe 10
@@ -279,7 +279,7 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
 
       // Multi-path read with various naming patterns
       val multiResult = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(normalPath, pathWithSpaces, pathWithSpecialChars)
 
       multiResult.count() shouldBe 30
@@ -300,11 +300,11 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("local").as("protocol")
         )
 
-      data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(localPath)
+      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(localPath)
 
       // Read with explicit file:// protocol
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(localPath)
 
       result.count() shouldBe 15
@@ -342,12 +342,12 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit(true).as("active")
         )
 
-      data1.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path1)
-      data2.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path2)
+      data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path1)
+      data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path2)
 
       // Read from multiple paths
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path1, path2)
 
       // Verify schema consistency
@@ -378,13 +378,13 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
             lit(i).as("dataset_number"),
             concat(lit("value_"), col("id")).as("description")
           )
-        data.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(path)
+        data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(path)
         path
       }
 
       // Read from all paths at once
       val result = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(paths: _*)
 
       // Verify all data is present

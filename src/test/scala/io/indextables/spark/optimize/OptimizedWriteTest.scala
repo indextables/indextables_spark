@@ -18,8 +18,8 @@
 package io.indextables.spark.optimize
 
 import io.indextables.spark.TestBase
-import io.indextables.spark.config.Tantivy4SparkConfig
-import io.indextables.spark.core.Tantivy4SparkOptions
+import io.indextables.spark.config.IndexTables4SparkConfig
+import io.indextables.spark.core.IndexTables4SparkOptions
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
@@ -167,7 +167,7 @@ class OptimizedWriteTest extends TestBase {
     }
   }
 
-  test("should test Tantivy4SparkOptions utility") {
+  test("should test IndexTables4SparkOptions utility") {
     // Test options parsing
     val optionsMap = Map(
       "optimizeWrite"         -> "true",
@@ -177,14 +177,14 @@ class OptimizedWriteTest extends TestBase {
 
     import scala.jdk.CollectionConverters._
     val caseInsensitiveMap = new CaseInsensitiveStringMap(optionsMap.asJava)
-    val options            = Tantivy4SparkOptions(caseInsensitiveMap)
+    val options            = IndexTables4SparkOptions(caseInsensitiveMap)
 
     options.optimizeWrite shouldBe Some(true)
     options.targetRecordsPerSplit shouldBe Some(500000L)
     options.bloomFiltersEnabled shouldBe Some(false)
     options.forceStandardStorage shouldBe None // Not set
 
-    println("✅ Tantivy4SparkOptions utility works correctly")
+    println("✅ IndexTables4SparkOptions utility works correctly")
   }
 
   test("should verify configuration hierarchy precedence") {

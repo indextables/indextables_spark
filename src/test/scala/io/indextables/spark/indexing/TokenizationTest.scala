@@ -36,11 +36,11 @@ class TokenizationTest extends TestBase with Matchers {
 
       // Write with default string type (no explicit configuration)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // String fields should do exact matching
       val exactMatch = df.filter(df("content") === "machine learning").collect()
@@ -68,12 +68,12 @@ class TokenizationTest extends TestBase with Matchers {
 
       // Write with explicit text type
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Text fields with === should still do exact matching
       val exactMatch = df.filter(df("content") === "machine learning algorithms").collect()
@@ -98,13 +98,13 @@ class TokenizationTest extends TestBase with Matchers {
 
       // Configure title as string (exact) and content as text (tokenized)
       data.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.title", "string")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // String field should match exactly
       val exactTitleMatch = df.filter(df("title") === "exact_title").collect()

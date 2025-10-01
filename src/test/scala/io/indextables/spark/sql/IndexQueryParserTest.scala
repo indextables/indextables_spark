@@ -25,8 +25,8 @@ import org.scalatest.funsuite.AnyFunSuite
 
 class IndexQueryParserTest extends AnyFunSuite with TestBase {
 
-  test("Tantivy4SparkSqlParser should parse simple indexquery expression") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should parse simple indexquery expression") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("title indexquery 'spark AND sql'")
 
@@ -37,8 +37,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("spark AND sql"))
   }
 
-  test("Tantivy4SparkSqlParser should parse indexquery with double quotes") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should parse indexquery with double quotes") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("content indexquery \"machine learning\"")
 
@@ -49,8 +49,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("machine learning"))
   }
 
-  test("Tantivy4SparkSqlParser should parse complex indexquery") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should parse complex indexquery") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("description indexquery '(apache AND spark) OR (hadoop AND mapreduce)'")
 
@@ -61,8 +61,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("(apache AND spark) OR (hadoop AND mapreduce)"))
   }
 
-  test("Tantivy4SparkSqlParser should parse indexquery with qualified column names") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should parse indexquery with qualified column names") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("table.columnName indexquery 'search term'")
 
@@ -73,8 +73,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("search term"))
   }
 
-  test("Tantivy4SparkSqlParser should handle indexquery with wildcards") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should handle indexquery with wildcards") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("title indexquery 'prefix* AND *suffix'")
 
@@ -85,8 +85,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("prefix* AND *suffix"))
   }
 
-  test("Tantivy4SparkSqlParser should handle indexquery with phrase queries") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should handle indexquery with phrase queries") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("content indexquery '\"exact phrase match\"'")
 
@@ -97,8 +97,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("\"exact phrase match\""))
   }
 
-  test("Tantivy4SparkSqlParser should fallback to default parser for non-indexquery expressions") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should fallback to default parser for non-indexquery expressions") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("title = 'test'")
 
@@ -108,8 +108,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(expr.isInstanceOf[EqualTo])
   }
 
-  test("Tantivy4SparkSqlParser should fallback on parse errors in indexquery parts") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should fallback on parse errors in indexquery parts") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     // This should fallback to the default parser since the left side is invalid for column reference
     val expr = parser.parseExpression("'literal_string' indexquery 'query'")
@@ -118,8 +118,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     // The exact behavior depends on how the default parser handles this invalid syntax
   }
 
-  test("Tantivy4SparkSqlParser should handle indexquery with escaped quotes") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should handle indexquery with escaped quotes") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("title indexquery 'title:\"Apache Spark\" AND version:3.*'")
 
@@ -130,8 +130,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("title:\"Apache Spark\" AND version:3.*"))
   }
 
-  test("Tantivy4SparkSqlParser should preserve case in column names") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should preserve case in column names") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val expr = parser.parseExpression("CamelCaseColumn indexquery 'search terms'")
 
@@ -143,8 +143,8 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQueryExpr.getQueryString.contains("search terms"))
   }
 
-  test("Tantivy4SparkSqlParser should handle whitespace variations") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should handle whitespace variations") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     // Test with extra whitespace
     val expr1 = parser.parseExpression("  title   indexquery   'query'  ")
@@ -164,22 +164,22 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     assert(indexQuery3.getQueryString.contains("query"))
   }
 
-  test("Tantivy4SparkSqlParser should still handle FLUSH TANTIVY4SPARK SEARCHER CACHE command") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should still handle FLUSH TANTIVY4SPARK SEARCHER CACHE command") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     val plan = parser.parsePlan("FLUSH TANTIVY4SPARK SEARCHER CACHE")
 
-    assert(plan.isInstanceOf[FlushTantivyCacheCommand])
+    assert(plan.isInstanceOf[FlushIndexTablesCacheCommand])
   }
 
-  test("Tantivy4SparkSqlParser should delegate non-indexquery plans to default parser") {
-    val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
+  test("IndexTables4SparkSqlParser should delegate non-indexquery plans to default parser") {
+    val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     // This should be parsed by the default parser
     val plan = parser.parsePlan("SELECT * FROM table WHERE col = 'value'")
 
     // Should be a valid plan parsed by the default parser
     assert(plan != null)
-    assert(!plan.isInstanceOf[FlushTantivyCacheCommand])
+    assert(!plan.isInstanceOf[FlushIndexTablesCacheCommand])
   }
 }

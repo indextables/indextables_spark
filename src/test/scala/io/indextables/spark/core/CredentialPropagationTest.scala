@@ -82,8 +82,8 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     // Create a test table first
     createTestTable(tablePath)
 
-    // Create Tantivy4SparkRelation directly (simulates SaveIntoDataSourceCommand path)
-    val relation = new Tantivy4SparkRelation(
+    // Create IndexTables4SparkRelation directly (simulates SaveIntoDataSourceCommand path)
+    val relation = new IndexTables4SparkRelation(
       path = tablePath,
       sqlContext = spark.sqlContext,
       readOptions = Map.empty // No read options - should get creds from Spark config
@@ -129,7 +129,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
       "spark.indextables.s3.pathStyleAccess" -> "true"
     )
 
-    val relation = new Tantivy4SparkRelation(
+    val relation = new IndexTables4SparkRelation(
       path = tablePath,
       sqlContext = spark.sqlContext,
       readOptions = readOptions
@@ -172,7 +172,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     // Create test table first
     createTestTable(tablePath)
 
-    val relation = new Tantivy4SparkRelation(
+    val relation = new IndexTables4SparkRelation(
       path = tablePath,
       sqlContext = spark.sqlContext,
       readOptions = Map.empty
@@ -215,7 +215,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     // Create test table
     createTestTable(tablePath)
 
-    val relation = new Tantivy4SparkRelation(
+    val relation = new IndexTables4SparkRelation(
       path = tablePath,
       sqlContext = spark.sqlContext,
       readOptions = readOptions
@@ -253,7 +253,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     hadoopConf.unset("spark.indextables.aws.region")
     hadoopConf.unset("spark.indextables.s3.endpoint")
 
-    val relation = new Tantivy4SparkRelation(
+    val relation = new IndexTables4SparkRelation(
       path = tablePath,
       sqlContext = spark.sqlContext,
       readOptions = Map.empty
@@ -292,10 +292,10 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     createTestTable(tablePath)
 
     // Test the DataSource resolveRelation path - this simulates spark.read.format("tantivy4spark").load()
-    val dataSource = new Tantivy4SparkDataSource()
+    val dataSource = new IndexTables4SparkDataSource()
 
     try {
-      // This path: DataSource.resolveRelation -> new Tantivy4SparkRelation -> relation.schema
+      // This path: DataSource.resolveRelation -> new IndexTables4SparkRelation -> relation.schema
       val relation = dataSource.createRelation(spark.sqlContext, readOptions)
       val schema   = relation.schema // This should not throw credential errors
 
@@ -364,7 +364,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     spark.conf.unset("spark.indextables.s3.endpoint")
 
     // Test V2 DataSource inferSchema method directly
-    val provider = new Tantivy4SparkTableProvider()
+    val provider = new IndexTables4SparkTableProvider()
     val inferSchemaOptions = new CaseInsensitiveStringMap(
       Map(
         "path"                                 -> tablePath,
@@ -410,7 +410,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     spark.conf.set("spark.indextables.s3.endpoint", "http://spark.endpoint")
 
     // Options should have highest precedence and override the others
-    val provider = new Tantivy4SparkTableProvider()
+    val provider = new IndexTables4SparkTableProvider()
     val inferSchemaOptions = new CaseInsensitiveStringMap(
       Map(
         "path"                               -> tablePath,
@@ -463,7 +463,7 @@ class CredentialPropagationTest extends TestBase with BeforeAndAfterAll {
     try {
       // This triggers the V2 TableProvider.inferSchema path - the exact scenario you mentioned
       val df = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.aws.accessKey", ACCESS_KEY)
         .option("spark.indextables.aws.secretKey", SECRET_KEY)
         .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)

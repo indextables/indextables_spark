@@ -38,13 +38,13 @@ class PartitionVsDataDateTest extends TestBase with Matchers {
 
       // Write with partition_date as partition column, data_date as regular indexed field
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.fastfields", "partition_date,data_date")
         .partitionBy("partition_date")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Test data date query (should work - field is stored in split)
       println("Creating filter for data_date === '2023-02-15'")

@@ -23,7 +23,7 @@ import org.apache.spark.sql.functions._
 import java.sql.{Date, Timestamp}
 import scala.util.Random
 
-class Tantivy4SparkFullIntegrationTest extends TestBase {
+class IndexTables4SparkFullIntegrationTest extends TestBase {
 
   // Note: These tests exercise the full integration but will fail at the native JNI level
   // without the actual Tantivy library. They verify the Spark integration is working correctly.
@@ -43,7 +43,7 @@ class Tantivy4SparkFullIntegrationTest extends TestBase {
     withTempPath { tempPath =>
       val testData = createComprehensiveTestDataFrame()
 
-      // Step 1: Write data using Tantivy4Spark format with direct path parameter
+      // Step 1: Write data using IndexTables4Spark format with direct path parameter
       testData.write
         .format("tantivy4spark")
         .option("spark.indextables.indexing.fastfields", "age,salary,experience_years,is_active")

@@ -36,7 +36,7 @@ import io.indextables.spark.transaction.TransactionLog
 import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 
-class Tantivy4SparkScanBuilder(
+class IndexTables4SparkScanBuilder(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   schema: StructType,
@@ -49,7 +49,7 @@ class Tantivy4SparkScanBuilder(
     with SupportsPushDownLimit
     with SupportsPushDownAggregates {
 
-  private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkScanBuilder])
+  private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScanBuilder])
 
   println(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
   logger.info(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
@@ -66,7 +66,7 @@ class Tantivy4SparkScanBuilder(
   private val instanceKey = {
     val tablePath   = transactionLog.getTablePath().toString
     val executionId = Option(sparkSession.sparkContext.getLocalProperty("spark.sql.execution.id"))
-    Tantivy4SparkScanBuilder.generateInstanceKey(tablePath, executionId)
+    IndexTables4SparkScanBuilder.generateInstanceKey(tablePath, executionId)
   }
 
   override def build(): Scan = {
@@ -91,9 +91,9 @@ class Tantivy4SparkScanBuilder(
         )
         extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
 
-        println(s"🔍 BUILD DEBUG: Creating Tantivy4SparkScan with ${_pushedFilters.length} pushed filters")
+        println(s"🔍 BUILD DEBUG: Creating IndexTables4SparkScan with ${_pushedFilters.length} pushed filters")
         _pushedFilters.foreach(filter => println(s"  - Creating scan with filter: $filter"))
-        new Tantivy4SparkScan(
+        new IndexTables4SparkScan(
           sparkSession,
           transactionLog,
           requiredSchema,
@@ -136,8 +136,8 @@ class Tantivy4SparkScanBuilder(
 
     // TODO: Verify that GROUP BY aggregations are also using the shared data skipping function
     // For now, create a specialized GROUP BY scan
-    // This will be implemented as Tantivy4SparkGroupByAggregateScan
-    new Tantivy4SparkGroupByAggregateScan(
+    // This will be implemented as IndexTables4SparkGroupByAggregateScan
+    new IndexTables4SparkGroupByAggregateScan(
       sparkSession,
       transactionLog,
       schema,
@@ -156,7 +156,7 @@ class Tantivy4SparkScanBuilder(
     )
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    new Tantivy4SparkSimpleAggregateScan(
+    new IndexTables4SparkSimpleAggregateScan(
       sparkSession,
       transactionLog,
       schema,
@@ -443,7 +443,7 @@ class Tantivy4SparkScanBuilder(
     logger.error(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction using instance key: $instanceKey")
 
     // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this instance
-    val storedQueries = Tantivy4SparkScanBuilder.getIndexQueries(instanceKey)
+    val storedQueries = IndexTables4SparkScanBuilder.getIndexQueries(instanceKey)
     if (storedQueries.nonEmpty) {
       logger.error(s"🔍 EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from instance storage")
       storedQueries.foreach(q => logger.error(s"  - Instance IndexQuery: $q"))
@@ -1068,7 +1068,7 @@ class Tantivy4SparkScanBuilder(
  * Companion object for ScanBuilder to store IndexQuery information. This provides a clean mechanism for
  * V2IndexQueryExpressionRule to pass IndexQuery expressions directly to the ScanBuilder without a global registry.
  */
-object Tantivy4SparkScanBuilder {
+object IndexTables4SparkScanBuilder {
   import scala.collection.concurrent
 
   // Thread-safe storage for IndexQuery expressions scoped by DataSource instance

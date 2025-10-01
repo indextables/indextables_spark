@@ -63,7 +63,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       println(s"✅ GROUP BY test: Data written to $tablePath")
 
       // Read back the data using V2 API for aggregate pushdown
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY query - this should trigger pushGroupBy() method
       println("🔍 GROUP BY TEST: Executing GROUP BY query...")
@@ -126,7 +126,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY with SUM
       println("🔍 GROUP BY SUM TEST: Executing GROUP BY with SUM...")
@@ -187,7 +187,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform multi-dimensional GROUP BY query - this should use MultiTermsAggregation
       println("🔍 MULTI-DIMENSIONAL GROUP BY TEST: Executing 3-dimensional GROUP BY query...")
@@ -257,7 +257,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform multi-dimensional GROUP BY with SUM
       println("🔍 MULTI-DIMENSIONAL GROUP BY SUM TEST: Executing 2-dimensional GROUP BY with SUM...")
@@ -313,7 +313,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .mode("overwrite")
         .save(tablePath)
 
-      val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // This query should trigger aggregate pushdown with GROUP BY
       val query = df.groupBy("status").count()
@@ -324,7 +324,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       println(physicalPlan)
 
       // Check if our GROUP BY scan classes appear in the plan
-      val hasTantivyGroupByScan = physicalPlan.contains("Tantivy4SparkGroupByAggregateScan") ||
+      val hasTantivyGroupByScan = physicalPlan.contains("IndexTables4SparkGroupByAggregateScan") ||
         physicalPlan.contains("GroupByAggregateScan")
 
       if (hasTantivyGroupByScan) {

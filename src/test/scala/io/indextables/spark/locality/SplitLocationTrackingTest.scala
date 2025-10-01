@@ -74,7 +74,7 @@ class SplitLocationTrackingTest extends TestBase with BeforeAndAfterEach {
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
-      // Write data using Tantivy4Spark
+      // Write data using IndexTables4Spark
       val tablePath = tempDir.toString
       df.write.format("tantivy4spark").save(tablePath)
 

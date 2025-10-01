@@ -24,31 +24,31 @@ import org.apache.spark.sql.catalyst.expressions.ExpressionInfo
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
-import io.indextables.spark.sql.Tantivy4SparkSqlParser
+import io.indextables.spark.sql.IndexTables4SparkSqlParser
 import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
 import io.indextables.spark.catalyst.V2IndexQueryExpressionRule
 
 /**
- * Spark session extensions for Tantivy4Spark.
+ * Spark session extensions for IndexTables4Spark.
  *
- * This class registers custom parsers, optimizers, and other extensions with Spark to enable Tantivy4Spark-specific
+ * This class registers custom parsers, optimizers, and other extensions with Spark to enable IndexTables4Spark-specific
  * functionality.
  *
  * Extensions provided:
  *   - Custom SQL parser for indexquery operator
- *   - FLUSH TANTIVY4SPARK SEARCHER CACHE command
+ *   - FLUSH INDEXTABLES4SPARK SEARCHER CACHE command
  *
  * To use these extensions, configure your SparkSession:
  *
- * spark.conf.set("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
+ * spark.conf.set("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
  *
- * Or in spark-defaults.conf: spark.sql.extensions=io.indextables.spark.extensions.Tantivy4SparkExtensions
+ * Or in spark-defaults.conf: spark.sql.extensions=io.indextables.spark.extensions.IndexTables4SparkExtensions
  */
-class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
+class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
 
   override def apply(extensions: SparkSessionExtensions): Unit = {
     // Inject our custom parser to handle indexquery operator and custom commands
-    extensions.injectParser((session, parser) => new Tantivy4SparkSqlParser(parser))
+    extensions.injectParser((session, parser) => new IndexTables4SparkSqlParser(parser))
 
     // Register the tantivy4spark_indexquery function
     extensions.injectFunction(

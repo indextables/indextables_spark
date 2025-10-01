@@ -8,17 +8,17 @@ object SqlFlushDemo extends App {
 
   val spark = SparkSession
     .builder()
-    .appName("Tantivy4Spark Flush Demo")
+    .appName("IndexTables4Spark Flush Demo")
     .master("local[2]")
-    .config("spark.sql.extensions", "io.indextables.spark.sql.Tantivy4SparkSessionExtension")
+    .config("spark.sql.extensions", "io.indextables.spark.sql.IndexTables4SparkSessionExtension")
     .getOrCreate()
 
   try {
-    println("=== Testing Tantivy4Spark FLUSH command ===")
+    println("=== Testing IndexTables4Spark FLUSH command ===")
 
     // Test 1: Direct command execution
-    println("\n1. Testing FlushTantivyCacheCommand directly:")
-    val command = FlushTantivyCacheCommand()
+    println("\n1. Testing FlushIndexTablesCacheCommand directly:")
+    val command = FlushIndexTablesCacheCommand()
     val results = command.run(spark)
 
     results.foreach { row =>
@@ -32,7 +32,7 @@ object SqlFlushDemo extends App {
 
     // Test 2: SQL Parser test
     println("\n2. Testing SQL parser:")
-    val parser        = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser        = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val parsedCommand = parser.parsePlan("FLUSH TANTIVY4SPARK SEARCHER CACHE")
     println(s"  Parsed command type: ${parsedCommand.getClass.getSimpleName}")
 
@@ -50,7 +50,7 @@ object SqlFlushDemo extends App {
       // Read it back to create some cache entries
       val readData = spark.read.format("tantivy4spark").load(tempPath)
       val count    = readData.count()
-      println(s"  Successfully wrote and read $count rows to/from Tantivy4Spark")
+      println(s"  Successfully wrote and read $count rows to/from IndexTables4Spark")
 
       // Now flush again
       val flushResults = command.run(spark)
@@ -62,7 +62,7 @@ object SqlFlushDemo extends App {
 
     } catch {
       case e: Exception =>
-        println(s"  (Data test skipped - Tantivy4Spark may not be fully configured: ${e.getMessage})")
+        println(s"  (Data test skipped - IndexTables4Spark may not be fully configured: ${e.getMessage})")
     }
 
     println("\n=== FLUSH command demo completed successfully! ===")

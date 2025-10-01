@@ -61,10 +61,10 @@ class SqlPushdownTest extends TestBase {
         }
     }
 
-    // Additional verification: look for Tantivy4Spark relation in the plan
-    val hasTantivyRelation = planString.contains("Tantivy4SparkRelation") || planString.contains("tantivy4spark")
+    // Additional verification: look for IndexTables4Spark relation in the plan
+    val hasTantivyRelation = planString.contains("IndexTables4SparkRelation") || planString.contains("tantivy4spark")
     if (hasTantivyRelation) {
-      println(s"  ✓ Plan contains Tantivy4Spark data source")
+      println(s"  ✓ Plan contains IndexTables4Spark data source")
     }
 
     println() // Empty line for readability

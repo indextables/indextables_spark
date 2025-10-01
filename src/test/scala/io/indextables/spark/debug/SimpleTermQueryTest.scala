@@ -90,7 +90,7 @@ class SimpleTermQueryTest extends TestBase {
           throw new RuntimeException(s"Could not find AddAction for split ${splitFile.getName} in transaction log")
         }
 
-        // Create SplitMetadata from AddAction - the same way Tantivy4SparkPartitions does
+        // Create SplitMetadata from AddAction - the same way IndexTables4SparkPartitions does
         import java.time.Instant
         import scala.jdk.CollectionConverters._
 

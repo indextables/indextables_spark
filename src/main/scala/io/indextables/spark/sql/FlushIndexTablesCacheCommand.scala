@@ -25,7 +25,7 @@ import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegis
 import org.slf4j.LoggerFactory
 
 /**
- * SQL command to flush Tantivy4Spark searcher cache.
+ * SQL command to flush IndexTables4Spark searcher cache.
  *
  * Syntax: FLUSH TANTIVY4SPARK SEARCHER CACHE
  *
@@ -33,9 +33,9 @@ import org.slf4j.LoggerFactory
  *   1. Flushes all JVM-wide split cache managers 2. Clears split location registry 3. Calls tantivy4java's cache flush
  *      functionality
  */
-case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
+case class FlushIndexTablesCacheCommand() extends LeafRunnableCommand {
 
-  private val logger = LoggerFactory.getLogger(classOf[FlushTantivyCacheCommand])
+  private val logger = LoggerFactory.getLogger(classOf[FlushIndexTablesCacheCommand])
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("cache_type", StringType, nullable = false)(),

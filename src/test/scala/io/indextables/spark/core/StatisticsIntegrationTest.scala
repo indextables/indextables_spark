@@ -23,7 +23,7 @@ import java.util.OptionalLong
 
 class StatisticsIntegrationTest extends TestBase {
 
-  test("Tantivy4SparkStatistics should provide basic table statistics") {
+  test("IndexTables4SparkStatistics should provide basic table statistics") {
     withTempPath { path =>
       val schema = StructType(
         Seq(
@@ -47,13 +47,13 @@ class StatisticsIntegrationTest extends TestBase {
 
       // Write data using V2 DataSource API
       df.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
       // Read back using V2 API and verify statistics are available
       val readDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
       // Force the query plan to be created, which should trigger statistics estimation
@@ -68,16 +68,16 @@ class StatisticsIntegrationTest extends TestBase {
       // The statistics should be computed during query planning
       // We can verify this by checking the logical plan contains our table
       assert(
-        logicalPlan.toString.contains("Tantivy4SparkTable") ||
+        logicalPlan.toString.contains("IndexTables4SparkTable") ||
           logicalPlan.toString.contains("tantivy4spark"),
-        s"Logical plan should contain Tantivy4Spark reference: $logicalPlan"
+        s"Logical plan should contain IndexTables4Spark reference: $logicalPlan"
       )
 
       println("✅ Statistics integration test completed successfully")
     }
   }
 
-  test("Tantivy4SparkStatistics should handle empty tables") {
+  test("IndexTables4SparkStatistics should handle empty tables") {
     withTempPath { path =>
       val schema = StructType(
         Seq(
@@ -91,13 +91,13 @@ class StatisticsIntegrationTest extends TestBase {
 
       // Write empty data
       emptyData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
       // Read back and verify no errors
       val readDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
 
       val result = readDf.collect()
@@ -131,13 +131,13 @@ class StatisticsIntegrationTest extends TestBase {
       val tablePath = path.toString
 
       df.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
       // Read with filter - statistics should reflect the filtered dataset
       val filteredDf = spark.read
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
         .filter("category = 'even'")
 

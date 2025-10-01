@@ -17,12 +17,12 @@ class IndexQueryParsingDebugTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(testDataPath)
 
       // Create temp view
-      spark.sql(s"CREATE OR REPLACE TEMPORARY VIEW debug_table USING io.indextables.spark.core.Tantivy4SparkTableProvider OPTIONS (path '$testDataPath')")
+      spark.sql(s"CREATE OR REPLACE TEMPORARY VIEW debug_table USING io.indextables.spark.core.IndexTables4SparkTableProvider OPTIONS (path '$testDataPath')")
 
       println("=== Testing IndexQuery SQL Parsing ===")
 

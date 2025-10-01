@@ -96,7 +96,7 @@ class SchemaConverterTest extends TestBase {
     // Should throw exception for array types
     intercept[UnsupportedOperationException] {
       SchemaConverter.sparkToTantivySchema(schemaWithArray)
-    }.getMessage should include("Array types are not supported by Tantivy4Spark")
+    }.getMessage should include("Array types are not supported by IndexTables4Spark")
 
     val schemaWithMap = StructType(
       Array(
@@ -108,7 +108,7 @@ class SchemaConverterTest extends TestBase {
     // Should throw exception for map types
     intercept[UnsupportedOperationException] {
       SchemaConverter.sparkToTantivySchema(schemaWithMap)
-    }.getMessage should include("Map types are not supported by Tantivy4Spark")
+    }.getMessage should include("Map types are not supported by IndexTables4Spark")
 
     val schemaWithStruct = StructType(
       Array(
@@ -129,7 +129,7 @@ class SchemaConverterTest extends TestBase {
     // Should throw exception for struct types
     intercept[UnsupportedOperationException] {
       SchemaConverter.sparkToTantivySchema(schemaWithStruct)
-    }.getMessage should include("Struct types are not supported by Tantivy4Spark")
+    }.getMessage should include("Struct types are not supported by IndexTables4Spark")
   }
 
   test("should handle empty schema") {

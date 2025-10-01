@@ -91,7 +91,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
   }
 
   test("SQL command parsing should work via extension") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // Test global invalidation
     val globalSql        = "INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE"
@@ -119,7 +119,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
   }
 
   test("SQL command should be case insensitive") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     val variations = Seq(
       "invalidate tantivy4spark transaction log cache",
@@ -135,7 +135,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
   }
 
   test("SQL command with schema qualified table name") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     val sql        = "INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE FOR database.table_name"
     val parsedPlan = parser.parsePlan(sql)
@@ -203,7 +203,7 @@ class InvalidateTransactionLogCacheCommandTest extends TestBase {
   }
 
   test("non-matching SQL should delegate to default parser") {
-    val parser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     // This should be handled by the default Spark SQL parser
     val parsedPlan = parser.parsePlan("SELECT 1 as test")

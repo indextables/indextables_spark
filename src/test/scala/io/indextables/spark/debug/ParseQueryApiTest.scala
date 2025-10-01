@@ -23,7 +23,7 @@ class ParseQueryApiTest extends TestBase {
 
     // Write with text fields
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.category", "text")
       .mode("overwrite")
@@ -31,7 +31,7 @@ class ParseQueryApiTest extends TestBase {
 
     // Read the data to get splits
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     // Force materialization to create splits

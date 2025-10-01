@@ -42,18 +42,18 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
     // Find available port first
     s3MockPort = findAvailablePort()
 
-    // Create Spark session with ONLY Tantivy4Spark S3 settings
+    // Create Spark session with ONLY IndexTables4Spark S3 settings
     // NO Hadoop S3A configuration at all
     spark = SparkSession
       .builder()
-      .appName("Tantivy4Spark MERGE SPLITS Direct S3 Test")
+      .appName("IndexTables4Spark MERGE SPLITS Direct S3 Test")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", java.nio.file.Files.createTempDirectory("spark-warehouse").toString)
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .config("spark.driver.host", "127.0.0.1")
       .config("spark.driver.bindAddress", "127.0.0.1")
-      .config("spark.sql.extensions", "io.indextables.spark.extensions.Tantivy4SparkExtensions")
-      // ONLY Tantivy4Spark S3 settings - NO Hadoop config
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // ONLY IndexTables4Spark S3 settings - NO Hadoop config
       .config("spark.indextables.aws.accessKey", ACCESS_KEY)
       .config("spark.indextables.aws.secretKey", SECRET_KEY)
       .config("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -137,7 +137,7 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
     // Parse and run MERGE SPLITS command directly
     // This will fail to find the path (since we haven't written data)
     // but the important thing is it doesn't fail due to missing Hadoop config
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand = sqlParser
       .parsePlan(s"MERGE SPLITS '$s3TablePath'")
       .asInstanceOf[MergeSplitsCommand]
@@ -166,7 +166,7 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
       s"s3://$TEST_BUCKET/nested/path/table"
     )
 
-    val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    val sqlParser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
 
     testPaths.foreach { path =>
       val command = sqlParser

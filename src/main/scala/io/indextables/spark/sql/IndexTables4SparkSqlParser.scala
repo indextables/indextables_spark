@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
 import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
-import io.indextables.spark.sql.parser.{Tantivy4SparkSqlAstBuilder, Tantivy4SparkSqlBaseParser, Tantivy4SparkSqlBaseLexer}
+import io.indextables.spark.sql.parser.{IndexTables4SparkSqlAstBuilder, IndexTables4SparkSqlBaseParser, IndexTables4SparkSqlBaseLexer}
 import org.antlr.v4.runtime.{CharStreams, CommonTokenStream}
 import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.antlr.v4.runtime.atn.PredictionMode
@@ -31,8 +31,8 @@ import org.apache.spark.sql.catalyst.parser.ParseErrorListener
 import org.slf4j.LoggerFactory
 
 /**
- * Custom SQL parser for Tantivy4Spark that extends the default Spark SQL parser to support additional
- * Tantivy4Spark-specific commands.
+ * Custom SQL parser for IndexTables4Spark that extends the default Spark SQL parser to support additional
+ * IndexTables4Spark-specific commands.
  *
  * Supported commands:
  *   - FLUSH TANTIVY4SPARK SEARCHER CACHE
@@ -43,9 +43,9 @@ import org.slf4j.LoggerFactory
  *   - indexquery: column indexquery 'query_string'
  *   - indexqueryall: indexqueryall('query_string')
  */
-class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
+class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
-  private val astBuilder = new Tantivy4SparkSqlAstBuilder()
+  private val astBuilder = new IndexTables4SparkSqlAstBuilder()
   private val logger     = LoggerFactory.getLogger(getClass)
 
   override def parsePlan(sqlText: String): LogicalPlan = {
@@ -56,8 +56,8 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
         logger.debug(s"AST Builder result: $result, type: ${if (result != null) result.getClass.getName else "null"}")
         result match {
           case plan: LogicalPlan =>
-            logger.debug(s"Successfully parsed Tantivy4Spark command: $plan")
-            // Successfully parsed a Tantivy4Spark command
+            logger.debug(s"Successfully parsed IndexTables4Spark command: $plan")
+            // Successfully parsed a IndexTables4Spark command
             plan
           case null =>
             logger.debug("ANTLR didn't match any patterns, delegating to Spark parser")
@@ -99,13 +99,13 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
   }
 
   /** Parse SQL text using ANTLR (similar to Delta Lake's approach). */
-  private def parse[T](command: String)(toResult: Tantivy4SparkSqlBaseParser => T): T = {
-    val lexer = new Tantivy4SparkSqlBaseLexer(CharStreams.fromString(command))
+  private def parse[T](command: String)(toResult: IndexTables4SparkSqlBaseParser => T): T = {
+    val lexer = new IndexTables4SparkSqlBaseLexer(CharStreams.fromString(command))
     lexer.removeErrorListeners()
     lexer.addErrorListener(ParseErrorListener)
 
     val tokenStream = new CommonTokenStream(lexer)
-    val parser      = new Tantivy4SparkSqlBaseParser(tokenStream)
+    val parser      = new IndexTables4SparkSqlBaseParser(tokenStream)
     parser.removeErrorListeners()
     parser.addErrorListener(ParseErrorListener)
 

@@ -184,7 +184,7 @@ class RealS3IntegrationJustMergeTest extends RealS3TestBase {
     data
       .filter(col("id") < 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
       .save(tablePath)
@@ -192,7 +192,7 @@ class RealS3IntegrationJustMergeTest extends RealS3TestBase {
     data
       .filter(col("id") >= 1000)
       .write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
       .save(tablePath)
@@ -202,7 +202,7 @@ class RealS3IntegrationJustMergeTest extends RealS3TestBase {
     // Verify data exists before merge
     val readOptions = getReadOptions()
     val preMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 
@@ -213,8 +213,8 @@ class RealS3IntegrationJustMergeTest extends RealS3TestBase {
 
     // Execute MERGE SPLITS command
     println(s"🔧 Executing MERGE SPLITS operation...")
-    import io.indextables.spark.sql.Tantivy4SparkSqlParser
-    val sqlParser3 = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
+    import io.indextables.spark.sql.IndexTables4SparkSqlParser
+    val sqlParser3 = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val mergeCommand4 = sqlParser3
       .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[io.indextables.spark.sql.MergeSplitsCommand]
@@ -224,7 +224,7 @@ class RealS3IntegrationJustMergeTest extends RealS3TestBase {
 
     // Verify data integrity after merge
     val postMergeData = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .options(readOptions)
       .load(tablePath)
 

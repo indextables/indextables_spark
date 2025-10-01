@@ -19,7 +19,7 @@ package io.indextables.spark.integration
 
 import io.indextables.spark.TestBase
 import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLog, AddAction}
-import io.indextables.spark.core.Tantivy4SparkScan
+import io.indextables.spark.core.IndexTables4SparkScan
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.sources._
@@ -78,7 +78,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     // Verify: Should only have 1 partition (file2)
     assert(partitions.length == 1, s"Expected 1 partition after data skipping, got ${partitions.length}")
 
-    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.Tantivy4SparkInputPartition]
+    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition]
     assert(partition.addAction.path.contains("file2"), s"Expected file2, got ${partition.addAction.path}")
 
     println("✅ EqualTo filter test passed: Correctly skipped 2 out of 3 files")
@@ -100,7 +100,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     assert(gtPartitions.length == 2, s"GreaterThan: Expected 2 partitions, got ${gtPartitions.length}")
 
-    val gtPaths = gtPartitions.map(_.asInstanceOf[io.indextables.spark.core.Tantivy4SparkInputPartition].addAction.path)
+    val gtPaths = gtPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(!gtPaths.exists(_.contains("range1")), "GreaterThan should skip range1")
     assert(gtPaths.exists(_.contains("range2")), "GreaterThan should include range2")
     assert(gtPaths.exists(_.contains("range3")), "GreaterThan should include range3")
@@ -112,7 +112,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     assert(ltPartitions.length == 2, s"LessThan: Expected 2 partitions, got ${ltPartitions.length}")
 
-    val ltPaths = ltPartitions.map(_.asInstanceOf[io.indextables.spark.core.Tantivy4SparkInputPartition].addAction.path)
+    val ltPaths = ltPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(ltPaths.exists(_.contains("range1")), "LessThan should include range1")
     assert(ltPaths.exists(_.contains("range2")), "LessThan should include range2")
     assert(!ltPaths.exists(_.contains("range3")), "LessThan should skip range3")
@@ -136,7 +136,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     // Should still scan fileWithoutStats (no stats = can't skip)
     assert(partitions.length == 1, s"Expected 1 partition (no stats file), got ${partitions.length}")
 
-    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.Tantivy4SparkInputPartition]
+    val partition = partitions.head.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition]
     assert(partition.addAction.path.contains("no_stats"), "Should keep file without statistics")
 
     println("✅ Missing statistics test passed: Files without stats are not skipped")
@@ -202,7 +202,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
       maxValues = None
     )
 
-  private def createScanWithFilters(filters: Array[Filter]): Tantivy4SparkScan = {
+  private def createScanWithFilters(filters: Array[Filter]): IndexTables4SparkScan = {
     val schema = StructType(
       Array(
         StructField("id", LongType, false),
@@ -214,7 +214,7 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
 
     val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-    new Tantivy4SparkScan(
+    new IndexTables4SparkScan(
       spark,
       transactionLog,
       schema,

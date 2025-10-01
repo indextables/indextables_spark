@@ -67,14 +67,14 @@ class V2LocalDateFilterTest extends TestBase {
 
     // Write data locally using V2 DataSource - force local storage
     df.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.storage.force.standard", "true") // Force local storage
       .mode("overwrite")
       .save(localPath)
 
     // Read data back locally - force local storage and disable data skipping for debugging
     val readDf = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.storage.force.standard", "true") // Force local storage
       .option("spark.indextables.dataSkipping.enabled", "false")  // Disable data skipping for debugging
       .load(localPath)

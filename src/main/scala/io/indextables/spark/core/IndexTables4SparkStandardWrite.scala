@@ -33,11 +33,11 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.slf4j.LoggerFactory
 
 /**
- * Standard write implementation for Tantivy4Spark tables. This implementation does NOT include
+ * Standard write implementation for IndexTables4Spark tables. This implementation does NOT include
  * RequiresDistributionAndOrdering, so it uses Spark's default partitioning without any optimization. Used when
  * optimizeWrite is disabled.
  */
-class Tantivy4SparkStandardWrite(
+class IndexTables4SparkStandardWrite(
   @transient transactionLog: TransactionLog,
   tablePath: Path,
   @transient writeInfo: LogicalWriteInfo,
@@ -49,7 +49,7 @@ class Tantivy4SparkStandardWrite(
     with RequiresDistributionAndOrdering
     with Serializable {
 
-  @transient private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkStandardWrite])
+  @transient private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkStandardWrite])
 
   // Extract serializable values from transient fields during construction
   private val writeSchema = writeInfo.schema()
@@ -141,7 +141,7 @@ class Tantivy4SparkStandardWrite(
         }
     }
 
-    new Tantivy4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
+    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -168,7 +168,7 @@ class Tantivy4SparkStandardWrite(
     }
 
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                               => Seq.empty[AddAction]
     }
 
@@ -242,7 +242,7 @@ class Tantivy4SparkStandardWrite(
 
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: Tantivy4SparkCommitMessage => msg.addActions
+      case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                               => Seq.empty[AddAction]
     }
 
@@ -280,7 +280,7 @@ class Tantivy4SparkStandardWrite(
           logger.warn(
             s"🔍 VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
           )
-          val tantivyOptions = io.indextables.spark.core.Tantivy4SparkOptions(
+          val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(
             new org.apache.spark.sql.util.CaseInsensitiveStringMap(serializedOptions.asJava)
           )
           val errors = scala.collection.mutable.ListBuffer[String]()

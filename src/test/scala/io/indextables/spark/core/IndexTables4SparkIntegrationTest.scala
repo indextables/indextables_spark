@@ -20,20 +20,20 @@ package io.indextables.spark.core
 import io.indextables.spark.TestBase
 import org.apache.spark.sql.SaveMode
 
-class Tantivy4SparkIntegrationTest extends TestBase {
+class IndexTables4SparkIntegrationTest extends TestBase {
 
   // Note: These integration tests would require the native library to be built
   // and available. For now, they test the Scala components in isolation.
 
-  test("should register Tantivy4Spark data source") {
-    val dataSource = new Tantivy4SparkDataSource()
+  test("should register IndexTables4Spark data source") {
+    val dataSource = new IndexTables4SparkDataSource()
     dataSource.shortName() shouldBe "tantivy4spark"
   }
 
   test("should create table provider") {
     import scala.collection.JavaConverters._
 
-    val provider = new Tantivy4SparkTableProvider()
+    val provider = new IndexTables4SparkTableProvider()
     provider.supportsExternalMetadata() shouldBe true
 
     withTempPath { tempPath =>
@@ -46,7 +46,7 @@ class Tantivy4SparkIntegrationTest extends TestBase {
     }
   }
 
-  test("should write and read DataFrame using Tantivy4Spark format") {
+  test("should write and read DataFrame using IndexTables4Spark format") {
     // This test checks that the write operation can be configured and executed
     // It may succeed if the native library is working, or fail with expected exceptions
 

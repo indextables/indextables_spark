@@ -23,7 +23,7 @@ class NotFilterTest extends TestBase {
 
     // Write with mixed field types
     testData.write
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.name", "text")       // tokenized for IndexQuery
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .mode("overwrite")
@@ -31,7 +31,7 @@ class NotFilterTest extends TestBase {
 
     // Read and create temp view
     val df = spark.read
-      .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(testPath)
 
     df.createOrReplaceTempView("products")

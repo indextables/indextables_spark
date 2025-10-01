@@ -50,7 +50,7 @@ class V2ReadPathTest extends TestBase {
       // This should trigger the V2 TableProvider path including inferSchema and read operations
       try {
         val readDataV2 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // V2 Provider explicitly
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // V2 Provider explicitly
           .load(tempPath)
 
         // This should trigger schema inference via V2 path
@@ -106,7 +106,7 @@ class V2ReadPathTest extends TestBase {
       // Test V2 read with various configuration options that should be serialized properly
       try {
         val readDataV2 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "100000000")
           .option("spark.indextables.cache.queryCache", "true")
           .option("spark.indextables.cache.name", "test-cache")
@@ -148,7 +148,7 @@ class V2ReadPathTest extends TestBase {
         // Test V2 WRITE path - this is critical to test
         println("Testing V2 write path...")
         writeData.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // V2 Provider for writing
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // V2 Provider for writing
           .option("spark.indextables.cache.maxSize", "50000000")
           .option("spark.indextables.cache.name", "v2-write-test-cache")
           .mode("overwrite")
@@ -159,7 +159,7 @@ class V2ReadPathTest extends TestBase {
         // Test V2 READ path
         println("Testing V2 read path...")
         val readDataV2 = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider") // V2 Provider for reading
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider") // V2 Provider for reading
           .option("spark.indextables.cache.maxSize", "50000000")
           .option("spark.indextables.cache.name", "v2-read-test-cache")
           .load(tempPath)
@@ -214,7 +214,7 @@ class V2ReadPathTest extends TestBase {
       try {
         // V2 write with options should override the other levels
         writeData.write
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "40000000") // Highest precedence
           .option("spark.indextables.cache.name", "hierarchy-test-cache")
           .mode("overwrite")
@@ -224,7 +224,7 @@ class V2ReadPathTest extends TestBase {
 
         // Read back to verify
         val readData = spark.read
-          .format("io.indextables.spark.core.Tantivy4SparkTableProvider")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.cache.maxSize", "40000000")
           .load(tempPath)
 
