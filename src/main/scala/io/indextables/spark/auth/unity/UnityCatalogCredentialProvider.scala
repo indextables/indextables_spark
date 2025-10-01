@@ -27,6 +27,7 @@ import com.databricks.sdk.service.catalog.{
 }
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
 import org.apache.hadoop.conf.Configuration
+import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
 
 import java.net.URI
@@ -225,9 +226,33 @@ class UnityCatalogCredentialProvider(uri: URI, conf: Configuration) extends AWSC
 
   /** Get the current user ID for cache isolation. */
   private def getCurrentUserId(): String = {
-    Option(conf.get(UserEmailKey))
-      .orElse(Option(System.getenv("DATABRICKS_USER_EMAIL")))
-      .getOrElse(System.getProperty("user.name", "unknown"))
+    // Try to get user from CommandContext first (using reflection for optional dependency)
+    val commandContextUser = Try {
+      val commandContextClass = Class.forName("com.databricks.spark.util.CommandContext")
+      val getContextObjectMethod = commandContextClass.getMethod("getContextObject")
+      val contextObject = getContextObjectMethod.invoke(null)
+
+      if (contextObject != null) {
+        val attributionContextMethod = contextObject.getClass.getMethod("attributionContext")
+        val attributionContext = attributionContextMethod.invoke(contextObject).asInstanceOf[scala.collection.Map[String, String]]
+        attributionContext.get("user")
+      } else {
+        None
+      }
+    }.toOption.flatten
+
+    commandContextUser.getOrElse {
+      // Try to get user from SparkSession local property
+      val sparkSessionUser = Try {
+        Option(SparkSession.active.sparkContext.getLocalProperty("user"))
+      }.toOption.flatten
+
+      sparkSessionUser.getOrElse {
+        // No user found, log warning and return default
+        logger.warn("Unable to determine user from CommandContext or SparkSession")
+        "NoActiveUser"
+      }
+    }
   }
 }
 
