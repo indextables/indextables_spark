@@ -48,13 +48,49 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 
 ## Features
 
-- **Embedded Search**: Runs directly within Spark executors without additional infrastructure
-- **AWS S3 Backend**: Persists and consumes search indexes from inexpensive object storage
-- **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support efficient query pruning based on "where" predicates
-- **Custom Query Operators**: "indexquery" SQL operand to provide access to the full Quickwit search syntax
-- **Extensive Predicate Acceleration**: Most where-clause components are automatically translated to search operations for fast retrieval
-- **Fast Aggregates**: Accelerated count, sum, min, max, and average operators with and without aggregation
-- **AWS Session Support**: Support for AWS credentials through instance profile, programmatic access, and custom credential providers
+- 🚀 **Embedded Search**: Runs directly within Spark executors without additional infrastructure
+- 💾 **AWS S3 Backend**: Persists and consumes search indexes from inexpensive object storage
+- ⚡ **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support efficient query pruning based on "where" predicates
+- 🔍 **Custom Query Operators**: "indexquery" SQL operand to provide access to the full Quickwit search syntax
+- 📊 **Extensive Predicate Acceleration**: Most where-clause components are automatically translated to search operations for fast retrieval
+- 🎯 **Fast Aggregates**: Accelerated count, sum, min, max, and average operators with and without aggregation
+- 🔐 **AWS Session Support**: Support for AWS credentials through instance profile, programmatic access, and custom credential providers
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────┐
+│             Spark Application                   │
+├─────────────────────────────────────────────────┤
+│        IndexTables DataSource V2 API            │
+├─────────────┬───────────────────────────────────┤
+│   Tantivy   │      Transaction Log              │
+│   Engine    │      (Delta-style)                │
+│  (Native)   │   ┌──────────────────┐            │
+│             │   │ Metadata Tracking│            │
+│             │   │ Min/Max Stats    │            │
+│             │   │ File Management  │            │
+│             │   └──────────────────┘            │
+├─────────────┴───────────────────────────────────┤
+│            S3 Storage Layer                     │
+│   ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
+│   │  Splits  │ │  Splits  │ │ Transaction  │   │
+│   │  (.split)│ │  (.split)│ │     Log      │   │
+│   └──────────┘ └──────────┘ └──────────────┘   │
+└─────────────────────────────────────────────────┘
+```
+
+### Key Components:
+
+- **Spark Integration**: Native DataSource V2 implementation for seamless Spark SQL integration
+- **Tantivy Engine**: High-performance Rust-based search engine (via tantivy4java JNI bindings)
+- **Transaction Log**: Delta Lake-style ACID transaction support with checkpoint optimization
+- **Split Storage**: Compressed, indexed data segments optimized for search and analytics
+- **Cache Layer**: Intelligent split caching with locality awareness for performance
+
+---
 
 ## Installation
 ### OSS Spark
@@ -133,6 +169,346 @@ spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'mytable'")
 | `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
 | `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
 | `spark.indextables.indexing.tokenizer.<field_name>` | - | Tokenizer type: `default`, `whitespace`, or `raw` |
+
+---
+
+## Common Use Cases
+
+### 📊 Log Analysis and Observability
+```scala
+// Search application logs for errors and exceptions
+val errors = logs
+  .filter($"level" === "ERROR" &&
+          $"timestamp" > current_timestamp() - expr("INTERVAL 1 HOUR") &&
+          $"message" indexquery "OutOfMemory OR StackOverflow OR NullPointerException")
+  .select("timestamp", "service", "message", "stack_trace")
+  .show()
+
+// Aggregate errors by service
+logs.filter($"level" === "ERROR" &&
+            $"message" indexquery "exception OR failed OR timeout")
+    .groupBy(window($"timestamp", "5 minutes"), $"service")
+    .count()
+    .orderBy($"window".desc)
+    .show()
+```
+
+### 🔐 Security Investigation and SIEM
+```scala
+// Find all login attempts from suspicious IPs in the last 24 hours
+val suspicious_activity = security_logs
+  .filter($"event_type".isin("login", "auth_attempt", "access") &&
+          $"timestamp" > current_timestamp() - expr("INTERVAL 24 HOURS") &&
+          ($"ip_address".isin(suspicious_ips: _*) ||
+           $"_indexall" indexquery "failed OR unauthorized OR denied"))
+  .select("timestamp", "user", "ip_address", "event_type", "outcome")
+
+// Identify potential brute force attempts
+security_logs
+  .filter($"event_type" === "login" && $"outcome" === "failed")
+  .groupBy($"ip_address", window($"timestamp", "1 minute"))
+  .agg(
+    count("*").as("attempts"),
+    collect_set("user").as("targeted_users")
+  )
+  .filter($"attempts" > 5)  // More than 5 attempts per minute
+  .orderBy($"window".desc)
+  .show()
+```
+
+### 📈 Application Performance Monitoring (APM)
+```scala
+// Find slow API calls with specific error patterns
+val slow_apis = api_logs
+  .filter($"response_time" > 1000 &&  // Response time > 1 second
+          $"endpoint" indexquery "GET OR POST" &&
+          ($"response_body" indexquery "timeout" || $"status_code" >= 500))
+  .select("timestamp", "endpoint", "response_time", "status_code", "trace_id")
+  .orderBy($"response_time".desc)
+  .show(50)
+
+// Analyze error patterns in microservices
+api_logs
+  .filter($"trace_id".isNotNull &&
+          $"_indexall" indexquery "error OR exception OR failed")
+  .groupBy("service_name", "endpoint")
+  .agg(
+    count("*").as("error_count"),
+    avg("response_time").as("avg_response_time"),
+    percentile_approx($"response_time", 0.95).as("p95_response_time")
+  )
+  .orderBy($"error_count".desc)
+  .show()
+```
+
+### 🔍 Full-Text Search in Documents
+```scala
+// Search knowledge base for relevant documents
+val relevant_docs = documents
+  .filter($"content" indexquery "machine learning AND (tensorflow OR pytorch)")
+  .filter($"published_date" >= "2023-01-01")
+  .select("title", "author", "published_date", "abstract")
+  .show()
+
+// Find documents with complex boolean queries
+documents
+  .filter($"content" indexquery """
+    (artificial intelligence OR machine learning) AND
+    (python OR scala) AND
+    NOT deprecated AND
+    "neural network"
+  """)
+  .select("title", "tags", "last_updated")
+  .show()
+```
+
+### 📊 Business Intelligence and Analytics
+```scala
+// Search customer feedback for specific issues
+val customer_issues = feedback
+  .filter($"_indexall" indexquery "refund OR complaint OR dissatisfied")
+  .filter($"rating" <= 3)
+  .groupBy("product_category", "issue_type")
+  .agg(
+    count("*").as("issue_count"),
+    avg("rating").as("avg_rating")
+  )
+  .orderBy($"issue_count".desc)
+
+// Analyze support tickets with natural language queries
+support_tickets
+  .filter($"status" === "open" &&
+          $"description" indexquery "billing problem OR payment failed" &&
+          $"priority" === "high")
+  .select("ticket_id", "customer_id", "created_at", "description")
+  .show()
+```
+
+---
+
+## Migration Guide
+
+### 📦 From Parquet to IndexTables
+```scala
+// Step 1: Read existing Parquet data
+val parquetDF = spark.read.parquet("s3://bucket/parquet-data")
+
+// Step 2: Analyze your schema and identify search fields
+parquetDF.printSchema()
+
+// Step 3: Convert to IndexTables with appropriate field configurations
+parquetDF.write
+  .format("io.indextables.provider.IndexTablesProvider")
+  .mode("overwrite")
+  // Configure text fields for full-text search
+  .option("spark.indextables.indexing.typemap.message", "text")
+  .option("spark.indextables.indexing.typemap.description", "text")
+  .option("spark.indextables.indexing.typemap.content", "text")
+  // Configure exact match fields (default)
+  .option("spark.indextables.indexing.typemap.id", "string")
+  .option("spark.indextables.indexing.typemap.status", "string")
+  // Enable fast fields for aggregations
+  .option("spark.indextables.indexing.fastfields", "timestamp,count,score")
+  .save("s3://bucket/indextable-data")
+
+// Step 4: Optimize the splits for better performance
+spark.sql("MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 1G")
+```
+
+### 🔺 From Delta Lake to IndexTables
+```scala
+// Read from Delta table
+val deltaDF = spark.read.format("delta").load("s3://bucket/delta-table")
+
+// Preserve partitioning if needed
+val partitionColumns = Seq("year", "month", "day")
+
+// Convert with partitioning preserved
+deltaDF.write
+  .format("io.indextables.provider.IndexTablesProvider")
+  .partitionBy(partitionColumns: _*)
+  .option("spark.indextables.indexing.typemap.event_data", "json")
+  .option("spark.indextables.indexing.typemap.log_message", "text")
+  .mode("overwrite")
+  .save("s3://bucket/indextable-data")
+```
+
+### 📋 From CSV/JSON to IndexTables
+```scala
+// Read CSV with schema inference
+val csvDF = spark.read
+  .option("header", "true")
+  .option("inferSchema", "true")
+  .csv("s3://bucket/csv-files/*.csv")
+
+// Read JSON
+val jsonDF = spark.read.json("s3://bucket/json-files/*.json")
+
+// Transform and write to IndexTables
+csvDF.union(jsonDF)
+  .write
+  .format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.indexing.typemap.comment", "text")
+  .option("spark.indextables.indexing.fastfields", "rating,timestamp")
+  .save("s3://bucket/unified-indextable")
+```
+
+### 🔄 Incremental Migration Strategy
+```scala
+// For large datasets, migrate incrementally by time ranges
+def migrateTimeRange(startDate: String, endDate: String) = {
+  spark.read
+    .parquet("s3://bucket/source-data")
+    .filter($"date" >= startDate && $"date" < endDate)
+    .write
+    .format("io.indextables.provider.IndexTablesProvider")
+    .mode("append")
+    .option("spark.indextables.indexing.typemap.message", "text")
+    .save("s3://bucket/indextable-data")
+}
+
+// Migrate in batches
+val dateRanges = Seq(
+  ("2023-01-01", "2023-02-01"),
+  ("2023-02-01", "2023-03-01"),
+  ("2023-03-01", "2023-04-01")
+)
+
+dateRanges.foreach { case (start, end) =>
+  migrateTimeRange(start, end)
+  // Optimize after each batch
+  spark.sql(s"MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 2G")
+}
+```
+
+---
+
+## Best Practices
+
+### ✅ DO's
+
+#### 🎯 **DO: Optimize Split Sizes**
+```scala
+// Target 1-4GB splits for optimal performance
+spark.sql("MERGE SPLITS 's3://bucket/table' TARGET SIZE 2G")
+
+// For time-series data, merge by partition
+spark.sql("""
+  MERGE SPLITS 's3://bucket/table'
+  WHERE date = '2024-01-01'
+  TARGET SIZE 1G
+""")
+```
+
+#### 🔍 **DO: Choose Field Types Wisely**
+```scala
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  // Use 'text' for fields requiring full-text search
+  .option("spark.indextables.indexing.typemap.message", "text")
+  .option("spark.indextables.indexing.typemap.description", "text")
+  // Use 'string' (default) for exact matching
+  .option("spark.indextables.indexing.typemap.status", "string")
+  .option("spark.indextables.indexing.typemap.user_id", "string")
+  // Use 'json' for JSON content
+  .option("spark.indextables.indexing.typemap.metadata", "json")
+  .save(path)
+```
+
+#### 💾 **DO: Configure Memory Correctly**
+```scala
+// Allocate 50% to Spark heap, 50% to native memory
+spark.conf.set("spark.executor.memory", "8g")  // If total memory is 16GB
+spark.conf.set("spark.executor.memoryOverhead", "8g")
+```
+
+#### ⚡ **DO: Use Fast Fields for Aggregations**
+```scala
+// Configure frequently aggregated fields as fast fields
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.indexing.fastfields", "timestamp,count,total,score")
+  .save(path)
+```
+
+#### 📅 **DO: Partition Time-Series Data**
+```scala
+// Partition by time for efficient pruning
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .partitionBy("year", "month", "day")
+  .save(path)
+```
+
+### ❌ DON'T's
+
+#### 🚫 **DON'T: Create Small Splits**
+```scala
+// BAD: Too many small splits hurt performance
+df.repartition(1000).write...  // Avoid over-partitioning
+
+// GOOD: Let IndexTables optimize or use auto-sizing
+df.write
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "500M")
+```
+
+#### 🚫 **DON'T: Use Default Memory Settings**
+```scala
+// BAD: Using default Spark memory configuration
+spark.conf.set("spark.executor.memory", "16g")  // Using all memory for heap
+
+// GOOD: Split memory between heap and native
+spark.conf.set("spark.executor.memory", "8g")
+spark.conf.set("spark.executor.memoryOverhead", "8g")
+```
+
+#### 🚫 **DON'T: Index Everything**
+```scala
+// BAD: Indexing fields that don't need search
+.option("spark.indextables.indexing.typemap.internal_id", "text")  // Wasteful
+
+// GOOD: Only index searchable fields, store others
+.option("spark.indextables.indexing.storeonlyfields", "internal_id,system_field")
+```
+
+#### 🚫 **DON'T: Forget to Merge Splits**
+```scala
+// BAD: Writing data without optimization
+df.write.format("io.indextables.provider.IndexTablesProvider").save(path)
+// Forgetting to merge...
+
+// GOOD: Always merge after large ingestions
+df.write.format("io.indextables.provider.IndexTablesProvider").save(path)
+spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 2G")
+```
+
+#### 🚫 **DON'T: Mix Field Types Incorrectly**
+```scala
+// BAD: Using 'string' type for content that needs full-text search
+.option("spark.indextables.indexing.typemap.log_message", "string")
+// This will only allow exact matches, not text search!
+
+// GOOD: Use appropriate field types
+.option("spark.indextables.indexing.typemap.log_message", "text")
+```
+
+### 📊 Performance Tips
+
+> **⚡ Tip:** Pre-warm caches for better query performance
+> ```scala
+> spark.conf.set("spark.indextables.cache.prewarm.enabled", "true")
+> ```
+
+> **🎯 Tip:** Monitor split statistics regularly
+> ```scala
+> spark.sql("SELECT COUNT(*) as split_count, AVG(size) as avg_size FROM transaction_log")
+> ```
+
+> **💡 Tip:** Use IndexQuery for complex searches instead of multiple filters
+> ```scala
+> // Instead of: df.filter($"msg".contains("error") || $"msg".contains("fail"))
+> df.filter($"msg" indexquery "error OR fail")
+> ```
+
+---
 
 ### Configuration Options (Read options and/or Spark properties)
 
