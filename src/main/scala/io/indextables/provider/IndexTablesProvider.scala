@@ -1,6 +1,6 @@
 package io.indextables.provider
 
-import com.tantivy4spark.core.Tantivy4SparkTableProvider
+import io.indextables.spark.core.Tantivy4SparkTableProvider
 
 /**
  * Alias for Tantivy4SparkTableProvider to provide a more generic interface. This allows users to access Tantivy4Spark

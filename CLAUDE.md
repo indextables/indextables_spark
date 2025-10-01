@@ -3,7 +3,7 @@
 **Tantivy4Spark** is a high-performance Spark DataSource implementing fast full-text search using Tantivy via tantivy4java. It runs embedded in Spark executors without server-side components.
 
 ## Note
-- This is the only way to run a single test for this project:  mvn test-compile scalatest:test -DwildcardSuites='com.tantivy4spark.core.DateStringFilterValidationTest'
+- This is the only way to run a single test for this project:  mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.DateStringFilterValidationTest'
 
 ## Key Features
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
@@ -288,14 +288,14 @@ df.write.format("tantivy4spark")
 ```scala
 // V2 with explicit row count for accurate auto-sizing
 val rowCount = df.count()
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "50M")
   .option("spark.indextables.autoSize.inputRowCount", rowCount.toString)
   .save("s3://bucket/path")
 
 // V2 without explicit count (uses estimation with warning)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "2G")
   .save("s3://bucket/path")
@@ -565,14 +565,14 @@ Skipped files are recorded in the transaction log using `SkipAction` with:
 
 ### Write
 
-**DataSource API Recommendation**: Use V2 API (`"com.tantivy4spark.core.Tantivy4SparkTableProvider"`) for new projects to ensure partition columns are properly indexed. V1 API (`"tantivy4spark"`) is maintained for compatibility but excludes partition columns from indexing.
+**DataSource API Recommendation**: Use V2 API (`"io.indextables.spark.core.Tantivy4SparkTableProvider"`) for new projects to ensure partition columns are properly indexed. V1 API (`"tantivy4spark"`) is maintained for compatibility but excludes partition columns from indexing.
 
 ```scala
 // Basic write (string fields by default) - V1 API
 df.write.format("tantivy4spark").save("s3://bucket/path")
 
 // Recommended: V2 API for new projects (proper partition column indexing)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
 
 // With field type configuration
 df.write.format("tantivy4spark")
@@ -589,7 +589,7 @@ df.write.format("tantivy4spark")
 
 // V2 API with auto-sizing and explicit row count
 val rowCount = df.count()
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "50M")
   .option("spark.indextables.autoSize.inputRowCount", rowCount.toString)
@@ -637,7 +637,7 @@ df.write.format("tantivy4spark")
   .save("s3://bucket/partitioned-data")
 
 // V2 DataSource API (modern) with custom working directory
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .partitionBy("year", "month", "day")
   .option("spark.indextables.indexWriter.tempDirectoryPath", "/fast-storage/tantivy-temp")
   .save("s3://bucket/v2-partitioned")
@@ -653,7 +653,7 @@ df.filter($"load_date" === "2024-01-01" && $"message" indexquery "error OR warni
 ### SQL
 ```sql
 -- Register extensions (if using SQL)
-spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
 
 -- Native queries
 SELECT * FROM documents WHERE content indexquery 'AI AND (neural OR deep)';
@@ -829,11 +829,11 @@ val df = spark.read.format("tantivy4spark").load("s3://bucket/path")
 ### V2 DataSource API (Modern)
 ```scala
 // V2 format - modern Spark 3.x+ with enhanced capabilities
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .partitionBy("date", "hour")
   .save("s3://bucket/path")
 
-val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+val df = spark.read.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .load("s3://bucket/path")
 ```
 
@@ -925,7 +925,7 @@ df.write.format("tantivy4spark")
 - **Unified data skipping architecture**: All scan types (regular, simple aggregate, GROUP BY aggregate) now use shared data skipping logic with proper schema awareness
 - **Fixed date field filtering**: Resolved critical schema passing issue where aggregate scans used empty schemas, causing date field type detection to fail
 - **Corrected filter logic**: Fixed AND vs OR logic error in `canFileMatchFilters` that was incorrectly using `filters.exists` instead of `filters.forall`
-- **V2 DataSource API consistency**: Updated all tests to use V2 API ("com.tantivy4spark.core.Tantivy4SparkTableProvider") for proper partition column indexing
+- **V2 DataSource API consistency**: Updated all tests to use V2 API ("io.indextables.spark.core.Tantivy4SparkTableProvider") for proper partition column indexing
 - **Cache locality for aggregates**: Implemented `preferredLocations()` for both `Tantivy4SparkSimpleAggregatePartition` and `Tantivy4SparkGroupByAggregatePartition`
 - **Schema-aware field detection**: Proper `DateType` detection enables correct date-to-days-since-epoch conversion for accurate comparison
 - **Aggregate pushdown reliability**: COUNT operations now return correct results instead of 0, with proper data skipping applied

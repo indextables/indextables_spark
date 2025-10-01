@@ -132,7 +132,7 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 
 ```scala
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "com.tantivy4spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCredentialProvider")
 ```
 
 ### Usage
@@ -583,14 +583,14 @@ spark.conf.set("spark.indextables.indexWriter.batchSize", "20000") // 20,000 doc
 spark.conf.set("spark.indextables.indexWriter.useBatch", "true") // Enable batch writing
 
 // Configure per DataFrame write operation (overrides session config)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB heap
   .option("spark.indextables.indexWriter.threads", "3") // 3 indexing threads
   .option("spark.indextables.indexWriter.batchSize", "15000") // 15,000 documents per batch
   .save("s3://bucket/path")
 
 // Disable batch writing for debugging (use individual document indexing)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider")
   .option("spark.indextables.indexWriter.useBatch", "false")
   .save("s3://bucket/path")
 
@@ -598,7 +598,7 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
 spark.conf.set("spark.indextables.indexWriter.heapSize", "500000000") // 500MB heap
 spark.conf.set("spark.indextables.indexWriter.threads", "8") // 8 indexing threads
 spark.conf.set("spark.indextables.indexWriter.batchSize", "50000") // 50,000 documents per batch
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/large-dataset")
+df.write.format("io.indextables.spark.core.Tantivy4SparkTableProvider").save("s3://bucket/large-dataset")
 ```
 
 #### AWS Configuration
@@ -608,7 +608,7 @@ Configure AWS credentials for S3 operations:
 ```scala
 // Recommended: Use custom credential provider (e.g., Unity Catalog)
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "com.tantivy4spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCredentialProvider")
 
 df.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")
 
@@ -671,7 +671,7 @@ Tantivy4Spark supports powerful query operators for native Tantivy query syntax 
 
 ```sql
 -- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
 
 -- Create table/view from Tantivy4Spark data
 CREATE TEMPORARY VIEW my_documents
@@ -713,8 +713,8 @@ LIMIT 10;
 ##### Programmatic Usage
 
 ```scala
-import com.tantivy4spark.expressions.IndexQueryExpression
-import com.tantivy4spark.util.ExpressionUtils
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.util.ExpressionUtils
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.Column
@@ -756,7 +756,7 @@ Tantivy4Spark supports searching across all fields using the virtual `_indexall`
 
 ```sql
 -- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
 
 -- Create table/view from Tantivy4Spark data
 CREATE TEMPORARY VIEW my_documents
@@ -790,8 +790,8 @@ WHERE _indexall indexquery 'apache OR python'
 ##### Programmatic Usage
 
 ```scala
-import com.tantivy4spark.expressions.IndexQueryExpression
-import com.tantivy4spark.util.ExpressionUtils
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.util.ExpressionUtils
 import org.apache.spark.sql.functions.col
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -833,7 +833,7 @@ Tantivy4Spark provides SQL-based split consolidation to reduce small file overhe
 
 ```sql
 -- Register Tantivy4Spark extensions for SQL parsing
-spark.sparkSession.extensions.add("com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.Tantivy4SparkExtensions")
 
 -- Basic merge splits command
 MERGE SPLITS 's3://bucket/path';
@@ -903,7 +903,7 @@ Located in `_transaction_log/` directory (Delta Lake compatible):
 
 ```
 src/main/scala/
-├── com/tantivy4spark/
+├── io/indextables/spark/
 │   ├── catalyst/       # Spark Catalyst optimizer integration
 │   ├── config/         # Configuration management
 │   ├── conversion/     # Type conversion utilities
@@ -925,16 +925,16 @@ src/main/scala/
     ├── extensions/     # IndexTablesSparkExtensions alias
     └── provider/       # IndexTablesProvider alias
 
-src/main/java/com/tantivy4spark/
+src/main/java/io/indextables/spark/
 └── auth/
     └── unity/          # Unity Catalog credential provider
 
 src/main/antlr4/        # ANTLR grammar definitions
-└── com/tantivy4spark/sql/parser/
+└── io/indextables/spark/sql/parser/
     └── Tantivy4SparkSqlBase.g4  # SQL parser grammar for custom commands
 
 src/test/scala/         # Comprehensive test suite (205+ tests passing)
-├── com/tantivy4spark/
+├── io/indextables/spark/
 │   ├── autosize/       # Auto-sizing feature tests
 │   ├── comprehensive/  # Comprehensive integration tests
 │   ├── config/         # Configuration tests
@@ -1036,7 +1036,7 @@ A: Checkpoint compaction reduces transaction log read times by 60% (2.5x speedup
 ### Configuration Questions
 
 **Q: What's the difference between V1 and V2 DataSource APIs?**
-A: V2 API (`com.tantivy4spark.core.Tantivy4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`tantivy4spark`) is maintained for backward compatibility.
+A: V2 API (`io.indextables.spark.core.Tantivy4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`tantivy4spark`) is maintained for backward compatibility.
 
 **Q: How do I configure auto-sizing?**
 A: Enable auto-sizing with `spark.indextables.autoSize.enabled=true` and set `spark.indextables.autoSize.targetSplitSize=100M`. V1 API automatically counts DataFrames; V2 API requires explicit row count.

@@ -1,6 +1,6 @@
 package io.indextables.extensions
 
-import com.tantivy4spark.extensions.Tantivy4SparkExtensions
+import io.indextables.spark.extensions.Tantivy4SparkExtensions
 
 /**
  * Alias for Tantivy4SparkExtensions to provide a more generic interface. This allows users to register Tantivy4Spark
