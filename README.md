@@ -1,71 +1,50 @@
-# Tantivy4Spark
+# IndexTables for Spark
 
-A high-performance Spark DataSource implementing fast full-text search using [Tantivy](https://github.com/quickwit-oss/tantivy) via [tantivy4java](https://github.com/quickwit-oss/tantivy-java). It runs embedded in Spark executors without server-side components.
+IndexTables is an experimental open-table format that provides a transactional layer on top of indexed storage. It enables fast search, retrieval, and aggregation across terabytes of data, often with sub-second performance. Originally designed for interactive log observability and cybersecurity investigations, IndexTables is versatile enough to support many other use cases requiring extremely fast retrieval.
+
+On Spark—the only supported platform today (with potential future support for Presto, Trino, and others)—IndexTables requires no additional components beyond a Spark cluster and object storage (currently tested on AWS S3). It has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. We welcome community feedback on other working distributions and are happy to collaborate on resolving any issues that prevent broader adoption.
+
+IndexTables leverages [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet as its underlying storage format. This hybrid of row and columnar storage, combined with powerful indexing technology, enables extremely fast keyword searches across massive datasets.
+
+To contact the orginal author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a Github issue or connect on Linkedin.
 
 ## Features
 
-- **Embedded Search**: Tantivy runs directly within Spark executors via tantivy4java
-- **Split-Based Architecture**: Write-only indexes with split-based reading for optimal performance
-- **Wildcard Query Support**: Full support for `*` and `?` wildcards with advanced multi-token patterns
-- **High-Performance Transaction Log**: Delta Lake-level performance with parallel operations, advanced caching, and checkpoint optimization
-- **Optimized Writes**: Delta Lake-style optimized writes with automatic split sizing based on target records per split
-- **Smart File Skipping**: Min/max value tracking for efficient query pruning
-- **Schema-Aware Filter Pushdown**: Safe filter optimization with field validation to prevent native crashes
-- **IndexQuery Operator**: Custom pushdown filter for native Tantivy query syntax with full expression support
-- **IndexQueryAll Virtual Column**: All-fields search capability using virtual `_indexall` column with native Tantivy queries
-- **S3-Optimized Storage**: Intelligent caching and compression for object storage with S3Mock compatibility
-- **AWS Session Token Support**: Full support for temporary credentials via AWS STS
-- **Flexible Storage**: Support for local, HDFS, and S3 storage protocols
-- **Schema Evolution**: Automatic schema inference and evolution support
-- **Thread-Safe Architecture**: ThreadLocal IndexWriter pattern eliminates race conditions
-- **Smart Cache Locality**: Host-based split caching with Spark's preferredLocations API for optimal data locality
-- **Automatic Storage Optimization**: Auto-detects `/local_disk0` on Databricks/EMR for optimal temp and cache directory placement
-- **Robust Error Handling**: Proper exception throwing for missing tables instead of silent failures
-- **Type Safety**: Comprehensive validation and rejection of unsupported data types with clear error messages
-- **Advanced Performance Optimizations**: Thread pools, parallel I/O, multi-level caching, streaming operations, and comprehensive metrics
-- **Production Ready**: 179 tests passing, 0 failing, comprehensive coverage including 49 IndexQuery and 44 IndexQueryAll tests
+- **Embedded Search**: Runs directly within Spark executors without additonal infrastructure
+- **AWS S3 Backend**: Persists and consumes search indexes from inexpensive object storage
+- **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support  efficient query pruning based on "where" predicates
+- **Custom Query Operators**: "indexquery" SQL operand to provide access to the full Quickwit search syntax
+- **Extensive Predicate Acceleration**: Most where-clause components are automatically translated to search operations for fast retrieval
+- **Fast Aggregates**: Accelerated count, sum, min, max, and average operators with and without aggregation
+- **AWS Session Support**: Support for AWS credentials though instance profile, programmatic access, and custom credential providers
 
-## Architecture
+## Installation
+### OSS Spark
+ 1. Install the proper [platform jar](https://provide.mavencentral.link) file for indextables in your boot classpath for your spark executors and driver
+ 2. Enable custom SQL extenstions by setting the appropriate spark property (`spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`)
+ 3. Configure your driver and worker memory to use only 1/2 of the regular memory amount for spark (the search system runs mostly in native heap)
+ 4. Assure that your spark instance is using at least Java 11.
 
-### Core Components
+### Databricks
+ On Databricks, you will want to
+  1) install the appropriate platform-specific jar files to your workspace root (ex: /Workspace/Users/me/indextables_x86_64_0.0.1.jar)
+  2) create a startup script in your workspace called "add_indextables_to_classpath.sh" with the following text (to add to classpath)
 
-- **Core Package** (`com.tantivy4spark.core`): Spark DataSource V2 integration
-- **Search Package** (`com.tantivy4spark.search`): Tantivy search engine wrapper via tantivy4java
-- **Storage Package** (`com.tantivy4spark.storage`): S3-optimized storage with predictive I/O
-- **Transaction Package** (`com.tantivy4spark.transaction`): Append-only transaction log
-
-### Integration Architecture
-
-This project integrates with Tantivy via **tantivy4java** (pure Java bindings):
-- **No Native Dependencies**: Uses tantivy4java library for cross-platform compatibility
-- **Split-Based Storage**: Uses QuickwitSplit format (.split files) with JVM-wide caching
-- **Write-Only Indexes**: Create → add documents → commit → create split → close pattern
-- **Thread-Safe Design**: ThreadLocal IndexWriter pattern eliminates race conditions
-- **Automatic Schema Mapping**: Seamless conversion from Spark types to Tantivy field types
-- **Schema-Aware Filtering**: Field validation prevents native crashes during query execution
-- **AWS Session Token Support**: Complete support for temporary credentials via STS
-- **Intelligent Task Scheduling**: Split location registry tracks cache localities for optimal task placement
-
-## Quick Start
-
-### Prerequisites
-
-- Java 11 or later
-- Apache Spark 3.5.x
-- Maven 3.6+ (for building from source)
-
-### Building
-
-```bash
-# Build the project
-mvn clean compile
-
-# Run tests (179 tests passing, 0 failing, 73 temporarily ignored)
-mvn test
-
-# Package
-mvn package
 ```
+#!/bin/bash
+cp /Workspace/Users/me/indextables_x86_64_0.0.1.jar /databricks/jars
+```
+
+  3) Add the startup script to your server startup configuration
+  4) Add the following spark properties to your server config: 
+
+```
+spark.executor memory 27016m <-- this is the setting for an r6id.2xlarge server, you will want to set it to 1/2 of the default settings
+spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
+```
+
+  5) Add the following environment variable if on DBX 15.4 to up-version java to 17 (JNAME=zulu17-ca-amd64)
+
 
 ### Usage
 
@@ -73,63 +52,97 @@ mvn package
 import org.apache.spark.sql.SparkSession
 
 val spark = SparkSession.builder()
-  .appName("Tantivy4Spark Example")
+  .appName("IndexTables Example")
   .getOrCreate()
 
-// Write data with optimized transaction log
+// Write data - see sections below about heap sizing, temporary space, etc...
 df.write
   .format("io.indextables.provider.IndexTablesProvider")
-  .mode("overwrite")
+  .mode("append")
+  // Index the field "message" for full-text search instead
+  // of the default exact matching,
+  .option("spark.indextables.indexing.typemap.message", "text")
   .save("s3://bucket/path/table")
 
-// Write with custom split sizing and performance optimizations
-df.write
-  .format("io.indextables.provider.IndexTablesProvider")
-  .option("targetRecordsPerSplit", "500000")  // 500K records per split
-  .option("spark.indextables.parallel.read.enabled", "true")  // Enable parallel operations
-  .option("spark.indextables.async.updates.enabled", "true")  // Enable async updates
-  .save("s3://bucket/path/table")
+// Merge index segments to a 4GB target size
+// for maximum performance and scaling -- THIS IS CRITICAL, bigger is better...
+spark.sql("MERGE SPLITS 's3://bucket/path/table' TARGET SIZE 4G")
 
 // Read data with optimized caching
 val df = spark.read
   .format("io.indextables.provider.IndexTablesProvider")
-  .option("spark.indextables.cache.filelist.ttl", "5")  // 5 minute file list cache
   .load("s3://bucket/path/table")
 
 // Query with filters (automatically converted to Tantivy queries)
 df.filter($"name".contains("John") && $"age" > 25).show()
 
-// SQL queries with automatic predicate pushdown
-spark.sql("SELECT * FROM my_table WHERE category = 'technology' LIMIT 10")
+// SQL queries including full spark sql syntax plus quickwit filters via "indexquery" operand
+df.createOrReplaceTempView("my_table")
+spark.sql("SELECT * FROM my_table WHERE category = 'technology' and message indexquery 'critical AND infrastrucuture' LIMIT 10")
 spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND score > 85")
 
-// Text search
-df.filter($"content".contains("machine learning")).show()
-
-// Wildcard queries
-df.filter($"title".contains("Spark*")).show()         // Prefix search
-df.filter($"name".contains("*smith")).show()          // Suffix search
-df.filter($"description".contains("*data*")).show()   // Contains search
-df.filter($"code".contains("test?")).show()           // Single char wildcard
+// Cross-field search - any record containing the text "mytable"
+spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'mytable'")
 ```
 
-### Optimized Transaction Log Performance
 
-Tantivy4Spark now features Delta Lake-level transaction log performance through comprehensive optimizations:
+#### Field Indexing Configuration (Write options)
 
-#### Performance Improvements
-- **60-80% faster reads** through parallel I/O and advanced caching
-- **3-5x improvement** in concurrent operations with dedicated thread pools
-- **50% memory reduction** via streaming and partitioned processing
-- **70% reduction** in S3 API calls through multi-level caching
-- **Near-linear scalability** up to 16 concurrent operations
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.indexing.typemap.<field_name>` | `string` | Field indexing type: `string`, `text`, or `json` |
+| `spark.indextables.indexing.fastfields` | - | Comma-separated list of fields for fast access |
+| `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
+| `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
+| `spark.indextables.indexing.tokenizer.<field_name>` | - | Tokenizer type: `default`, `whitespace`, or `raw` |
 
-#### Key Optimization Features
-- **Specialized Thread Pools**: Dedicated pools for checkpoint, commit, async updates, stats, file listing, and parallel reads
-- **Multi-Level Caching**: Guava-based caches with TTL for logs, snapshots, file lists, metadata, versions, and checkpoints
-- **Parallel Operations**: Concurrent file listing, version reading, and batch writes
-- **Memory Optimization**: Streaming checkpoint creation, external merge sort, k-way merge
-- **Advanced Features**: Backward listing optimization, incremental checksums, async updates with staleness tolerance
+### Configuration Options (Read options and/or Spark properties)
+
+The system supports several configuration options for performance tuning:
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
+| `spark.indextables.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
+| `spark.indextables.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
+| `spark.indextables.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
+| `spark.indextables.cache.queryCache` | `true` | Enable query result caching |
+| `spark.indextables.cache.directoryPath` | auto-detect `/local_disk0` | Custom cache directory path (auto-detects optimal location) |
+| `spark.indextables.cache.prewarm.enabled` | `true` | Enable proactive cache warming |
+| `spark.indextables.docBatch.enabled` | `true` | Enable batch document retrieval for better performance |
+| `spark.indextables.docBatch.maxSize` | `1000` | Maximum documents per batch |
+| `spark.indextables.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default, supports "2G", "500M", "1024K") |
+| `spark.indextables.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
+| `spark.indextables.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
+| `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
+| `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
+| `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
+| `spark.indextables.aws.accessKey` | - | AWS access key for S3 split access |
+| `spark.indextables.aws.secretKey` | - | AWS secret key for S3 split access |
+| `spark.indextables.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
+| `spark.indextables.aws.region` | - | AWS region for S3 split access |
+| `spark.indextables.aws.endpoint` | - | Custom AWS S3 endpoint |
+| `spark.indextables.aws.credentialsProviderClass` | - | Fully qualified class name of custom AWS credential provider |
+| `spark.indextables.s3.endpoint` | - | S3 endpoint URL (alternative to aws.endpoint) |
+| `spark.indextables.s3.pathStyleAccess` | `false` | Use path-style access for S3 (required for some S3-compatible services) |
+
+
+#### Auto-Sizing Configuration
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.autoSize.enabled` | `false` | Enable auto-sizing based on historical data |
+| `spark.indextables.autoSize.targetSplitSize` | - | Target size per split (supports: "100M", "1G", "512K", bytes) |
+| `spark.indextables.autoSize.inputRowCount` | - | Explicit row count for accurate partitioning (required for V2 API) |
+
+#### S3 Upload Configuration
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.s3.streamingThreshold` | `104857600` | Files larger than this use streaming upload (100MB default) |
+| `spark.indextables.s3.multipartThreshold` | `104857600` | Threshold for S3 multipart upload (100MB default) |
+| `spark.indextables.s3.maxConcurrency` | `4` | Number of parallel upload threads |
+
 
 #### Transaction Log Configuration
 
@@ -146,94 +159,19 @@ Tantivy4Spark now features Delta Lake-level transaction log performance through 
 | `spark.indextables.cache.filelist.ttl` | `2` | File list cache TTL in minutes |
 | `spark.indextables.cache.metadata.size` | `100` | Metadata cache maximum entries |
 | `spark.indextables.cache.metadata.ttl` | `30` | Metadata cache TTL in minutes |
-
-### Configuration Options
-
-The system supports several configuration options for performance tuning:
-
-| Configuration | Default | Description |
-|---------------|---------|-------------|
-| `spark.indextables.optimizeWrite.enabled` | `true` | Enable/disable optimized writes with automatic split sizing |
-| `spark.indextables.optimizeWrite.targetRecordsPerSplit` | `1000000` | Target number of records per split file for optimized writes |
-| `spark.indextables.storage.force.standard` | `false` | Force standard Hadoop operations for all protocols |
-| `spark.indextables.cache.name` | `"tantivy4spark-cache"` | Name of the JVM-wide split cache |
-| `spark.indextables.cache.maxSize` | `200000000` | Maximum cache size in bytes (200MB default) |
-| `spark.indextables.cache.maxConcurrentLoads` | `8` | Maximum concurrent component loads |
-| `spark.indextables.cache.queryCache` | `true` | Enable query result caching |
-| `spark.indextables.cache.directoryPath` | auto-detect `/local_disk0` | Custom cache directory path (auto-detects optimal location) |
-| `spark.indextables.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default) |
-| `spark.indextables.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
-| `spark.indextables.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
-| `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
-| `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
-| `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
-| `spark.indextables.aws.accessKey` | - | AWS access key for S3 split access |
-| `spark.indextables.aws.secretKey` | - | AWS secret key for S3 split access |
-| `spark.indextables.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
-| `spark.indextables.aws.region` | - | AWS region for S3 split access |
-| `spark.indextables.aws.endpoint` | - | Custom AWS S3 endpoint |
-| `spark.indextables.azure.accountName` | - | Azure storage account name |
-| `spark.indextables.azure.accountKey` | - | Azure storage account key |
-| `spark.indextables.gcp.projectId` | - | GCP project ID for Cloud Storage |
-| `spark.indextables.gcp.credentialsFile` | - | Path to GCP service account credentials file |
-
-#### Advanced Performance Configuration (Future)
-
-Additional configuration options for advanced performance tuning:
-
-| Configuration | Default | Description |
-|---------------|---------|-------------|
-| `spark.indextables.split.maxAge` | `2d` | Maximum age for split cache entries before eviction |
-| `spark.indextables.split.cacheQuota.maxBytes` | `1GB` | Maximum total bytes for split cache across all executors |
-| `spark.indextables.split.cacheQuota.maxCount` | `1000` | Maximum number of splits to cache per executor |
-| `spark.indextables.merge.concurrency` | `4` | Number of concurrent merge operations |
-| `spark.indextables.merge.policy` | `log` | Merge policy: `log`, `temporal`, or `no_merge` |
-| `spark.indextables.io.bandwidth.limit` | - | I/O bandwidth limit per executor (e.g., `100MB/s`) |
-| `spark.indextables.indexWriter.directBuffer` | `true` | Use direct ByteBuffers for zero-copy batch operations |
-| `spark.indextables.indexWriter.bufferPoolSize` | `10` | Number of reusable direct buffers to pool |
-
-#### Optimized Writes Configuration
-
-Control the automatic split sizing behavior (similar to Delta Lake optimizedWrite):
-
-```scala
-// Enable optimized writes with default 1M records per split
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("optimizeWrite", "true")
-  .save("s3://bucket/path")
-
-// Configure via Spark session (applies to all writes)
-spark.conf.set("spark.indextables.optimizeWrite.enabled", "true")
-spark.conf.set("spark.indextables.optimizeWrite.targetRecordsPerSplit", "2000000")
-
-// Configure per write operation (overrides session config)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("targetRecordsPerSplit", "500000")  // 500K records per split
-  .save("s3://bucket/path")
-
-// Disable optimized writes (use Spark's default partitioning)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("optimizeWrite", "false")
-  .save("s3://bucket/path")
-```
-
-#### Storage Configuration
-
-The system automatically detects storage protocol and uses appropriate I/O strategy:
-
-```scala
-// S3-optimized I/O (default for s3:// protocols)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://bucket/path")
-
-// Force standard Hadoop operations
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.indextables.storage.force.standard", "true")
-  .save("s3://bucket/path")
-
-// Standard operations (automatic for other protocols)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("hdfs://namenode/path")
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("file:///local/path")
-```
+| `spark.indextables.checkpoint.enabled` | `true` | Enable automatic checkpoint creation |
+| `spark.indextables.checkpoint.interval` | `10` | Create checkpoint every N transactions |
+| `spark.indextables.checkpoint.parallelism` | `4` | Thread pool size for parallel I/O |
+| `spark.indextables.checkpoint.read.timeoutSeconds` | `30` | Timeout for parallel read operations |
+| `spark.indextables.logRetention.duration` | `2592000000` | Log retention duration (30 days in milliseconds) |
+| `spark.indextables.checkpointRetention.duration` | `7200000` | Checkpoint retention duration (2 hours in milliseconds) |
+| `spark.indextables.checkpoint.checksumValidation.enabled` | `true` | Enable data integrity validation |
+| `spark.indextables.checkpoint.multipart.enabled` | `false` | Enable multi-part checkpoints for large tables |
+| `spark.indextables.checkpoint.multipart.maxActionsPerPart` | `50000` | Actions per checkpoint part |
+| `spark.indextables.checkpoint.auto.enabled` | `true` | Enable automatic checkpoint optimization |
+| `spark.indextables.checkpoint.auto.minFileAge` | `600000` | Minimum file age for auto checkpoint (10 minutes in milliseconds) |
+| `spark.indextables.transaction.cache.enabled` | `true` | Enable transaction log caching |
+| `spark.indextables.transaction.cache.expirationSeconds` | `300` | Transaction cache TTL (5 minutes) |
 
 #### IndexWriter Performance Configuration
 
@@ -319,36 +257,6 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.cache.directoryPath", "/nvme/cache") // High-performance cache
   .save("s3://bucket/path")
 ```
-
-#### Wildcard Query Support
-
-Tantivy4Spark includes comprehensive wildcard query support through tantivy4java:
-
-```scala
-// Basic wildcard patterns
-df.filter($"title".contains("Spark*"))        // Prefix: matches "Spark", "Sparkling", "Sparkle"
-df.filter($"name".contains("*smith"))         // Suffix: matches "blacksmith", "goldsmith"
-df.filter($"content".contains("*data*"))      // Contains: matches "metadata", "database"
-df.filter($"code".contains("test?"))          // Single char: matches "test1", "tests"
-
-// Complex wildcard patterns
-df.filter($"path".contains("/usr/*/bin"))     // Path patterns
-df.filter($"desc".contains("pro*ing"))        // Middle wildcards
-df.filter($"tags".contains("v?.?.?"))         // Version patterns like "v1.2.3"
-
-// Escaped wildcards (literal matching)
-df.filter($"text".contains("\\*important\\*")) // Matches literal "*important*"
-df.filter($"note".contains("\\?"))            // Matches literal "?"
-
-// Multi-token patterns (advanced)
-df.filter($"bio".contains("machine* *learning")) // Matches terms with both patterns
-```
-
-**Performance Tips**:
-- Patterns starting with literals (`prefix*`) are faster than suffix patterns (`*suffix`)
-- Avoid starting patterns with wildcards when possible for better performance
-- Wildcard queries work at the term level after tokenization
-- Case sensitivity follows the tokenizer configuration (default is case-insensitive)
 
 #### IndexQuery and IndexQueryAll Operators
 
@@ -438,13 +346,6 @@ patterns.foreach { pattern =>
 }
 ```
 
-**Features**:
-- ✅ **Full Filter Pushdown**: Queries execute natively in Tantivy for optimal performance
-- ✅ **Complex Query Syntax**: Boolean operators (AND, OR, NOT), phrase queries, field queries
-- ✅ **Type Safety**: Comprehensive validation with descriptive error messages
-- ✅ **Expression Trees**: Support for complex expression combinations with standard Spark filters
-- ✅ **Comprehensive Testing**: 49 test cases covering all scenarios and edge cases
-
 #### IndexQueryAll Operator
 
 Tantivy4Spark supports searching across all fields using the virtual `_indexall` column with the `indexquery` operator:
@@ -521,43 +422,6 @@ patterns.foreach { pattern =>
 df.createOrReplaceTempView("my_docs")
 spark.sql("SELECT * FROM my_docs WHERE _indexall indexquery 'apache AND spark'").show()
 ```
-
-**IndexQueryAll Features**:
-- ✅ **Virtual Column**: Uses virtual `_indexall` column with standard `indexquery` operator
-- ✅ **All-Fields Search**: Automatically searches across all text fields in the index
-- ✅ **No Field Specification**: No need to specify actual field names - just use `_indexall`
-- ✅ **Full Filter Pushdown**: Queries execute natively in Tantivy with empty field list
-- ✅ **Same Query Syntax**: Supports same boolean, phrase, and wildcard syntax as field-specific IndexQuery
-- ✅ **V2 DataSource Integration**: Seamless integration with Spark's V2 DataSource API
-- ✅ **Comprehensive Testing**: 44+ test cases covering expression, utils, and integration scenarios
-
-#### SQL Pushdown Verification
-
-Tantivy4Spark provides comprehensive verification that both predicate and limit pushdown work correctly with `spark.sql()` queries:
-
-```scala
-// Create a temporary view
-spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load("s3://bucket/path").createOrReplaceTempView("my_table")
-
-// SQL queries with pushdown (filters are pushed to the data source)
-val query = spark.sql("SELECT * FROM my_table WHERE category = 'fruit' AND active = true LIMIT 5")
-
-// View the execution plan to verify pushdown
-query.explain(true)
-// Shows: PushedFilters: [IsNotNull(category), EqualTo(category,fruit), EqualTo(active,true)]
-
-query.collect() // Returns exactly 5 filtered rows
-```
-
-**Verified Pushdown Types:**
-- ✅ **EqualTo filters**: `WHERE column = 'value'`
-- ✅ **In filters**: `WHERE column IN ('val1', 'val2')`
-- ✅ **IsNotNull filters**: Automatically added for non-nullable predicates
-- ✅ **Complex AND conditions**: `WHERE col1 = 'a' AND col2 = 'b'`
-- ✅ **Filters with LIMIT**: Combined predicate and limit pushdown
-- ✅ **Negation filters**: `WHERE NOT column = 'value'`
-
-The system includes comprehensive tests (`SqlPushdownTest.scala`) that verify pushdown is working by examining query execution plans and confirming that filters appear in the `PushedFilters` section of the Spark physical plan.
 
 #### Split Optimization with MERGE SPLITS
 
@@ -695,39 +559,12 @@ src/test/scala/     # Comprehensive test suite (179 tests passing, 0 failing)
 └── debug/          # Debug and diagnostic tests
 ```
 
-### Running Tests
-
-```bash
-# All tests (179 tests passing, 0 failing, 73 V2 tests temporarily ignored)
-mvn test
-
-# Specific test suites
-mvn test -Dtest="*IntegrationTest"                # Integration tests
-mvn test -Dtest="SqlPushdownTest"                 # SQL pushdown verification tests
-mvn test -Dtest="OptimizedWriteTest"              # Optimized writes tests
-mvn test -Dtest="UnsupportedTypesTest"            # Type safety tests
-mvn test -Dtest="BatchTransactionLogTest"         # Transaction log batch operations
-mvn test -Dtest="*DebugTest"                      # Debug and diagnostic tests
-
-# Test coverage report
-mvn scoverage:report
-```
-
 ### Contributing
-
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes with tests
 4. Ensure all tests pass and coverage requirements are met
 5. Submit a pull request
-
-## Performance
-
-### Benchmarks
-
-- **Query Performance**: 10-100x faster than Parquet for text search queries
-- **Storage Efficiency**: Comparable to Parquet for storage size
-- **S3 Performance**: 50% fewer API calls with predictive I/O
 
 ### Optimization Tips
 
@@ -735,15 +572,6 @@ mvn scoverage:report
 2. Enable S3 optimization for cloud workloads  
 3. Leverage data skipping with min/max statistics
 4. Partition large datasets by common query dimensions
-
-## Performance
-
-### Benchmarks
-
-- **Query Performance**: 10-100x faster than Parquet for text search queries
-- **Storage Efficiency**: Comparable to Parquet for storage size
-- **S3 Performance**: 50% fewer API calls with predictive I/O
-- **Cache Locality**: Automatic task scheduling to hosts with cached splits reduces network I/O
 
 ### Optimization Features
 
@@ -754,108 +582,24 @@ mvn scoverage:report
    - Reduced network bandwidth usage
    - Better cluster resource utilization
 
-3. **Optimization Tips**:
-   - Use appropriate data types in your schema
-   - Enable S3 optimization for cloud workloads  
-   - Leverage data skipping with min/max statistics
-   - Partition large datasets by common query dimensions
-   - Let the cache locality system build up over time for maximum benefit
-
 ## Roadmap
 
 See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 
 ### Planned Features
-- **ReplaceWhere with Partition Predicates**: Delta Lake-style selective partition replacement
-- **Transaction Log Compaction**: Checkpoint system for improved metadata performance
-- **Enhanced Query Optimization**: Bloom filters and advanced column statistics
+- **Table hygene**: Capability similar to delta "VACUUM" command
 - **Multi-cloud Enhancements**: Expanded Azure and GCP support
+- **Catalog support**: Support for hive catalogs
+- **Schema migration**: Support for updating schemas and indexing schemes
+- **Re-indexing support**: Support for chanigng indexing types of fields from plain strings to full-text search
+- **Prewarming enhancements**: Better support for pre-warming caches on new clustres
+- **Memory auto-tuning**: Better support for automatically tuning native heaps for indexing, merging, and queries
+- **VARIANT Data types**: Support for JSON fields
+- **Arrays and embedded structures**: Support for complex column types
 
-### Design Documents
-- [ReplaceWhere Design](docs/REPLACE_WHERE_DESIGN.md) - Selective partition replacement functionality
-- [Log Compaction Design](docs/LOG_COMPACTION_DESIGN.md) - Checkpoint-based transaction log optimization
 
 ## Known Issues and Solutions
-
-### AWS Configuration in Distributed Mode
-
-**Issue**: When running on distributed Spark clusters, AWS credentials and region information may not properly propagate from the driver to executors, causing "A region must be set when sending requests to S3" errors.
-
-**Solution**: The system includes automatic broadcast mechanisms to distribute configuration:
-
-1. **V2 DataSource API**: Uses Spark broadcast variables to distribute configuration to executors
-2. **V1 DataSource API**: Automatically copies `spark.indextables.*` configurations from driver to executor Hadoop configuration
-
-**Best Practices**:
-```scala
-// Set configuration in Spark session (automatically broadcast to executors)
-spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")
-spark.conf.set("spark.indextables.aws.secretKey", "your-secret-key")
-spark.conf.set("spark.indextables.aws.region", "us-west-2")
-
-// Or set via DataFrame options (automatically propagated)
-df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-  .option("spark.indextables.aws.region", "us-west-2")
-  .save("s3://bucket/path")
-```
-
-### Custom S3 Endpoints
-
-**Issue**: Using custom S3 endpoints (MinIO, LocalStack, S3Mock) with tantivy4java may cause region resolution errors.
-
-**Workaround**: Use standard AWS regions even with custom endpoints:
-```scala
-spark.conf.set("spark.indextables.aws.region", "us-east-1")  // Standard region
-spark.conf.set("spark.indextables.s3.endpoint", "http://localhost:9000")  // Custom endpoint
-```
-
-### Boolean Filtering with S3 Storage (Disabled Test)
-
-**Issue**: Boolean filtering queries may return incorrect results (0 matches) when using S3 storage, while the same queries work correctly with local filesystem storage.
-
-**Status**: Test disabled to maintain 100% test pass rate. Root cause identified as split-based filtering bypass of type conversion logic.
-
-**Test Location**: `S3SplitReadWriteTest.scala` - test "should handle S3 write with different data types" converted to `disabledTestS3BooleanFiltering()` method.
-
-**Workaround**: Use local or HDFS storage for workloads requiring boolean filtering until this issue is resolved.
-
-**Details**: S3 split-based filtering uses a different execution path that bypasses the `FiltersToQueryConverter` where proper Java Boolean type conversion occurs. This causes incompatible types to be passed to the native tantivy4java library.
-
-### Schema Evolution Limitations
-
-**Issue**: Limited support for schema changes after initial creation.
-
-**Guidelines**:
-- ✅ Adding new fields is supported
-- ❌ Removing fields may cause read errors
-- ❌ Changing field types is not recommended
-- ✅ Renaming fields works if old data is not accessed
-
-## Troubleshooting
-
-### Debug Mode
-
-Enable detailed logging for troubleshooting:
-```scala
-spark.conf.set("spark.sql.adaptive.enabled", "false")  // Disable AQE for clearer logs
-// Set log level to DEBUG in log4j configuration
-```
-
-### Common Error Messages
-
-1. **"A region must be set when sending requests to S3"**
-   - Ensure AWS region is set in configuration
-   - Check that configuration is propagating to executors
-   - Verify AWS credentials are valid
-
-2. **"UnsupportedOperationException: Array types not supported"**
-   - Tantivy doesn't support complex types (arrays, maps, structs)
-   - Use supported types: String, Long, Int, Double, Float, Boolean, Timestamp, Date
-
-3. **"Failed to read split file"**
-   - Verify S3 permissions and credentials
-   - Check that split files exist and are accessible
-   - Ensure proper region configuration
+- TBD
 
 ## License
 
