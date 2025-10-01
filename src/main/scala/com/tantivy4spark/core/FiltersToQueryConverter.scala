@@ -18,17 +18,14 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.sources._
-import com.tantivy4java.{
-  Query,
+import io.indextables.tantivy4java.query.{Query, Occur}
+import io.indextables.tantivy4java.split.{
   SplitQuery,
   SplitMatchAllQuery,
   SplitTermQuery,
-  SplitBooleanQuery,
-  Schema,
-  Occur,
-  FieldType,
-  Index
+  SplitBooleanQuery
 }
+import io.indextables.tantivy4java.core.{Schema, FieldType, Index}
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 import com.tantivy4spark.search.SplitSearchEngine
@@ -159,25 +156,25 @@ object FiltersToQueryConverter {
         case Some(value) =>
           val valueStr = formatValueForRangeQuery(value)
           if (rangeInfo.minInclusive) {
-            com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(valueStr)
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(valueStr)
           } else {
-            com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(valueStr)
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(valueStr)
           }
-        case None => com.tantivy4java.SplitRangeQuery.RangeBound.unbounded()
+        case None => io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded()
       }
 
       val upperBound = maxValue match {
         case Some(value) =>
           val valueStr = formatValueForRangeQuery(value)
           if (rangeInfo.maxInclusive) {
-            com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(valueStr)
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(valueStr)
           } else {
-            com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(valueStr)
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(valueStr)
           }
-        case None => com.tantivy4java.SplitRangeQuery.RangeBound.unbounded()
+        case None => io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded()
       }
 
-      val rangeQuery = new com.tantivy4java.SplitRangeQuery(field, lowerBound, upperBound, tantivyFieldType)
+      val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(field, lowerBound, upperBound, tantivyFieldType)
       queryLog(s"Creating optimized SplitRangeQuery: $rangeQuery")
       Some(rangeQuery)
     } catch {
@@ -1099,10 +1096,10 @@ object FiltersToQueryConverter {
               val startDateStr = localDate.toString // YYYY-MM-DD format
               val endDateStr   = nextDay.toString   // YYYY-MM-DD format
 
-              val rangeQuery = new com.tantivy4java.SplitRangeQuery(
+              val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
                 attribute,
-                com.tantivy4java.SplitRangeQuery.RangeBound.inclusive(startDateStr), // Include start of day
-                com.tantivy4java.SplitRangeQuery.RangeBound.exclusive(endDateStr),   // Exclude start of next day
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(startDateStr), // Include start of day
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endDateStr),   // Exclude start of next day
                 "date" // Use "date" field type as shown in SplitDateRangeQueryTest
               )
               queryLog(s"Creating date equality SplitRangeQuery with date strings: [$startDateStr TO $endDateStr) for $localDate")

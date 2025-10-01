@@ -126,7 +126,7 @@ case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
     // Additionally, try to call any global tantivy4java flush if available via reflection
     try {
       // Some versions of tantivy4java may have a global flush method
-      val clazz  = Class.forName("com.tantivy4java.SplitCacheManager")
+      val clazz  = Class.forName("io.indextables.tantivy4java.split.SplitCacheManager")
       val method = clazz.getDeclaredMethod("clearGlobalCache")
       method.invoke(null)
       flushedCount += 1

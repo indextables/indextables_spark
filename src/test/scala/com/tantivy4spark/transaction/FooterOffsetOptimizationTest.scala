@@ -208,7 +208,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       val reconstructedMetadata =
         try
           // This simulates the SplitMetadata reconstruction in Tantivy4SparkPartitions.scala
-          new com.tantivy4java.QuickwitSplit.SplitMetadata(
+          new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
             addAction.path,                     // splitId
             "tantivy4spark-index",              // indexUid (NEW - required)
             0L,                                 // partitionId (NEW - required)

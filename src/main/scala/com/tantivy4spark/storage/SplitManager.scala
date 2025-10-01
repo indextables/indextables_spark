@@ -17,7 +17,8 @@
 
 package com.tantivy4spark.storage
 
-import com.tantivy4java.{QuickwitSplit, SplitCacheManager}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitCacheManager
 import com.tantivy4spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.conf.Configuration

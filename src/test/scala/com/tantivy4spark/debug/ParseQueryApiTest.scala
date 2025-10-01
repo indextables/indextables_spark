@@ -1,7 +1,10 @@
 package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
-import com.tantivy4java._
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document}
+import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.query.Query
 import java.util.Arrays
 
 class ParseQueryApiTest extends TestBase {

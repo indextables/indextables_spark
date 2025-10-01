@@ -25,7 +25,8 @@ import com.tantivy4spark.transaction.AddAction
 import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, BroadcastSplitLocalityManager}
 import com.tantivy4spark.search.SplitSearchEngine
 import com.tantivy4spark.core.FiltersToQueryConverter
-import com.tantivy4java.{Query, SplitQuery, SplitMatchAllQuery}
+import io.indextables.tantivy4java.query.Query
+import io.indextables.tantivy4java.split.{SplitQuery, SplitMatchAllQuery}
 import org.slf4j.LoggerFactory
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.collection.concurrent.TrieMap
@@ -233,7 +234,7 @@ object PreWarmManager {
       // This is more efficient than query-based warmup and doesn't require any query objects
       val splitSearcher = splitSearchEngine.getSplitSearcher()
       logger.info(s"🔥 Using component preloading for split warmup: ${task.addAction.path}")
-      import com.tantivy4java.SplitSearcher
+      import io.indextables.tantivy4java.split.SplitSearcher
       val warmupFuture = splitSearcher.preloadComponents(
         SplitSearcher.IndexComponent.POSTINGS,
         SplitSearcher.IndexComponent.POSITIONS,
@@ -348,7 +349,7 @@ object PreWarmManager {
       case None => 0L
     }
 
-    val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+    val splitMetadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
       addAction.path.split("/").last.replace(".split", ""),         // splitId from filename
       "tantivy4spark-index",                                        // indexUid (NEW - required)
       0L,                                                           // partitionId (NEW - required)

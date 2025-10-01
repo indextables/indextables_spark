@@ -28,7 +28,7 @@ import org.apache.hadoop.fs.Path
 import java.nio.file.Files
 import java.io.File
 import scala.util.Random
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**

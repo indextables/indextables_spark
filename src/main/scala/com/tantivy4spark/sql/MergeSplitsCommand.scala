@@ -33,7 +33,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.slf4j.LoggerFactory
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.ThreadLocalRandom
-import com.tantivy4java.{QuickwitSplit, Index}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.core.Index
 import com.tantivy4spark.util.ConfigNormalization
 import scala.jdk.CollectionConverters._
 
@@ -1953,9 +1954,9 @@ case class SerializableSplitMetadata(
   }
   def getIndexUid(): String = indexUid.orNull
 
-  def toQuickwitSplitMetadata(): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+  def toQuickwitSplitMetadata(): io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata = {
     import scala.jdk.CollectionConverters._
-    new com.tantivy4java.QuickwitSplit.SplitMetadata(
+    new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
       splitId.getOrElse("unknown"),                                          // splitId
       "tantivy4spark-index",                                                 // indexUid (NEW - required)
       0L,                                                                    // partitionId (NEW - required)
@@ -1980,7 +1981,7 @@ case class SerializableSplitMetadata(
 }
 
 object SerializableSplitMetadata {
-  def fromQuickwitSplitMetadata(metadata: com.tantivy4java.QuickwitSplit.SplitMetadata): SerializableSplitMetadata = {
+  def fromQuickwitSplitMetadata(metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata): SerializableSplitMetadata = {
     val timeStart = Option(metadata.getTimeRangeStart()).map(_.toString)
     val timeEnd   = Option(metadata.getTimeRangeEnd()).map(_.toString)
     val tags = Option(metadata.getTags()).filter(!_.isEmpty).map { tagSet =>

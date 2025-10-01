@@ -17,7 +17,8 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java.{Query, Schema, Occur}
+import io.indextables.tantivy4java.query.{Query, Occur}
+import io.indextables.tantivy4java.core.Schema
 import org.slf4j.LoggerFactory
 import scala.util.Try
 import scala.jdk.CollectionConverters._
@@ -205,7 +206,7 @@ object QueryParser {
       // Check if this is a text field before using phrase query
       val isTextField =
         try {
-          import com.tantivy4java.FieldType
+          import io.indextables.tantivy4java.core.FieldType
           val textFields = schema.getFieldNamesByType(FieldType.TEXT).asScala.toSet
           textFields.contains(fieldName)
         } catch {
@@ -276,15 +277,15 @@ object QueryParser {
 
   private def getTextFields(schema: Schema): List[String] = {
     import scala.jdk.CollectionConverters._
-    import com.tantivy4java.FieldType
+    import io.indextables.tantivy4java.core.FieldType
 
     // Get field names that are of TEXT type
     schema.getFieldNamesByType(FieldType.TEXT).asScala.toList
   }
 
   /** Convert a string value to the appropriate type based on the field type. */
-  private def convertValueToFieldType(value: String, fieldType: com.tantivy4java.FieldType): Object = {
-    import com.tantivy4java.FieldType
+  private def convertValueToFieldType(value: String, fieldType: io.indextables.tantivy4java.core.FieldType): Object = {
+    import io.indextables.tantivy4java.core.FieldType
 
     try
       fieldType match {

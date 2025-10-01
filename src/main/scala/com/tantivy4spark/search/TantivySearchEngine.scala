@@ -65,7 +65,7 @@ class TantivySearchEngine private (
     outputPath: String,
     partitionId: Long,
     nodeId: String
-  ): (String, com.tantivy4java.QuickwitSplit.SplitMetadata) = {
+  ): (String, io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata) = {
     // Use commitAndClose to follow write-only pattern for production
     directInterface.commitAndClose()
 

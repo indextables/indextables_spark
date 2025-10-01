@@ -26,7 +26,8 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.broadcast.Broadcast
 import com.tantivy4spark.transaction.TransactionLog
 import org.slf4j.LoggerFactory
-import com.tantivy4java.{QuickwitSplit, SplitCacheManager}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitCacheManager
 import scala.jdk.CollectionConverters._
 
 /**
@@ -346,7 +347,8 @@ class Tantivy4SparkSimpleAggregateReader(
   private def executeSimpleAggregation(): Array[org.apache.spark.sql.catalyst.InternalRow] = {
     import org.apache.spark.sql.catalyst.InternalRow
     import org.apache.spark.unsafe.types.UTF8String
-    import com.tantivy4java._
+    import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
+    import io.indextables.tantivy4java.aggregation.{CountAggregation, SumAggregation, AverageAggregation, MinAggregation, MaxAggregation}
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
@@ -467,11 +469,11 @@ class Tantivy4SparkSimpleAggregateReader(
               logger.info(
                 s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName' with filters"
               )
-              val sumAgg = new com.tantivy4java.SumAggregation(fieldName)
+              val sumAgg = new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"sum_agg", sumAgg)
 
               if (result.hasAggregations()) {
-                val sumResult = result.getAggregation("sum_agg").asInstanceOf[com.tantivy4java.SumResult]
+                val sumResult = result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 val sumValue  = if (sumResult != null) sumResult.getSum.toLong else 0L
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
                 aggregationResults += sumValue
@@ -495,11 +497,11 @@ class Tantivy4SparkSimpleAggregateReader(
               logger.info(
                 s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName' with filters"
               )
-              val minAgg = new com.tantivy4java.MinAggregation(fieldName)
+              val minAgg = new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"min_agg", minAgg)
 
               if (result.hasAggregations()) {
-                val minResult = result.getAggregation("min_agg").asInstanceOf[com.tantivy4java.MinResult]
+                val minResult = result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 val minValue  = if (minResult != null) minResult.getMin.toLong else 0L
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
                 aggregationResults += minValue
@@ -513,11 +515,11 @@ class Tantivy4SparkSimpleAggregateReader(
               logger.info(
                 s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName' with filters"
               )
-              val maxAgg = new com.tantivy4java.MaxAggregation(fieldName)
+              val maxAgg = new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"max_agg", maxAgg)
 
               if (result.hasAggregations()) {
-                val maxResult = result.getAggregation("max_agg").asInstanceOf[com.tantivy4java.MaxResult]
+                val maxResult = result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 val maxValue  = if (maxResult != null) maxResult.getMax.toLong else 0L
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
                 aggregationResults += maxValue

@@ -20,7 +20,7 @@ package com.tantivy4spark.debug
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.search.{TantivyNative, TantivySearchEngine, SplitSearchEngine}
 import com.tantivy4spark.storage.SplitCacheConfig
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.apache.spark.sql.types._
@@ -197,7 +197,8 @@ class NativeLibraryTest extends TestBase {
       println("Step 4: Testing split-based search...")
 
       // Create cache manager for split searching
-      import com.tantivy4java.{SplitCacheManager, Query}
+      import io.indextables.tantivy4java.split.SplitCacheManager
+      import io.indextables.tantivy4java.query.Query
       val cacheConfig = new SplitCacheManager.CacheConfig(s"native-test-cache-${System.nanoTime()}")
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)

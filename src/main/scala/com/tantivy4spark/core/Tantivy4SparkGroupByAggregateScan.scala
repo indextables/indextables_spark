@@ -26,7 +26,9 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.broadcast.Broadcast
 import com.tantivy4spark.transaction.TransactionLog
 import org.slf4j.LoggerFactory
-import com.tantivy4java.{QuickwitSplit, SplitCacheManager}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitCacheManager
+import io.indextables.tantivy4java.aggregation.TermsResult
 import scala.jdk.CollectionConverters._
 
 /**
@@ -371,7 +373,8 @@ class Tantivy4SparkGroupByAggregateReader(
   private def executeGroupByAggregation(): Array[org.apache.spark.sql.catalyst.InternalRow] = {
     import org.apache.spark.sql.catalyst.InternalRow
     import org.apache.spark.unsafe.types.UTF8String
-    import com.tantivy4java._
+    import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
+    import io.indextables.tantivy4java.aggregation.{CountAggregation, SumAggregation, AverageAggregation, MinAggregation, MaxAggregation, TermsAggregation}
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
@@ -419,7 +422,7 @@ class Tantivy4SparkGroupByAggregateReader(
           logger.info(s"🔍 GROUP BY EXECUTION: Using native MultiTermsAggregation")
 
           // Create MultiTermsAggregation with the field array
-          val multiTermsAgg = new com.tantivy4java.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
+          val multiTermsAgg = new io.indextables.tantivy4java.aggregation.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
           logger.info(
             s"🔍 GROUP BY EXECUTION: Created MultiTermsAggregation for fields: ${groupByColumns.mkString(", ")}"
           )
@@ -442,9 +445,9 @@ class Tantivy4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"sum_$index", new com.tantivy4java.SumAggregation(fieldName))
-                  case multiTerms: com.tantivy4java.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"sum_$index", new com.tantivy4java.SumAggregation(fieldName))
+                    terms.addSubAggregation(s"sum_$index", new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName))
+                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                    multiTerms.addSubAggregation(s"sum_$index", new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName))
                 }
 
               case avg: Avg =>
@@ -461,9 +464,9 @@ class Tantivy4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"min_$index", new com.tantivy4java.MinAggregation(fieldName))
-                  case multiTerms: com.tantivy4java.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"min_$index", new com.tantivy4java.MinAggregation(fieldName))
+                    terms.addSubAggregation(s"min_$index", new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName))
+                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                    multiTerms.addSubAggregation(s"min_$index", new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName))
                 }
 
               case max: Max =>
@@ -471,9 +474,9 @@ class Tantivy4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"max_$index", new com.tantivy4java.MaxAggregation(fieldName))
-                  case multiTerms: com.tantivy4java.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"max_$index", new com.tantivy4java.MaxAggregation(fieldName))
+                    terms.addSubAggregation(s"max_$index", new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName))
+                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                    multiTerms.addSubAggregation(s"max_$index", new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName))
                 }
 
               case other =>
@@ -520,7 +523,7 @@ class Tantivy4SparkGroupByAggregateReader(
             // The aggregationResult is a TermsResult containing the nested structure
             // We need to wrap it in a MultiTermsResult to flatten the nested buckets
             val termsResult      = aggregationResult.asInstanceOf[TermsResult]
-            val multiTermsResult = new com.tantivy4java.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
+            val multiTermsResult = new io.indextables.tantivy4java.aggregation.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
             val multiBuckets     = multiTermsResult.getBuckets
 
             if (multiBuckets == null) {
@@ -708,7 +711,7 @@ class Tantivy4SparkGroupByAggregateReader(
   }
 
   /** Convert bucket key to appropriate Spark value. */
-  private def convertBucketKeyToSpark(bucket: com.tantivy4java.TermsResult.TermsBucket, fieldName: String): Any = {
+  private def convertBucketKeyToSpark(bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket, fieldName: String): Any = {
     import org.apache.spark.unsafe.types.UTF8String
 
     if (bucket == null) {
@@ -751,7 +754,7 @@ class Tantivy4SparkGroupByAggregateReader(
   }
 
   /** Calculate aggregation values from bucket data. Currently only supports COUNT aggregations with GROUP BY. */
-  private def calculateAggregationValues(bucket: com.tantivy4java.TermsResult.TermsBucket, aggregation: Aggregation)
+  private def calculateAggregationValues(bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket, aggregation: Aggregation)
     : Array[Any] = {
     // This method is now deprecated - metric aggregations are calculated separately
     // Keep for backward compatibility with COUNT-only queries
@@ -819,7 +822,7 @@ class Tantivy4SparkGroupByAggregateReader(
 
   /** Calculate aggregation values using sub-aggregations from MultiTermsBucket */
   private def calculateAggregationValuesFromMultiTermsBucket(
-    multiBucket: com.tantivy4java.MultiTermsResult.MultiTermsBucket,
+    multiBucket: io.indextables.tantivy4java.aggregation.MultiTermsResult.MultiTermsBucket,
     aggregation: Aggregation
   ): Array[Any] = {
     import org.apache.spark.sql.connector.expressions.aggregate._
@@ -843,7 +846,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Sum =>
               // Extract SUM result from sub-aggregation
               try {
-                val sumResult = multiBucket.getSubAggregation(s"sum_$index").asInstanceOf[com.tantivy4java.SumResult]
+                val sumResult = multiBucket.getSubAggregation(s"sum_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 if (sumResult != null) {
                   sumResult.getSum.toLong
                 } else {
@@ -867,7 +870,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Min =>
               // Extract MIN result from sub-aggregation
               try {
-                val minResult = multiBucket.getSubAggregation(s"min_$index").asInstanceOf[com.tantivy4java.MinResult]
+                val minResult = multiBucket.getSubAggregation(s"min_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 if (minResult != null) {
                   minResult.getMin.toLong
                 } else {
@@ -883,7 +886,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Max =>
               // Extract MAX result from sub-aggregation
               try {
-                val maxResult = multiBucket.getSubAggregation(s"max_$index").asInstanceOf[com.tantivy4java.MaxResult]
+                val maxResult = multiBucket.getSubAggregation(s"max_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 if (maxResult != null) {
                   maxResult.getMax.toLong
                 } else {
@@ -906,7 +909,7 @@ class Tantivy4SparkGroupByAggregateReader(
 
   /** Calculate aggregation values using sub-aggregations from bucket */
   private def calculateAggregationValuesFromSubAggregations(
-    bucket: com.tantivy4java.TermsResult.TermsBucket,
+    bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket,
     aggregation: Aggregation
   ): Array[Any] = {
     import org.apache.spark.sql.connector.expressions.aggregate._
@@ -930,7 +933,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Sum =>
               // Extract SUM result from sub-aggregation
               try {
-                val sumResult = bucket.getSubAggregation(s"sum_$index").asInstanceOf[com.tantivy4java.SumResult]
+                val sumResult = bucket.getSubAggregation(s"sum_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 if (sumResult != null) {
                   sumResult.getSum.toLong
                 } else {
@@ -954,7 +957,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Min =>
               // Extract MIN result from sub-aggregation
               try {
-                val minResult = bucket.getSubAggregation(s"min_$index").asInstanceOf[com.tantivy4java.MinResult]
+                val minResult = bucket.getSubAggregation(s"min_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 if (minResult != null) {
                   minResult.getMin.toLong
                 } else {
@@ -970,7 +973,7 @@ class Tantivy4SparkGroupByAggregateReader(
             case _: Max =>
               // Extract MAX result from sub-aggregation
               try {
-                val maxResult = bucket.getSubAggregation(s"max_$index").asInstanceOf[com.tantivy4java.MaxResult]
+                val maxResult = bucket.getSubAggregation(s"max_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 if (maxResult != null) {
                   maxResult.getMax.toLong
                 } else {

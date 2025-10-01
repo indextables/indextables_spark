@@ -107,9 +107,9 @@ object Tantivy4SparkRelation {
       extends Serializable {
 
     // Convert to tantivy4java SplitMetadata for use with split readers
-    def toTantivySplitMetadata(splitPath: String): com.tantivy4java.QuickwitSplit.SplitMetadata = {
+    def toTantivySplitMetadata(splitPath: String): io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata = {
       import scala.jdk.CollectionConverters._
-      new com.tantivy4java.QuickwitSplit.SplitMetadata(
+      new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
         splitPath.split("/").last.replace(".split", ""),    // splitId from filename
         "tantivy4spark-index",                              // indexUid (NEW - required)
         0L,                                                 // partitionId (NEW - required)
@@ -339,7 +339,7 @@ object Tantivy4SparkRelation {
         }
         queryObj
       } else {
-        import com.tantivy4java.SplitMatchAllQuery
+        import io.indextables.tantivy4java.split.SplitMatchAllQuery
         new SplitMatchAllQuery() // Use match-all query for no filters
       }
 

@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java._
+import io.indextables.tantivy4java.core.Tantivy
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.slf4j.LoggerFactory

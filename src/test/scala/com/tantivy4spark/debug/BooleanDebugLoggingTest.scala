@@ -6,7 +6,7 @@ package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
 import com.tantivy4spark.core.FiltersToQueryConverter
-import com.tantivy4java.{FieldType, SchemaBuilder}
+import io.indextables.tantivy4java.core.{FieldType, SchemaBuilder}
 import org.apache.spark.sql.sources.{EqualTo, Filter}
 import org.scalatest.matchers.should.Matchers
 

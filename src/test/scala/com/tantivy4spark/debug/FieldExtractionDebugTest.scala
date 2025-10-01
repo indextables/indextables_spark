@@ -18,8 +18,10 @@
 package com.tantivy4spark.debug
 
 import org.scalatest.funsuite.AnyFunSuite
-import com.tantivy4java._
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
+import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitTermQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.query.Query
 import java.nio.file.Files
 import scala.collection.JavaConverters._
 

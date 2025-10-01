@@ -18,7 +18,7 @@
 package com.tantivy4spark.schema
 
 import com.tantivy4spark.TestBase
-import com.tantivy4java.{SchemaBuilder, FieldType}
+import io.indextables.tantivy4java.core.{SchemaBuilder, FieldType}
 import org.apache.spark.sql.types._
 import org.scalatest.matchers.should.Matchers
 import java.sql.{Date, Timestamp}

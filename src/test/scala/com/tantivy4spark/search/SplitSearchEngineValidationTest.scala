@@ -18,7 +18,7 @@
 package com.tantivy4spark.search
 
 import org.scalatest.funsuite.AnyFunSuite
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.apache.spark.sql.types._
 import org.mockito.Mockito._
 import com.tantivy4spark.storage.SplitCacheConfig

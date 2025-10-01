@@ -17,7 +17,8 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java._
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter, Tantivy}
+import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
 import org.slf4j.LoggerFactory
 import java.nio.file.{Path, Files}
 import java.io.File
@@ -131,7 +132,7 @@ object TantivyDirectInterface {
   private def createSchemaThreadSafe(
     sparkSchema: StructType,
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): (com.tantivy4java.Schema, SchemaBuilder) =
+  ): (io.indextables.tantivy4java.core.Schema, SchemaBuilder) =
     schemaCreationLock.synchronized {
       logger.warn(s"🔍 CREATE SCHEMA CALLED: Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
       logger.debug(

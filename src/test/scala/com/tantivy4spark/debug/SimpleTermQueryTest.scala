@@ -18,8 +18,10 @@
 package com.tantivy4spark.debug
 
 import com.tantivy4spark.TestBase
-import com.tantivy4java._
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter, Searcher}
+import io.indextables.tantivy4java.query.Query
+import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitTermQuery, SplitMatchAllQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
 
@@ -105,7 +107,7 @@ class SimpleTermQueryTest extends TestBase {
           case None => 0L
         }
 
-        val metadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+        val metadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
           matchingFile.path.split("/").last.replace(".split", ""),    // splitId from filename
           "tantivy4spark-index",                                      // indexUid (NEW - required)
           0L,                                                         // partitionId (NEW - required)

@@ -360,7 +360,7 @@ class Tantivy4SparkPartitionReader(
               .take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
         }
 
-        val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
+        val splitMetadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
           addAction.path.split("/").last.replace(".split", ""),    // splitId from filename
           "tantivy4spark-index",                                   // indexUid (NEW - required)
           0L,                                                      // partitionId (NEW - required)
@@ -438,7 +438,7 @@ class Tantivy4SparkPartitionReader(
           }
           queryObj
         } else {
-          import com.tantivy4java.SplitMatchAllQuery
+          import io.indextables.tantivy4java.split.SplitMatchAllQuery
           new SplitMatchAllQuery() // Use match-all query for no filters
         }
 

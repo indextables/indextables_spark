@@ -135,7 +135,7 @@
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
         <dependency>
-            <groupId>io.indextables</groupId>
+            <groupId>com.tantivy4java</groupId>
             <artifactId>tantivy4java</artifactId>
             <version>0.24.1_x86_64</version>
         </dependency>
@@ -216,16 +216,7 @@
                         <arg>-unchecked</arg>
                         <arg>-Xlint</arg>
                         <arg>-Ywarn-unused:imports</arg>
-                        <arg>-Yrangepos</arg>
-                        <arg>-P:semanticdb:targetroot:${project.build.directory}/classes/META-INF/semanticdb</arg>
                     </args>
-                    <compilerPlugins>
-                        <compilerPlugin>
-                            <groupId>org.scalameta</groupId>
-                            <artifactId>semanticdb-scalac_2.12</artifactId>
-                            <version>4.8.15</version>
-                        </compilerPlugin>
-                    </compilerPlugins>
                 </configuration>
             </plugin>
 

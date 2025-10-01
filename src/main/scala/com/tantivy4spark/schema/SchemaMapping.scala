@@ -17,7 +17,7 @@
 
 package com.tantivy4spark.schema
 
-import com.tantivy4java.{FieldType, Schema}
+import io.indextables.tantivy4java.core.{FieldType, Schema}
 import org.apache.spark.sql.types._
 import org.slf4j.LoggerFactory
 
@@ -149,7 +149,7 @@ object SchemaMapping {
      *   Array of values converted to Spark types
      */
     def convertDocument(
-      splitDocument: com.tantivy4java.Document,
+      splitDocument: io.indextables.tantivy4java.core.Document,
       splitSchema: Schema,
       sparkSchema: StructType
     ): Array[Any] = {
@@ -172,7 +172,7 @@ object SchemaMapping {
 
     /** Convert a single field from split to Spark format */
     private def convertField(
-      document: com.tantivy4java.Document,
+      document: io.indextables.tantivy4java.core.Document,
       sparkField: StructField,
       splitSchema: Schema
     ): Any =

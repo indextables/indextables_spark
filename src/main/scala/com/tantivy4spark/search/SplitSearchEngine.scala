@@ -17,16 +17,16 @@
 
 package com.tantivy4spark.search
 
-import com.tantivy4java.{
+import io.indextables.tantivy4java.split.{
   SplitSearcher,
   SplitCacheManager,
   SplitQuery,
   SplitMatchAllQuery,
   SplitTermQuery,
-  SplitBooleanQuery,
-  SearchResult,
-  Schema
+  SplitBooleanQuery
 }
+import io.indextables.tantivy4java.result.SearchResult
+import io.indextables.tantivy4java.core.Schema
 import com.tantivy4spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import com.tantivy4spark.schema.SchemaMapping
 import org.apache.spark.sql.catalyst.InternalRow
@@ -45,7 +45,7 @@ import scala.util.Try
 class SplitSearchEngine private (
   sparkSchema: StructType,
   splitPath: String,
-  metadata: com.tantivy4java.QuickwitSplit.SplitMetadata,
+  metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
   cacheConfig: SplitCacheConfig = SplitCacheConfig())
     extends AutoCloseable {
 
@@ -279,7 +279,7 @@ class SplitSearchEngine private (
       val docAddresses = hits.map(hit => hit.getDocAddress())
 
       // Use configurable document retrieval strategy
-      val documents: Array[com.tantivy4java.Document] = if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
+      val documents: Array[io.indextables.tantivy4java.core.Document] = if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
         logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
 
         // Process in batches to respect maximum batch size
@@ -395,7 +395,7 @@ object SplitSearchEngine {
   def fromSplitFileWithMetadata(
     sparkSchema: StructType,
     splitPath: String,
-    metadata: com.tantivy4java.QuickwitSplit.SplitMetadata,
+    metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
     cacheConfig: SplitCacheConfig = SplitCacheConfig()
   ): SplitSearchEngine = {
 

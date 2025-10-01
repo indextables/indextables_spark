@@ -20,7 +20,24 @@ package com.tantivy4spark.core
 import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType, LongType}
-import com.tantivy4java._
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
+import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
+import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitAggregation, SplitMatchAllQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.aggregation.{
+  CountAggregation,
+  SumAggregation,
+  AverageAggregation,
+  MinAggregation,
+  MaxAggregation,
+  StatsAggregation,
+  CountResult,
+  SumResult,
+  AverageResult,
+  MinResult,
+  MaxResult,
+  StatsResult
+}
 import java.io.File
 import java.nio.file.Files
 import scala.util.Random

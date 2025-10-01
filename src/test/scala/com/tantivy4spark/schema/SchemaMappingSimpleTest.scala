@@ -124,7 +124,7 @@ class SchemaMappingSimpleTest extends TestBase {
   }
 
   test("SchemaMapping utility methods should convert Spark types to Tantivy field types") {
-    import com.tantivy4java.FieldType
+    import io.indextables.tantivy4java.core.FieldType
 
     SchemaMapping.sparkTypeToTantivyFieldType(StringType) should be(FieldType.TEXT)
     SchemaMapping.sparkTypeToTantivyFieldType(IntegerType) should be(FieldType.INTEGER)

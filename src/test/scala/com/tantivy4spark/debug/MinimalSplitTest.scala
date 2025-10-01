@@ -19,8 +19,9 @@ package com.tantivy4spark.debug
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import com.tantivy4java._
-import com.tantivy4java.QuickwitSplit
+import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
+import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import java.nio.file.{Files, Paths}
 import scala.util.Using
 
