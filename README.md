@@ -6,6 +6,8 @@ IndexTables runs entirely within your existing Spark cluster with no additional 
 
 Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet. This hybrid row and columnar storage format, combined with advanced indexing, delivers extremely fast keyword searches across massive datasets.
 
+> **⚠️ Development Status**: IndexTables is under active development with frequent updates and improvements. APIs and features may change as the project evolves. We recommend thorough testing in non-production environments before deploying to production workloads.
+
 To contact the original author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a GitHub issue or connect on LinkedIn.
 
 ## Table of Contents
@@ -79,10 +81,10 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 │             │   └──────────────────┘            │
 ├─────────────┴───────────────────────────────────┤
 │            S3 Storage Layer                     │
-│   ┌──────────┐ ┌──────────┐ ┌──────────────┐   │
-│   │  Splits  │ │  Splits  │ │ Transaction  │   │
-│   │  (.split)│ │  (.split)│ │     Log      │   │
-│   └──────────┘ └──────────┘ └──────────────┘   │
+│   ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
+│   │  Splits  │ │  Splits  │ │ Transaction  │    │
+│   │  (.split)│ │  (.split)│ │     Log      │    │
+│   └──────────┘ └──────────┘ └──────────────┘    │
 └─────────────────────────────────────────────────┘
 ```
 
