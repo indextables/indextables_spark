@@ -27,14 +27,11 @@ import scala.util.Try
 
 /**
  * Comprehensive integration test that validates the complete skipped files functionality:
- * 1. SkipAction creation and transaction log recording
- * 2. Cooldown period enforcement and filtering
- * 3. Transaction log querying methods
- * 4. Configuration handling
- * 5. End-to-end merge operation integration
+ *   1. SkipAction creation and transaction log recording 2. Cooldown period enforcement and filtering 3. Transaction
+ *      log querying methods 4. Configuration handling 5. End-to-end merge operation integration
  *
- * This test works without requiring actual corrupted files by directly testing
- * the transaction log and cooldown mechanisms.
+ * This test works without requiring actual corrupted files by directly testing the transaction log and cooldown
+ * mechanisms.
  */
 class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
@@ -43,10 +40,12 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"\n🔧 Testing complete skipped files tracking functionality")
 
       // Step 1: Create initial data to have a transaction log
-      val initialData = spark.range(10).select(
-        col("id"),
-        concat(lit("test_doc_"), col("id")).as("title")
-      )
+      val initialData = spark
+        .range(10)
+        .select(
+          col("id"),
+          concat(lit("test_doc_"), col("id")).as("title")
+        )
 
       initialData.write
         .format("tantivy4spark")
@@ -55,8 +54,8 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Step 2: Get transaction log and test skip recording
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
-      val testFilePath = "test/corrupted_file.split"
-      val testReason = "File corruption detected during merge"
+      val testFilePath   = "test/corrupted_file.split"
+      val testReason     = "File corruption detected during merge"
 
       println(s"Recording skipped file: $testFilePath")
 
@@ -106,7 +105,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       )
 
       val candidateFiles = Seq(testAddAction)
-      val filteredFiles = transactionLog.filterFilesInCooldown(candidateFiles)
+      val filteredFiles  = transactionLog.filterFilesInCooldown(candidateFiles)
 
       filteredFiles shouldBe empty
       println(s"✅ File correctly filtered out during cooldown period")
@@ -120,14 +119,14 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       )
 
       val updatedSkips = transactionLog.getSkippedFiles().filter(_.path == testFilePath)
-      val latestSkip = updatedSkips.maxBy(_.skipTimestamp)
+      val latestSkip   = updatedSkips.maxBy(_.skipTimestamp)
       latestSkip.skipCount shouldBe 2
       latestSkip.reason shouldBe "Second failure - persistent corruption"
 
       println(s"✅ Skip count correctly incremented: ${latestSkip.skipCount}")
 
       // Step 7: Test different file doesn't affect cooldown
-      val differentFilePath = "test/different_file.split"
+      val differentFilePath     = "test/different_file.split"
       val isDifferentInCooldown = transactionLog.isFileInCooldown(differentFilePath)
       isDifferentInCooldown shouldBe false
 
@@ -145,10 +144,12 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       spark.conf.set("spark.indextables.skippedFiles.trackingEnabled", "false")
       spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "48")
 
-      val initialData = spark.range(5).select(
-        col("id"),
-        concat(lit("config_test_"), col("id")).as("title")
-      )
+      val initialData = spark
+        .range(5)
+        .select(
+          col("id"),
+          concat(lit("config_test_"), col("id")).as("title")
+        )
 
       initialData.write
         .format("tantivy4spark")
@@ -158,7 +159,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
 
       // When tracking is disabled, the configuration should still be readable
-      val cooldownHours = spark.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
+      val cooldownHours   = spark.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
       val trackingEnabled = spark.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
 
       cooldownHours shouldBe 48
@@ -179,12 +180,12 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       )
 
       val skippedFiles = transactionLog.getSkippedFiles()
-      val configSkip = skippedFiles.find(_.path == testFile)
+      val configSkip   = skippedFiles.find(_.path == testFile)
       configSkip shouldBe defined
 
       // Verify the cooldown period is correctly set (2 hours = 2 * 60 * 60 * 1000 ms)
       val expectedCooldownMs = 2 * 60 * 60 * 1000L
-      val actualCooldownMs = configSkip.get.retryAfter.get - configSkip.get.skipTimestamp
+      val actualCooldownMs   = configSkip.get.retryAfter.get - configSkip.get.skipTimestamp
 
       // Allow for small timing differences (within 1 second)
       Math.abs(actualCooldownMs - expectedCooldownMs) should be < 1000L
@@ -238,7 +239,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
     // Test Java interoperability
     val firstSkipped = retrievedSkips.get(0)
-    val lastSkipped = retrievedSkips.get(retrievedSkips.size() - 1)
+    val lastSkipped  = retrievedSkips.get(retrievedSkips.size() - 1)
 
     firstSkipped shouldBe "s3://bucket/corrupted1.split"
     lastSkipped shouldBe "/local/path/corrupted3.split"
@@ -297,10 +298,12 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"\n🔧 Testing transaction log integration with SkipAction")
 
       // Create initial data
-      val data = spark.range(3).select(
-        col("id"),
-        concat(lit("integration_"), col("id")).as("title")
-      )
+      val data = spark
+        .range(3)
+        .select(
+          col("id"),
+          concat(lit("integration_"), col("id")).as("title")
+        )
 
       data.write
         .format("tantivy4spark")
@@ -322,14 +325,15 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         "Invalid file format"
       )
 
-      skipPaths.zip(skipReasons).foreach { case (path, reason) =>
-        transactionLog.recordSkippedFile(
-          filePath = path,
-          reason = reason,
-          operation = "merge",
-          partitionValues = Some(Map("integration" -> "test")),
-          cooldownHours = 1
-        )
+      skipPaths.zip(skipReasons).foreach {
+        case (path, reason) =>
+          transactionLog.recordSkippedFile(
+            filePath = path,
+            reason = reason,
+            operation = "merge",
+            partitionValues = Some(Map("integration" -> "test")),
+            cooldownHours = 1
+          )
       }
 
       // Verify all skips were recorded
@@ -337,13 +341,14 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       allSkips.length shouldBe 3
 
       // Verify each skip has correct information
-      skipPaths.zip(skipReasons).foreach { case (expectedPath, expectedReason) =>
-        val skip = allSkips.find(_.path == expectedPath)
-        skip shouldBe defined
-        skip.get.reason shouldBe expectedReason
-        skip.get.operation shouldBe "merge"
-        skip.get.partitionValues shouldBe Some(Map("integration" -> "test"))
-        skip.get.skipCount shouldBe 1
+      skipPaths.zip(skipReasons).foreach {
+        case (expectedPath, expectedReason) =>
+          val skip = allSkips.find(_.path == expectedPath)
+          skip shouldBe defined
+          skip.get.reason shouldBe expectedReason
+          skip.get.operation shouldBe "merge"
+          skip.get.partitionValues shouldBe Some(Map("integration" -> "test"))
+          skip.get.skipCount shouldBe 1
       }
 
       println(s"✅ All ${allSkips.length} skip actions correctly recorded in transaction log")
@@ -375,9 +380,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       // Test cooldown map
       val cooldownMap = transactionLog.getFilesInCooldown()
       cooldownMap.size shouldBe 3
-      skipPaths.foreach { path =>
-        cooldownMap should contain key path
-      }
+      skipPaths.foreach(path => cooldownMap should contain key path)
 
       println(s"✅ Cooldown map correctly contains all ${cooldownMap.size} files")
     }
@@ -388,10 +391,12 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"\n🔧 Testing post-cooldown retry behavior")
 
       // Step 1: Create initial data and transaction log
-      val initialData = spark.range(5).select(
-        col("id"),
-        concat(lit("retry_test_"), col("id")).as("title")
-      )
+      val initialData = spark
+        .range(5)
+        .select(
+          col("id"),
+          concat(lit("retry_test_"), col("id")).as("title")
+        )
 
       initialData.write
         .format("tantivy4spark")
@@ -399,8 +404,8 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         .save(outputPath)
 
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
-      val testFilePath = "retry/test_file.split"
-      val testReason = "File failed during merge - testing retry logic"
+      val testFilePath   = "retry/test_file.split"
+      val testReason     = "File failed during merge - testing retry logic"
 
       // Step 2: Record a skipped file with a very short cooldown (1 second for testing)
       println(s"Recording skipped file with 1-second cooldown: $testFilePath")
@@ -412,7 +417,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
         operation = "merge",
         partitionValues = Some(Map("retry_test" -> "value1")),
         size = Some(54321L),
-        cooldownHours = 1  // This will be 1 hour in production, but we'll test with manual time manipulation
+        cooldownHours = 1 // This will be 1 hour in production, but we'll test with manual time manipulation
       )
 
       println(s"Skip recorded in version: $skipVersion")
@@ -435,7 +440,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       println(s"✅ File correctly blocked during cooldown period")
 
       // Step 4: Test with an expired cooldown using custom timestamp
-      val expiredFilePath = "retry/expired_cooldown_file.split"
+      val expiredFilePath  = "retry/expired_cooldown_file.split"
       val expiredTimestamp = System.currentTimeMillis() - (2 * 60 * 60 * 1000L) // 2 hours ago
 
       // Create a skip record with an expired timestamp (1 hour cooldown, but timestamp is 2 hours ago)
@@ -460,7 +465,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       )
 
       // Step 5: Verify expired file is NOT filtered (should be retryable)
-      val expiredFileFiltered = transactionLog.filterFilesInCooldown(Seq(expiredFileAction))
+      val expiredFileFiltered   = transactionLog.filterFilesInCooldown(Seq(expiredFileAction))
       val expiredFileInCooldown = transactionLog.isFileInCooldown(expiredFilePath)
 
       // The expired file should not be in cooldown and should pass through the filter
@@ -487,7 +492,7 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       )
 
       // Step 7: Verify zero cooldown file is immediately retryable
-      val zeroCooldownFiltered = transactionLog.filterFilesInCooldown(Seq(zeroCooldownAction))
+      val zeroCooldownFiltered   = transactionLog.filterFilesInCooldown(Seq(zeroCooldownAction))
       val zeroCooldownInCooldown = transactionLog.isFileInCooldown(zeroCooldownFilePath)
 
       // Zero cooldown file should be immediately retryable
@@ -498,13 +503,15 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
       // Step 8: Verify all cooldown scenarios work correctly
       val allSkippedFiles = transactionLog.getSkippedFiles()
-      val testFileSkips = allSkippedFiles.filter(_.path.contains("retry"))
+      val testFileSkips   = allSkippedFiles.filter(_.path.contains("retry"))
 
       testFileSkips.foreach { skip =>
         val cooldownEndTime = skip.retryAfter.getOrElse(skip.skipTimestamp)
-        val currentTime = System.currentTimeMillis()
-        val isExpired = currentTime > cooldownEndTime
-        println(s"📝 File: ${skip.path}, cooldown expires at: $cooldownEndTime, current: $currentTime, expired: $isExpired")
+        val currentTime     = System.currentTimeMillis()
+        val isExpired       = currentTime > cooldownEndTime
+        println(
+          s"📝 File: ${skip.path}, cooldown expires at: $cooldownEndTime, current: $currentTime, expired: $isExpired"
+        )
       }
 
       println(s"✅ Complete post-cooldown retry logic validated")
@@ -528,19 +535,20 @@ class SkippedFilesIntegrationTest extends TestBase with Matchers {
       (Some("valid-uuid-123"), "Some(\"valid-uuid-123\") (valid indexUid)")
     )
 
-    testCases.foreach { case (indexUid, description) =>
-      // Test the same logic used in MergeSplitsCommand
-      val shouldSkipMerge = indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)
+    testCases.foreach {
+      case (indexUid, description) =>
+        // Test the same logic used in MergeSplitsCommand
+        val shouldSkipMerge = indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)
 
-      val expectedResult = description.contains("valid-uuid") match {
-        case true => false  // Valid indexUid should NOT skip merge
-        case false => true  // All invalid cases should skip merge
-      }
+        val expectedResult = description.contains("valid-uuid") match {
+          case true  => false // Valid indexUid should NOT skip merge
+          case false => true  // All invalid cases should skip merge
+        }
 
-      shouldSkipMerge shouldBe expectedResult
+        shouldSkipMerge shouldBe expectedResult
 
-      val status = if (shouldSkipMerge) "SKIP MERGE" else "PROCEED WITH MERGE"
-      println(s"✅ $description -> $status")
+        val status = if (shouldSkipMerge) "SKIP MERGE" else "PROCEED WITH MERGE"
+        println(s"✅ $description -> $status")
     }
 
     println(s"✅ Empty string indexUid correctly treated same as null indexUid")

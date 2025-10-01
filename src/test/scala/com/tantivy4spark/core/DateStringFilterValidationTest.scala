@@ -22,8 +22,8 @@ import org.apache.spark.sql.functions._
 import java.sql.Date
 
 /**
- * Test to validate that date filtering works correctly when dates are stored as Date type
- * in the transaction log but WHERE clause specifies them as string literals.
+ * Test to validate that date filtering works correctly when dates are stored as Date type in the transaction log but
+ * WHERE clause specifies them as string literals.
  *
  * This tests partition pruning and filter pushdown for date-partitioned tables.
  */
@@ -60,26 +60,26 @@ class DateStringFilterValidationTest extends TestBase {
 
       // Test 1: Exact match with string literal
       val result1 = df.filter($"event_date" === "2023-02-20")
-      val rows1 = result1.collect()
+      val rows1   = result1.collect()
       assert(rows1.length == 1, "Should find exactly 1 record for 2023-02-20")
       assert(rows1(0).getAs[String]("id") == "event2", "Should find event2")
 
       // Test 2: Date range with string literals
       val result2 = df.filter($"event_date" >= "2023-01-01" && $"event_date" < "2024-01-01")
-      val rows2 = result2.collect()
+      val rows2   = result2.collect()
       assert(rows2.length == 3, "Should find 3 records for 2023")
       val ids2 = rows2.map(_.getAs[String]("id")).sorted
       assert(ids2.sameElements(Array("event1", "event2", "event3")), "Should find events 1, 2, 3")
 
       // Test 3: Another exact match
       val result3 = df.filter($"event_date" === "2024-01-05")
-      val rows3 = result3.collect()
+      val rows3   = result3.collect()
       assert(rows3.length == 1, "Should find exactly 1 record for 2024-01-05")
       assert(rows3(0).getAs[String]("id") == "event4", "Should find event4")
 
       // Test 4: IN clause with string dates
       val result4 = df.filter($"event_date".isin("2023-01-15", "2024-02-14"))
-      val rows4 = result4.collect()
+      val rows4   = result4.collect()
       assert(rows4.length == 2, "Should find 2 records with IN clause")
       val ids4 = rows4.map(_.getAs[String]("id")).sorted
       assert(ids4.sameElements(Array("event1", "event5")), "Should find events 1 and 5")
@@ -87,13 +87,13 @@ class DateStringFilterValidationTest extends TestBase {
       // Test 5: SQL syntax
       df.createOrReplaceTempView("date_test_table")
       val sqlResult = spark.sql("SELECT * FROM date_test_table WHERE event_date = '2023-02-20'")
-      val sqlRows = sqlResult.collect()
+      val sqlRows   = sqlResult.collect()
       assert(sqlRows.length == 1, "SQL query should find exactly 1 record")
       assert(sqlRows(0).getAs[String]("id") == "event2", "SQL should find event2")
 
       // Test 6: Greater than comparison
       val result6 = df.filter($"event_date" > "2023-12-31")
-      val rows6 = result6.collect()
+      val rows6   = result6.collect()
       assert(rows6.length == 2, "Should find 2 records after 2023")
       val ids6 = rows6.map(_.getAs[String]("id")).sorted
       assert(ids6.sameElements(Array("event4", "event5")), "Should find events 4 and 5")
@@ -163,7 +163,7 @@ class DateStringFilterValidationTest extends TestBase {
       val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
 
       // Filter that should only touch specific partitions
-      val januaryData = df.filter($"event_date" >= "2023-01-01" && $"event_date" < "2023-02-01")
+      val januaryData  = df.filter($"event_date" >= "2023-01-01" && $"event_date" < "2023-02-01")
       val januaryCount = januaryData.count()
       assert(januaryCount == 2, "Should find 2 January records")
 

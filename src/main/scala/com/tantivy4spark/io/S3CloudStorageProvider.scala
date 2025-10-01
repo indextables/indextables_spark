@@ -17,7 +17,12 @@
 
 package com.tantivy4spark.io
 
-import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, AwsSessionCredentials, StaticCredentialsProvider, DefaultCredentialsProvider}
+import software.amazon.awssdk.auth.credentials.{
+  AwsBasicCredentials,
+  AwsSessionCredentials,
+  StaticCredentialsProvider,
+  DefaultCredentialsProvider
+}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model._
@@ -28,85 +33,82 @@ import java.io.{InputStream, OutputStream, ByteArrayInputStream, ByteArrayOutput
 import java.net.URI
 import java.util.concurrent.{CompletableFuture, Executors}
 import scala.jdk.CollectionConverters._
-import scala.util.{Try}
+import scala.util.Try
 import com.tantivy4spark.utils.CredentialProviderFactory
 
 /**
- * High-performance S3 storage provider using AWS SDK directly.
- * Bypasses Hadoop filesystem for better performance and reliability.
+ * High-performance S3 storage provider using AWS SDK directly. Bypasses Hadoop filesystem for better performance and
+ * reliability.
  */
 class S3CloudStorageProvider(
   config: CloudStorageConfig,
   hadoopConf: org.apache.hadoop.conf.Configuration = null,
-  tablePath: String = "s3://dummy"
-) extends CloudStorageProvider {
+  tablePath: String = "s3://dummy")
+    extends CloudStorageProvider {
 
-
-  private val logger = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
+  private val logger   = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
   private val executor = Executors.newCachedThreadPool()
 
   // Configurable multipart upload threshold (default 100MB)
   private val multipartThreshold = config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)
 
   // Multipart uploader for large files
-  private lazy val multipartUploader = new S3MultipartUploader(s3Client, S3MultipartConfig(
-    multipartThreshold = multipartThreshold,
-    partSize = math.min(64L * 1024 * 1024, multipartThreshold / 4), // 64MB or 1/4 of threshold
-    maxConcurrency = config.maxConcurrency.getOrElse(4),
-    maxRetries = config.maxRetries.getOrElse(3)
-  ))
-  
+  private lazy val multipartUploader = new S3MultipartUploader(
+    s3Client,
+    S3MultipartConfig(
+      multipartThreshold = multipartThreshold,
+      partSize = math.min(64L * 1024 * 1024, multipartThreshold / 4), // 64MB or 1/4 of threshold
+      maxConcurrency = config.maxConcurrency.getOrElse(4),
+      maxRetries = config.maxRetries.getOrElse(3)
+    )
+  )
+
   logger.debug(s"S3CloudStorageProvider CONFIG:")
   logger.debug(s"  - accessKey: ${config.awsAccessKey.map(_.take(4) + "...")}")
   logger.debug(s"  - secretKey: ${config.awsSecretKey.map(_ => "***")}")
   logger.debug(s"  - endpoint: ${config.awsEndpoint}")
   logger.debug(s"  - pathStyleAccess: ${config.awsPathStyleAccess}")
   logger.debug(s"  - region: ${config.awsRegion}")
-  
+
   // Detect if we're running against S3Mock for compatibility adjustments
   private val isS3Mock = config.awsEndpoint.exists(_.contains("localhost"))
-  
+
   // Helper methods for S3Mock path transformation and protocol conversion
   // Use a special delimiter that won't appear in normal filenames
   private val S3_MOCK_DIR_SEPARATOR = "___"
-  
+
   // Convert s3a:// URLs to s3:// for tantivy4java compatibility
   // tantivy4java only understands s3:// protocol, not s3a:// or s3n://
-  private def normalizeProtocolForTantivy(path: String): String = {
+  private def normalizeProtocolForTantivy(path: String): String =
     if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
       path.replaceFirst("^s3[an]://", "s3://")
     } else {
       path
     }
-  }
-  
+
   // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
-  private def flattenPathForS3Mock(key: String): String = {
+  private def flattenPathForS3Mock(key: String): String =
     if (isS3Mock && key.contains("/")) {
       key.replace("/", S3_MOCK_DIR_SEPARATOR)
     } else {
       key
     }
-  }
-  
+
   // Convert flat paths back to nested: path___to___file.txt -> path/to/file.txt
-  private def unflattenPathFromS3Mock(key: String): String = {
+  private def unflattenPathFromS3Mock(key: String): String =
     if (isS3Mock && key.contains(S3_MOCK_DIR_SEPARATOR)) {
       key.replace(S3_MOCK_DIR_SEPARATOR, "/")
     } else {
       key
     }
-  }
 
   /**
-   * Normalize a path to table level by removing filename if present.
-   * This ensures that credential providers are always created with the table path,
-   * not individual split file paths.
-   * IMPORTANT: Preserves the original scheme (s3a://, s3://, etc.) to ensure
-   * credential providers receive the same URI scheme as specified by the user.
+   * Normalize a path to table level by removing filename if present. This ensures that credential providers are always
+   * created with the table path, not individual split file paths. IMPORTANT: Preserves the original scheme (s3a://,
+   * s3://, etc.) to ensure credential providers receive the same URI scheme as specified by the user.
    */
   private def normalizeToTablePath(path: String): String = {
-    val uri = new URI(path)
+    val uri      = new URI(path)
     val pathPart = uri.getPath
 
     // If the path ends with a .split file, remove it to get the table path
@@ -123,10 +125,10 @@ class S3CloudStorageProvider(
       path // Not a split file path, use as-is
     }
   }
-  
+
   private val s3Client: S3Client = {
     val builder = S3Client.builder()
-    
+
     // Configure region
     config.awsRegion match {
       case Some(region) =>
@@ -135,13 +137,13 @@ class S3CloudStorageProvider(
       case None =>
         logger.warn(s"⚠️ S3Client: No region configured, this will cause errors!")
     }
-    
+
     // Configure endpoint (for testing with S3Mock, MinIO, etc.)
     config.awsEndpoint.foreach { endpoint =>
       // Skip endpoint override for standard AWS S3 endpoints when region is configured
       // Using endpoint override with s3.amazonaws.com breaks regional routing
       val isStandardAwsEndpoint = endpoint.contains("s3.amazonaws.com") || endpoint.contains("amazonaws.com")
-      
+
       if (isStandardAwsEndpoint && config.awsRegion.isDefined) {
         logger.info(s"🔧 Skipping endpoint override for standard AWS endpoint '$endpoint' because region is configured: ${config.awsRegion.get}")
       } else {
@@ -153,10 +155,10 @@ class S3CloudStorageProvider(
             // Default to https if no scheme specified
             URI.create(s"https://$endpoint")
           }
-          
+
           logger.info(s"Configuring S3 client with endpoint: $endpointUri")
           builder.endpointOverride(endpointUri)
-          
+
           if (config.awsPathStyleAccess) {
             builder.forcePathStyle(true)
           }
@@ -169,7 +171,7 @@ class S3CloudStorageProvider(
     }
 
     // Helper method for fallback credential configuration
-    def createFallbackCredentialsProvider() = {
+    def createFallbackCredentialsProvider() =
       (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
         case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
           logger.info(s"Using AWS session credentials with access key: ${accessKey.take(4)}...")
@@ -183,7 +185,6 @@ class S3CloudStorageProvider(
           logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
           DefaultCredentialsProvider.create()
       }
-    }
 
     // Configure credentials with the following priority:
     // 1. Custom provider (if configured)
@@ -236,64 +237,78 @@ class S3CloudStorageProvider(
 
     builder.credentialsProvider(credentialsProvider).build()
   }
-  
+
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
     val (bucket, originalPrefix) = parseS3Path(path)
-    
+
     // Apply uniform path flattening for S3Mock compatibility
     val basePrefix = flattenPathForS3Mock(originalPrefix)
-    
+
     // Add trailing slash only for transaction log directory listings to prevent matching
     // similarly named directories like _transaction_log_backup
-    val prefix = if (basePrefix.nonEmpty && 
-                     (basePrefix.endsWith("/_transaction_log") || basePrefix == "_transaction_log") &&
-                     !basePrefix.endsWith("/")) {
-      basePrefix + "/"
-    } else {
-      basePrefix
-    }
-    
+    val prefix =
+      if (
+        basePrefix.nonEmpty &&
+        (basePrefix.endsWith("/_transaction_log") || basePrefix == "_transaction_log") &&
+        !basePrefix.endsWith("/")
+      ) {
+        basePrefix + "/"
+      } else {
+        basePrefix
+      }
+
     try {
       logger.info(s"🔍 S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")
-      val request = ListObjectsV2Request.builder()
+      val request = ListObjectsV2Request
+        .builder()
         .bucket(bucket)
         .prefix(prefix)
         .delimiter(if (recursive || isS3Mock) null else "/") // For S3Mock, always list recursively since we flatten paths
         .build()
-      
+
       val response = s3Client.listObjectsV2(request)
-      
-      val files = response.contents().asScala.map { s3Object =>
-        // Transform the path back to the original format for the caller
-        val originalKey = s3Object.key()
-        val displayKey = unflattenPathFromS3Mock(originalKey)
-        
-        logger.debug(s"🔍 S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
-        
-        CloudFileInfo(
-          path = s"s3://$bucket/$displayKey",
-          size = s3Object.size(),
-          modificationTime = s3Object.lastModified().toEpochMilli,
-          isDirectory = false
-        )
-      }.toSeq
-      
+
+      val files = response
+        .contents()
+        .asScala
+        .map { s3Object =>
+          // Transform the path back to the original format for the caller
+          val originalKey = s3Object.key()
+          val displayKey  = unflattenPathFromS3Mock(originalKey)
+
+          logger.debug(s"🔍 S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
+
+          CloudFileInfo(
+            path = s"s3://$bucket/$displayKey",
+            size = s3Object.size(),
+            modificationTime = s3Object.lastModified().toEpochMilli,
+            isDirectory = false
+          )
+        }
+        .toSeq
+
       // For S3Mock with flattened paths, we don't have real directories
       val directories = if (!recursive && !isS3Mock) {
-        response.commonPrefixes().asScala.map { commonPrefix =>
-          val displayPrefix = unflattenPathFromS3Mock(commonPrefix.prefix())
-          
-          CloudFileInfo(
-            path = s"s3://$bucket/$displayPrefix",
-            size = 0L,
-            modificationTime = 0L,
-            isDirectory = true
-          )
-        }.toSeq
+        response
+          .commonPrefixes()
+          .asScala
+          .map { commonPrefix =>
+            val displayPrefix = unflattenPathFromS3Mock(commonPrefix.prefix())
+
+            CloudFileInfo(
+              path = s"s3://$bucket/$displayPrefix",
+              size = 0L,
+              modificationTime = 0L,
+              isDirectory = true
+            )
+          }
+          .toSeq
       } else Seq.empty
-      
+
       val allResults = files ++ directories
-      logger.info(s"🔍 S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'")
+      logger.info(
+        s"🔍 S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'"
+      )
       files.foreach(f => logger.debug(s"  File: ${f.path}"))
       allResults
     } catch {
@@ -302,19 +317,20 @@ class S3CloudStorageProvider(
         throw new RuntimeException(s"Failed to list S3 files: ${ex.getMessage}", ex)
     }
   }
-  
+
   override def exists(path: String): Boolean = {
     val (bucket, originalKey) = parseS3Path(path)
-    
+
     // Apply uniform path flattening for S3Mock compatibility
     val key = flattenPathForS3Mock(originalKey)
-    
+
     try {
-      val request = HeadObjectRequest.builder()
+      val request = HeadObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
-      
+
       s3Client.headObject(request)
       true
     } catch {
@@ -324,24 +340,27 @@ class S3CloudStorageProvider(
         false
     }
   }
-  
+
   override def getFileInfo(path: String): Option[CloudFileInfo] = {
     val (bucket, key) = parseS3Path(path)
-    
+
     try {
-      val request = HeadObjectRequest.builder()
+      val request = HeadObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
-      
+
       val response = s3Client.headObject(request)
-      
-      Some(CloudFileInfo(
-        path = path,
-        size = response.contentLength(),
-        modificationTime = response.lastModified().toEpochMilli,
-        isDirectory = false
-      ))
+
+      Some(
+        CloudFileInfo(
+          path = path,
+          size = response.contentLength(),
+          modificationTime = response.lastModified().toEpochMilli,
+          isDirectory = false
+        )
+      )
     } catch {
       case _: NoSuchKeyException => None
       case ex: Exception =>
@@ -349,21 +368,22 @@ class S3CloudStorageProvider(
         None
     }
   }
-  
+
   override def readFile(path: String): Array[Byte] = {
     val (bucket, originalKey) = parseS3Path(path)
-    
+
     // Apply uniform path flattening for S3Mock compatibility
     val key = flattenPathForS3Mock(originalKey)
-    
+
     try {
       logger.debug(s"Reading entire S3 file: s3://$bucket/$key (original: $originalKey)")
-      
-      val request = GetObjectRequest.builder()
+
+      val request = GetObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
-      
+
       val response = s3Client.getObject(request)
       response.readAllBytes()
     } catch {
@@ -372,20 +392,25 @@ class S3CloudStorageProvider(
         throw new RuntimeException(s"Failed to read S3 file: ${ex.getMessage}", ex)
     }
   }
-  
-  override def readRange(path: String, offset: Long, length: Long): Array[Byte] = {
+
+  override def readRange(
+    path: String,
+    offset: Long,
+    length: Long
+  ): Array[Byte] = {
     val (bucket, key) = parseS3Path(path)
-    val rangeHeader = s"bytes=$offset-${offset + length - 1}"
-    
+    val rangeHeader   = s"bytes=$offset-${offset + length - 1}"
+
     try {
       logger.debug(s"Reading S3 range: s3://$bucket/$key, range=$rangeHeader")
-      
-      val request = GetObjectRequest.builder()
+
+      val request = GetObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .range(rangeHeader)
         .build()
-      
+
       val response = s3Client.getObject(request)
       response.readAllBytes()
     } catch {
@@ -394,16 +419,17 @@ class S3CloudStorageProvider(
         throw new RuntimeException(s"Failed to read S3 range: ${ex.getMessage}", ex)
     }
   }
-  
+
   override def openInputStream(path: String): InputStream = {
     val (bucket, key) = parseS3Path(path)
-    
+
     try {
-      val request = GetObjectRequest.builder()
+      val request = GetObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
-      
+
       s3Client.getObject(request)
     } catch {
       case ex: Exception =>
@@ -411,17 +437,16 @@ class S3CloudStorageProvider(
         throw new RuntimeException(s"Failed to open S3 input stream: ${ex.getMessage}", ex)
     }
   }
-  
-  override def createOutputStream(path: String): OutputStream = {
+
+  override def createOutputStream(path: String): OutputStream =
     // For S3, we need to buffer the output and upload when the stream is closed
     new S3OutputStream(path)
-  }
-  
+
   override def writeFile(path: String, content: Array[Byte]): Unit = {
     val (bucket, originalKey) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
-    val key = flattenPathForS3Mock(originalKey)
+    val key           = flattenPathForS3Mock(originalKey)
     val contentLength = content.length.toLong
 
     try {
@@ -443,7 +468,8 @@ class S3CloudStorageProvider(
       } else {
         logger.info(s"📄 Using single-part upload for file: s3://$bucket/$key (${formatBytes(contentLength)})")
 
-        val request = PutObjectRequest.builder()
+        val request = PutObjectRequest
+          .builder()
           .bucket(bucket)
           .key(key)
           .contentLength(contentLength)
@@ -461,33 +487,36 @@ class S3CloudStorageProvider(
         throw new RuntimeException(s"Failed to write S3 file: ${ex.getMessage}", ex)
     }
   }
-  
-  /**
-   * Ensure bucket exists before writing files
-   */
-  private def ensureBucketExists(bucket: String): Unit = {
+
+  /** Ensure bucket exists before writing files */
+  private def ensureBucketExists(bucket: String): Unit =
     try {
-      val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest.builder()
+      val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest
+        .builder()
         .bucket(bucket)
         .build()
-      
+
       s3Client.headBucket(bucketExistsRequest)
       logger.debug(s"✅ Bucket exists: $bucket")
     } catch {
       case _: software.amazon.awssdk.services.s3.model.NoSuchBucketException =>
         logger.info(s"🔧 Creating missing bucket: $bucket")
-        val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+        val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest
+          .builder()
           .bucket(bucket)
           .build()
         s3Client.createBucket(createBucketRequest)
         logger.info(s"✅ Created S3 bucket: $bucket")
       case ex: Exception =>
         logger.warn(s"⚠️  Could not verify bucket existence for $bucket: ${ex.getMessage}")
-        // Continue anyway - the putObject call will fail if bucket really doesn't exist
+      // Continue anyway - the putObject call will fail if bucket really doesn't exist
     }
-  }
 
-  override def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long] = None): Unit = {
+  override def writeFileFromStream(
+    path: String,
+    inputStream: InputStream,
+    contentLength: Option[Long] = None
+  ): Unit = {
     val (bucket, originalKey) = parseS3Path(path)
     // Apply uniform path flattening for S3Mock compatibility
     val key = flattenPathForS3Mock(originalKey)
@@ -515,13 +544,14 @@ class S3CloudStorageProvider(
 
   override def deleteFile(path: String): Boolean = {
     val (bucket, key) = parseS3Path(path)
-    
+
     try {
-      val request = DeleteObjectRequest.builder()
+      val request = DeleteObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
-      
+
       s3Client.deleteObject(request)
       true
     } catch {
@@ -530,25 +560,27 @@ class S3CloudStorageProvider(
         false
     }
   }
-  
+
   override def createDirectory(path: String): Boolean = {
     val (bucket, key) = parseS3Path(path)
-    
+
     // If the key is empty or just "/", create the bucket
     if (key.isEmpty || key == "/") {
       try {
         // Check if bucket exists
-        val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest.builder()
+        val bucketExistsRequest = software.amazon.awssdk.services.s3.model.HeadBucketRequest
+          .builder()
           .bucket(bucket)
           .build()
-        
+
         try {
           s3Client.headBucket(bucketExistsRequest)
           logger.debug(s"Bucket already exists: $bucket")
         } catch {
           case _: software.amazon.awssdk.services.s3.model.NoSuchBucketException =>
             // Create bucket
-            val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest.builder()
+            val createBucketRequest = software.amazon.awssdk.services.s3.model.CreateBucketRequest
+              .builder()
               .bucket(bucket)
               .build()
             s3Client.createBucket(createBucketRequest)
@@ -569,29 +601,29 @@ class S3CloudStorageProvider(
       true
     }
   }
-  
+
   override def readFilesParallel(paths: Seq[String]): Map[String, Array[Byte]] = {
     if (paths.isEmpty) return Map.empty
-    
+
     logger.info(s"Reading ${paths.size} files in parallel from S3")
-    
+
     val futures = paths.map { path =>
-      CompletableFuture.supplyAsync(() => {
-        try {
-          path -> Some(readFile(path))
-        } catch {
-          case ex: Exception =>
-            logger.error(s"Failed to read S3 file in parallel: $path", ex)
-            path -> None
-        }
-      }, executor)
+      CompletableFuture.supplyAsync(
+        () =>
+          try
+            path -> Some(readFile(path))
+          catch {
+            case ex: Exception =>
+              logger.error(s"Failed to read S3 file in parallel: $path", ex)
+              path -> None
+          },
+        executor
+      )
     }
-    
+
     try {
-      val results = futures.map(_.get()).collect {
-        case (path, Some(content)) => path -> content
-      }.toMap
-      
+      val results = futures.map(_.get()).collect { case (path, Some(content)) => path -> content }.toMap
+
       logger.info(s"Successfully read ${results.size} of ${paths.size} files in parallel")
       results
     } catch {
@@ -600,29 +632,25 @@ class S3CloudStorageProvider(
         Map.empty
     }
   }
-  
+
   override def existsParallel(paths: Seq[String]): Map[String, Boolean] = {
     if (paths.isEmpty) return Map.empty
-    
+
     logger.debug(s"Checking existence of ${paths.size} files in parallel")
-    
-    val futures = paths.map { path =>
-      CompletableFuture.supplyAsync(() => {
-        path -> exists(path)
-      }, executor)
-    }
-    
-    try {
+
+    val futures = paths.map(path => CompletableFuture.supplyAsync(() => path -> exists(path), executor))
+
+    try
       futures.map(_.get()).toMap
-    } catch {
+    catch {
       case ex: Exception =>
         logger.error("Failed to complete parallel S3 existence checks", ex)
         paths.map(_ -> false).toMap
     }
   }
-  
+
   override def getProviderType: String = "s3"
-  
+
   override def close(): Unit = {
     multipartUploader.shutdown()
     executor.shutdown()
@@ -630,9 +658,7 @@ class S3CloudStorageProvider(
     logger.debug("Closed S3 storage provider")
   }
 
-  /**
-   * Format bytes for human-readable output
-   */
+  /** Format bytes for human-readable output */
   private def formatBytes(bytes: Long): String = {
     val kb = 1024L
     val mb = kb * 1024
@@ -648,37 +674,35 @@ class S3CloudStorageProvider(
       s"$bytes bytes"
     }
   }
-  
+
   /**
-   * Normalize path for tantivy4java compatibility.
-   * Converts s3a:// and s3n:// protocols to s3:// which tantivy4java understands.
+   * Normalize path for tantivy4java compatibility. Converts s3a:// and s3n:// protocols to s3:// which tantivy4java
+   * understands.
    */
   override def normalizePathForTantivy(path: String): String = {
     val protocolNormalized = normalizeProtocolForTantivy(path)
-    
+
     // Apply path flattening for S3Mock compatibility
     if (isS3Mock) {
       val (bucket, key) = parseS3Path(protocolNormalized)
-      val flattenedKey = flattenPathForS3Mock(key)
+      val flattenedKey  = flattenPathForS3Mock(key)
       s"s3://$bucket/$flattenedKey"
     } else {
       protocolNormalized
     }
   }
-  
-  /**
-   * Parse S3 path into bucket and key components
-   */
+
+  /** Parse S3 path into bucket and key components */
   private def parseS3Path(path: String): (String, String) = {
-    val uri = URI.create(path)
+    val uri    = URI.create(path)
     val bucket = uri.getHost
-    val key = uri.getPath.stripPrefix("/")
+    val key    = uri.getPath.stripPrefix("/")
     (bucket, key)
   }
-  
+
   /**
-   * Custom OutputStream for S3 that buffers content and uploads on close.
-   * Uses multipart upload for large files (>100MB) for better reliability.
+   * Custom OutputStream for S3 that buffers content and uploads on close. Uses multipart upload for large files
+   * (>100MB) for better reliability.
    */
   private class S3OutputStream(path: String) extends OutputStream {
     private val buffer = new ByteArrayOutputStream()
@@ -694,12 +718,16 @@ class S3CloudStorageProvider(
       buffer.write(b)
     }
 
-    override def write(b: Array[Byte], off: Int, len: Int): Unit = {
+    override def write(
+      b: Array[Byte],
+      off: Int,
+      len: Int
+    ): Unit = {
       if (closed) throw new IllegalStateException("Stream is closed")
       buffer.write(b, off, len)
     }
 
-    override def close(): Unit = {
+    override def close(): Unit =
       if (!closed) {
         try {
           val content = buffer.toByteArray
@@ -710,6 +738,5 @@ class S3CloudStorageProvider(
           closed = true
         }
       }
-    }
   }
 }

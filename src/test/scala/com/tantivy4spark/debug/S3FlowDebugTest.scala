@@ -33,28 +33,28 @@ import scala.jdk.CollectionConverters._
 import scala.util.Using
 
 /**
- * Isolated tests to debug S3 flow issues.
- * These tests isolate each component to identify the root cause of S3 operation failures.
+ * Isolated tests to debug S3 flow issues. These tests isolate each component to identify the root cause of S3 operation
+ * failures.
  */
 class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
-  private val TEST_BUCKET = "test-debug-bucket"
-  private val ACCESS_KEY = "debug-access-key"
-  private val SECRET_KEY = "debug-secret-key"
-  private val SESSION_TOKEN = "debug-session-token"
+  private val TEST_BUCKET     = "test-debug-bucket"
+  private val ACCESS_KEY      = "debug-access-key"
+  private val SECRET_KEY      = "debug-secret-key"
+  private val SESSION_TOKEN   = "debug-session-token"
   private var s3MockPort: Int = _
-  private var s3Mock: S3Mock = _
+  private var s3Mock: S3Mock  = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    
+
     // Find available port
     s3MockPort = findAvailablePort()
-    
+
     // Start S3Mock server
     s3Mock = S3Mock(port = s3MockPort, dir = "/tmp/s3debug")
     s3Mock.start
-    
+
     println(s"🔧 S3Mock server started on port $s3MockPort")
   }
 
@@ -65,28 +65,31 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     super.afterAll()
   }
 
-  private def findAvailablePort(): Int = {
-    Using.resource(new ServerSocket(0)) { socket =>
-      socket.getLocalPort
-    }
-  }
+  private def findAvailablePort(): Int =
+    Using.resource(new ServerSocket(0))(socket => socket.getLocalPort)
 
   test("S3Mock server basic connectivity") {
     // Test 1: Can we connect to S3Mock at all?
-    val s3Client = S3Client.builder()
+    val s3Client = S3Client
+      .builder()
       .endpointOverride(URI.create(s"http://localhost:$s3MockPort"))
-      .credentialsProvider(StaticCredentialsProvider.create(
-        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
-      ))
+      .credentialsProvider(
+        StaticCredentialsProvider.create(
+          AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+        )
+      )
       .region(Region.US_EAST_1)
       .forcePathStyle(true)
       .build()
 
     try {
       // Try to create a bucket
-      s3Client.createBucket(CreateBucketRequest.builder()
-        .bucket(TEST_BUCKET)
-        .build())
+      s3Client.createBucket(
+        CreateBucketRequest
+          .builder()
+          .bucket(TEST_BUCKET)
+          .build()
+      )
       println(s"✅ Successfully created bucket: $TEST_BUCKET")
 
       // Try to list buckets
@@ -98,24 +101,23 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
       case ex: Exception =>
         println(s"❌ S3Mock connectivity test failed: ${ex.getMessage}")
         fail(s"S3Mock server not accessible: ${ex.getMessage}")
-    } finally {
+    } finally
       s3Client.close()
-    }
   }
 
   test("CloudStorageProviderFactory with S3Mock") {
     // Test 2: Can CloudStorageProviderFactory create an S3 provider correctly?
     val options = Map(
-      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
-      "spark.indextables.aws.secretKey" -> SECRET_KEY,
-      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.indextables.aws.region" -> "us-east-1",
-      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.aws.accessKey"      -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey"      -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken"   -> SESSION_TOKEN,
+      "spark.indextables.aws.region"         -> "us-east-1",
+      "spark.indextables.s3.endpoint"        -> s"http://localhost:$s3MockPort",
       "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val hadoopConf             = spark.sparkContext.hadoopConfiguration
 
     try {
       val provider = CloudStorageProviderFactory.createProvider(
@@ -128,7 +130,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
       println(s"✅ Successfully created S3CloudStorageProvider")
 
       provider.close()
-      
+
     } catch {
       case ex: Exception =>
         println(s"❌ CloudStorageProviderFactory test failed: ${ex.getMessage}")
@@ -139,37 +141,42 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
   test("S3CloudStorageProvider basic operations") {
     // Test 3: Can S3CloudStorageProvider perform basic file operations?
-    
+
     // First create the bucket using AWS SDK
-    val s3Client = S3Client.builder()
+    val s3Client = S3Client
+      .builder()
       .endpointOverride(URI.create(s"http://localhost:$s3MockPort"))
-      .credentialsProvider(StaticCredentialsProvider.create(
-        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
-      ))
+      .credentialsProvider(
+        StaticCredentialsProvider.create(
+          AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+        )
+      )
       .region(Region.US_EAST_1)
       .forcePathStyle(true)
       .build()
 
     try {
-      s3Client.createBucket(CreateBucketRequest.builder()
-        .bucket(TEST_BUCKET)
-        .build())
+      s3Client.createBucket(
+        CreateBucketRequest
+          .builder()
+          .bucket(TEST_BUCKET)
+          .build()
+      )
       println(s"✅ Created bucket for provider test: $TEST_BUCKET")
-    } finally {
+    } finally
       s3Client.close()
-    }
 
     val options = Map(
-      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
-      "spark.indextables.aws.secretKey" -> SECRET_KEY,
-      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.indextables.aws.region" -> "us-east-1",
-      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.aws.accessKey"      -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey"      -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken"   -> SESSION_TOKEN,
+      "spark.indextables.aws.region"         -> "us-east-1",
+      "spark.indextables.s3.endpoint"        -> s"http://localhost:$s3MockPort",
       "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val hadoopConf             = spark.sparkContext.hadoopConfiguration
 
     val provider = CloudStorageProviderFactory.createProvider(
       s"s3://$TEST_BUCKET/test-path",
@@ -179,9 +186,9 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
     try {
       // Test basic file write
-      val testPath = s"s3://$TEST_BUCKET/test-file.txt"
+      val testPath    = s"s3://$TEST_BUCKET/test-file.txt"
       val testContent = "Hello, S3Mock!".getBytes("UTF-8")
-      
+
       println(s"🔧 Attempting to write to: $testPath")
       provider.writeFile(testPath, testContent)
       println(s"✅ Successfully wrote file: $testPath")
@@ -201,44 +208,48 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
         println(s"❌ S3CloudStorageProvider operations failed: ${ex.getMessage}")
         ex.printStackTrace()
         fail(s"S3CloudStorageProvider operations failed: ${ex.getMessage}")
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("S3CloudStorageProvider directory operations") {
     // Test 4: Can S3CloudStorageProvider handle directory operations?
-    
+
     // Create bucket first
-    val s3Client = S3Client.builder()
+    val s3Client = S3Client
+      .builder()
       .endpointOverride(URI.create(s"http://localhost:$s3MockPort"))
-      .credentialsProvider(StaticCredentialsProvider.create(
-        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
-      ))
+      .credentialsProvider(
+        StaticCredentialsProvider.create(
+          AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+        )
+      )
       .region(Region.US_EAST_1)
       .forcePathStyle(true)
       .build()
 
     try {
-      s3Client.createBucket(CreateBucketRequest.builder()
-        .bucket(TEST_BUCKET)
-        .build())
+      s3Client.createBucket(
+        CreateBucketRequest
+          .builder()
+          .bucket(TEST_BUCKET)
+          .build()
+      )
       println(s"✅ Created bucket for directory test: $TEST_BUCKET")
-    } finally {
+    } finally
       s3Client.close()
-    }
 
     val options = Map(
-      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
-      "spark.indextables.aws.secretKey" -> SECRET_KEY,
-      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.indextables.aws.region" -> "us-east-1",
-      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.aws.accessKey"      -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey"      -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken"   -> SESSION_TOKEN,
+      "spark.indextables.aws.region"         -> "us-east-1",
+      "spark.indextables.s3.endpoint"        -> s"http://localhost:$s3MockPort",
       "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val hadoopConf             = spark.sparkContext.hadoopConfiguration
 
     val provider = CloudStorageProviderFactory.createProvider(
       s"s3://$TEST_BUCKET/test-dir",
@@ -249,7 +260,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     try {
       // Test directory creation (this is what TransactionLog does)
       val dirPath = s"s3://$TEST_BUCKET/test-table/_transaction_log"
-      
+
       println(s"🔧 Attempting to create directory: $dirPath")
       val dirCreated = provider.createDirectory(dirPath)
       println(s"✅ Directory creation result: $dirCreated")
@@ -259,9 +270,9 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
       println(s"✅ Directory exists check: $dirExists")
 
       // Test writing a file in the directory (this is what TransactionLog.writeActions does)
-      val filePath = s"$dirPath/00000000000000000000.json"
+      val filePath    = s"$dirPath/00000000000000000000.json"
       val fileContent = """{"metaData": {"id": "test-id", "format": {"provider": "tantivy4spark"}}}""".getBytes("UTF-8")
-      
+
       println(s"🔧 Attempting to write transaction log file: $filePath")
       try {
         provider.writeFile(filePath, fileContent)
@@ -273,13 +284,15 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
           val shallowPath = s"s3://$TEST_BUCKET/shallow.json"
           provider.writeFile(shallowPath, fileContent)
           println(s"✅ Shallow file write succeeded: $shallowPath")
-          
+
           // Now try a single-level nested path
           val singleNestedPath = s"s3://$TEST_BUCKET/single/nested.json"
           provider.writeFile(singleNestedPath, fileContent)
           println(s"✅ Single nested file write succeeded: $singleNestedPath")
-          
-          throw new Exception(s"S3Mock appears to have issues with deep nested paths like: $filePath. Original error: ${ex.getMessage}")
+
+          throw new Exception(
+            s"S3Mock appears to have issues with deep nested paths like: $filePath. Original error: ${ex.getMessage}"
+          )
       }
 
       // Test reading the file back
@@ -292,9 +305,8 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
         println(s"❌ S3CloudStorageProvider directory operations failed: ${ex.getMessage}")
         ex.printStackTrace()
         fail(s"Directory operations failed: ${ex.getMessage}")
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("TransactionLog with S3Mock integration") {
@@ -304,23 +316,28 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     import org.apache.spark.sql.types._
 
     // Create bucket first
-    val s3Client = S3Client.builder()
+    val s3Client = S3Client
+      .builder()
       .endpointOverride(URI.create(s"http://localhost:$s3MockPort"))
-      .credentialsProvider(StaticCredentialsProvider.create(
-        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
-      ))
+      .credentialsProvider(
+        StaticCredentialsProvider.create(
+          AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)
+        )
+      )
       .region(Region.US_EAST_1)
       .forcePathStyle(true)
       .build()
 
     try {
-      s3Client.createBucket(CreateBucketRequest.builder()
-        .bucket(TEST_BUCKET)
-        .build())
+      s3Client.createBucket(
+        CreateBucketRequest
+          .builder()
+          .bucket(TEST_BUCKET)
+          .build()
+      )
       println(s"✅ Created bucket for TransactionLog test: $TEST_BUCKET")
-    } finally {
+    } finally
       s3Client.close()
-    }
 
     // Configure Spark to use our S3Mock
     spark.conf.set("spark.indextables.aws.accessKey", ACCESS_KEY)
@@ -340,25 +357,27 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     hadoopConf.set("spark.indextables.s3.pathStyleAccess", "true")
 
     val options = Map(
-      "spark.indextables.aws.accessKey" -> ACCESS_KEY,
-      "spark.indextables.aws.secretKey" -> SECRET_KEY,
-      "spark.indextables.aws.sessionToken" -> SESSION_TOKEN,
-      "spark.indextables.aws.region" -> "us-east-1",
-      "spark.indextables.s3.endpoint" -> s"http://localhost:$s3MockPort",
+      "spark.indextables.aws.accessKey"      -> ACCESS_KEY,
+      "spark.indextables.aws.secretKey"      -> SECRET_KEY,
+      "spark.indextables.aws.sessionToken"   -> SESSION_TOKEN,
+      "spark.indextables.aws.region"         -> "us-east-1",
+      "spark.indextables.s3.endpoint"        -> s"http://localhost:$s3MockPort",
       "spark.indextables.s3.pathStyleAccess" -> "true"
     ).asJava
 
-    val tablePath = new Path(s"s3://$TEST_BUCKET/test-table")
+    val tablePath              = new Path(s"s3://$TEST_BUCKET/test-table")
     val caseInsensitiveOptions = new CaseInsensitiveStringMap(options)
-    val transactionLog = TransactionLogFactory.create(tablePath, spark, caseInsensitiveOptions)
+    val transactionLog         = TransactionLogFactory.create(tablePath, spark, caseInsensitiveOptions)
 
     try {
       // Test schema initialization
-      val testSchema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("name", StringType, nullable = false),
-        StructField("description", StringType, nullable = true)
-      ))
+      val testSchema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("name", StringType, nullable = false),
+          StructField("description", StringType, nullable = true)
+        )
+      )
 
       println(s"🔧 Attempting to initialize TransactionLog with schema")
       transactionLog.initialize(testSchema)
@@ -375,8 +394,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
         println(s"❌ TransactionLog integration failed: ${ex.getMessage}")
         ex.printStackTrace()
         fail(s"TransactionLog with S3Mock failed: ${ex.getMessage}")
-    } finally {
+    } finally
       transactionLog.close()
-    }
   }
 }

@@ -21,30 +21,30 @@ import com.tantivy4spark.TestBase
 import org.apache.spark.sql.functions._
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
-/**
- * Simple V2 test to debug issues
- */
+/** Simple V2 test to debug issues */
 class V2SimpleTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
   ignore("should perform basic V2 write and read") {
     withTempPath { path =>
       // Create very simple data
-      val data = spark.range(0, 3).select(
-        col("id"),
-        concat(lit("item_"), col("id")).as("name")
-      )
-      
+      val data = spark
+        .range(0, 3)
+        .select(
+          col("id"),
+          concat(lit("item_"), col("id")).as("name")
+        )
+
       // Write using V2 API
       data.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .save(path)
-      
+
       // Read using V2 API
       val result = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(path)
-      
+
       result.count() shouldBe 3
       result.collect().map(_.getString(1)) should contain theSameElementsAs Array("item_0", "item_1", "item_2")
     }

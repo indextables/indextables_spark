@@ -17,7 +17,14 @@
 
 package com.tantivy4spark.core
 
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, Write, WriterCommitMessage, RequiresDistributionAndOrdering}
+import org.apache.spark.sql.connector.write.{
+  BatchWrite,
+  DataWriterFactory,
+  PhysicalWriteInfo,
+  Write,
+  WriterCommitMessage,
+  RequiresDistributionAndOrdering
+}
 import org.apache.spark.sql.connector.distributions.{Distribution, Distributions, ClusteredDistribution}
 import org.apache.spark.sql.connector.expressions.{Expressions, SortOrder, LogicalExpressions}
 import com.tantivy4spark.transaction.{TransactionLog, AddAction}
@@ -26,19 +33,21 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.slf4j.LoggerFactory
 
 /**
- * Standard write implementation for Tantivy4Spark tables.
- * This implementation does NOT include RequiresDistributionAndOrdering,
- * so it uses Spark's default partitioning without any optimization.
- * Used when optimizeWrite is disabled.
+ * Standard write implementation for Tantivy4Spark tables. This implementation does NOT include
+ * RequiresDistributionAndOrdering, so it uses Spark's default partitioning without any optimization. Used when
+ * optimizeWrite is disabled.
  */
 class Tantivy4SparkStandardWrite(
-    @transient transactionLog: TransactionLog,
-    tablePath: Path,
-    @transient writeInfo: LogicalWriteInfo,
-    serializedOptions: Map[String, String],  // Use serializable Map instead of CaseInsensitiveStringMap
-    @transient hadoopConf: org.apache.hadoop.conf.Configuration,
-    isOverwrite: Boolean = false  // Track whether this is an overwrite operation
-) extends Write with BatchWrite with RequiresDistributionAndOrdering with Serializable {
+  @transient transactionLog: TransactionLog,
+  tablePath: Path,
+  @transient writeInfo: LogicalWriteInfo,
+  serializedOptions: Map[String, String], // Use serializable Map instead of CaseInsensitiveStringMap
+  @transient hadoopConf: org.apache.hadoop.conf.Configuration,
+  isOverwrite: Boolean = false // Track whether this is an overwrite operation
+) extends Write
+    with BatchWrite
+    with RequiresDistributionAndOrdering
+    with Serializable {
 
   @transient private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkStandardWrite])
 
@@ -47,7 +56,7 @@ class Tantivy4SparkStandardWrite(
   private val serializedHadoopConf = {
     // Serialize only the tantivy4spark config properties from hadoopConf
     val props = scala.collection.mutable.Map[String, String]()
-    val iter = hadoopConf.iterator()
+    val iter  = hadoopConf.iterator()
     while (iter.hasNext) {
       val entry = iter.next()
       if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
@@ -59,7 +68,7 @@ class Tantivy4SparkStandardWrite(
     }
     props.toMap
   }
-  private val partitionColumns = {
+  private val partitionColumns =
     // Extract partition columns from write options (set by .partitionBy())
     // Spark sets this as a JSON array string like ["col1","col2"]
     serializedOptions.get("__partition_columns") match {
@@ -96,38 +105,42 @@ class Tantivy4SparkStandardWrite(
             Seq.empty[String]
         }
     }
-  }
 
   override def toBatch: BatchWrite = this
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating standard batch writer factory for ${info.numPartitions} partitions")
     logger.info(s"Using Spark's default partitioning (no optimization)")
-    
+
     if (partitionColumns.nonEmpty) {
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
-    
+
     // Combine serialized hadoop config with tantivy4spark options (normalize spark.indextables to spark.tantivy4spark)
     val normalizedTantivyOptions = serializedOptions
       .filter(kv => kv._1.startsWith("spark.indextables.") || kv._1.startsWith("spark.indextables."))
-      .map { case (key, value) =>
-        val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.indextables.")
-        } else key
-        normalizedKey -> value
+      .map {
+        case (key, value) =>
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.indextables.")
+          } else key
+          normalizedKey -> value
       }
     val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
-      
-    serializedOptions.foreach { case (key, value) =>
-      if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
-        val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.indextables.")
-        } else key
-        logger.info(s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
-      }
+
+    serializedOptions.foreach {
+      case (key, value) =>
+        if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.indextables.")
+          } else key
+          logger.info(
+            s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***"
+              else value}"
+          )
+        }
     }
-    
+
     new Tantivy4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
@@ -135,13 +148,18 @@ class Tantivy4SparkStandardWrite(
     println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     logger.warn(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
-    serializedOptions.foreach { case (k, v) =>
-      val redactedValue = if (k.toLowerCase.contains("secret") || k.toLowerCase.contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")) {
-        "***REDACTED***"
-      } else {
-        v
-      }
-      println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+    serializedOptions.foreach {
+      case (k, v) =>
+        val redactedValue =
+          if (
+            k.toLowerCase.contains("secret") || k.toLowerCase
+              .contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")
+          ) {
+            "***REDACTED***"
+          } else {
+            v
+          }
+        println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
 
     // Validate indexing configuration for append operations
@@ -151,7 +169,7 @@ class Tantivy4SparkStandardWrite(
 
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // Log how many empty partitions were filtered out
@@ -171,11 +189,11 @@ class Tantivy4SparkStandardWrite(
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
-        case Some("Overwrite") => true
+        case Some("Overwrite")     => true
         case Some("ErrorIfExists") => false
-        case Some("Ignore") => false  
-        case Some("Append") => false
-        case None => {
+        case Some("Ignore")        => false
+        case Some("Append")        => false
+        case None                  =>
           // Check if this looks like an initial write (no existing files) - treat as overwrite
           try {
             val existingFiles = transactionLog.listFiles()
@@ -190,20 +208,18 @@ class Tantivy4SparkStandardWrite(
           } catch {
             case _: Exception => false // If we can't read transaction log, assume append
           }
-        }
-        case Some(other) => {
+        case Some(other) =>
           logger.warn(s"Unknown saveMode: $other, defaulting to append")
           false
-        }
       }
       println(s"🔍 DEBUG: Final saveMode decision: $saveMode")
       logger.warn(s"🔍 DEBUG: Final saveMode decision: $saveMode")
       saveMode
     }
-    
-    // Initialize transaction log with schema if this is the first commit  
+
+    // Initialize transaction log with schema if this is the first commit
     transactionLog.initialize(writeSchema, partitionColumns)
-    
+
     // Commit the changes
     if (shouldOverwrite) {
       println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
@@ -217,17 +233,17 @@ class Tantivy4SparkStandardWrite(
       val version = transactionLog.addFiles(addActions)
       logger.info(s"Added ${addActions.length} files in transaction version $version")
     }
-    
+
     logger.info(s"Successfully committed ${addActions.length} files")
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logger.warn(s"Aborting write with ${messages.length} messages")
-    
+
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // TODO: In a real implementation, we would delete the physical files here
@@ -235,10 +251,10 @@ class Tantivy4SparkStandardWrite(
   }
 
   /**
-   * Validate indexing configuration for append operations.
-   * Checks that the new configuration is compatible with the existing table configuration.
+   * Validate indexing configuration for append operations. Checks that the new configuration is compatible with the
+   * existing table configuration.
    */
-  private def validateIndexingConfigurationForAppend(): Unit = {
+  private def validateIndexingConfigurationForAppend(): Unit =
     try {
       logger.warn("🔍 VALIDATION DEBUG: Running append configuration validation")
 
@@ -261,7 +277,9 @@ class Tantivy4SparkStandardWrite(
 
         // The docMappingJson is directly an array of field definitions
         if (existingMapping.isArray) {
-          logger.warn(s"🔍 VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing...")
+          logger.warn(
+            s"🔍 VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
+          )
           val tantivyOptions = com.tantivy4spark.core.Tantivy4SparkOptions(
             new org.apache.spark.sql.util.CaseInsensitiveStringMap(serializedOptions.asJava)
           )
@@ -286,7 +304,7 @@ class Tantivy4SparkStandardWrite(
               logger.warn(s"🔍 VALIDATION DEBUG: Existing field config present: ${existingFieldConfig.isDefined}")
 
               if (existingFieldConfig.isDefined) {
-                val existing = existingFieldConfig.get
+                val existing     = existingFieldConfig.get
                 val existingType = Option(existing.get("type")).map(_.asText())
                 logger.warn(s"🔍 VALIDATION DEBUG: Existing field type: $existingType")
 
@@ -330,15 +348,14 @@ class Tantivy4SparkStandardWrite(
       case e: IllegalArgumentException => throw e // Re-throw validation errors
       case e: Exception =>
         logger.warn(s"🔍 VALIDATION DEBUG: Validation failed with exception: ${e.getMessage}")
-        // Don't fail the write for other types of errors
+      // Don't fail the write for other types of errors
     }
-  }
 
   /**
-   * RequiresDistributionAndOrdering implementation for partitioned tables.
-   * This ensures Spark partitions data by partition columns before writing.
+   * RequiresDistributionAndOrdering implementation for partitioned tables. This ensures Spark partitions data by
+   * partition columns before writing.
    */
-  override def requiredDistribution(): Distribution = {
+  override def requiredDistribution(): Distribution =
     if (partitionColumns.nonEmpty) {
       // For partitioned tables, cluster by partition columns using the correct constructor
       val clusteredColumns = partitionColumns.toArray
@@ -349,14 +366,12 @@ class Tantivy4SparkStandardWrite(
       logger.info("Standard write: no partition columns, using unspecified distribution")
       Distributions.unspecified()
     }
-  }
 
-  override def requiredOrdering(): Array[SortOrder] = {
+  override def requiredOrdering(): Array[SortOrder] =
     // No specific ordering required
     Array.empty
-  }
 
-  override def requiredNumPartitions(): Int = {
+  override def requiredNumPartitions(): Int =
     if (partitionColumns.nonEmpty) {
       // For partitioned tables, let Spark determine the number of partitions based on data distribution
       // Return 0 to let Spark automatically determine the partition count
@@ -367,5 +382,4 @@ class Tantivy4SparkStandardWrite(
       logger.info("Standard write: using default partition count for non-partitioned table")
       0
     }
-  }
 }

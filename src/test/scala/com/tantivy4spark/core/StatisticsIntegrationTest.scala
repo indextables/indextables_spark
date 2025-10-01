@@ -25,18 +25,21 @@ class StatisticsIntegrationTest extends TestBase {
 
   test("Tantivy4SparkStatistics should provide basic table statistics") {
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("title", StringType, nullable = true),
-        StructField("content", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("title", StringType, nullable = true),
+          StructField("content", StringType, nullable = true)
+        )
+      )
 
       val testData = (1 to 100).map { i =>
         (i.toLong, s"Title $i", s"Content for document $i with some additional text to make it longer")
       }
 
-      val rows = testData.map { case (id, title, content) =>
-        org.apache.spark.sql.Row(id, title, content)
+      val rows = testData.map {
+        case (id, title, content) =>
+          org.apache.spark.sql.Row(id, title, content)
       }
       val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
 
@@ -64,9 +67,11 @@ class StatisticsIntegrationTest extends TestBase {
 
       // The statistics should be computed during query planning
       // We can verify this by checking the logical plan contains our table
-      assert(logicalPlan.toString.contains("Tantivy4SparkTable") ||
-             logicalPlan.toString.contains("tantivy4spark"),
-             s"Logical plan should contain Tantivy4Spark reference: $logicalPlan")
+      assert(
+        logicalPlan.toString.contains("Tantivy4SparkTable") ||
+          logicalPlan.toString.contains("tantivy4spark"),
+        s"Logical plan should contain Tantivy4Spark reference: $logicalPlan"
+      )
 
       println("✅ Statistics integration test completed successfully")
     }
@@ -74,10 +79,12 @@ class StatisticsIntegrationTest extends TestBase {
 
   test("Tantivy4SparkStatistics should handle empty tables") {
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("name", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("name", StringType, nullable = true)
+        )
+      )
 
       val emptyData = spark.createDataFrame(spark.sparkContext.emptyRDD[org.apache.spark.sql.Row], schema)
       val tablePath = path.toString
@@ -102,19 +109,22 @@ class StatisticsIntegrationTest extends TestBase {
 
   test("Statistics should work with filtered scans") {
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("category", StringType, nullable = true),
-        StructField("value", DoubleType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("category", StringType, nullable = true),
+          StructField("value", DoubleType, nullable = true)
+        )
+      )
 
       val testData = (1 to 50).map { i =>
         val category = if (i % 2 == 0) "even" else "odd"
         (i.toLong, category, i.toDouble * 1.5)
       }
 
-      val rows = testData.map { case (id, category, value) =>
-        org.apache.spark.sql.Row(id, category, value)
+      val rows = testData.map {
+        case (id, category, value) =>
+          org.apache.spark.sql.Row(id, category, value)
       }
       val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
 

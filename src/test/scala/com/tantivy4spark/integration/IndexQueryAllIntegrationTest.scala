@@ -38,7 +38,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
   override def beforeEach(): Unit = {
     super.beforeEach()
     testDataPath = Files.createTempDirectory("indexqueryall_test_").toString
-    
+
     // Register Tantivy4Spark extensions for SQL parsing
     spark.experimental.extraOptimizations = Seq.empty
   }
@@ -66,7 +66,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     val df = spark.createDataFrame(testData).toDF("id", "title", "description", "category", "status", "score")
 
     // Test IndexQueryAllExpression programmatically
-    val query = Literal(UTF8String.fromString("Apache"), StringType)
+    val query             = Literal(UTF8String.fromString("Apache"), StringType)
     val indexQueryAllExpr = IndexQueryAllExpression(query)
 
     // Verify expression properties
@@ -74,20 +74,20 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(indexQueryAllExpr.canPushDown)
     assert(indexQueryAllExpr.dataType.typeName == "boolean")
     assert(!indexQueryAllExpr.nullable)
-    
+
     // Test with Column wrapper
     val columnExpr = new org.apache.spark.sql.Column(indexQueryAllExpr)
-    
+
     // Since IndexQueryAll returns true in fallback mode, we can test the expression is created
     val filteredDf = df.filter(columnExpr)
-    
+
     // In fallback mode, all rows pass through
     assert(filteredDf.count() == 5)
-    
+
     // Test combining with other filters
     val combinedDf = df.filter(columnExpr && col("category") === "technology")
     assert(combinedDf.count() == 2) // Two technology rows
-    
+
     // Test expression conversion to filter
     val filter = ExpressionUtils.expressionToIndexQueryAllFilter(indexQueryAllExpr)
     assert(filter.isDefined)
@@ -105,19 +105,19 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
 
     complexQueries.foreach { queryString =>
       val complexQuery = Literal(UTF8String.fromString(queryString), StringType)
-      val expr = IndexQueryAllExpression(complexQuery)
-      
+      val expr         = IndexQueryAllExpression(complexQuery)
+
       // Verify expression properties
       assert(expr.getQueryString.contains(queryString))
       assert(expr.canPushDown)
       assert(expr.dataType.typeName == "boolean")
-      
+
       // Verify filter conversion
       val filter = ExpressionUtils.expressionToIndexQueryAllFilter(expr)
       assert(filter.isDefined)
       assert(filter.get.queryString == queryString)
       assert(filter.get.isValid)
-      
+
       // Test evaluation fallback (should return true)
       import org.apache.spark.sql.catalyst.expressions.EmptyRow
       assert(expr.eval(EmptyRow) == true)
@@ -128,9 +128,9 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     // Test SQL parsing and expression creation for indexqueryall function
     import com.tantivy4spark.sql.Tantivy4SparkSqlParser
     import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
-    
+
     val parser = new Tantivy4SparkSqlParser(CatalystSqlParser)
-    
+
     // Test parsing indexqueryall function syntax
     val testQueries = Seq(
       "indexqueryall('Apache')",
@@ -139,23 +139,23 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
       "indexqueryall('\"artificial intelligence\"')",
       "indexqueryall('spark AND NOT deprecated')"
     )
-    
+
     testQueries.foreach { queryStr =>
       val expr = parser.parseExpression(queryStr)
-      
+
       // Verify it creates IndexQueryAllExpression
       assert(expr.isInstanceOf[IndexQueryAllExpression])
       val indexQueryAll = expr.asInstanceOf[IndexQueryAllExpression]
-      
+
       // Extract query string and verify
       assert(indexQueryAll.getQueryString.isDefined)
       assert(indexQueryAll.canPushDown)
-      
+
       // Verify SQL representation
       val sql = indexQueryAll.sql
       assert(sql.contains("indexqueryall"))
     }
-    
+
     // Create test DataFrame for SQL simulation
     val testData = Seq(
       (1, "Apache Spark Documentation", "documentation"),
@@ -163,23 +163,23 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
       (3, "T-MOBILE Infrastructure", "case-study"),
       (4, "Machine Learning Tutorial", "tutorial")
     )
-    
+
     val df = spark.createDataFrame(testData).toDF("id", "title", "category")
     df.createOrReplaceTempView("test_documents")
 
     // Test actual SQL queries using indexqueryall() function
     // Note: Since indexqueryall returns true in fallback mode (when not pushed down to Tantivy),
     // these tests verify SQL parsing and execution work correctly
-    
+
     // Register the custom SQL parser with Spark session
     spark.sessionState.sqlParser match {
       case parser if !parser.isInstanceOf[Tantivy4SparkSqlParser] =>
         // Only register if not already registered
         val newParser = new Tantivy4SparkSqlParser(CatalystSqlParser)
-        // Note: Cannot directly replace sessionState.sqlParser, so we test parsing directly
+      // Note: Cannot directly replace sessionState.sqlParser, so we test parsing directly
       case _ => // Already registered or is instance of our parser
     }
-    
+
     // Test SQL queries with indexqueryall() function - verify they parse and execute
     val sqlQueries = Seq(
       "SELECT * FROM test_documents WHERE indexqueryall('Apache')",
@@ -188,36 +188,36 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
       "SELECT * FROM test_documents WHERE indexqueryall('documentation') AND category = 'documentation'",
       "SELECT count(*) as total FROM test_documents WHERE indexqueryall('tutorial OR case-study')"
     )
-    
+
     sqlQueries.foreach { sqlQuery =>
       try {
         // Parse the SQL to verify indexqueryall function is recognized
         val logicalPlan = spark.sessionState.sqlParser.parsePlan(sqlQuery)
         assert(logicalPlan != null, s"Failed to parse SQL: $sqlQuery")
-        
+
         // For fallback testing, create a simple version that should work
-        val fallbackQuery = sqlQuery.replace("indexqueryall('", "1=1 -- indexqueryall('").replace("')", "')")
+        val fallbackQuery  = sqlQuery.replace("indexqueryall('", "1=1 -- indexqueryall('").replace("')", "')")
         val fallbackResult = spark.sql(fallbackQuery)
-        
+
         // Verify the fallback query executes (since indexqueryall returns true in fallback)
         assert(fallbackResult.count() >= 0, s"Fallback query failed: $fallbackQuery")
-        
+
         println(s"✓ SQL query parsed successfully: $sqlQuery")
-        
+
       } catch {
         case e: Exception =>
           // Expected for some queries since we don't have full SQL parser integration in test environment
           println(s"⚠ SQL query parsing expected limitation: $sqlQuery - ${e.getClass.getSimpleName}")
-          // This is acceptable as we're testing in a limited test environment
+        // This is acceptable as we're testing in a limited test environment
       }
     }
-    
+
     // Test that we can create query plans with complex conditions
     val basicQuery = spark.sql("SELECT * FROM test_documents WHERE id > 0")
     assert(basicQuery.count() == 4) // All 4 rows
-    
+
     // Test complex SQL with standard predicates
-    val complexSQL = """
+    val complexSQL    = """
       SELECT id, title, category 
       FROM test_documents 
       WHERE id > 0
@@ -226,7 +226,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     """
     val complexResult = spark.sql(complexSQL)
     assert(complexResult.count() == 4)
-    
+
     // Verify we can access the DataFrame operations
     val titles = complexResult.select("title").collect().map(_.getString(0))
     assert(titles.length == 4)
@@ -237,60 +237,63 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
 
   test("IndexQueryAllExpression should handle edge cases") {
     // Test edge cases for IndexQueryAllExpression
-    
+
     // Test with empty query
     val emptyQuery = Literal(UTF8String.fromString(""), StringType)
-    val emptyExpr = IndexQueryAllExpression(emptyQuery)
+    val emptyExpr  = IndexQueryAllExpression(emptyQuery)
     assert(emptyExpr.getQueryString.contains(""))
     assert(emptyExpr.canPushDown) // Empty string is technically valid
-    
+
     // Validate empty query fails validation
     val emptyValidation = ExpressionUtils.validateIndexQueryAllExpression(emptyExpr)
     assert(emptyValidation.isLeft)
     assert(emptyValidation.left.get.contains("Query string cannot be empty"))
-    
+
     // Test with special characters
     val specialChars = "@#$%^&*()"
     val specialQuery = Literal(UTF8String.fromString(specialChars), StringType)
-    val specialExpr = IndexQueryAllExpression(specialQuery)
+    val specialExpr  = IndexQueryAllExpression(specialQuery)
     assert(specialExpr.getQueryString.contains(specialChars))
     assert(specialExpr.canPushDown)
-    
+
     // Test with Unicode content
     val unicodeQuery = Literal(UTF8String.fromString("émojis 😀 and ñoñó"), StringType)
-    val unicodeExpr = IndexQueryAllExpression(unicodeQuery)
+    val unicodeExpr  = IndexQueryAllExpression(unicodeQuery)
     assert(unicodeExpr.getQueryString.isDefined)
-    
+
     // Debug the actual string content
     val actualString = unicodeExpr.getQueryString.get
     // Use a simpler test that checks for the actual characters we expect
-    assert(actualString.contains("émojis") || actualString.length > 5, s"Expected Unicode string but got: '$actualString'")
+    assert(
+      actualString.contains("émojis") || actualString.length > 5,
+      s"Expected Unicode string but got: '$actualString'"
+    )
     assert(unicodeExpr.canPushDown)
-    
+
     // Test with wildcard patterns
     val wildcardQueries = Seq("Test*", "*test", "te?t", "test*ing")
     wildcardQueries.foreach { pattern =>
       val wildcardQuery = Literal(UTF8String.fromString(pattern), StringType)
-      val wildcardExpr = IndexQueryAllExpression(wildcardQuery)
+      val wildcardExpr  = IndexQueryAllExpression(wildcardQuery)
       assert(wildcardExpr.getQueryString.contains(pattern))
       assert(wildcardExpr.canPushDown)
-      
+
       // Verify filter conversion works
       val filter = ExpressionUtils.expressionToIndexQueryAllFilter(wildcardExpr)
       assert(filter.isDefined)
       assert(filter.get.queryString == pattern)
     }
-    
+
     // Test with null query
     val nullQuery = Literal(null, StringType)
-    val nullExpr = IndexQueryAllExpression(nullQuery)
+    val nullExpr  = IndexQueryAllExpression(nullQuery)
     assert(nullExpr.getQueryString.isEmpty)
     assert(!nullExpr.canPushDown)
-    
+
     // Test with very long query
-    val longQuery = "term " * 100 // 500 character query
+    val longQuery        = "term " * 100 // 500 character query
     val longQueryLiteral = Literal(UTF8String.fromString(longQuery), StringType)
-    val longExpr = IndexQueryAllExpression(longQueryLiteral)
+    val longExpr         = IndexQueryAllExpression(longQueryLiteral)
     assert(longExpr.getQueryString.isDefined)
     assert(longExpr.canPushDown)
   }
@@ -298,8 +301,8 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
   test("IndexQueryAllExpression filter conversion and validation") {
     // Test expression to filter conversion
     val query = Literal(UTF8String.fromString("test query"), StringType)
-    val expr = IndexQueryAllExpression(query)
-    
+    val expr  = IndexQueryAllExpression(query)
+
     val filter = ExpressionUtils.expressionToIndexQueryAllFilter(expr)
     assert(filter.isDefined)
     assert(filter.get.queryString == "test query")
@@ -313,7 +316,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     assert(validation.isRight)
 
     // Test invalid expression validation
-    val invalidExpr = IndexQueryAllExpression(Literal(UTF8String.fromString(""), StringType))
+    val invalidExpr       = IndexQueryAllExpression(Literal(UTF8String.fromString(""), StringType))
     val invalidValidation = ExpressionUtils.validateIndexQueryAllExpression(invalidExpr)
     assert(invalidValidation.isLeft)
   }
@@ -329,82 +332,83 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     )
 
     val df = spark.createDataFrame(testData).toDF("id", "title", "description", "category")
-    
+
     // Write to Tantivy4Spark format for proper SQL integration
     val tantivy4sparkPath = testDataPath + "/sql_test_data"
     df.write
       .format("tantivy4spark")
-      .mode("overwrite") 
+      .mode("overwrite")
       .save(tantivy4sparkPath)
-    
+
     try {
       // Create a table using Tantivy4Spark DataSource
       spark.sql(s"""
         CREATE OR REPLACE TEMPORARY VIEW indexqueryall_test_table
         USING tantivy4spark
-        OPTIONS (path '${tantivy4sparkPath}')
+        OPTIONS (path '$tantivy4sparkPath')
       """)
-      
+
       // Test direct expression creation and integration (simulating what SQL parser would do)
       val testQueries = Seq(
         ("Apache", "Should find Apache Spark entries"),
-        ("VERIZON OR T-MOBILE", "Should find telecom entries"), 
+        ("VERIZON OR T-MOBILE", "Should find telecom entries"),
         ("machine AND learning", "Should find ML content"),
         ("spark AND data", "Should find Spark data processing content")
       )
-      
-      testQueries.foreach { case (queryString, description) =>
-        println(s"Testing indexqueryall with: $queryString ($description)")
-        
-        // Create IndexQueryAllExpression manually (as SQL parser would do)
-        val query = Literal(UTF8String.fromString(queryString), StringType)
-        val indexQueryAllExpr = IndexQueryAllExpression(query)
-        
-        // Verify expression properties
-        assert(indexQueryAllExpr.getQueryString.contains(queryString))
-        assert(indexQueryAllExpr.canPushDown)
-        assert(indexQueryAllExpr.dataType.typeName == "boolean")
-        
-        // Test programmatic usage with Column wrapper
-        val column = new org.apache.spark.sql.Column(indexQueryAllExpr)
-        
-        // Read the Tantivy4Spark data and apply the IndexQueryAll filter
-        val tantivyDF = spark.read.format("tantivy4spark").load(tantivy4sparkPath)
-        
-        // Apply the IndexQueryAll filter - in production this would be pushed down
-        // In test environment, it falls back to returning all rows (returns true)
-        val filteredDF = tantivyDF.filter(column)
-        val resultCount = filteredDF.count()
-        
-        // Since IndexQueryAllExpression returns true in fallback mode, we get all rows
-        assert(resultCount >= 0, s"Query should return some results for: $queryString")
-        println(s"✓ IndexQueryAll filter applied successfully, got $resultCount rows")
-        
-        // Verify the data structure is correct
-        val columns = filteredDF.columns
-        assert(columns.contains("id"))
-        assert(columns.contains("title")) 
-        assert(columns.contains("description"))
-        assert(columns.contains("category"))
+
+      testQueries.foreach {
+        case (queryString, description) =>
+          println(s"Testing indexqueryall with: $queryString ($description)")
+
+          // Create IndexQueryAllExpression manually (as SQL parser would do)
+          val query             = Literal(UTF8String.fromString(queryString), StringType)
+          val indexQueryAllExpr = IndexQueryAllExpression(query)
+
+          // Verify expression properties
+          assert(indexQueryAllExpr.getQueryString.contains(queryString))
+          assert(indexQueryAllExpr.canPushDown)
+          assert(indexQueryAllExpr.dataType.typeName == "boolean")
+
+          // Test programmatic usage with Column wrapper
+          val column = new org.apache.spark.sql.Column(indexQueryAllExpr)
+
+          // Read the Tantivy4Spark data and apply the IndexQueryAll filter
+          val tantivyDF = spark.read.format("tantivy4spark").load(tantivy4sparkPath)
+
+          // Apply the IndexQueryAll filter - in production this would be pushed down
+          // In test environment, it falls back to returning all rows (returns true)
+          val filteredDF  = tantivyDF.filter(column)
+          val resultCount = filteredDF.count()
+
+          // Since IndexQueryAllExpression returns true in fallback mode, we get all rows
+          assert(resultCount >= 0, s"Query should return some results for: $queryString")
+          println(s"✓ IndexQueryAll filter applied successfully, got $resultCount rows")
+
+          // Verify the data structure is correct
+          val columns = filteredDF.columns
+          assert(columns.contains("id"))
+          assert(columns.contains("title"))
+          assert(columns.contains("description"))
+          assert(columns.contains("category"))
       }
-      
+
       // Test SQL-like functionality by testing the expression conversion
       import com.tantivy4spark.util.ExpressionUtils
-      
+
       val sqlTestQuery = "VERIZON OR T-MOBILE"
-      val expr = IndexQueryAllExpression(Literal(UTF8String.fromString(sqlTestQuery), StringType))
-      val filter = ExpressionUtils.expressionToIndexQueryAllFilter(expr)
-      
+      val expr         = IndexQueryAllExpression(Literal(UTF8String.fromString(sqlTestQuery), StringType))
+      val filter       = ExpressionUtils.expressionToIndexQueryAllFilter(expr)
+
       assert(filter.isDefined, "Should convert IndexQueryAllExpression to filter")
       assert(filter.get.queryString == sqlTestQuery, "Filter should preserve query string")
       assert(filter.get.references.isEmpty, "IndexQueryAllFilter should have no field references")
-      
+
       println("✓ IndexQueryAll SQL function integration test completed successfully")
-      
+
     } catch {
       case e: Exception =>
         println(s"Note: Full SQL integration test skipped due to test environment limitations: ${e.getMessage}")
-        // This is acceptable - the important parts (expression creation, filter conversion) are tested
+      // This is acceptable - the important parts (expression creation, filter conversion) are tested
     }
   }
 
@@ -421,25 +425,25 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     // Test multiple IndexQueryAllExpression combined with AND
     val query1 = IndexQueryAllExpression(Literal(UTF8String.fromString("Apache"), StringType))
     val query2 = IndexQueryAllExpression(Literal(UTF8String.fromString("Spark"), StringType))
-    
+
     // Verify both expressions are valid
     assert(query1.canPushDown)
     assert(query2.canPushDown)
-    
+
     // Test combining expressions
     val column1 = new org.apache.spark.sql.Column(query1)
     val column2 = new org.apache.spark.sql.Column(query2)
-    
+
     // Since IndexQueryAll returns true in fallback, we combine with real filters
     val combinedDf = df.filter(column1 && column2 && col("category") === "tech")
-    
+
     // Should get the tech rows
     assert(combinedDf.count() == 2)
-    
+
     // Test expression tree with multiple IndexQueryAll
     import org.apache.spark.sql.catalyst.expressions.And
     val combinedExpr = And(query1, query2)
-    
+
     // Extract IndexQueryAll expressions from tree
     val extracted = ExpressionUtils.extractIndexQueryAllExpressions(combinedExpr)
     assert(extracted.length == 2)
@@ -450,58 +454,58 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
   ignore("IndexQueryAllExpression performance with large dataset") {
     // Test performance of IndexQueryAllExpression creation and validation
     val numQueries = 1000
-    
+
     val startTime = System.currentTimeMillis()
-    
+
     // Create many IndexQueryAllExpression instances
     val expressions = (1 to numQueries).map { i =>
       val queryString = s"term$i AND (category:tech OR category:research) AND NOT deprecated"
-      val query = Literal(UTF8String.fromString(queryString), StringType)
-      val expr = IndexQueryAllExpression(query)
-      
+      val query       = Literal(UTF8String.fromString(queryString), StringType)
+      val expr        = IndexQueryAllExpression(query)
+
       // Verify basic operations
       assert(expr.getQueryString.isDefined)
       assert(expr.canPushDown)
-      
+
       // Convert to filter
       val filter = ExpressionUtils.expressionToIndexQueryAllFilter(expr)
       assert(filter.isDefined)
-      
+
       expr
     }
-    
+
     val creationTime = System.currentTimeMillis() - startTime
-    
+
     // Performance check: Creating 1000 expressions should be fast
     assert(creationTime < 5000, s"Creating $numQueries expressions took ${creationTime}ms")
-    
+
     // Test expression tree traversal performance
     val treeStartTime = System.currentTimeMillis()
-    
+
     // Build complex expression tree
     var complexExpr: org.apache.spark.sql.catalyst.expressions.Expression = expressions.head
     expressions.tail.take(10).foreach { expr =>
       complexExpr = org.apache.spark.sql.catalyst.expressions.And(complexExpr, expr)
     }
-    
+
     // Extract all IndexQueryAll expressions from tree
     val extracted = ExpressionUtils.extractIndexQueryAllExpressions(complexExpr)
     assert(extracted.length == 11) // 1 + 10 combined expressions
-    
+
     val treeTime = System.currentTimeMillis() - treeStartTime
     assert(treeTime < 1000, s"Tree traversal took ${treeTime}ms")
-    
+
     // Test validation performance
     val validationStartTime = System.currentTimeMillis()
-    
+
     expressions.take(100).foreach { expr =>
       val validation = ExpressionUtils.validateIndexQueryAllExpression(expr)
       assert(validation.isRight)
     }
-    
+
     val validationTime = System.currentTimeMillis() - validationStartTime
     assert(validationTime < 1000, s"Validating 100 expressions took ${validationTime}ms")
-    
+
     println(s"IndexQueryAll performance test: Created $numQueries expressions in ${creationTime}ms")
     println(s"Tree operations: ${treeTime}ms, Validation: ${validationTime}ms")
   }

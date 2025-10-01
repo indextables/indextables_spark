@@ -39,7 +39,7 @@ class ParseQueryApiTest extends TestBase {
 
     try {
       // Get the first split file
-      val splitDir = new java.io.File(testPath)
+      val splitDir   = new java.io.File(testPath)
       val splitFiles = splitDir.listFiles().filter(_.getName.endsWith(".split"))
 
       if (splitFiles.nonEmpty) {
@@ -47,9 +47,9 @@ class ParseQueryApiTest extends TestBase {
         println(s"Using split: $splitPath")
 
         // Test SplitSearcher parseQuery methods
-        val cacheConfig = new SplitCacheManager.CacheConfig("test-cache")
+        val cacheConfig  = new SplitCacheManager.CacheConfig("test-cache")
         val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-        val metadata = QuickwitSplit.readSplitMetadata(splitPath)
+        val metadata     = QuickwitSplit.readSplitMetadata(splitPath)
 
         val searcher = cacheManager.createSplitSearcher("file://" + splitPath, metadata)
         try {
@@ -87,9 +87,8 @@ class ParseQueryApiTest extends TestBase {
               println(s"❌ parseQuery(String, List<String>) failed: ${e.getMessage}")
           }
 
-        } finally {
+        } finally
           if (searcher != null) searcher.close()
-        }
       } else {
         println("❌ No split files found")
       }

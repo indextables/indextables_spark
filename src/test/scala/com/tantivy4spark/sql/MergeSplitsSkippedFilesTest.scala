@@ -28,9 +28,8 @@ import scala.util.Try
 
 /**
  * Test suite to validate that merge operations correctly handle skipped files:
- * 1. Files that cannot be merged are not marked as "removed" in transaction log
- * 2. Skipped files are tracked with timestamps and reasons
- * 3. Cooldown periods prevent repeated attempts on recently failed files
+ *   1. Files that cannot be merged are not marked as "removed" in transaction log 2. Skipped files are tracked with
+ *      timestamps and reasons 3. Cooldown periods prevent repeated attempts on recently failed files
  */
 class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
 
@@ -39,23 +38,29 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       println(s"\n🔧 Testing skipped files handling in merge operations")
 
       // Step 1: Create test data with multiple splits
-      val testData1 = spark.range(50).select(
-        col("id"),
-        concat(lit("doc_"), col("id")).as("title"),
-        concat(lit("Content for document "), col("id")).as("content")
-      )
+      val testData1 = spark
+        .range(50)
+        .select(
+          col("id"),
+          concat(lit("doc_"), col("id")).as("title"),
+          concat(lit("Content for document "), col("id")).as("content")
+        )
 
-      val testData2 = spark.range(50, 100).select(
-        col("id"),
-        concat(lit("doc_"), col("id")).as("title"),
-        concat(lit("Content for document "), col("id")).as("content")
-      )
+      val testData2 = spark
+        .range(50, 100)
+        .select(
+          col("id"),
+          concat(lit("doc_"), col("id")).as("title"),
+          concat(lit("Content for document "), col("id")).as("content")
+        )
 
-      val testData3 = spark.range(100, 150).select(
-        col("id"),
-        concat(lit("doc_"), col("id")).as("title"),
-        concat(lit("Content for document "), col("id")).as("content")
-      )
+      val testData3 = spark
+        .range(100, 150)
+        .select(
+          col("id"),
+          concat(lit("doc_"), col("id")).as("title"),
+          concat(lit("Content for document "), col("id")).as("content")
+        )
 
       // Write data in separate operations to create multiple splits
       testData1.write
@@ -77,15 +82,15 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Step 2: Read transaction log to get current state
-      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val transactionLog     = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
       val beforeMergeActions = transactionLog.listFiles()
-      val beforeMergeCount = beforeMergeActions.length
+      val beforeMergeCount   = beforeMergeActions.length
 
       println(s"Before merge: $beforeMergeCount files in transaction log")
       beforeMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
       // Step 3: Verify we can read all data before merge
-      val beforeMergeDF = spark.read.format("tantivy4spark").load(outputPath)
+      val beforeMergeDF      = spark.read.format("tantivy4spark").load(outputPath)
       val beforeMergeRecords = beforeMergeDF.count()
       beforeMergeRecords shouldBe 150
 
@@ -98,13 +103,13 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         // Step 5: Check transaction log after merge
         transactionLog.invalidateCache()
         val afterMergeActions = transactionLog.listFiles()
-        val afterMergeCount = afterMergeActions.length
+        val afterMergeCount   = afterMergeActions.length
 
         println(s"After merge: $afterMergeCount files in transaction log")
         afterMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
         // Step 6: Verify data integrity
-        val afterMergeDF = spark.read.format("tantivy4spark").load(outputPath)
+        val afterMergeDF      = spark.read.format("tantivy4spark").load(outputPath)
         val afterMergeRecords = afterMergeDF.count()
 
         println(s"Data integrity check: $beforeMergeRecords -> $afterMergeRecords records")
@@ -119,12 +124,12 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       } catch {
         case e: Exception =>
           println(s"⚠️  Merge operation failed: ${e.getMessage}")
-          // This is acceptable - we're testing that skipped files aren't marked as removed
-          // The key test is that data integrity is preserved even if merge fails
+        // This is acceptable - we're testing that skipped files aren't marked as removed
+        // The key test is that data integrity is preserved even if merge fails
       }
 
       // Step 8: Verify that all data is still accessible
-      val finalDF = spark.read.format("tantivy4spark").load(outputPath)
+      val finalDF    = spark.read.format("tantivy4spark").load(outputPath)
       val finalCount = finalDF.count()
       finalCount shouldBe 150
 
@@ -137,10 +142,12 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       println(s"\n🔧 Testing simulated skipped files behavior")
 
       // Create test data
-      val testData = spark.range(100).select(
-        col("id"),
-        concat(lit("test_doc_"), col("id")).as("title")
-      )
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("test_doc_"), col("id")).as("title")
+        )
 
       testData.write
         .format("tantivy4spark")
@@ -150,7 +157,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
 
       // Get initial transaction log state
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
-      val initialFiles = transactionLog.listFiles()
+      val initialFiles   = transactionLog.listFiles()
 
       println(s"Initial state: ${initialFiles.length} files")
       initialFiles.foreach(file => println(s"  - ${file.path}"))
@@ -162,7 +169,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
 
       // Verify data integrity after merge
       val afterMergeDF = spark.read.format("tantivy4spark").load(outputPath)
-      val finalCount = afterMergeDF.count()
+      val finalCount   = afterMergeDF.count()
       finalCount shouldBe 100
 
       println(s"✅ Simulated skipped files test passed: $finalCount records preserved")
@@ -237,10 +244,12 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       println(s"\n🔧 Testing transaction log preservation of files that would be skipped")
 
       // Create initial data
-      val initialData = spark.range(20).select(
-        col("id"),
-        concat(lit("preserved_doc_"), col("id")).as("title")
-      )
+      val initialData = spark
+        .range(20)
+        .select(
+          col("id"),
+          concat(lit("preserved_doc_"), col("id")).as("title")
+        )
 
       initialData.write
         .format("tantivy4spark")
@@ -248,17 +257,19 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         .save(outputPath)
 
       // Get initial transaction log state
-      val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
-      val initialFiles = transactionLog.listFiles()
+      val transactionLog   = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(outputPath), spark)
+      val initialFiles     = transactionLog.listFiles()
       val initialFileCount = initialFiles.length
 
       println(s"Initial files in transaction log: $initialFileCount")
 
       // Add more data to create additional splits
-      val additionalData = spark.range(20, 40).select(
-        col("id"),
-        concat(lit("preserved_doc_"), col("id")).as("title")
-      )
+      val additionalData = spark
+        .range(20, 40)
+        .select(
+          col("id"),
+          concat(lit("preserved_doc_"), col("id")).as("title")
+        )
 
       additionalData.write
         .format("tantivy4spark")
@@ -285,7 +296,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       afterMergeFiles.foreach(file => println(s"  - ${file.path} (${file.size} bytes)"))
 
       // Verify data integrity
-      val finalData = spark.read.format("tantivy4spark").load(outputPath)
+      val finalData  = spark.read.format("tantivy4spark").load(outputPath)
       val finalCount = finalData.count()
       finalCount shouldBe 40
 

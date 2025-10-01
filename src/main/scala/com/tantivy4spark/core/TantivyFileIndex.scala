@@ -25,24 +25,23 @@ import scala.collection.mutable
 import org.slf4j.LoggerFactory
 
 /**
- * Custom FileIndex implementation that uses transaction log for file discovery
- * instead of filesystem scanning. This is similar to Delta Lake's approach.
+ * Custom FileIndex implementation that uses transaction log for file discovery instead of filesystem scanning. This is
+ * similar to Delta Lake's approach.
  */
 // Serializable wrapper for FileStatus information
 case class SerializableFileInfo(
-    path: String,
-    length: Long,
-    modificationTime: Long,
-    isDirectory: Boolean
-)
+  path: String,
+  length: Long,
+  modificationTime: Long,
+  isDirectory: Boolean)
 
 class TantivyFileIndex(
-    @transient spark: SparkSession,
-    options: Map[String, String],
-    fileStatuses: Seq[FileStatus],
-    userSpecifiedSchema: StructType
-) extends FileIndex {
-  
+  @transient spark: SparkSession,
+  options: Map[String, String],
+  fileStatuses: Seq[FileStatus],
+  userSpecifiedSchema: StructType)
+    extends FileIndex {
+
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[TantivyFileIndex])
 
   // Convert FileStatus to serializable form to avoid Hadoop Configuration serialization issues
@@ -56,11 +55,12 @@ class TantivyFileIndex(
   }.toArray
 
   override def listFiles(
-      partitionFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression],
-      dataFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression]): Seq[PartitionDirectory] = {
-    
+    partitionFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression],
+    dataFilters: Seq[org.apache.spark.sql.catalyst.expressions.Expression]
+  ): Seq[PartitionDirectory] = {
+
     logger.debug(s"TantivyFileIndex.listFiles called with ${_fileInfos.length} files")
-    
+
     // Convert SerializableFileInfo back to FileStatus for Spark
     val fileStatuses = _fileInfos.map { info =>
       val path = new Path(info.path)
@@ -68,51 +68,47 @@ class TantivyFileIndex(
       new FileStatus(
         info.length,
         info.isDirectory,
-        1, // blockReplication - default
+        1,    // blockReplication - default
         4096, // blockSize - default
         info.modificationTime,
         path
       )
     }
-    
+
     // Group files by partition (no partitioning for now, so all files in root partition)
     val partitionMap = mutable.Map[Map[String, String], mutable.ArrayBuffer[FileStatus]]()
-    
+
     fileStatuses.foreach { fileStatus =>
       val partitionValues = Map.empty[String, String] // No partitioning
       partitionMap.getOrElseUpdate(partitionValues, mutable.ArrayBuffer.empty) += fileStatus
     }
-    
-    partitionMap.map { case (partitionValues, files) =>
-      PartitionDirectory(
-        values = org.apache.spark.sql.catalyst.InternalRow.empty, // No partition values
-        files = files.toArray
-      )
+
+    partitionMap.map {
+      case (partitionValues, files) =>
+        PartitionDirectory(
+          values = org.apache.spark.sql.catalyst.InternalRow.empty, // No partition values
+          files = files.toArray
+        )
     }.toSeq
   }
 
-  override def rootPaths: Seq[Path] = {
+  override def rootPaths: Seq[Path] =
     if (_fileInfos.nonEmpty) {
       _fileInfos.map(info => new Path(info.path).getParent).distinct.toSeq
     } else {
       Seq.empty
     }
-  }
 
-  override def inputFiles: Array[String] = {
+  override def inputFiles: Array[String] =
     _fileInfos.map(_.path)
-  }
 
-  override def refresh(): Unit = {
+  override def refresh(): Unit =
     // Transaction log-based, no need to refresh from filesystem
     logger.debug("TantivyFileIndex.refresh called (no-op for transaction log)")
-  }
 
-  override def sizeInBytes: Long = {
+  override def sizeInBytes: Long =
     _fileInfos.map(_.length).sum
-  }
 
-  override def partitionSchema: StructType = {
+  override def partitionSchema: StructType =
     new StructType() // No partitioning for now
-  }
 }

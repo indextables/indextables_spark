@@ -33,34 +33,41 @@ import java.nio.file.{Files, Paths}
 
 /**
  * Manager for Tantivy4Spark split operations using tantivy4java's QuickwitSplit functionality.
- * 
- * Replaces the previous zip-based archive system with split files (.split) that use
- * tantivy4java's optimized storage format and caching system.
+ *
+ * Replaces the previous zip-based archive system with split files (.split) that use tantivy4java's optimized storage
+ * format and caching system.
  */
 object SplitManager {
   private val logger = LoggerFactory.getLogger(getClass)
-  
+
   /**
    * Create a split file from a Tantivy index.
-   * 
-   * @param indexPath Path to the Tantivy index directory
-   * @param outputPath Path where the split file should be written (must end with .split)
-   * @param partitionId Partition identifier for this split
-   * @param nodeId Node identifier (typically hostname or Spark executor ID)
-   * @param options Optional Spark options for cloud configuration
-   * @param hadoopConf Optional Hadoop configuration for cloud storage
-   * @return Metadata about the created split
+   *
+   * @param indexPath
+   *   Path to the Tantivy index directory
+   * @param outputPath
+   *   Path where the split file should be written (must end with .split)
+   * @param partitionId
+   *   Partition identifier for this split
+   * @param nodeId
+   *   Node identifier (typically hostname or Spark executor ID)
+   * @param options
+   *   Optional Spark options for cloud configuration
+   * @param hadoopConf
+   *   Optional Hadoop configuration for cloud storage
+   * @return
+   *   Metadata about the created split
    */
   def createSplit(
-    indexPath: String, 
-    outputPath: String, 
-    partitionId: Long, 
+    indexPath: String,
+    outputPath: String,
+    partitionId: Long,
     nodeId: String,
     options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
     hadoopConf: Configuration = new Configuration()
   ): QuickwitSplit.SplitMetadata = {
     logger.info(s"Creating split from index: $indexPath -> $outputPath")
-    
+
     // Check if the index directory exists and validate it
     val indexDir = new java.io.File(indexPath)
     if (!indexDir.exists()) {
@@ -72,39 +79,48 @@ object SplitManager {
       logger.error(s"Index path is not a directory: $indexPath")
       throw new RuntimeException(s"Index path is not a directory: $indexPath")
     }
-    
+
     // List files in the index directory for debugging
     val files = indexDir.listFiles()
     if (files == null || files.isEmpty) {
       logger.error(s"Index directory is empty: $indexPath")
       throw new RuntimeException(s"Index directory is empty: $indexPath")
     }
-    
+
     logger.info(s"Index directory $indexPath contains ${files.length} files: ${files.map(_.getName).mkString(", ")}")
-    
+
     // Also check that the output directory exists
     val outputDir = new java.io.File(outputPath).getParentFile
     if (outputDir != null && !outputDir.exists()) {
       logger.info(s"Creating output directory: ${outputDir.getAbsolutePath}")
       outputDir.mkdirs()
     }
-    
+
     // Generate unique identifiers for the split
-    val indexUid = s"tantivy4spark-${UUID.randomUUID().toString}"
-    val sourceId = "tantivy4spark"
+    val indexUid      = s"tantivy4spark-${UUID.randomUUID().toString}"
+    val sourceId      = "tantivy4spark"
     val docMappingUid = "default"
-    
+
     // Create split configuration
-    val config = new QuickwitSplit.SplitConfig(indexUid, sourceId, nodeId, docMappingUid,
-      partitionId, Instant.now(), Instant.now(), null, null)
-    
+    val config = new QuickwitSplit.SplitConfig(
+      indexUid,
+      sourceId,
+      nodeId,
+      docMappingUid,
+      partitionId,
+      Instant.now(),
+      Instant.now(),
+      null,
+      null
+    )
+
     // Determine if we need to use cloud storage
     val protocol = ProtocolBasedIOFactory.determineProtocol(outputPath)
-    
+
     if (protocol == ProtocolBasedIOFactory.S3Protocol) {
       // For S3, create the split locally first, then upload
       val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
-      
+
       try {
         // Create split file locally
         val metadata = QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
@@ -124,7 +140,7 @@ object SplitManager {
         logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath returned metadata:")
         logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")
         logger.warn(s"🔍 PROOF:   getClass = ${metadata.getClass.getName}")
-        
+
         if (metadata.hasFooterOffsets()) {
           logger.warn(s"🔍 PROOF: Footer offsets PRESENT:")
           logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
@@ -133,14 +149,16 @@ object SplitManager {
           logger.warn(s"🔍 PROOF:   hotcacheLength = deprecated (using footer offsets)")
         } else {
           logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets!")
-          logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
+          logger.error(
+            s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata"
+          )
         }
-        
+
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
         try {
           val splitFile = Paths.get(tempSplitPath)
-          val fileSize = Files.size(splitFile)
+          val fileSize  = Files.size(splitFile)
 
           // Configurable threshold for streaming uploads (default 100MB)
           val streamingThreshold = options.getLong("spark.indextables.s3.streamingThreshold", 100L * 1024 * 1024)
@@ -152,9 +170,8 @@ object SplitManager {
             try {
               cloudProvider.writeFileFromStream(outputPath, inputStream, Some(fileSize))
               logger.info(s"✅ Streaming upload completed: $outputPath (${fileSize / (1024 * 1024)} MB)")
-            } finally {
+            } finally
               inputStream.close()
-            }
           } else {
             logger.info(s"📄 Using traditional upload for small split: $outputPath (${fileSize / (1024 * 1024)} MB)")
             // Use traditional method for smaller files
@@ -162,13 +179,12 @@ object SplitManager {
             cloudProvider.writeFile(outputPath, splitContent)
             logger.info(s"Split uploaded: $outputPath (${splitContent.length} bytes)")
           }
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-        
+
         // Clean up temporary file
         Files.deleteIfExists(Paths.get(tempSplitPath))
-        
+
         metadata
       } catch {
         case e: Exception =>
@@ -197,7 +213,7 @@ object SplitManager {
         logger.warn(s"🔍 PROOF: QuickwitSplit.convertIndexFromPath (non-S3) returned metadata:")
         logger.warn(s"🔍 PROOF:   hasFooterOffsets() = ${metadata.hasFooterOffsets()}")
         logger.warn(s"🔍 PROOF:   getClass = ${metadata.getClass.getName}")
-        
+
         if (metadata.hasFooterOffsets()) {
           logger.warn(s"🔍 PROOF: Footer offsets PRESENT (non-S3):")
           logger.warn(s"🔍 PROOF:   footerStartOffset = ${metadata.getFooterStartOffset()}")
@@ -206,7 +222,9 @@ object SplitManager {
           logger.warn(s"🔍 PROOF:   hotcacheLength = deprecated (using footer offsets)")
         } else {
           logger.error(s"❌ PROOF: tantivy4java did NOT generate footer offsets (non-S3 path)!")
-          logger.error(s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata")
+          logger.error(
+            s"❌ PROOF: This proves tantivy4java's QuickwitSplit.convertIndexFromPath is not generating footer metadata"
+          )
         }
         metadata
       } catch {
@@ -216,11 +234,9 @@ object SplitManager {
       }
     }
   }
-  
-  /**
-   * Validate that a split file is well-formed and readable.
-   */
-  def validateSplit(splitPath: String): Boolean = {
+
+  /** Validate that a split file is well-formed and readable. */
+  def validateSplit(splitPath: String): Boolean =
     try {
       val isValid = QuickwitSplit.validateSplit(splitPath)
       logger.debug(s"Split validation for $splitPath: $isValid")
@@ -230,21 +246,15 @@ object SplitManager {
         logger.warn(s"Split validation failed for $splitPath", e)
         false
     }
-  }
-  
-  /**
-   * Read split metadata without fully loading the split.
-   */
-  def readSplitMetadata(splitPath: String): Option[QuickwitSplit.SplitMetadata] = {
+
+  /** Read split metadata without fully loading the split. */
+  def readSplitMetadata(splitPath: String): Option[QuickwitSplit.SplitMetadata] =
     Try {
       QuickwitSplit.readSplitMetadata(splitPath)
     }.toOption
-  }
-  
-  /**
-   * List all files contained within a split.
-   */
-  def listSplitFiles(splitPath: String): List[String] = {
+
+  /** List all files contained within a split. */
+  def listSplitFiles(splitPath: String): List[String] =
     try {
       import scala.jdk.CollectionConverters._
       QuickwitSplit.listSplitFiles(splitPath).asScala.toList
@@ -253,19 +263,16 @@ object SplitManager {
         logger.warn(s"Failed to list files in split $splitPath", e)
         List.empty
     }
-  }
 }
 
-/**
- * Configuration for the global split cache system.
- */
+/** Configuration for the global split cache system. */
 case class SplitCacheConfig(
   cacheName: String = "tantivy4spark-default-cache",
   maxCacheSize: Long = 200000000L, // 200MB default
   maxConcurrentLoads: Int = 8,
   enableQueryCache: Boolean = true,
-  enableDocBatch: Boolean = true, // Default to true for better performance
-  docBatchMaxSize: Int = 1000, // Maximum documents per batch when enabled
+  enableDocBatch: Boolean = true,        // Default to true for better performance
+  docBatchMaxSize: Int = 1000,           // Maximum documents per batch when enabled
   splitCachePath: Option[String] = None, // Custom cache directory path
   awsAccessKey: Option[String] = None,
   awsSecretKey: Option[String] = None,
@@ -280,14 +287,11 @@ case class SplitCacheConfig(
   gcpProjectId: Option[String] = None,
   gcpServiceAccountKey: Option[String] = None,
   gcpCredentialsFile: Option[String] = None,
-  gcpEndpoint: Option[String] = None
-) {
-  
+  gcpEndpoint: Option[String] = None) {
+
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
-  
-  /**
-   * Convert to tantivy4java CacheConfig.
-   */
+
+  /** Convert to tantivy4java CacheConfig. */
   def toJavaCacheConfig(): SplitCacheManager.CacheConfig = {
     var config = new SplitCacheManager.CacheConfig(cacheName)
       .withMaxCacheSize(maxCacheSize)
@@ -297,12 +301,14 @@ case class SplitCacheConfig(
     // Configure split cache directory path with auto-detection
     val effectiveCachePath = splitCachePath.orElse(SplitCacheConfig.getDefaultCachePath())
     effectiveCachePath.foreach { cachePath =>
-      logger.info(s"🔧 Split cache directory configured: $cachePath (Note: GlobalCacheConfig initialization required separately)")
+      logger.info(
+        s"🔧 Split cache directory configured: $cachePath (Note: GlobalCacheConfig initialization required separately)"
+      )
       // Note: splitCachePath configuration is handled through GlobalCacheConfig.initialize()
       // before creating any SplitCacheManager instances - this is documented but not implemented
       // in this version of tantivy4java
     }
-    
+
     // AWS configuration with detailed verification
     logger.info(s"🔍 SplitCacheConfig AWS Verification:")
     logger.info(s"  - awsAccessKey: ${awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
@@ -310,31 +316,35 @@ case class SplitCacheConfig(
     logger.info(s"  - awsRegion: ${awsRegion.getOrElse("None")}")
     logger.info(s"  - awsSessionToken: ${awsSessionToken.map(_ => "***").getOrElse("None")}")
     logger.info(s"  - awsEndpoint: ${awsEndpoint.getOrElse("None")}")
-    
+
     // Configure AWS credentials (access key and secret key with optional session token)
     (awsAccessKey, awsSecretKey) match {
       case (Some(key), Some(secret)) =>
         logger.info(s"✅ AWS credentials present - configuring tantivy4java")
         config = awsSessionToken match {
-          case Some(token) => 
-            logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, sessionToken=***)")
+          case Some(token) =>
+            logger.info(
+              s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***, sessionToken=***)"
+            )
             val result = config.withAwsCredentials(key, secret, token)
             logger.info(s"🔧 withAwsCredentials returned: $result")
             result
-          case None => 
+          case None =>
             logger.info(s"🔧 Calling config.withAwsCredentials(accessKey=${key.take(4)}..., secretKey=***)")
             val result = config.withAwsCredentials(key, secret)
             logger.info(s"🔧 withAwsCredentials returned: $result")
             result
         }
       case (Some(key), None) =>
-        logger.warn(s"⚠️  AWS access key provided but SECRET KEY is missing! accessKey=${key.take(4)}..., secretKey=None")
+        logger.warn(
+          s"⚠️  AWS access key provided but SECRET KEY is missing! accessKey=${key.take(4)}..., secretKey=None"
+        )
       case (None, Some(_)) =>
         logger.warn(s"⚠️  AWS secret key provided but ACCESS KEY is missing! accessKey=None, secretKey=***")
       case _ => // No AWS credentials provided
         logger.debug("🔧 SplitCacheConfig: No AWS credentials provided - using default credentials chain")
     }
-    
+
     // Configure AWS region separately
     awsRegion match {
       case Some(region) =>
@@ -344,16 +354,16 @@ case class SplitCacheConfig(
       case None =>
         logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
     }
-    
-    awsEndpoint.foreach { endpoint => 
+
+    awsEndpoint.foreach { endpoint =>
       logger.info(s"🔧 Configuring AWS endpoint: $endpoint")
       config = config.withAwsEndpoint(endpoint)
     }
-    awsPathStyleAccess.foreach { pathStyle => 
+    awsPathStyleAccess.foreach { pathStyle =>
       logger.info(s"🔧 Configuring AWS path-style access: $pathStyle")
       config = config.withAwsPathStyleAccess(pathStyle)
     }
-    
+
     // Azure configuration
     (azureAccountName, azureAccountKey) match {
       case (Some(name), Some(key)) =>
@@ -361,33 +371,31 @@ case class SplitCacheConfig(
       case _ => // Try connection string
         azureConnectionString.foreach(connStr => config = config.withAzureConnectionString(connStr))
     }
-    
+
     azureEndpoint.foreach(endpoint => config = config.withAzureEndpoint(endpoint))
-    
-    // GCP configuration  
+
+    // GCP configuration
     (gcpProjectId, gcpServiceAccountKey) match {
       case (Some(projectId), Some(serviceKey)) =>
         config = config.withGcpCredentials(projectId, serviceKey)
       case _ => // Try credentials file
         gcpCredentialsFile.foreach(credFile => config = config.withGcpCredentialsFile(credFile))
     }
-    
+
     gcpEndpoint.foreach(endpoint => config = config.withGcpEndpoint(endpoint))
-    
+
     logger.info(s"🔧 Final tantivy4java CacheConfig before returning: $config")
     config
   }
 }
 
-/**
- * Companion object for SplitCacheConfig with auto-detection utilities.
- */
+/** Companion object for SplitCacheConfig with auto-detection utilities. */
 object SplitCacheConfig {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Auto-detect the optimal cache directory path.
-   * Defaults to /local_disk0 if it exists and is writable, otherwise returns None for system default.
+   * Auto-detect the optimal cache directory path. Defaults to /local_disk0 if it exists and is writable, otherwise
+   * returns None for system default.
    */
   def getDefaultCachePath(): Option[String] = {
     val localDisk0 = new java.io.File("/local_disk0")
@@ -401,8 +409,8 @@ object SplitCacheConfig {
   }
 
   /**
-   * Get the optimal temp directory path for operations.
-   * Defaults to /local_disk0 if it exists and is writable, otherwise returns None for system default.
+   * Get the optimal temp directory path for operations. Defaults to /local_disk0 if it exists and is writable,
+   * otherwise returns None for system default.
    */
   def getDefaultTempPath(): Option[String] = {
     val localDisk0 = new java.io.File("/local_disk0")
@@ -417,88 +425,72 @@ object SplitCacheConfig {
 }
 
 /**
- * Registry for tracking which hosts have cached which splits.
- * This enables Spark to use preferredLocations for better data locality.
+ * Registry for tracking which hosts have cached which splits. This enables Spark to use preferredLocations for better
+ * data locality.
  */
 object SplitLocationRegistry {
   private val logger = LoggerFactory.getLogger(getClass)
-  
+
   // Map from splitPath to Set of hostnames that have cached it
   @volatile private var splitLocations: Map[String, Set[String]] = Map.empty
-  private val lock = new Object
-  
-  /**
-   * Record that a split has been accessed/cached on a particular host.
-   */
-  def recordSplitAccess(splitPath: String, hostname: String): Unit = {
+  private val lock                                               = new Object
+
+  /** Record that a split has been accessed/cached on a particular host. */
+  def recordSplitAccess(splitPath: String, hostname: String): Unit =
     lock.synchronized {
       val currentHosts = splitLocations.getOrElse(splitPath, Set.empty)
       val updatedHosts = currentHosts + hostname
       splitLocations = splitLocations + (splitPath -> updatedHosts)
       logger.debug(s"Recorded split access: $splitPath on host $hostname (total hosts: ${updatedHosts.size})")
     }
-  }
-  
-  /**
-   * Get the list of hosts that have likely cached this split.
-   */
-  def getPreferredHosts(splitPath: String): Array[String] = {
+
+  /** Get the list of hosts that have likely cached this split. */
+  def getPreferredHosts(splitPath: String): Array[String] =
     splitLocations.getOrElse(splitPath, Set.empty).toArray
-  }
-  
-  /**
-   * Clear location tracking for a specific split (e.g., when it's no longer relevant).
-   */
-  def clearSplitLocations(splitPath: String): Unit = {
+
+  /** Clear location tracking for a specific split (e.g., when it's no longer relevant). */
+  def clearSplitLocations(splitPath: String): Unit =
     lock.synchronized {
       splitLocations = splitLocations - splitPath
       logger.debug(s"Cleared location tracking for split: $splitPath")
     }
-  }
-  
-  /**
-   * Get current hostname for this JVM.
-   */
-  def getCurrentHostname: String = {
-    try {
+
+  /** Get current hostname for this JVM. */
+  def getCurrentHostname: String =
+    try
       java.net.InetAddress.getLocalHost.getHostName
-    } catch {
+    catch {
       case ex: Exception =>
         logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
         "unknown"
     }
-  }
-  
-  /**
-   * Clear all split location tracking information.
-   * Returns the number of entries that were cleared.
-   */
-  def clearAllLocations(): SplitLocationFlushResult = {
+
+  /** Clear all split location tracking information. Returns the number of entries that were cleared. */
+  def clearAllLocations(): SplitLocationFlushResult =
     lock.synchronized {
       val clearedCount = splitLocations.size
       splitLocations = Map.empty
       logger.info(s"Cleared all split location tracking ($clearedCount entries)")
       SplitLocationFlushResult(clearedCount)
     }
-  }
 }
 
 /**
  * Global manager for split cache instances.
- * 
- * Maintains JVM-wide split cache managers that are shared across all Tantivy4Spark operations
- * within a single JVM (e.g., all tasks in a Spark executor).
+ *
+ * Maintains JVM-wide split cache managers that are shared across all Tantivy4Spark operations within a single JVM
+ * (e.g., all tasks in a Spark executor).
  */
 object GlobalSplitCacheManager {
   private val logger = LoggerFactory.getLogger(getClass)
-  
+
   // JVM-wide cache managers indexed by cache key (includes all config elements including session tokens)
   @volatile private var cacheManagers: Map[String, SplitCacheManager] = Map.empty
-  private val lock = new Object
-  
+  private val lock                                                    = new Object
+
   /**
-   * Generate a cache key that includes all configuration elements including session tokens.
-   * This ensures cache managers are not shared between different credential configurations.
+   * Generate a cache key that includes all configuration elements including session tokens. This ensures cache managers
+   * are not shared between different credential configurations.
    */
   private def generateCacheKey(config: SplitCacheConfig): String = {
     val keyElements = Seq(
@@ -523,22 +515,21 @@ object GlobalSplitCacheManager {
     )
     keyElements.mkString("|")
   }
-  
+
   /**
-   * Get or create a global split cache manager.
-   * Cache managers are now keyed by all config elements (including session tokens) to prevent
-   * configuration mismatches when reusing cache instances.
+   * Get or create a global split cache manager. Cache managers are now keyed by all config elements (including session
+   * tokens) to prevent configuration mismatches when reusing cache instances.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
     val cacheKey = generateCacheKey(config)
-    
+
     logger.debug(s"GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
     logger.debug(s"Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
     logger.debug(s"Generated cache key: $cacheKey")
     logger.debug(s"Existing cache managers: ${cacheManagers.keySet.size} entries")
-   
+
     cacheManagers.get(cacheKey) match {
-      case Some(manager) => 
+      case Some(manager) =>
         logger.debug(s"Reusing existing cache manager with matching configuration: ${config.cacheName}")
         manager
       case None =>
@@ -547,45 +538,43 @@ object GlobalSplitCacheManager {
           cacheManagers.get(cacheKey) match {
             case Some(manager) => manager
             case None =>
-              logger.info(s"Creating new global split cache manager: ${config.cacheName}, max size: ${config.maxCacheSize}")
+              logger.info(
+                s"Creating new global split cache manager: ${config.cacheName}, max size: ${config.maxCacheSize}"
+              )
               logger.info(s"Cache key: $cacheKey")
               val javaConfig = config.toJavaCacheConfig()
-              val manager = SplitCacheManager.getInstance(javaConfig)
+              val manager    = SplitCacheManager.getInstance(javaConfig)
               cacheManagers = cacheManagers + (cacheKey -> manager)
               manager
           }
         }
     }
   }
-  
-  /**
-   * Close all cache managers (typically called during JVM shutdown).
-   */
-  def closeAll(): Unit = {
+
+  /** Close all cache managers (typically called during JVM shutdown). */
+  def closeAll(): Unit =
     lock.synchronized {
       logger.info(s"Closing ${cacheManagers.size} split cache managers")
       cacheManagers.values.foreach { manager =>
-        try {
+        try
           manager.close()
-        } catch {
+        catch {
           case e: Exception =>
             logger.warn("Error closing cache manager", e)
         }
       }
       cacheManagers = Map.empty
     }
-  }
-  
+
   /**
-   * Flush all global split cache managers.
-   * This will close all cache managers and clear the global registry.
-   * Returns the number of cache managers that were flushed.
+   * Flush all global split cache managers. This will close all cache managers and clear the global registry. Returns
+   * the number of cache managers that were flushed.
    */
-  def flushAllCaches(): SplitCacheFlushResult = {
+  def flushAllCaches(): SplitCacheFlushResult =
     lock.synchronized {
       val flushedCount = cacheManagers.size
       logger.info(s"Flushing all split cache managers ($flushedCount managers)")
-      
+
       cacheManagers.values.foreach { manager =>
         try {
           manager.close()
@@ -595,43 +584,35 @@ object GlobalSplitCacheManager {
             logger.warn(s"Error flushing cache manager: ${ex.getMessage}")
         }
       }
-      
+
       cacheManagers = Map.empty
       logger.info(s"Successfully flushed all split cache managers")
       SplitCacheFlushResult(flushedCount)
     }
-  }
-  
-  /**
-   * Get statistics for all active cache managers.
-   */
-  def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] = {
-    cacheManagers.map { case (cacheKey, manager) =>
-      cacheKey -> manager.getGlobalCacheStats()
+
+  /** Get statistics for all active cache managers. */
+  def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] =
+    cacheManagers.map {
+      case (cacheKey, manager) =>
+        cacheKey -> manager.getGlobalCacheStats()
     }
-  }
-  
-  /**
-   * Get the number of active cache managers.
-   */
+
+  /** Get the number of active cache managers. */
   def getCacheManagerCount(): Int = cacheManagers.size
-  
-  /**
-   * Clear all cache managers (for testing purposes).
-   */
-  def clearAll(): Unit = {
+
+  /** Clear all cache managers (for testing purposes). */
+  def clearAll(): Unit =
     lock.synchronized {
       cacheManagers.values.foreach { manager =>
-        try {
+        try
           manager.close()
-        } catch {
+        catch {
           case e: Exception =>
             logger.warn("Error closing cache manager during clear", e)
         }
       }
       cacheManagers = Map.empty
     }
-  }
 }
 
 // Result classes for cache flush operations

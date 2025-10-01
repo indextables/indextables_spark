@@ -33,7 +33,7 @@ class StandaloneParseQueryTest extends TestBase {
     df.count()
 
     // Get the split file
-    val splitDir = new java.io.File(testPath)
+    val splitDir   = new java.io.File(testPath)
     val splitFiles = splitDir.listFiles().filter(_.getName.endsWith(".split"))
     require(splitFiles.nonEmpty, "No split files found")
 

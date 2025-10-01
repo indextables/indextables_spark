@@ -5,7 +5,7 @@ package com.tantivy4spark.debug
 //
 // SQL LIKE patterns are converted by Spark's optimizer as follows:
 // 1. LIKE 'prefix%' -> StringStartsWith filter
-// 2. LIKE '%suffix' -> StringEndsWith filter  
+// 2. LIKE '%suffix' -> StringEndsWith filter
 // 3. LIKE '%contains%' -> StringContains filter
 // 4. Complex patterns with _ or mixed % -> No pushdown (stays as Filter in Spark)
 //

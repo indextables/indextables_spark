@@ -26,12 +26,12 @@ import java.nio.file.Files
 
 /**
  * Base class for real AWS S3 integration tests.
- * 
- * This base class provides Spark session setup without any mock S3 configuration,
- * allowing tests to connect to real AWS S3 using standard AWS credentials.
- * 
- * Unlike TestBase, this class does NOT set any S3Mock endpoints or configurations
- * that would interfere with real AWS S3 connections.
+ *
+ * This base class provides Spark session setup without any mock S3 configuration, allowing tests to connect to real AWS
+ * S3 using standard AWS credentials.
+ *
+ * Unlike TestBase, this class does NOT set any S3Mock endpoints or configurations that would interfere with real AWS S3
+ * connections.
  */
 abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -51,9 +51,10 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    
+
     // Create Spark session without any mock S3 configuration
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("RealS3IntegrationTest")
       .master("local[2]")
       .config("spark.sql.warehouse.dir", Files.createTempDirectory("spark-warehouse").toString)
@@ -68,7 +69,7 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
 
     // Set log level to reduce noise
     spark.sparkContext.setLogLevel("WARN")
-    
+
     println(s"🚀 RealS3TestBase: Spark session created for real AWS S3 testing")
   }
 
@@ -80,14 +81,12 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
     super.afterAll()
   }
 
-  /**
-   * Create a temporary directory for test data.
-   */
+  /** Create a temporary directory for test data. */
   protected def withTempPath(f: File => Unit): Unit = {
     val tempDir = Files.createTempDirectory("tantivy4spark-test")
-    try {
+    try
       f(tempDir.toFile)
-    } finally {
+    finally {
       // Clean up temp directory
       def deleteRecursively(file: File): Unit = {
         if (file.isDirectory) {
@@ -99,24 +98,19 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
     }
   }
 
-  /**
-   * Generate a unique test ID for avoiding conflicts in S3.
-   */
-  protected def generateTestId(): String = {
+  /** Generate a unique test ID for avoiding conflicts in S3. */
+  protected def generateTestId(): String =
     java.util.UUID.randomUUID().toString.substring(0, 8)
-  }
 
   /**
-   * Check if real AWS credentials are available.
-   * This is a utility method for tests to check credential availability.
+   * Check if real AWS credentials are available. This is a utility method for tests to check credential availability.
    */
-  protected def hasAwsCredentials(): Boolean = {
+  protected def hasAwsCredentials(): Boolean =
     try {
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
       credFile.exists()
     } catch {
       case _: Exception => false
     }
-  }
 }

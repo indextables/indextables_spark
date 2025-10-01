@@ -21,23 +21,23 @@ import com.tantivy4spark.RealS3TestBase
 import org.apache.spark.sql.functions._
 import java.io.File
 import java.util.UUID
-import java.io.{FileInputStream}
+import java.io.FileInputStream
 import java.util.Properties
 import scala.util.Using
 
 /**
- * Test to validate that spark.indextables.* configurations actually work
- * during read, write, and merge operations, including real S3 operations.
+ * Test to validate that spark.indextables.* configurations actually work during read, write, and merge operations,
+ * including real S3 operations.
  */
 class IndexTablesValidationTest extends RealS3TestBase {
 
   // S3 configuration for real AWS testing
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
 
   // Generate unique test run ID to avoid conflicts
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/indextables-validation-$testRunId"
 
   // AWS credentials loaded from ~/.aws/credentials
@@ -78,12 +78,10 @@ class IndexTablesValidationTest extends RealS3TestBase {
     super.afterAll()
   }
 
-  /**
-   * Load AWS credentials from ~/.aws/credentials file.
-   */
-  private def loadAwsCredentials(): Option[(String, String)] = {
+  /** Load AWS credentials from ~/.aws/credentials file. */
+  private def loadAwsCredentials(): Option[(String, String)] =
     try {
-      val homeDir = System.getProperty("user.home")
+      val homeDir         = System.getProperty("user.home")
       val credentialsFile = new File(homeDir, ".aws/credentials")
 
       if (credentialsFile.exists()) {
@@ -106,17 +104,14 @@ class IndexTablesValidationTest extends RealS3TestBase {
     } catch {
       case _: Exception => None
     }
-  }
 
-  /**
-   * Clean up S3 test data.
-   */
-  private def cleanupS3TestData(): Unit = {
+  /** Clean up S3 test data. */
+  private def cleanupS3TestData(): Unit =
     try {
       // Use Spark to list and delete test data
       val hadoopConf = spark.sparkContext.hadoopConfiguration
-      val fs = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(testBasePath), hadoopConf)
-      val path = new org.apache.hadoop.fs.Path(testBasePath)
+      val fs         = org.apache.hadoop.fs.FileSystem.get(new java.net.URI(testBasePath), hadoopConf)
+      val path       = new org.apache.hadoop.fs.Path(testBasePath)
 
       if (fs.exists(path)) {
         fs.delete(path, true) // recursive delete
@@ -126,16 +121,17 @@ class IndexTablesValidationTest extends RealS3TestBase {
       case e: Exception =>
         println(s"⚠️  Failed to clean up S3 test data: ${e.getMessage}")
     }
-  }
 
   test("IndexTables provider should work for basic write and read") {
     withTempPath { path =>
       // Create test data
-      val testData = spark.range(0, 3).select(
-        col("id"),
-        concat(lit("test_"), col("id")).as("title"),
-        concat(lit("content_"), col("id")).as("content")
-      )
+      val testData = spark
+        .range(0, 3)
+        .select(
+          col("id"),
+          concat(lit("test_"), col("id")).as("title"),
+          concat(lit("content_"), col("id")).as("content")
+        )
 
       // Write using IndexTables provider with spark.indextables.* configurations
       testData.write
@@ -170,18 +166,20 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
   test("Mixed spark.tantivy4spark and spark.indextables configurations should work") {
     withTempPath { path =>
-      val testData = spark.range(0, 2).select(
-        col("id"),
-        concat(lit("mixed_"), col("id")).as("name")
-      )
+      val testData = spark
+        .range(0, 2)
+        .select(
+          col("id"),
+          concat(lit("mixed_"), col("id")).as("name")
+        )
 
       // Write with mixed configurations
       testData.write
         .format("io.indextables.provider.IndexTablesProvider")
         .option("spark.indextables.indexing.typemap.name", "string")  // Original prefix
-        .option("spark.indextables.indexWriter.batchSize", "500")        // New prefix
-        .option("spark.indextables.cache.maxSize", "30000000")         // Original prefix
-        .option("spark.indextables.indexWriter.heapSize", "50000000")    // 50MB (meets 15MB/thread * 2 threads minimum)
+        .option("spark.indextables.indexWriter.batchSize", "500")     // New prefix
+        .option("spark.indextables.cache.maxSize", "30000000")        // Original prefix
+        .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (meets 15MB/thread * 2 threads minimum)
         .mode("overwrite")
         .save(path.toString)
 
@@ -192,8 +190,8 @@ class IndexTablesValidationTest extends RealS3TestBase {
       // Read with mixed configurations
       val readData = spark.read
         .format("io.indextables.provider.IndexTablesProvider")
-        .option("spark.indextables.cache.maxSize", "20000000")         // Original prefix
-        .option("spark.indextables.docBatch.enabled", "true")            // New prefix
+        .option("spark.indextables.cache.maxSize", "20000000") // Original prefix
+        .option("spark.indextables.docBatch.enabled", "true")  // New prefix
         .load(path.toString)
 
       readData.count() should equal(2)
@@ -219,9 +217,9 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     // Test configuration filtering
     val mixedConfigs = Map(
-      "spark.indextables.cache.maxSize" -> "100000000",
+      "spark.indextables.cache.maxSize"         -> "100000000",
       "spark.indextables.indexWriter.batchSize" -> "5000",
-      "spark.sql.adaptive.enabled" -> "true"
+      "spark.sql.adaptive.enabled"              -> "true"
     )
 
     val normalized = ConfigNormalization.filterAndNormalizeTantivyConfigs(mixedConfigs)
@@ -235,11 +233,13 @@ class IndexTablesValidationTest extends RealS3TestBase {
     import scala.collection.JavaConverters._
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.indexing.typemap.title" -> "string",
-      "spark.indextables.indexing.typemap.content" -> "text",
-      "spark.indextables.indexing.tokenizer.summary" -> "raw"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.indexing.typemap.title"     -> "string",
+        "spark.indextables.indexing.typemap.content"   -> "text",
+        "spark.indextables.indexing.tokenizer.summary" -> "raw"
+      ).asJava
+    )
 
     val tantivyOptions = new Tantivy4SparkOptions(options)
 
@@ -263,10 +263,12 @@ class IndexTablesValidationTest extends RealS3TestBase {
       spark.conf.set("spark.indextables.cache.maxSize", "60000000")
 
       try {
-        val testData = spark.range(0, 2).select(
-          col("id"),
-          concat(lit("session_"), col("id")).as("title")
-        )
+        val testData = spark
+          .range(0, 2)
+          .select(
+            col("id"),
+            concat(lit("session_"), col("id")).as("title")
+          )
 
         // Write using session configurations (should inherit the spark.indextables settings)
         testData.write
@@ -299,11 +301,13 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     val testPath = s"$testBasePath/s3-indextables-write"
 
-    val testData = spark.range(0, 5).select(
-      col("id"),
-      concat(lit("s3_test_"), col("id")).as("title"),
-      concat(lit("S3 content for record "), col("id")).as("content")
-    )
+    val testData = spark
+      .range(0, 5)
+      .select(
+        col("id"),
+        concat(lit("s3_test_"), col("id")).as("title"),
+        concat(lit("S3 content for record "), col("id")).as("content")
+      )
 
     // Write using spark.indextables configurations with S3
     testData.write
@@ -335,27 +339,29 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     val testPath = s"$testBasePath/s3-mixed-configs"
 
-    val testData = spark.range(0, 3).select(
-      col("id"),
-      concat(lit("mixed_s3_"), col("id")).as("name"),
-      (col("id") * 100).as("score")
-    )
+    val testData = spark
+      .range(0, 3)
+      .select(
+        col("id"),
+        concat(lit("mixed_s3_"), col("id")).as("name"),
+        (col("id") * 100).as("score")
+      )
 
     // Write with mixed configurations
     testData.write
       .format("io.indextables.provider.IndexTablesProvider")
-      .option("spark.indextables.indexing.typemap.name", "string")      // Original prefix
-      .option("spark.indextables.indexWriter.batchSize", "2000")          // New prefix
-      .option("spark.indextables.cache.maxSize", "50000000")            // Original prefix
-      .option("spark.indextables.indexWriter.heapSize", "50000000")       // 50MB (meets 15MB/thread * 2 threads minimum)
+      .option("spark.indextables.indexing.typemap.name", "string")  // Original prefix
+      .option("spark.indextables.indexWriter.batchSize", "2000")    // New prefix
+      .option("spark.indextables.cache.maxSize", "50000000")        // Original prefix
+      .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (meets 15MB/thread * 2 threads minimum)
       .mode("overwrite")
       .save(testPath)
 
     // Read with mixed configurations
     val readData = spark.read
       .format("io.indextables.provider.IndexTablesProvider")
-      .option("spark.indextables.cache.maxSize", "40000000")            // Original prefix
-      .option("spark.indextables.docBatch.enabled", "true")               // New prefix
+      .option("spark.indextables.cache.maxSize", "40000000") // Original prefix
+      .option("spark.indextables.docBatch.enabled", "true")  // New prefix
       .load(testPath)
 
     readData.count() should equal(3)
@@ -370,18 +376,22 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     val testPath = s"$testBasePath/s3-indexquery-test"
 
-    val testData = spark.createDataFrame(Seq(
-      ("1", "Apache Spark", "Distributed computing framework for big data processing"),
-      ("2", "Apache Hadoop", "Framework for distributed storage and processing"),
-      ("3", "Machine Learning", "AI algorithms and statistical models for data analysis"),
-      ("4", "Data Science", "Interdisciplinary field using scientific methods")
-    )).toDF("id", "title", "description")
+    val testData = spark
+      .createDataFrame(
+        Seq(
+          ("1", "Apache Spark", "Distributed computing framework for big data processing"),
+          ("2", "Apache Hadoop", "Framework for distributed storage and processing"),
+          ("3", "Machine Learning", "AI algorithms and statistical models for data analysis"),
+          ("4", "Data Science", "Interdisciplinary field using scientific methods")
+        )
+      )
+      .toDF("id", "title", "description")
 
     // Write with text field configuration for IndexQuery support
     testData.write
       .format("io.indextables.provider.IndexTablesProvider")
-      .option("spark.indextables.indexing.typemap.title", "string")       // String for exact match
-      .option("spark.indextables.indexing.typemap.description", "text")   // Text for IndexQuery
+      .option("spark.indextables.indexing.typemap.title", "string")     // String for exact match
+      .option("spark.indextables.indexing.typemap.description", "text") // Text for IndexQuery
       .option("spark.indextables.indexWriter.batchSize", "2000")
       .option("spark.indextables.cache.maxSize", "60000000")
       .mode("overwrite")
@@ -400,7 +410,8 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     // Test IndexQuery on description field (text type) using SQL
     readData.createOrReplaceTempView("s3_indexquery_data")
-    val queryResults = spark.sql("SELECT * FROM s3_indexquery_data WHERE description indexquery 'distributed AND framework'").collect()
+    val queryResults =
+      spark.sql("SELECT * FROM s3_indexquery_data WHERE description indexquery 'distributed AND framework'").collect()
     queryResults.length should be >= 1
 
     // Use count() instead of collect() to avoid partition limits

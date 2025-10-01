@@ -20,13 +20,12 @@ package com.tantivy4spark.core
 import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.sql.SparkSession
 
-/**
- * Basic test for aggregate pushdown functionality.
- */
+/** Basic test for aggregate pushdown functionality. */
 class BasicAggregatePushdownTest extends AnyFunSuite {
 
   test("aggregate pushdown basic interface integration") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("BasicAggregatePushdownTest")
       .master("local[*]")
       .getOrCreate()
@@ -47,9 +46,8 @@ class BasicAggregatePushdownTest extends AnyFunSuite {
 
       println("✅ Basic aggregate pushdown structure test passed")
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("transaction log count optimization detection") {

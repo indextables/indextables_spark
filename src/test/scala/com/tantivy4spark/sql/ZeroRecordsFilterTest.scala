@@ -26,13 +26,11 @@ import org.scalatest.matchers.should.Matchers
 import java.io.File
 import java.nio.file.Files
 
-/**
- * Test to validate that files with zero records are not inserted into the transaction log
- */
+/** Test to validate that files with zero records are not inserted into the transaction log */
 class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: File = _
+  var tempDir: File       = _
 
   override def beforeEach(): Unit = {
     // Create temporary directory for this test
@@ -40,7 +38,8 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     tempDir.deleteOnExit()
 
     // Create Spark session
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("ZeroRecordsFilterTest")
       .master("local[2]")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -73,13 +72,15 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Array(
-      StructField("id", StringType, true),
-      StructField("content", StringType, true),
-      StructField("score", IntegerType, true)
-    ))
+    val schema = StructType(
+      Array(
+        StructField("id", StringType, true),
+        StructField("content", StringType, true),
+        StructField("score", IntegerType, true)
+      )
+    )
 
-    val emptyRDD = spark.sparkContext.emptyRDD[Row]
+    val emptyRDD  = spark.sparkContext.emptyRDD[Row]
     val emptyData = spark.createDataFrame(emptyRDD, schema)
 
     // Verify the DataFrame is indeed empty
@@ -92,12 +93,12 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
       .save(tablePath)
 
     // Check transaction log to ensure no AddActions were created
-    val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
-    val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    val hadoopPath     = new org.apache.hadoop.fs.Path(tablePath)
+    val emptyOptions   = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
 
     // Get AddActions directly
-    val addActions = transactionLog.listFiles()
+    val addActions     = transactionLog.listFiles()
     val metadataAction = transactionLog.getMetadata()
 
     println(s"AddActions: ${addActions.length}")
@@ -123,11 +124,13 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Array(
-      StructField("id", StringType, true),
-      StructField("content", StringType, true),
-      StructField("score", IntegerType, true)
-    ))
+    val schema = StructType(
+      Array(
+        StructField("id", StringType, true),
+        StructField("content", StringType, true),
+        StructField("score", IntegerType, true)
+      )
+    )
 
     val testDataRows = Seq(
       Row("doc1", "first document", 1),
@@ -135,7 +138,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     )
 
     val testDataRDD = spark.sparkContext.parallelize(testDataRows)
-    val testData = spark.createDataFrame(testDataRDD, schema)
+    val testData    = spark.createDataFrame(testDataRDD, schema)
 
     // Write initial data
     testData.write
@@ -144,15 +147,13 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
       .save(tablePath)
 
     // Get initial transaction log state
-    val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
-    val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
+    val hadoopPath        = new org.apache.hadoop.fs.Path(tablePath)
+    val emptyOptions      = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    val transactionLog    = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
     val initialAddActions = transactionLog.listFiles()
 
     println(s"Initial AddActions: ${initialAddActions.length}")
-    initialAddActions.foreach { add =>
-      println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}")
-    }
+    initialAddActions.foreach(add => println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}"))
 
     // Verify we have at least one AddAction for the non-empty data
     initialAddActions.length should be > 0
@@ -175,9 +176,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     val finalAddActions = transactionLog.listFiles()
 
     println(s"Final AddActions: ${finalAddActions.length}")
-    finalAddActions.foreach { add =>
-      println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}")
-    }
+    finalAddActions.foreach(add => println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}"))
 
     // Should have same number of AddActions (empty append didn't add any)
     finalAddActions.length shouldBe initialAddActions.length

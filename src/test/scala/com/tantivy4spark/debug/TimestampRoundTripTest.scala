@@ -22,19 +22,18 @@ import org.apache.spark.sql.SaveMode
 import java.sql.Timestamp
 
 /**
- * Test to validate timestamp round-trip accuracy for V2 table provider.
- * This test specifically checks for the bug where 2025 timestamps come back as 1970.
+ * Test to validate timestamp round-trip accuracy for V2 table provider. This test specifically checks for the bug where
+ * 2025 timestamps come back as 1970.
  */
 class TimestampRoundTripTest extends TestBase {
 
-  private def isNativeLibraryAvailable(): Boolean = {
+  private def isNativeLibraryAvailable(): Boolean =
     try {
       import com.tantivy4spark.search.TantivyNative
       TantivyNative.ensureLibraryLoaded()
     } catch {
       case _: Exception => false
     }
-  }
 
   test("should correctly round-trip timestamp values using V2 table provider") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
@@ -95,8 +94,8 @@ class TimestampRoundTripTest extends TestBase {
         println("✅ Timestamp round-trip successful!")
       } else {
         println("❌ Timestamp round-trip FAILED!")
-        println(s"Expected: ${timestamp2025.getTime} (${timestamp2025})")
-        println(s"Got: ${readTimestamp.getTime} (${readTimestamp})")
+        println(s"Expected: ${timestamp2025.getTime} ($timestamp2025)")
+        println(s"Got: ${readTimestamp.getTime} ($readTimestamp)")
 
         // Check if it's the 1970 bug (values near epoch)
         if (readTimestamp.getTime < 100000000000L) { // Less than ~1973
@@ -105,8 +104,10 @@ class TimestampRoundTripTest extends TestBase {
       }
 
       // Test assertion
-      assert(readTimestamp.getTime == timestamp2025.getTime,
-        s"Timestamp round-trip failed: expected ${timestamp2025.getTime}, got ${readTimestamp.getTime}")
+      assert(
+        readTimestamp.getTime == timestamp2025.getTime,
+        s"Timestamp round-trip failed: expected ${timestamp2025.getTime}, got ${readTimestamp.getTime}"
+      )
     }
   }
 
@@ -127,9 +128,12 @@ class TimestampRoundTripTest extends TestBase {
 
       val sparkSession = spark
       import sparkSession.implicits._
-      val testData = timestamps.zipWithIndex.map { case ((label, ts), idx) =>
-        (idx + 1, label, ts)
-      }.toDF("id", "label", "timestamp_field")
+      val testData = timestamps.zipWithIndex
+        .map {
+          case ((label, ts), idx) =>
+            (idx + 1, label, ts)
+        }
+        .toDF("id", "label", "timestamp_field")
 
       println("📝 Original data:")
       testData.show(false)
@@ -148,20 +152,23 @@ class TimestampRoundTripTest extends TestBase {
       readData.show(false)
 
       // Verify all timestamps
-      val readRows = readData.collect().toSeq.sortBy(_.getInt(0))
+      val readRows     = readData.collect().toSeq.sortBy(_.getInt(0))
       val originalRows = testData.collect().toSeq.sortBy(_.getInt(0))
 
       assert(readRows.length == originalRows.length, "Row count mismatch")
 
-      readRows.zip(originalRows).foreach { case (readRow, originalRow) =>
-        val readTs = readRow.getTimestamp(2)
-        val originalTs = originalRow.getTimestamp(2)
-        val label = originalRow.getString(1)
+      readRows.zip(originalRows).foreach {
+        case (readRow, originalRow) =>
+          val readTs     = readRow.getTimestamp(2)
+          val originalTs = originalRow.getTimestamp(2)
+          val label      = originalRow.getString(1)
 
-        println(s"Verifying $label: original=${originalTs.getTime}, read=${readTs.getTime}")
+          println(s"Verifying $label: original=${originalTs.getTime}, read=${readTs.getTime}")
 
-        assert(readTs.getTime == originalTs.getTime,
-          s"Timestamp mismatch for $label: expected ${originalTs.getTime}, got ${readTs.getTime}")
+          assert(
+            readTs.getTime == originalTs.getTime,
+            s"Timestamp mismatch for $label: expected ${originalTs.getTime}, got ${readTs.getTime}"
+          )
       }
 
       println("✅ All timestamp round-trips successful!")

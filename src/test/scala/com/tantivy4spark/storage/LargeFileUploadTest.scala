@@ -24,17 +24,19 @@ import java.io.RandomAccessFile
 import scala.util.Random
 
 /**
- * Test memory-efficient upload for large splits to prevent OOM errors.
- * Tests both the streaming upload mechanism and configuration options.
+ * Test memory-efficient upload for large splits to prevent OOM errors. Tests both the streaming upload mechanism and
+ * configuration options.
  */
 class LargeFileUploadTest extends TestBase {
 
   test("Memory-efficient upload should handle large files without OOM") {
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("data", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("data", StringType, nullable = true)
+        )
+      )
 
       // Generate test data that will create a larger split
       val largeString = "x" * 1000 // 1KB per record
@@ -42,8 +44,9 @@ class LargeFileUploadTest extends TestBase {
         (i.toLong, s"$largeString-$i")
       }
 
-      val rows = testData.map { case (id, data) =>
-        org.apache.spark.sql.Row(id, data)
+      val rows = testData.map {
+        case (id, data) =>
+          org.apache.spark.sql.Row(id, data)
       }
       val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
 
@@ -54,7 +57,7 @@ class LargeFileUploadTest extends TestBase {
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .option("spark.indextables.s3.streamingThreshold", "5000000") // 5MB threshold for testing
         .option("spark.indextables.s3.multipartThreshold", "5000000") // 5MB multipart threshold
-        .option("spark.indextables.s3.maxConcurrency", "2") // Limit concurrency for test
+        .option("spark.indextables.s3.maxConcurrency", "2")           // Limit concurrency for test
         .mode("overwrite")
         .save(tablePath)
 
@@ -78,18 +81,19 @@ class LargeFileUploadTest extends TestBase {
 
   test("Configuration threshold should control upload strategy") {
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("content", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("content", StringType, nullable = true)
+        )
+      )
 
       // Create smaller dataset
-      val testData = (1 to 100).map { i =>
-        (i.toLong, s"Content for record $i")
-      }
+      val testData = (1 to 100).map(i => (i.toLong, s"Content for record $i"))
 
-      val rows = testData.map { case (id, content) =>
-        org.apache.spark.sql.Row(id, content)
+      val rows = testData.map {
+        case (id, content) =>
+          org.apache.spark.sql.Row(id, content)
       }
       val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
 
@@ -119,10 +123,12 @@ class LargeFileUploadTest extends TestBase {
     // This test is ignored by default as it requires significant memory and time
     // Enable only for stress testing with sufficient resources
     withTempPath { path =>
-      val schema = StructType(Seq(
-        StructField("id", LongType, nullable = false),
-        StructField("large_data", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", LongType, nullable = false),
+          StructField("large_data", StringType, nullable = true)
+        )
+      )
 
       // Generate very large dataset (1GB+)
       val largeString = "x" * 50000 // 50KB per record
@@ -130,8 +136,9 @@ class LargeFileUploadTest extends TestBase {
         (i.toLong, s"$largeString-$i")
       }
 
-      val rows = testData.map { case (id, data) =>
-        org.apache.spark.sql.Row(id, data)
+      val rows = testData.map {
+        case (id, data) =>
+          org.apache.spark.sql.Row(id, data)
       }
       val df = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
 
@@ -144,8 +151,8 @@ class LargeFileUploadTest extends TestBase {
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .option("spark.indextables.s3.streamingThreshold", "100000000") // 100MB
         .option("spark.indextables.s3.multipartThreshold", "100000000") // 100MB
-        .option("spark.indextables.s3.maxConcurrency", "8") // Higher concurrency
-        .option("spark.indextables.s3.partSize", "134217728") // 128MB parts
+        .option("spark.indextables.s3.maxConcurrency", "8")             // Higher concurrency
+        .option("spark.indextables.s3.partSize", "134217728")           // 128MB parts
         .mode("overwrite")
         .save(tablePath)
 

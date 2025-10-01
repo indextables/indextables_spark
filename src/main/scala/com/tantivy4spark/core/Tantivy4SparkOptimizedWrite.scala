@@ -18,7 +18,16 @@
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, SupportsOverwrite, SupportsTruncate, Write, WriterCommitMessage, RequiresDistributionAndOrdering}
+import org.apache.spark.sql.connector.write.{
+  BatchWrite,
+  DataWriterFactory,
+  PhysicalWriteInfo,
+  SupportsOverwrite,
+  SupportsTruncate,
+  Write,
+  WriterCommitMessage,
+  RequiresDistributionAndOrdering
+}
 import org.apache.spark.sql.connector.distributions.{Distribution, Distributions, ClusteredDistribution}
 import org.apache.spark.sql.connector.expressions.{SortOrder, SortDirection, Expressions, LogicalExpressions}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -30,19 +39,21 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.slf4j.LoggerFactory
 
 /**
- * Write implementation that supports optimized writes for Tantivy4Spark tables.
- * Similar to Delta Lake's TransactionalWrite, this adds an optimization layer
- * that can shuffle data to target optimal split sizes.
+ * Write implementation that supports optimized writes for Tantivy4Spark tables. Similar to Delta Lake's
+ * TransactionalWrite, this adds an optimization layer that can shuffle data to target optimal split sizes.
  */
 class Tantivy4SparkOptimizedWrite(
-    @transient transactionLog: TransactionLog,
-    tablePath: Path,
-    @transient writeInfo: LogicalWriteInfo,
-    serializedOptions: Map[String, String],  // Use serializable Map instead of CaseInsensitiveStringMap
-    @transient hadoopConf: org.apache.hadoop.conf.Configuration,
-    isOverwrite: Boolean = false,  // Track whether this is an overwrite operation
-    estimatedRowCount: Long = 1000000L  // Estimated row count for optimized partitioning
-) extends Write with BatchWrite with RequiresDistributionAndOrdering with Serializable {
+  @transient transactionLog: TransactionLog,
+  tablePath: Path,
+  @transient writeInfo: LogicalWriteInfo,
+  serializedOptions: Map[String, String], // Use serializable Map instead of CaseInsensitiveStringMap
+  @transient hadoopConf: org.apache.hadoop.conf.Configuration,
+  isOverwrite: Boolean = false,      // Track whether this is an overwrite operation
+  estimatedRowCount: Long = 1000000L // Estimated row count for optimized partitioning
+) extends Write
+    with BatchWrite
+    with RequiresDistributionAndOrdering
+    with Serializable {
 
   @transient private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkOptimizedWrite])
 
@@ -51,7 +62,7 @@ class Tantivy4SparkOptimizedWrite(
   private val serializedHadoopConf = {
     // Serialize only the tantivy4spark config properties from hadoopConf
     val props = scala.collection.mutable.Map[String, String]()
-    val iter = hadoopConf.iterator()
+    val iter  = hadoopConf.iterator()
     while (iter.hasNext) {
       val entry = iter.next()
       if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
@@ -63,13 +74,14 @@ class Tantivy4SparkOptimizedWrite(
     }
     props.toMap
   }
-  private val partitionColumns = try {
-    transactionLog.getPartitionColumns()
-  } catch {
-    case ex: Exception =>
-      logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
-      Seq.empty[String]
-  }
+  private val partitionColumns =
+    try
+      transactionLog.getPartitionColumns()
+    catch {
+      case ex: Exception =>
+        logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
+        Seq.empty[String]
+    }
 
   @transient private lazy val tantivyOptions = {
     // Recreate CaseInsensitiveStringMap from serialized options for API compatibility
@@ -82,10 +94,7 @@ class Tantivy4SparkOptimizedWrite(
 
   /**
    * Determine if optimized writes should be enabled based on configuration hierarchy:
-   * 1. DataFrame write options
-   * 2. Spark session configuration  
-   * 3. Table properties
-   * 4. Default (enabled)
+   *   1. DataFrame write options 2. Spark session configuration 3. Table properties 4. Default (enabled)
    */
   private def shouldOptimizeWrite(): Boolean = {
     logger.warn(s"🔍 OPTIMIZED WRITE: shouldOptimizeWrite called")
@@ -99,7 +108,8 @@ class Tantivy4SparkOptimizedWrite(
     }
 
     // Check Spark session configuration
-    val sessionConfValue = spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
+    val sessionConfValue = spark.conf
+      .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED)
       .map(_.toBoolean)
     if (sessionConfValue.isDefined) {
       logger.debug(s"Using session config optimizeWrite = ${sessionConfValue.get}")
@@ -108,7 +118,7 @@ class Tantivy4SparkOptimizedWrite(
 
     // Check table properties (from metadata)
     try {
-      val metadata = transactionLog.getMetadata()
+      val metadata           = transactionLog.getMetadata()
       val tablePropertyValue = Tantivy4SparkConfig.OPTIMIZE_WRITE.fromMetadata(metadata)
       if (tablePropertyValue.isDefined) {
         logger.debug(s"Using table property optimizeWrite = ${tablePropertyValue.get}")
@@ -127,18 +137,16 @@ class Tantivy4SparkOptimizedWrite(
 
   /**
    * Get the target records per split from configuration hierarchy:
-   * 1. Auto-sizing based on historical data (if enabled)
-   * 2. DataFrame write options
-   * 3. Spark session configuration
-   * 4. Table properties
-   * 5. Default (1M records)
+   *   1. Auto-sizing based on historical data (if enabled) 2. DataFrame write options 3. Spark session configuration 4.
+   *      Table properties 5. Default (1M records)
    */
   private def getTargetRecordsPerSplit(): Long = {
     val spark = SparkSession.active
 
     // Check if auto-sizing is enabled first
     val autoSizeEnabled = tantivyOptions.autoSizeEnabled.getOrElse {
-      spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+      spark.conf
+        .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
         .map(_.toBoolean)
         .getOrElse(false) // Auto-sizing is disabled by default
     }
@@ -167,25 +175,30 @@ class Tantivy4SparkOptimizedWrite(
         logger.info(s"Auto-sizing enabled with target split size: ${SizeParser.formatBytes(targetSizeBytes)}")
 
         // Analyze historical data to calculate target rows
-        val analyzer = SplitSizeAnalyzer(tablePath, spark, {
-          import scala.jdk.CollectionConverters._
-          val optionsMap = new java.util.HashMap[String, String]()
-          serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
-          new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
-        })
+        val analyzer = SplitSizeAnalyzer(
+          tablePath,
+          spark, {
+            import scala.jdk.CollectionConverters._
+            val optionsMap = new java.util.HashMap[String, String]()
+            serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
+            new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
+          }
+        )
 
         analyzer.calculateTargetRows(targetSizeBytes) match {
           case Some(calculatedRows) =>
             logger.info(s"Auto-sizing calculated target rows per split: $calculatedRows")
             return calculatedRows
           case None =>
-            logger.warn("Auto-sizing failed to calculate target rows from historical data, falling back to manual configuration")
-            // Fall through to manual configuration
+            logger.warn(
+              "Auto-sizing failed to calculate target rows from historical data, falling back to manual configuration"
+            )
+          // Fall through to manual configuration
         }
       } catch {
         case ex: Exception =>
           logger.error(s"Auto-sizing historical analysis failed: ${ex.getMessage}", ex)
-          // Fall through to manual configuration
+        // Fall through to manual configuration
       }
     }
 
@@ -197,7 +210,8 @@ class Tantivy4SparkOptimizedWrite(
     }
 
     // Check Spark session configuration
-    val sessionConfValue = spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
+    val sessionConfValue = spark.conf
+      .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT)
       .map(_.toLong)
     if (sessionConfValue.isDefined) {
       logger.debug(s"Using session config targetRecordsPerSplit = ${sessionConfValue.get}")
@@ -206,7 +220,7 @@ class Tantivy4SparkOptimizedWrite(
 
     // Check table properties (from metadata)
     try {
-      val metadata = transactionLog.getMetadata()
+      val metadata           = transactionLog.getMetadata()
       val tablePropertyValue = Tantivy4SparkConfig.OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT.fromMetadata(metadata)
       if (tablePropertyValue.isDefined) {
         logger.debug(s"Using table property targetRecordsPerSplit = ${tablePropertyValue.get}")
@@ -224,20 +238,21 @@ class Tantivy4SparkOptimizedWrite(
   }
 
   /**
-   * Create a potentially optimized physical plan for writing data.
-   * This is similar to Delta Lake's TransactionalWrite.writeFiles method.
+   * Create a potentially optimized physical plan for writing data. This is similar to Delta Lake's
+   * TransactionalWrite.writeFiles method.
    */
-  def createOptimizedWritePlan(queryExecution: org.apache.spark.sql.execution.QueryExecution): org.apache.spark.sql.execution.SparkPlan = {
+  def createOptimizedWritePlan(queryExecution: org.apache.spark.sql.execution.QueryExecution)
+    : org.apache.spark.sql.execution.SparkPlan = {
     logger.warn(s"🔍 OPTIMIZED WRITE: createOptimizedWritePlan called")
     val originalPlan = queryExecution.executedPlan
 
     if (shouldOptimizeWrite()) {
       val targetRecords = getTargetRecordsPerSplit()
       logger.info(s"Enabling optimized write with target $targetRecords records per split")
-      
+
       // TODO: Extract partition columns from table metadata if available
       val partitionColumns = Seq.empty[String] // For now, no partitioning support
-      
+
       Tantivy4SparkOptimizedWriterExec(
         child = originalPlan,
         partitionColumns = partitionColumns,
@@ -253,12 +268,12 @@ class Tantivy4SparkOptimizedWrite(
     logger.warn(s"🔍 OPTIMIZED WRITE: toBatch called")
     this
   }
-  
+
   /**
-   * RequiresDistributionAndOrdering implementation for V2 optimized writes.
-   * This tells Spark how to distribute (repartition) the data before writing.
+   * RequiresDistributionAndOrdering implementation for V2 optimized writes. This tells Spark how to distribute
+   * (repartition) the data before writing.
    */
-  override def requiredDistribution(): Distribution = {
+  override def requiredDistribution(): Distribution =
     if (partitionColumns.nonEmpty) {
       // For partitioned tables, cluster by partition columns using the correct constructor
       val clusteredColumns = partitionColumns.toArray
@@ -273,12 +288,10 @@ class Tantivy4SparkOptimizedWrite(
       logger.warn("No schema fields available for clustering, using unspecified distribution")
       Distributions.unspecified()
     }
-  }
-  
+
   /**
-   * Return the number of partitions required for optimized writes.
-   * This is the key method that actually controls partitioning in V2.
-   * For auto-sizing, this method will attempt to count the input DataFrame.
+   * Return the number of partitions required for optimized writes. This is the key method that actually controls
+   * partitioning in V2. For auto-sizing, this method will attempt to count the input DataFrame.
    */
   override def requiredNumPartitions(): Int = {
     logger.warn(s"🔍 OPTIMIZED WRITE: requiredNumPartitions called")
@@ -287,7 +300,8 @@ class Tantivy4SparkOptimizedWrite(
     // Check if auto-sizing is enabled
     val spark = SparkSession.active
     val autoSizeEnabled = tantivyOptions.autoSizeEnabled.getOrElse {
-      spark.conf.getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
+      spark.conf
+        .getOption(Tantivy4SparkSQLConf.TANTIVY4SPARK_AUTO_SIZE_ENABLED)
         .map(_.toBoolean)
         .getOrElse(false)
     }
@@ -303,10 +317,12 @@ class Tantivy4SparkOptimizedWrite(
           logger.info(s"V2 Auto-sizing: using explicit row count = $rowCount")
           rowCount
         case None =>
-          logger.warn("V2 Auto-sizing: enabled but no explicit row count provided. " +
-                     "Using estimated row count for partitioning. " +
-                     "For accurate auto-sizing with V2 API, call df.count() first and pass as option: " +
-                     ".option(\"spark.indextables.autoSize.inputRowCount\", rowCount.toString)")
+          logger.warn(
+            "V2 Auto-sizing: enabled but no explicit row count provided. " +
+              "Using estimated row count for partitioning. " +
+              "For accurate auto-sizing with V2 API, call df.count() first and pass as option: " +
+              ".option(\"spark.indextables.autoSize.inputRowCount\", rowCount.toString)"
+          )
           logger.warn("V2 Auto-sizing: Falling back to estimated row count, partitioning may not be optimal")
           estimatedRowCount
       }
@@ -315,7 +331,7 @@ class Tantivy4SparkOptimizedWrite(
     }
 
     // Calculate number of partitions based on row count and target records per split
-    val numPartitions = math.ceil(actualRowCount.toDouble / targetRecords).toInt
+    val numPartitions   = math.ceil(actualRowCount.toDouble / targetRecords).toInt
     val finalPartitions = math.max(1, numPartitions)
 
     if (autoSizeEnabled) {
@@ -326,10 +342,8 @@ class Tantivy4SparkOptimizedWrite(
 
     finalPartitions
   }
-  
-  /**
-   * No specific ordering requirements for Tantivy4Spark writes.
-   */
+
+  /** No specific ordering requirements for Tantivy4Spark writes. */
   override def requiredOrdering(): Array[SortOrder] = Array.empty
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
@@ -340,31 +354,36 @@ class Tantivy4SparkOptimizedWrite(
     logger.info(s"V2 optimized write enabled, target records per split: $targetRecords")
     logger.info(s"V2 optimized write: Using RequiresDistributionAndOrdering to control partitioning")
     logger.info(s"Actual partitions: ${info.numPartitions} (controlled by requiredNumPartitions)")
-    
+
     if (partitionColumns.nonEmpty) {
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
-    
+
     // Combine serialized hadoop config with tantivy4spark options (normalize spark.indextables to spark.tantivy4spark)
     val normalizedTantivyOptions = serializedOptions
       .filter(kv => kv._1.startsWith("spark.indextables.") || kv._1.startsWith("spark.indextables."))
-      .map { case (key, value) =>
-        val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.indextables.")
-        } else key
-        normalizedKey -> value
+      .map {
+        case (key, value) =>
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.indextables.")
+          } else key
+          normalizedKey -> value
       }
     val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
 
-    serializedOptions.foreach { case (key, value) =>
-      if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
-        val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.indextables.")
-        } else key
-        logger.info(s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
-      }
+    serializedOptions.foreach {
+      case (key, value) =>
+        if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
+          val normalizedKey = if (key.startsWith("spark.indextables.")) {
+            key.replace("spark.indextables.", "spark.indextables.")
+          } else key
+          logger.info(
+            s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***"
+              else value}"
+          )
+        }
     }
-    
+
     new Tantivy4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
@@ -372,18 +391,23 @@ class Tantivy4SparkOptimizedWrite(
     println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     logger.warn(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
-    serializedOptions.foreach { case (k, v) =>
-      val redactedValue = if (k.toLowerCase.contains("secret") || k.toLowerCase.contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")) {
-        "***REDACTED***"
-      } else {
-        v
-      }
-      println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+    serializedOptions.foreach {
+      case (k, v) =>
+        val redactedValue =
+          if (
+            k.toLowerCase.contains("secret") || k.toLowerCase
+              .contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")
+          ) {
+            "***REDACTED***"
+          } else {
+            v
+          }
+        println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
-    
+
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
@@ -398,11 +422,11 @@ class Tantivy4SparkOptimizedWrite(
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
-        case Some("Overwrite") => true
+        case Some("Overwrite")     => true
         case Some("ErrorIfExists") => false
-        case Some("Ignore") => false  
-        case Some("Append") => false
-        case None => {
+        case Some("Ignore")        => false
+        case Some("Append")        => false
+        case None                  =>
           // Check if this looks like an initial write (no existing files) - treat as overwrite
           try {
             val existingFiles = transactionLog.listFiles()
@@ -417,15 +441,13 @@ class Tantivy4SparkOptimizedWrite(
           } catch {
             case _: Exception => false // If we can't read transaction log, assume append
           }
-        }
-        case Some(other) => {
+        case Some(other) =>
           logger.warn(s"Unknown saveMode: $other, defaulting to append")
           false
-        }
       }
       saveMode
     }
-    
+
     // Extract partition columns from write options (same fix as StandardWrite)
     val partitionColumns = serializedOptions.get("__partition_columns") match {
       case Some(partitionColumnsJson) =>
@@ -458,9 +480,9 @@ class Tantivy4SparkOptimizedWrite(
       logger.warn(s"🔍 DEBUG: Performing append operation with ${addActions.length} files")
       transactionLog.addFiles(addActions)
     }
-    
+
     logger.info(s"Successfully committed ${addActions.length} files in transaction version $version")
-    
+
     // Log total row count after commit (safely handling different types)
     try {
       val totalRows = transactionLog.getTotalRowCount()
@@ -473,11 +495,11 @@ class Tantivy4SparkOptimizedWrite(
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {
     logger.warn(s"Aborting write with ${messages.length} messages")
-    
+
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // In a real implementation, we would delete the physical files here

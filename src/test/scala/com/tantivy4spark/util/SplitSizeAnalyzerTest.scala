@@ -21,9 +21,7 @@ import com.tantivy4spark.TestBase
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-/**
- * Tests for SplitSizeAnalyzer - analyzing historical split data for auto-sizing.
- */
+/** Tests for SplitSizeAnalyzer - analyzing historical split data for auto-sizing. */
 class SplitSizeAnalyzerTest extends TestBase {
 
   test("SplitSizeAnalyzer should analyze historical data and calculate target rows") {
@@ -42,18 +40,20 @@ class SplitSizeAnalyzerTest extends TestBase {
       assert(readDf.count() == 5)
 
       // Now test the analyzer
-      val options = new CaseInsensitiveStringMap(java.util.Map.of())
+      val options  = new CaseInsensitiveStringMap(java.util.Map.of())
       val analyzer = SplitSizeAnalyzer(new Path(tempPath), spark, options)
 
       // Test with a target size
       val targetSizeBytes = 1024L * 1024L // 1MB
-      val result = analyzer.calculateTargetRows(targetSizeBytes)
+      val result          = analyzer.calculateTargetRows(targetSizeBytes)
 
       // Should return some calculated value based on historical data
       assert(result.isDefined, "Should calculate target rows from historical data")
       assert(result.get > 0, "Target rows should be positive")
 
-      println(s"✅ Analyzer calculated ${result.get} target rows for ${SizeParser.formatBytes(targetSizeBytes)} target size")
+      println(
+        s"✅ Analyzer calculated ${result.get} target rows for ${SizeParser.formatBytes(targetSizeBytes)} target size"
+      )
     }
   }
 
@@ -62,11 +62,11 @@ class SplitSizeAnalyzerTest extends TestBase {
       // Create empty directory (no transaction log)
       new java.io.File(tempPath).mkdirs()
 
-      val options = new CaseInsensitiveStringMap(java.util.Map.of())
+      val options  = new CaseInsensitiveStringMap(java.util.Map.of())
       val analyzer = SplitSizeAnalyzer(new Path(tempPath), spark, options)
 
       val targetSizeBytes = 1024L * 1024L // 1MB
-      val result = analyzer.calculateTargetRows(targetSizeBytes)
+      val result          = analyzer.calculateTargetRows(targetSizeBytes)
 
       // Should return None when no historical data exists
       assert(result.isEmpty, "Should return None when no historical data exists")
@@ -77,11 +77,11 @@ class SplitSizeAnalyzerTest extends TestBase {
 
   test("SplitSizeAnalyzer should handle non-existent path gracefully") {
     val nonExistentPath = "/non/existent/path"
-    val options = new CaseInsensitiveStringMap(java.util.Map.of())
-    val analyzer = SplitSizeAnalyzer(new Path(nonExistentPath), spark, options)
+    val options         = new CaseInsensitiveStringMap(java.util.Map.of())
+    val analyzer        = SplitSizeAnalyzer(new Path(nonExistentPath), spark, options)
 
     val targetSizeBytes = 1024L * 1024L
-    val result = analyzer.calculateTargetRows(targetSizeBytes)
+    val result          = analyzer.calculateTargetRows(targetSizeBytes)
 
     // Should return None gracefully
     assert(result.isEmpty, "Should return None for non-existent path")
@@ -113,16 +113,16 @@ class SplitSizeAnalyzerTest extends TestBase {
         .save(tempPath)
 
       // Verify total data
-      val totalData = spark.read.format("tantivy4spark").load(tempPath)
+      val totalData  = spark.read.format("tantivy4spark").load(tempPath)
       val totalCount = totalData.count()
       assert(totalCount > 1000, s"Should have substantial data for analysis, got $totalCount rows")
 
       // Analyze with multiple historical splits
-      val options = new CaseInsensitiveStringMap(java.util.Map.of())
+      val options  = new CaseInsensitiveStringMap(java.util.Map.of())
       val analyzer = SplitSizeAnalyzer(new Path(tempPath), spark, options)
 
       val targetSizeBytes = 2L * 1024L * 1024L // 2MB
-      val result = analyzer.calculateTargetRows(targetSizeBytes)
+      val result          = analyzer.calculateTargetRows(targetSizeBytes)
 
       assert(result.isDefined, "Should calculate target rows from multiple historical splits")
       assert(result.get > 0, "Target rows should be positive")
@@ -140,15 +140,15 @@ class SplitSizeAnalyzerTest extends TestBase {
         .mode("overwrite")
         .save(tempPath)
 
-      val options = new CaseInsensitiveStringMap(java.util.Map.of())
+      val options  = new CaseInsensitiveStringMap(java.util.Map.of())
       val analyzer = SplitSizeAnalyzer(new Path(tempPath), spark, options)
 
       // Test different target sizes
       val targetSizes = List(
-        100L * 1024L,              // 100K
-        1024L * 1024L,             // 1M
-        10L * 1024L * 1024L,       // 10M
-        100L * 1024L * 1024L       // 100M
+        100L * 1024L,        // 100K
+        1024L * 1024L,       // 1M
+        10L * 1024L * 1024L, // 10M
+        100L * 1024L * 1024L // 100M
       )
 
       val results = targetSizes.map { targetSize =>
@@ -157,16 +157,18 @@ class SplitSizeAnalyzerTest extends TestBase {
       }
 
       // All should succeed
-      results.foreach { case (targetSize, result) =>
-        assert(result.isDefined, s"Should calculate target rows for ${SizeParser.formatBytes(targetSize)}")
-        assert(result.get > 0, s"Target rows should be positive for ${SizeParser.formatBytes(targetSize)}")
+      results.foreach {
+        case (targetSize, result) =>
+          assert(result.isDefined, s"Should calculate target rows for ${SizeParser.formatBytes(targetSize)}")
+          assert(result.get > 0, s"Target rows should be positive for ${SizeParser.formatBytes(targetSize)}")
       }
 
       // Larger target sizes should generally result in more rows per split
       val sortedResults = results.map { case (targetSize, result) => (targetSize, result.get) }.sortBy(_._1)
       println("Target size -> calculated rows:")
-      sortedResults.foreach { case (targetSize, rows) =>
-        println(s"  ${SizeParser.formatBytes(targetSize)} -> $rows rows")
+      sortedResults.foreach {
+        case (targetSize, rows) =>
+          println(s"  ${SizeParser.formatBytes(targetSize)} -> $rows rows")
       }
 
       println("✅ Analyzer handled different target sizes appropriately")
@@ -204,7 +206,8 @@ class SplitSizeAnalyzerTest extends TestBase {
     withTempPath { tempPath =>
       // Write many small batches to create many splits
       for (i <- 1 to 20) {
-        val batch = spark.range(i * 100, i * 100 + 10)
+        val batch = spark
+          .range(i * 100, i * 100 + 10)
           .selectExpr("id", "CAST(id AS STRING) as name")
 
         val mode = if (i == 1) "overwrite" else "append"
@@ -240,7 +243,7 @@ class SplitSizeAnalyzerTest extends TestBase {
         .mode("overwrite")
         .save(tempPath)
 
-      val options = new CaseInsensitiveStringMap(java.util.Map.of())
+      val options  = new CaseInsensitiveStringMap(java.util.Map.of())
       val analyzer = SplitSizeAnalyzer(new Path(tempPath), spark, options)
 
       // Test with very small target size

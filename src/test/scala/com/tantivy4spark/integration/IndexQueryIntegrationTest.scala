@@ -30,40 +30,42 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.scalatest.funsuite.AnyFunSuite
 
 class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
-  
+
   test("IndexQueryExpression should convert to IndexQueryFilter correctly") {
     val column = AttributeReference("title", StringType, nullable = true)()
-    val query = Literal(UTF8String.fromString("spark AND sql"), StringType)
-    val expr = IndexQueryExpression(column, query)
-    
+    val query  = Literal(UTF8String.fromString("spark AND sql"), StringType)
+    val expr   = IndexQueryExpression(column, query)
+
     val filterOpt = ExpressionUtils.expressionToIndexQueryFilter(expr)
-    
+
     assert(filterOpt.isDefined)
     val filter = filterOpt.get
     assert(filter.columnName == "title")
     assert(filter.queryString == "spark AND sql")
   }
-  
+
   test("IndexQueryFilter should be recognized as supported filter") {
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
     import com.tantivy4spark.core.Tantivy4SparkScanBuilder
     import com.tantivy4spark.transaction.TransactionLog
-    
-    val testSchema = StructType(Array(
-      StructField("id", IntegerType, nullable = false),
-      StructField("title", StringType, nullable = true),
-      StructField("content", StringType, nullable = true)
-    ))
-    
+
+    val testSchema = StructType(
+      Array(
+        StructField("id", IntegerType, nullable = false),
+        StructField("title", StringType, nullable = true),
+        StructField("content", StringType, nullable = true)
+      )
+    )
+
     // Create a mock transaction log and scan builder to test filter support
     // Note: This would require more setup in a real integration test
     val indexQueryFilter = IndexQueryFilter("title", "spark AND sql")
-    
+
     // The filter should be valid
     assert(indexQueryFilter.isValid)
     assert(indexQueryFilter.references.sameElements(Array("title")))
   }
-  
+
   test("Expression utilities should handle complex expressions with IndexQuery") {
     val indexQuery1 = IndexQueryExpression(
       AttributeReference("title", StringType, nullable = true)(),
@@ -77,49 +79,49 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       AttributeReference("status", StringType, nullable = true)(),
       Literal(UTF8String.fromString("active"), StringType)
     )
-    
+
     val complexExpr = And(And(indexQuery1, indexQuery2), regularFilter)
-    
+
     val extractedQueries = ExpressionUtils.extractIndexQueries(complexExpr)
-    
+
     assert(extractedQueries.length == 2)
     assert(extractedQueries.contains(indexQuery1))
     assert(extractedQueries.contains(indexQuery2))
   }
-  
+
   test("IndexQueryExpression validation should work correctly") {
     // Valid expression
     val validExpr = IndexQueryExpression(
       AttributeReference("title", StringType, nullable = true)(),
       Literal(UTF8String.fromString("valid query"), StringType)
     )
-    
+
     val validation = ExpressionUtils.validateIndexQueryExpression(validExpr)
     assert(validation.isRight)
-    
+
     // Invalid expression - empty query
     val invalidExpr = IndexQueryExpression(
       AttributeReference("title", StringType, nullable = true)(),
       Literal(UTF8String.fromString(""), StringType)
     )
-    
+
     val invalidValidation = ExpressionUtils.validateIndexQueryExpression(invalidExpr)
     assert(invalidValidation.isLeft)
     assert(invalidValidation.left.get.contains("Query string cannot be empty"))
   }
-  
+
   test("Filter to expression conversion should be reversible") {
-    val originalFilter = IndexQueryFilter("title", "machine learning AND spark")
-    val expr = ExpressionUtils.filterToExpression(originalFilter)
+    val originalFilter  = IndexQueryFilter("title", "machine learning AND spark")
+    val expr            = ExpressionUtils.filterToExpression(originalFilter)
     val convertedFilter = ExpressionUtils.expressionToIndexQueryFilter(expr)
-    
+
     assert(convertedFilter.isDefined)
     val roundTripFilter = convertedFilter.get
-    
+
     assert(roundTripFilter.columnName == originalFilter.columnName)
     assert(roundTripFilter.queryString == originalFilter.queryString)
   }
-  
+
   test("IndexQueryExpression should handle various query types") {
     val testCases = Seq(
       ("title", "simple query"),
@@ -129,60 +131,61 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       ("metadata", "(complex OR compound) AND NOT excluded"),
       ("search_field", "range:[10 TO 100]")
     )
-    
-    testCases.foreach { case (column, query) =>
-      val expr = IndexQueryExpression(
-        AttributeReference(column, StringType, nullable = true)(),
-        Literal(UTF8String.fromString(query), StringType)
-      )
-      
-      assert(expr.getColumnName.contains(column))
-      assert(expr.getQueryString.contains(query))
-      assert(expr.canPushDown)
-      
-      val filter = ExpressionUtils.expressionToIndexQueryFilter(expr)
-      assert(filter.isDefined)
-      assert(filter.get.columnName == column)
-      assert(filter.get.queryString == query)
+
+    testCases.foreach {
+      case (column, query) =>
+        val expr = IndexQueryExpression(
+          AttributeReference(column, StringType, nullable = true)(),
+          Literal(UTF8String.fromString(query), StringType)
+        )
+
+        assert(expr.getColumnName.contains(column))
+        assert(expr.getQueryString.contains(query))
+        assert(expr.canPushDown)
+
+        val filter = ExpressionUtils.expressionToIndexQueryFilter(expr)
+        assert(filter.isDefined)
+        assert(filter.get.columnName == column)
+        assert(filter.get.queryString == query)
     }
   }
-  
+
   test("IndexQueryExpression SQL representation should be correct") {
     val expr = IndexQueryExpression(
       AttributeReference("title", StringType, nullable = true)(),
       Literal(UTF8String.fromString("search query"), StringType)
     )
-    
+
     val sql = expr.sql
     assert(sql.contains("indexquery"))
     assert(sql.contains("title"))
     assert(sql.contains("search query"))
   }
-  
+
   test("Complex expression trees with IndexQuery should extract correctly") {
     val indexQuery = IndexQueryExpression(
       AttributeReference("content", StringType, nullable = true)(),
       Literal(UTF8String.fromString("important documents"), StringType)
     )
-    
+
     val regularFilter = GreaterThan(
       AttributeReference("score", IntegerType, nullable = false)(),
       Literal(80, IntegerType)
     )
-    
-    val notExpression = Not(indexQuery)
-    val orExpression = Or(indexQuery, regularFilter)
+
+    val notExpression    = Not(indexQuery)
+    val orExpression     = Or(indexQuery, regularFilter)
     val nestedExpression = And(orExpression, Not(regularFilter))
-    
+
     // Test extraction from different expression types
     assert(ExpressionUtils.extractIndexQueries(notExpression).length == 1)
     assert(ExpressionUtils.extractIndexQueries(orExpression).length == 1)
     assert(ExpressionUtils.extractIndexQueries(nestedExpression).length == 1)
-    
+
     val extractedFromNested = ExpressionUtils.extractIndexQueries(nestedExpression)
     assert(extractedFromNested.head == indexQuery)
   }
-  
+
   test("IndexQueryExpression type checking should validate inputs") {
     // Valid case
     val validExpr = IndexQueryExpression(
@@ -190,7 +193,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       Literal(UTF8String.fromString("query"), StringType)
     )
     assert(validExpr.checkInputDataTypes().isSuccess)
-    
+
     // Invalid right operand type
     val invalidRightExpr = IndexQueryExpression(
       AttributeReference("title", StringType, nullable = true)(),
@@ -200,7 +203,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
     assert(result.isFailure)
     assert(result.asInstanceOf[TypeCheckResult.TypeCheckFailure].message.contains("string literal"))
   }
-  
+
   test("IndexQueryFilter should handle special characters and edge cases") {
     val specialCharQueries = Seq(
       "title:\"quotes and spaces\"",
@@ -210,7 +213,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       "symbols: @#$%^&*()",
       "escaped\\:colon\\*asterisk"
     )
-    
+
     specialCharQueries.foreach { query =>
       val filter = IndexQueryFilter("content", query)
       assert(filter.isValid)
@@ -218,7 +221,7 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       assert(filter.references.sameElements(Array("content")))
     }
   }
-  
+
   test("End-to-end SQL integration test with indexquery operator") {
     withTempPath { tempPath =>
       val spark = this.spark
@@ -270,13 +273,14 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
       assert(results.length > 0, "SQL query with indexquery operator should return results")
 
       // Verify that the correct document was found (the one with "spark" in the title)
-      assert(results.exists(_.getString(1).toLowerCase.contains("spark")),
-        "IndexQuery should return documents containing the search term")
+      assert(
+        results.exists(_.getString(1).toLowerCase.contains("spark")),
+        "IndexQuery should return documents containing the search term"
+      )
 
       // Verify the SQL plan shows our data source is being used
       val planString = sqlResult.queryExecution.executedPlan.toString()
-      assert(planString.contains("Tantivy4SparkScan"),
-        "Query plan should use Tantivy4SparkScan")
+      assert(planString.contains("Tantivy4SparkScan"), "Query plan should use Tantivy4SparkScan")
 
       // Test another query pattern
       val sqlResult2 = spark.sql("""

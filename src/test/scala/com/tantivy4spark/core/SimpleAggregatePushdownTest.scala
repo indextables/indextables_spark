@@ -24,12 +24,12 @@ import java.nio.file.Files
 import java.io.File
 
 /**
- * Comprehensive test suite for simple aggregation pushdown functionality.
- * Tests COUNT, SUM, AVG, MIN, MAX aggregations without GROUP BY clauses.
+ * Comprehensive test suite for simple aggregation pushdown functionality. Tests COUNT, SUM, AVG, MIN, MAX aggregations
+ * without GROUP BY clauses.
  */
 class SimpleAggregatePushdownTest extends TestBase {
 
-  private def isNativeLibraryAvailable(): Boolean = {
+  private def isNativeLibraryAvailable(): Boolean =
     try {
       import com.tantivy4spark.search.TantivyNative
       TantivyNative.ensureLibraryLoaded()
@@ -37,19 +37,20 @@ class SimpleAggregatePushdownTest extends TestBase {
     } catch {
       case _: Exception => false
     }
-  }
 
   private def createTestData(): DataFrame = {
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Seq(
-      StructField("id", StringType, nullable = false),
-      StructField("category", StringType, nullable = false),
-      StructField("content", StringType, nullable = false),
-      StructField("score", IntegerType, nullable = false),
-      StructField("rating", DoubleType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType, nullable = false),
+        StructField("category", StringType, nullable = false),
+        StructField("content", StringType, nullable = false),
+        StructField("score", IntegerType, nullable = false),
+        StructField("rating", DoubleType, nullable = false)
+      )
+    )
 
     val rows = Seq(
       Row("doc1", "category_a", "content about AI", 10, 1.5),
@@ -69,7 +70,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -94,7 +96,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -119,7 +122,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -145,7 +149,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -171,7 +176,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -197,7 +203,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -223,7 +230,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -232,20 +240,22 @@ class SimpleAggregatePushdownTest extends TestBase {
       // Read data and perform multiple aggregations
       val df = spark.read.format("tantivy4spark").load(tempPath)
 
-      val result = df.agg(
-        count(lit(1)).as("total_count"),
-        sum("score").as("total_sum"),
-        avg("score").as("avg_score"),
-        min("score").as("min_score"),
-        max("score").as("max_score")
-      ).collect()
+      val result = df
+        .agg(
+          count(lit(1)).as("total_count"),
+          sum("score").as("total_sum"),
+          avg("score").as("avg_score"),
+          min("score").as("min_score"),
+          max("score").as("max_score")
+        )
+        .collect()
 
-      val row = result(0)
+      val row        = result(0)
       val totalCount = row.getLong(0)
-      val totalSum = row.getLong(1)
-      val avgScore = row.getDouble(2)
-      val minScore = row.getInt(3)
-      val maxScore = row.getInt(4)
+      val totalSum   = row.getLong(1)
+      val avgScore   = row.getDouble(2)
+      val minScore   = row.getInt(3)
+      val maxScore   = row.getInt(4)
 
       totalCount shouldBe 5L
       totalSum shouldBe 150L
@@ -264,7 +274,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -274,18 +285,20 @@ class SimpleAggregatePushdownTest extends TestBase {
       val df = spark.read.format("tantivy4spark").load(tempPath)
 
       // Filter for scores > 20, should include docs with scores 30, 40, 50
-      val result = df.filter(col("score") > 20)
+      val result = df
+        .filter(col("score") > 20)
         .agg(
           count(lit(1)).as("filtered_count"),
           sum("score").as("filtered_sum")
-        ).collect()
+        )
+        .collect()
 
-      val row = result(0)
+      val row           = result(0)
       val filteredCount = row.getLong(0)
-      val filteredSum = row.getLong(1)
+      val filteredSum   = row.getLong(1)
 
-      filteredCount shouldBe 3L  // docs with scores 30, 40, 50
-      filteredSum shouldBe 120L  // 30 + 40 + 50 = 120
+      filteredCount shouldBe 3L // docs with scores 30, 40, 50
+      filteredSum shouldBe 120L // 30 + 40 + 50 = 120
 
       println(s"✅ Aggregations with WHERE clause test passed: count=$filteredCount, sum=$filteredSum")
     }
@@ -298,7 +311,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -309,23 +323,27 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Filter for category in ('category_a', 'category_b') AND score >= 20
       // Should include docs: doc2 (score=20), doc3 (score=30), doc4 (score=40)
-      val result = df.filter(col("category").isin("category_a", "category_b") && col("score") >= 20)
+      val result = df
+        .filter(col("category").isin("category_a", "category_b") && col("score") >= 20)
         .agg(
           count(lit(1)).as("complex_count"),
           sum("score").as("complex_sum"),
           avg("score").as("complex_avg")
-        ).collect()
+        )
+        .collect()
 
-      val row = result(0)
+      val row          = result(0)
       val complexCount = row.getLong(0)
-      val complexSum = row.getLong(1)
-      val complexAvg = row.getDouble(2)
+      val complexSum   = row.getLong(1)
+      val complexAvg   = row.getDouble(2)
 
-      complexCount shouldBe 3L  // docs 2, 3, 4
-      complexSum shouldBe 90L   // 20 + 30 + 40 = 90
-      complexAvg shouldBe 30.0  // 90/3 = 30.0
+      complexCount shouldBe 3L // docs 2, 3, 4
+      complexSum shouldBe 90L  // 20 + 30 + 40 = 90
+      complexAvg shouldBe 30.0 // 90/3 = 30.0
 
-      println(s"✅ Aggregations with complex WHERE clause test passed: count=$complexCount, sum=$complexSum, avg=$complexAvg")
+      println(
+        s"✅ Aggregations with complex WHERE clause test passed: count=$complexCount, sum=$complexSum, avg=$complexAvg"
+      )
     }
   }
 
@@ -337,15 +355,19 @@ class SimpleAggregatePushdownTest extends TestBase {
     import org.apache.hadoop.fs.Path
     import scala.collection.JavaConverters._
 
-    val schema = StructType(Seq(
-      StructField("id", StringType, nullable = false),
-      StructField("category", StringType, nullable = false),
-      StructField("score", IntegerType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType, nullable = false),
+        StructField("category", StringType, nullable = false),
+        StructField("score", IntegerType, nullable = false)
+      )
+    )
 
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.indexing.fastfields" -> "score"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.indexing.fastfields" -> "score"
+      ).asJava
+    )
 
     // For testing: create a mock TransactionLog with empty files
     // Create options map with allowDirectUsage for testing
@@ -359,14 +381,20 @@ class SimpleAggregatePushdownTest extends TestBase {
 
     // Test that we can create the scan builder
     val scanBuilder = new Tantivy4SparkScanBuilder(
-      spark, transactionLog, schema, options, broadcastConfig.value
+      spark,
+      transactionLog,
+      schema,
+      options,
+      broadcastConfig.value
     )
 
     assert(scanBuilder != null, "ScanBuilder should be created successfully")
 
     // Verify the createSimpleAggregateScan method exists
-    val method = scanBuilder.getClass.getDeclaredMethod("createSimpleAggregateScan",
-      classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation])
+    val method = scanBuilder.getClass.getDeclaredMethod(
+      "createSimpleAggregateScan",
+      classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation]
+    )
     assert(method != null, "createSimpleAggregateScan method should exist")
 
     println("✅ Simple aggregations scan builder integration test passed")
@@ -387,11 +415,13 @@ class SimpleAggregatePushdownTest extends TestBase {
     assert(sumSchema.fields(0).dataType == LongType)
 
     // Test multiple aggregations schema
-    val multiSchema = StructType(Seq(
-      StructField("count(1)", LongType, nullable = false),
-      StructField("sum(score)", LongType, nullable = true),
-      StructField("avg(score)", DoubleType, nullable = true)
-    ))
+    val multiSchema = StructType(
+      Seq(
+        StructField("count(1)", LongType, nullable = false),
+        StructField("sum(score)", LongType, nullable = true),
+        StructField("avg(score)", DoubleType, nullable = true)
+      )
+    )
     assert(multiSchema.fields.length == 3)
 
     println("✅ Simple aggregations schema generation test passed")
@@ -422,7 +452,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -442,7 +473,7 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Check if our simple aggregate scan appears in the plan
       val hasSimpleAggregateScan = physicalPlan.contains("Tantivy4SparkSimpleAggregateScan") ||
-                                  physicalPlan.contains("SimpleAggregateScan")
+        physicalPlan.contains("SimpleAggregateScan")
 
       if (hasSimpleAggregateScan) {
         println("✅ Simple aggregation pushdown detected in physical plan!")
@@ -453,7 +484,7 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // For now, just verify the query executes correctly - the scan detection will depend on
       // the actual Spark version and physical plan format
-      val result = query.collect()
+      val result     = query.collect()
       val totalScore = result(0).getLong(0)
       totalScore shouldBe 150L
 
@@ -468,7 +499,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -479,24 +511,24 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Test COUNT(*) without filters - should potentially use transaction log optimization
       val countQuery = df.agg(count(lit(1)))
-      val countPlan = countQuery.queryExecution.executedPlan.toString
+      val countPlan  = countQuery.queryExecution.executedPlan.toString
 
       println("🔍 COUNT(*) PHYSICAL PLAN:")
       println(countPlan)
 
       // Test SUM with filters - should use simple aggregation scan
       val sumQuery = df.filter(col("score") > 20).agg(sum("score"))
-      val sumPlan = sumQuery.queryExecution.executedPlan.toString
+      val sumPlan  = sumQuery.queryExecution.executedPlan.toString
 
       println("🔍 SUM WITH FILTER PHYSICAL PLAN:")
       println(sumPlan)
 
       // Verify both queries execute correctly
       val countResult = countQuery.collect()(0).getLong(0)
-      val sumResult = sumQuery.collect()(0).getLong(0)
+      val sumResult   = sumQuery.collect()(0).getLong(0)
 
       countResult shouldBe 5L
-      sumResult shouldBe 120L  // 30 + 40 + 50 = 120
+      sumResult shouldBe 120L // 30 + 40 + 50 = 120
 
       println(s"✅ Plan comparison test passed: count=$countResult, filtered_sum=$sumResult")
     }
@@ -509,7 +541,10 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data using V2 API - use single partition to avoid distributed aggregation issues
-      testData.coalesce(1).write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      testData
+        .coalesce(1)
+        .write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -532,7 +567,7 @@ class SimpleAggregatePushdownTest extends TestBase {
       println(physicalPlan)
 
       // Execute query to verify functionality
-      val result = query.collect()
+      val result   = query.collect()
       val avgScore = result(0).getDouble(0)
 
       println(s"🔍 V2 API: Expected avg = 30.0, actual avg = $avgScore")
@@ -550,7 +585,8 @@ class SimpleAggregatePushdownTest extends TestBase {
       val testData = createTestData()
 
       // Write test data using V2 API - DO NOT coalesce, let it create multiple partitions
-      testData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      testData.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
@@ -564,20 +600,22 @@ class SimpleAggregatePushdownTest extends TestBase {
       println(s"🔍 DISTRIBUTED: Total count = $totalCount")
 
       // Test multiple aggregation types that should work in distributed mode
-      val result = df.agg(
-        count(lit(1)).as("total_count"),
-        sum("score").as("total_sum"),
-        avg("score").as("avg_score"),
-        min("score").as("min_score"),
-        max("score").as("max_score")
-      ).collect()
+      val result = df
+        .agg(
+          count(lit(1)).as("total_count"),
+          sum("score").as("total_sum"),
+          avg("score").as("avg_score"),
+          min("score").as("min_score"),
+          max("score").as("max_score")
+        )
+        .collect()
 
-      val row = result(0)
+      val row         = result(0)
       val actualCount = row.getLong(0)
-      val actualSum = row.getLong(1)
-      val actualAvg = row.getDouble(2)
-      val actualMin = row.getInt(3)
-      val actualMax = row.getInt(4)
+      val actualSum   = row.getLong(1)
+      val actualAvg   = row.getDouble(2)
+      val actualMin   = row.getInt(3)
+      val actualMax   = row.getInt(4)
 
       println(s"🔍 DISTRIBUTED RESULTS:")
       println(s"  Count: $actualCount (expected: 5)")
@@ -604,12 +642,13 @@ class SimpleAggregatePushdownTest extends TestBase {
     val originalAqeSetting = spark.conf.getOption("spark.sql.adaptive.enabled")
     spark.conf.set("spark.sql.adaptive.enabled", "false")
 
-    try {
+    try
       withTempPath { tempPath =>
         val testData = createTestData()
 
         // Write test data
-        testData.write.format("tantivy4spark")
+        testData.write
+          .format("tantivy4spark")
           .option("spark.indextables.indexing.typemap.category", "string")
           .option("spark.indextables.indexing.fastfields", "score,rating")
           .mode(SaveMode.Overwrite)
@@ -627,36 +666,36 @@ class SimpleAggregatePushdownTest extends TestBase {
           ("MAX", df.agg(max("score")))
         )
 
-        queries.foreach { case (aggType, query) =>
-          val physicalPlan = query.queryExecution.executedPlan.toString
+        queries.foreach {
+          case (aggType, query) =>
+            val physicalPlan = query.queryExecution.executedPlan.toString
 
-          println(s"🔍 $aggType AGGREGATION PLAN (AQE DISABLED):")
-          println(physicalPlan)
+            println(s"🔍 $aggType AGGREGATION PLAN (AQE DISABLED):")
+            println(physicalPlan)
 
-          // Check for our scan classes in the plan
-          val hasTantivyScan = physicalPlan.contains("Tantivy4Spark") ||
-                              physicalPlan.contains("SimpleAggregateScan") ||
-                              physicalPlan.contains("AggregateScan")
+            // Check for our scan classes in the plan
+            val hasTantivyScan = physicalPlan.contains("Tantivy4Spark") ||
+              physicalPlan.contains("SimpleAggregateScan") ||
+              physicalPlan.contains("AggregateScan")
 
-          if (hasTantivyScan) {
-            println(s"✅ $aggType: Tantivy aggregation scan detected in plan")
-          } else {
-            println(s"⚠️ $aggType: No Tantivy scan detected - may be using Spark aggregation")
-          }
+            if (hasTantivyScan) {
+              println(s"✅ $aggType: Tantivy aggregation scan detected in plan")
+            } else {
+              println(s"⚠️ $aggType: No Tantivy scan detected - may be using Spark aggregation")
+            }
 
-          // Execute to verify correctness
-          val result = query.collect()
-          assert(result.length == 1, s"$aggType should return exactly one result")
+            // Execute to verify correctness
+            val result = query.collect()
+            assert(result.length == 1, s"$aggType should return exactly one result")
 
-          println(s"✅ $aggType aggregation executed successfully")
+            println(s"✅ $aggType aggregation executed successfully")
         }
       }
-    } finally {
+    finally
       // Restore original AQE setting
       originalAqeSetting match {
         case Some(value) => spark.conf.set("spark.sql.adaptive.enabled", value)
-        case None => spark.conf.unset("spark.sql.adaptive.enabled")
+        case None        => spark.conf.unset("spark.sql.adaptive.enabled")
       }
-    }
   }
 }

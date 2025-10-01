@@ -44,11 +44,11 @@ class PartitionedDatasetTest extends TestBase {
 
   override def afterEach(): Unit = {
     super.afterEach()
-    try {
+    try
       if (testDataPath != null) {
         FileUtils.deleteDirectory(new File(testDataPath))
       }
-    } catch {
+    catch {
       case _: Exception => // Ignore cleanup errors
     }
   }
@@ -84,9 +84,7 @@ class PartitionedDatasetTest extends TestBase {
     // Debug: Check what directories were actually created
     val baseDir = new File(testDataPath)
     println(s"Contents of $testDataPath:")
-    baseDir.listFiles().foreach { f =>
-      println(s"  ${f.getName} (${if (f.isDirectory) "DIR" else "FILE"})")
-    }
+    baseDir.listFiles().foreach(f => println(s"  ${f.getName} (${if (f.isDirectory) "DIR" else "FILE"})"))
 
     // Validate physical partitions exist on disk
     validatePhysicalPartitions(testDataPath)
@@ -134,7 +132,7 @@ class PartitionedDatasetTest extends TestBase {
     // Test 4: Text search within partition
     val textSearchInPartition = df.filter(
       col("load_date") === "2024-01-01" &&
-      col("message").contains("error")
+        col("message").contains("error")
     )
     val textSearchCount = textSearchInPartition.count()
     println(s"Text search in partition returned $textSearchCount records")
@@ -151,7 +149,7 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.indextables.indexWriter.batchSize", "5") // Very small batches to force many files
+      .option("spark.indextables.indexWriter.batchSize", "5")                // Very small batches to force many files
       .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Very small split sizes
       .mode("overwrite")
       .save(testDataPath)
@@ -195,7 +193,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity after merge
-    val df = spark.read.format("tantivy4spark").load(testDataPath)
+    val df                = spark.read.format("tantivy4spark").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 2400, "Should preserve all records after partition merge")
 
@@ -215,7 +213,7 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("tantivy4spark")
       .partitionBy("load_date", "load_hour")
-      .option("spark.indextables.indexWriter.batchSize", "5") // Small batches
+      .option("spark.indextables.indexWriter.batchSize", "5")                // Small batches
       .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Small split sizes
       .mode("overwrite")
       .save(testDataPath)
@@ -242,7 +240,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity
-    val df = spark.read.format("tantivy4spark").load(testDataPath)
+    val df                = spark.read.format("tantivy4spark").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 1800, "Should preserve all records after global merge")
 
@@ -330,7 +328,7 @@ class PartitionedDatasetTest extends TestBase {
       .save(testDataPath)
 
     // Verify combined dataset
-    val df = spark.read.format("tantivy4spark").load(testDataPath)
+    val df         = spark.read.format("tantivy4spark").load(testDataPath)
     val totalCount = df.count()
     assert(totalCount == 800, "Should have combined records from both writes")
 
@@ -404,21 +402,26 @@ class PartitionedDatasetTest extends TestBase {
 
   // Helper methods
 
-  private def generateTimeSeriesData(spark: SparkSession, totalRecords: Int, daysSpan: Int, startDate: String = "2024-01-01"): DataFrame = {
+  private def generateTimeSeriesData(
+    spark: SparkSession,
+    totalRecords: Int,
+    daysSpan: Int,
+    startDate: String = "2024-01-01"
+  ): DataFrame = {
     import spark.implicits._
 
-    val random = new Random(42) // Fixed seed for reproducible tests
-    val baseDate = LocalDate.parse(startDate)
+    val random     = new Random(42) // Fixed seed for reproducible tests
+    val baseDate   = LocalDate.parse(startDate)
     val eventTypes = Array("system", "application", "security", "performance")
     val severities = Array("info", "warning", "error", "critical")
 
     val records = (0 until totalRecords).map { i =>
       val dayOffset = random.nextInt(daysSpan)
-      val hour = random.nextInt(24)
-      val loadDate = baseDate.plusDays(dayOffset).toString
+      val hour      = random.nextInt(24)
+      val loadDate  = baseDate.plusDays(dayOffset).toString
 
       val eventType = eventTypes(random.nextInt(eventTypes.length))
-      val severity = severities(random.nextInt(severities.length))
+      val severity  = severities(random.nextInt(severities.length))
 
       val messageTemplates = Array(
         s"$eventType $severity: Processing batch $i",
@@ -430,7 +433,9 @@ class PartitionedDatasetTest extends TestBase {
       )
 
       val message = messageTemplates(random.nextInt(messageTemplates.length))
-      val timestamp = Timestamp.valueOf(LocalDateTime.parse(f"${loadDate}T${hour}%02d:${random.nextInt(60)}%02d:${random.nextInt(60)}%02d"))
+      val timestamp = Timestamp.valueOf(
+        LocalDateTime.parse(f"${loadDate}T$hour%02d:${random.nextInt(60)}%02d:${random.nextInt(60)}%02d")
+      )
 
       TimeSeriesRecord(
         id = i.toLong,
@@ -453,7 +458,8 @@ class PartitionedDatasetTest extends TestBase {
     assert(Files.exists(Paths.get(transactionLogPath)), "Transaction log directory should exist")
 
     // Read transaction log files to verify partition metadata
-    val logFiles = new File(transactionLogPath).listFiles()
+    val logFiles = new File(transactionLogPath)
+      .listFiles()
       .filter(_.getName.endsWith(".json"))
 
     assert(logFiles.nonEmpty, "Should have transaction log files")
@@ -469,11 +475,12 @@ class PartitionedDatasetTest extends TestBase {
   }
 
   private def validatePhysicalPartitions(path: String): Unit = {
-    val baseDir = new File(path)
+    val baseDir  = new File(path)
     val allFiles = baseDir.listFiles()
 
     if (allFiles != null) {
-      val partitionDirs = allFiles.filter(_.isDirectory)
+      val partitionDirs = allFiles
+        .filter(_.isDirectory)
         .filter(_.getName.startsWith("load_date="))
 
       if (partitionDirs.nonEmpty) {
@@ -481,7 +488,8 @@ class PartitionedDatasetTest extends TestBase {
 
         // Check for hour partitions within date partitions
         partitionDirs.foreach { dateDir =>
-          val hourDirs = dateDir.listFiles()
+          val hourDirs = dateDir
+            .listFiles()
             .filter(_.isDirectory)
             .filter(_.getName.startsWith("load_hour="))
 
@@ -501,7 +509,7 @@ class PartitionedDatasetTest extends TestBase {
         // Maybe Tantivy4Spark doesn't use physical partitioning like Delta Lake
         // Let's check if there are just split files at the root level
         val splitFiles = allFiles.filter(_.getName.endsWith(".split"))
-        val logDir = allFiles.find(_.getName == "_transaction_log")
+        val logDir     = allFiles.find(_.getName == "_transaction_log")
 
         println(s"No partition directories found. Found ${splitFiles.length} split files at root level")
         if (logDir.isDefined) {
@@ -516,7 +524,7 @@ class PartitionedDatasetTest extends TestBase {
     }
   }
 
-  private def countSplitFiles(path: String): Int = {
+  private def countSplitFiles(path: String): Int =
     // Count logically active files using transaction log, not physical files on disk
     // This is important because RemoveActions don't delete files, they just mark them as removed
     try {
@@ -524,7 +532,7 @@ class PartitionedDatasetTest extends TestBase {
       import org.apache.hadoop.fs.Path
 
       val transactionLog = TransactionLogFactory.create(new Path(path), spark)
-      val activeFiles = transactionLog.listFiles()
+      val activeFiles    = transactionLog.listFiles()
       activeFiles.length
     } catch {
       case _: Exception =>
@@ -533,7 +541,8 @@ class PartitionedDatasetTest extends TestBase {
           if (!dir.exists() || !dir.isDirectory) return 0
 
           val splitFiles = dir.listFiles().filter(_.getName.endsWith(".split")).length
-          val subDirFiles = dir.listFiles()
+          val subDirFiles = dir
+            .listFiles()
             .filter(_.isDirectory)
             .map(countRecursively)
             .sum
@@ -542,7 +551,6 @@ class PartitionedDatasetTest extends TestBase {
         }
         countRecursively(new File(path))
     }
-  }
 
   private def countSplitFilesInDir(dirPath: String): Int = {
     val dir = new File(dirPath)
@@ -562,5 +570,4 @@ case class TimeSeriesRecord(
   severity: String,
   message: String,
   metric_value: Double,
-  host_id: String
-)
+  host_id: String)

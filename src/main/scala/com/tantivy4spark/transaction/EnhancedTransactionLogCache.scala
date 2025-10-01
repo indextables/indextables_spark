@@ -25,19 +25,18 @@ import scala.collection.concurrent.TrieMap
 import scala.util.Try
 
 /**
- * Enhanced multi-level caching system for transaction logs using Google Guava cache
- * with proper eviction policies, TTL management, and lazy evaluation support.
+ * Enhanced multi-level caching system for transaction logs using Google Guava cache with proper eviction policies, TTL
+ * management, and lazy evaluation support.
  */
 class EnhancedTransactionLogCache(
-    logCacheSize: Long = 1000,
-    logCacheTTLMinutes: Long = 5,
-    snapshotCacheSize: Long = 100,
-    snapshotCacheTTLMinutes: Long = 10,
-    fileListCacheSize: Long = 50,
-    fileListCacheTTLMinutes: Long = 2,
-    metadataCacheSize: Long = 100,
-    metadataCacheTTLMinutes: Long = 30
-) {
+  logCacheSize: Long = 1000,
+  logCacheTTLMinutes: Long = 5,
+  snapshotCacheSize: Long = 100,
+  snapshotCacheTTLMinutes: Long = 10,
+  fileListCacheSize: Long = 50,
+  fileListCacheTTLMinutes: Long = 2,
+  metadataCacheSize: Long = 100,
+  metadataCacheTTLMinutes: Long = 30) {
 
   private val logger = LoggerFactory.getLogger(classOf[EnhancedTransactionLogCache])
 
@@ -48,52 +47,56 @@ class EnhancedTransactionLogCache(
   case class MetadataCacheKey(tablePath: String)
 
   // Log-level cache for transaction log instances
-  private val logCache: Cache[LogCacheKey, TransactionLogSnapshot] = CacheBuilder.newBuilder()
+  private val logCache: Cache[LogCacheKey, TransactionLogSnapshot] = CacheBuilder
+    .newBuilder()
     .expireAfterAccess(logCacheTTLMinutes, TimeUnit.MINUTES)
     .maximumSize(logCacheSize)
     .recordStats()
     .removalListener(new RemovalListener[LogCacheKey, TransactionLogSnapshot] {
-      override def onRemoval(notification: RemovalNotification[LogCacheKey, TransactionLogSnapshot]): Unit = {
+      override def onRemoval(notification: RemovalNotification[LogCacheKey, TransactionLogSnapshot]): Unit =
         logger.debug(s"Evicted log cache entry: ${notification.getKey}, reason: ${notification.getCause}")
-      }
     })
     .build[LogCacheKey, TransactionLogSnapshot]()
 
   // Snapshot cache for version states
-  private val snapshotCache: Cache[SnapshotCacheKey, Snapshot] = CacheBuilder.newBuilder()
+  private val snapshotCache: Cache[SnapshotCacheKey, Snapshot] = CacheBuilder
+    .newBuilder()
     .expireAfterWrite(snapshotCacheTTLMinutes, TimeUnit.MINUTES)
     .maximumSize(snapshotCacheSize)
     .recordStats()
     .removalListener(new RemovalListener[SnapshotCacheKey, Snapshot] {
-      override def onRemoval(notification: RemovalNotification[SnapshotCacheKey, Snapshot]): Unit = {
+      override def onRemoval(notification: RemovalNotification[SnapshotCacheKey, Snapshot]): Unit =
         logger.debug(s"Evicted snapshot cache entry: ${notification.getKey}, reason: ${notification.getCause}")
-      }
     })
     .build[SnapshotCacheKey, Snapshot]()
 
   // File list cache with checksum validation
-  private val fileListCache: Cache[FileListCacheKey, Seq[AddAction]] = CacheBuilder.newBuilder()
+  private val fileListCache: Cache[FileListCacheKey, Seq[AddAction]] = CacheBuilder
+    .newBuilder()
     .expireAfterWrite(fileListCacheTTLMinutes, TimeUnit.MINUTES)
     .maximumSize(fileListCacheSize)
     .recordStats()
     .build[FileListCacheKey, Seq[AddAction]]()
 
   // Metadata cache
-  private val metadataCache: Cache[MetadataCacheKey, MetadataAction] = CacheBuilder.newBuilder()
+  private val metadataCache: Cache[MetadataCacheKey, MetadataAction] = CacheBuilder
+    .newBuilder()
     .expireAfterAccess(metadataCacheTTLMinutes, TimeUnit.MINUTES)
     .maximumSize(metadataCacheSize)
     .recordStats()
     .build[MetadataCacheKey, MetadataAction]()
 
   // Version-specific action cache
-  private val versionCache: Cache[LogCacheKey, Seq[Action]] = CacheBuilder.newBuilder()
+  private val versionCache: Cache[LogCacheKey, Seq[Action]] = CacheBuilder
+    .newBuilder()
     .expireAfterAccess(5, TimeUnit.MINUTES)
     .maximumSize(500)
     .recordStats()
     .build[LogCacheKey, Seq[Action]]()
 
   // Checkpoint info cache
-  private val checkpointCache: Cache[String, CheckpointInfo] = CacheBuilder.newBuilder()
+  private val checkpointCache: Cache[String, CheckpointInfo] = CacheBuilder
+    .newBuilder()
     .expireAfterWrite(10, TimeUnit.MINUTES)
     .maximumSize(100)
     .recordStats()
@@ -102,13 +105,11 @@ class EnhancedTransactionLogCache(
   // Lazy value cache for expensive computations
   private val lazyValueCache = new TrieMap[String, LazyValue[_]]()
 
-  /**
-   * Get or compute a transaction log snapshot
-   */
+  /** Get or compute a transaction log snapshot */
   def getOrComputeLogSnapshot(
-      tablePath: String,
-      version: Long,
-      compute: => TransactionLogSnapshot
+    tablePath: String,
+    version: Long,
+    compute: => TransactionLogSnapshot
   ): TransactionLogSnapshot = {
     val key = LogCacheKey(tablePath, version)
     Option(logCache.getIfPresent(key)) match {
@@ -123,13 +124,11 @@ class EnhancedTransactionLogCache(
     }
   }
 
-  /**
-   * Get or compute a snapshot
-   */
+  /** Get or compute a snapshot */
   def getOrComputeSnapshot(
-      tablePath: String,
-      version: Long,
-      compute: => Snapshot
+    tablePath: String,
+    version: Long,
+    compute: => Snapshot
   ): Snapshot = {
     val key = SnapshotCacheKey(tablePath, version)
     Option(snapshotCache.getIfPresent(key)) match {
@@ -144,13 +143,11 @@ class EnhancedTransactionLogCache(
     }
   }
 
-  /**
-   * Get or compute file list
-   */
+  /** Get or compute file list */
   def getOrComputeFileList(
-      tablePath: String,
-      checksum: String,
-      compute: => Seq[AddAction]
+    tablePath: String,
+    checksum: String,
+    compute: => Seq[AddAction]
   ): Seq[AddAction] = {
     val key = FileListCacheKey(tablePath, checksum)
     Option(fileListCache.getIfPresent(key)) match {
@@ -168,12 +165,10 @@ class EnhancedTransactionLogCache(
     }
   }
 
-  /**
-   * Get or compute metadata
-   */
+  /** Get or compute metadata */
   def getOrComputeMetadata(
-      tablePath: String,
-      compute: => MetadataAction
+    tablePath: String,
+    compute: => MetadataAction
   ): MetadataAction = {
     val key = MetadataCacheKey(tablePath)
     Option(metadataCache.getIfPresent(key)) match {
@@ -188,13 +183,11 @@ class EnhancedTransactionLogCache(
     }
   }
 
-  /**
-   * Get or compute version actions
-   */
+  /** Get or compute version actions */
   def getOrComputeVersionActions(
-      tablePath: String,
-      version: Long,
-      compute: => Seq[Action]
+    tablePath: String,
+    version: Long,
+    compute: => Seq[Action]
   ): Seq[Action] = {
     val key = LogCacheKey(tablePath, version)
     Option(versionCache.getIfPresent(key)) match {
@@ -209,13 +202,11 @@ class EnhancedTransactionLogCache(
     }
   }
 
-  /**
-   * Get or compute checkpoint info
-   */
+  /** Get or compute checkpoint info */
   def getOrComputeCheckpoint(
-      tablePath: String,
-      compute: => CheckpointInfo
-  ): CheckpointInfo = {
+    tablePath: String,
+    compute: => CheckpointInfo
+  ): CheckpointInfo =
     Option(checkpointCache.getIfPresent(tablePath)) match {
       case Some(info) =>
         logger.debug(s"Checkpoint cache hit for $tablePath")
@@ -226,47 +217,43 @@ class EnhancedTransactionLogCache(
         checkpointCache.put(tablePath, info)
         info
     }
-  }
 
-  /**
-   * Get or create a lazy value for expensive computations
-   */
-  def getOrCreateLazyValue[T](key: String, compute: => T): LazyValue[T] = {
+  /** Get or create a lazy value for expensive computations */
+  def getOrCreateLazyValue[T](key: String, compute: => T): LazyValue[T] =
     lazyValueCache.getOrElseUpdate(key, new LazyValue(compute)).asInstanceOf[LazyValue[T]]
-  }
 
   // Write-through cache methods for proactive cache management
 
-  /**
-   * Directly cache version actions (write-through)
-   */
-  def putVersionActions(tablePath: String, version: Long, actions: Seq[Action]): Unit = {
+  /** Directly cache version actions (write-through) */
+  def putVersionActions(
+    tablePath: String,
+    version: Long,
+    actions: Seq[Action]
+  ): Unit = {
     val key = LogCacheKey(tablePath, version)
     versionCache.put(key, actions)
     logger.debug(s"Cached version actions for $tablePath version $version")
   }
 
-  /**
-   * Directly cache file list (write-through)
-   */
-  def putFileList(tablePath: String, checksum: String, files: Seq[AddAction]): Unit = {
+  /** Directly cache file list (write-through) */
+  def putFileList(
+    tablePath: String,
+    checksum: String,
+    files: Seq[AddAction]
+  ): Unit = {
     val key = FileListCacheKey(tablePath, checksum)
     fileListCache.put(key, files)
     logger.debug(s"Cached file list for $tablePath checksum $checksum")
   }
 
-  /**
-   * Directly cache metadata (write-through)
-   */
+  /** Directly cache metadata (write-through) */
   def putMetadata(tablePath: String, metadata: MetadataAction): Unit = {
     val key = MetadataCacheKey(tablePath)
     metadataCache.put(key, metadata)
     logger.debug(s"Cached metadata for $tablePath")
   }
 
-  /**
-   * Invalidate all caches for a specific table
-   */
+  /** Invalidate all caches for a specific table */
   def invalidateTable(tablePath: String): Unit = {
     logger.info(s"Invalidating all caches for table $tablePath")
 
@@ -283,9 +270,7 @@ class EnhancedTransactionLogCache(
     keysToRemove.foreach(lazyValueCache.remove)
   }
 
-  /**
-   * Invalidate version-dependent caches for a table
-   */
+  /** Invalidate version-dependent caches for a table */
   def invalidateVersionDependentCaches(tablePath: String): Unit = {
     logger.debug(s"Invalidating version-dependent caches for table $tablePath")
 
@@ -294,30 +279,23 @@ class EnhancedTransactionLogCache(
     metadataCache.invalidate(MetadataCacheKey(tablePath))
   }
 
-  /**
-   * Invalidate specific versions
-   */
-  def invalidateVersions(tablePath: String, versions: Seq[Long]): Unit = {
+  /** Invalidate specific versions */
+  def invalidateVersions(tablePath: String, versions: Seq[Long]): Unit =
     versions.foreach { version =>
       logCache.invalidate(LogCacheKey(tablePath, version))
       snapshotCache.invalidate(SnapshotCacheKey(tablePath, version))
       versionCache.invalidate(LogCacheKey(tablePath, version))
     }
-  }
 
-  /**
-   * Helper to invalidate cache entries by predicate
-   */
+  /** Helper to invalidate cache entries by predicate */
   private def invalidateByPredicate[K, V](cache: Cache[K, V], predicate: K => Boolean): Unit = {
     import scala.jdk.CollectionConverters._
     val keysToInvalidate = cache.asMap().keySet().asScala.filter(predicate)
     cache.invalidateAll(keysToInvalidate.asJava)
   }
 
-  /**
-   * Get cache statistics for monitoring
-   */
-  def getStatistics(): CacheStatistics = {
+  /** Get cache statistics for monitoring */
+  def getStatistics(): CacheStatistics =
     CacheStatistics(
       logCacheStats = logCache.stats(),
       snapshotCacheStats = snapshotCache.stats(),
@@ -327,11 +305,8 @@ class EnhancedTransactionLogCache(
       checkpointCacheStats = checkpointCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
-  }
 
-  /**
-   * Clear all caches
-   */
+  /** Clear all caches */
   def clearAll(): Unit = {
     logger.info("Clearing all caches")
     logCache.invalidateAll()
@@ -343,9 +318,7 @@ class EnhancedTransactionLogCache(
     lazyValueCache.clear()
   }
 
-  /**
-   * Cleanup expired entries
-   */
+  /** Cleanup expired entries */
   def cleanUp(): Unit = {
     logCache.cleanUp()
     snapshotCache.cleanUp()
@@ -356,14 +329,12 @@ class EnhancedTransactionLogCache(
   }
 }
 
-/**
- * Lazy value wrapper for deferred computation with thread-safe caching
- */
+/** Lazy value wrapper for deferred computation with thread-safe caching */
 class LazyValue[T](compute: => T) {
   @volatile private var cached: Option[T] = None
-  private val lock = new Object()
+  private val lock                        = new Object()
 
-  def get: T = {
+  def get: T =
     cached.getOrElse {
       lock.synchronized {
         cached.getOrElse {
@@ -373,55 +344,44 @@ class LazyValue[T](compute: => T) {
         }
       }
     }
-  }
 
   def getOption: Option[T] = cached
 
   def isComputed: Boolean = cached.isDefined
 
-  def invalidate(): Unit = {
+  def invalidate(): Unit =
     lock.synchronized {
       cached = None
     }
-  }
 }
 
-/**
- * Snapshot representation for caching
- */
+/** Snapshot representation for caching */
 case class Snapshot(
-    version: Long,
-    files: Seq[AddAction],
-    metadata: MetadataAction,
-    timestamp: Long = System.currentTimeMillis()
-) {
+  version: Long,
+  files: Seq[AddAction],
+  metadata: MetadataAction,
+  timestamp: Long = System.currentTimeMillis()) {
   def age: Long = System.currentTimeMillis() - timestamp
 }
 
-/**
- * Transaction log snapshot for caching
- */
+/** Transaction log snapshot for caching */
 case class TransactionLogSnapshot(
-    tablePath: String,
-    version: Long,
-    files: Seq[AddAction],
-    metadata: Option[MetadataAction],
-    checkpointInfo: Option[CheckpointInfo],
-    timestamp: Long = System.currentTimeMillis()
-)
+  tablePath: String,
+  version: Long,
+  files: Seq[AddAction],
+  metadata: Option[MetadataAction],
+  checkpointInfo: Option[CheckpointInfo],
+  timestamp: Long = System.currentTimeMillis())
 
-/**
- * Cache statistics for monitoring
- */
+/** Cache statistics for monitoring */
 case class CacheStatistics(
-    logCacheStats: GuavaCacheStats,
-    snapshotCacheStats: GuavaCacheStats,
-    fileListCacheStats: GuavaCacheStats,
-    metadataCacheStats: GuavaCacheStats,
-    versionCacheStats: GuavaCacheStats,
-    checkpointCacheStats: GuavaCacheStats,
-    lazyValueCount: Int
-) {
+  logCacheStats: GuavaCacheStats,
+  snapshotCacheStats: GuavaCacheStats,
+  fileListCacheStats: GuavaCacheStats,
+  metadataCacheStats: GuavaCacheStats,
+  versionCacheStats: GuavaCacheStats,
+  checkpointCacheStats: GuavaCacheStats,
+  lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
       logCacheStats,
@@ -432,14 +392,14 @@ case class CacheStatistics(
       checkpointCacheStats
     )
 
-    val totalHits = allStats.map(_.hitCount()).sum
+    val totalHits     = allStats.map(_.hitCount()).sum
     val totalRequests = allStats.map(_.requestCount()).sum
 
     if (totalRequests == 0) 0.0
     else totalHits.toDouble / totalRequests
   }
 
-  def totalEvictionCount: Long = {
+  def totalEvictionCount: Long =
     Seq(
       logCacheStats,
       snapshotCacheStats,
@@ -448,5 +408,4 @@ case class CacheStatistics(
       versionCacheStats,
       checkpointCacheStats
     ).map(_.evictionCount()).sum
-  }
 }

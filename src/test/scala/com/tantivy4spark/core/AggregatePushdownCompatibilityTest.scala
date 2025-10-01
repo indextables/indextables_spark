@@ -19,9 +19,7 @@ package com.tantivy4spark.core
 
 import org.scalatest.funsuite.AnyFunSuite
 
-/**
- * Test to verify that aggregate pushdown interfaces are available in this Spark version.
- */
+/** Test to verify that aggregate pushdown interfaces are available in this Spark version. */
 class AggregatePushdownCompatibilityTest extends AnyFunSuite {
 
   test("SupportsPushDownAggregates interface should be available") {

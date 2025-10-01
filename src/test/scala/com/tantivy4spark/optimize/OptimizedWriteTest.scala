@@ -18,7 +18,7 @@
 package com.tantivy4spark.optimize
 
 import com.tantivy4spark.TestBase
-import com.tantivy4spark.config.{Tantivy4SparkConfig}
+import com.tantivy4spark.config.Tantivy4SparkConfig
 import com.tantivy4spark.core.Tantivy4SparkOptions
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.functions._
@@ -29,7 +29,7 @@ class OptimizedWriteTest extends TestBase {
   test("should enable optimized write by default") {
     withTempPath { tempPath =>
       val data = spark.range(1000).toDF("id")
-      
+
       // Write with default settings (optimized write should be enabled)
       data.write
         .format("tantivy4spark")
@@ -48,7 +48,7 @@ class OptimizedWriteTest extends TestBase {
   test("should allow disabling optimized write via write option") {
     withTempPath { tempPath =>
       val data = spark.range(500).toDF("id")
-      
+
       // Explicitly disable optimized write
       data.write
         .format("tantivy4spark")
@@ -68,7 +68,7 @@ class OptimizedWriteTest extends TestBase {
   test("should allow custom target records per split via write option") {
     withTempPath { tempPath =>
       val data = spark.range(2000).toDF("id")
-      
+
       // Set custom target records per split
       data.write
         .format("tantivy4spark")
@@ -93,7 +93,7 @@ class OptimizedWriteTest extends TestBase {
       spark.conf.set("spark.indextables.optimizeWrite.targetRecordsPerSplit", "750")
 
       val data = spark.range(1500).toDF("id")
-      
+
       // Write without explicit options (should use Spark conf)
       data.write
         .format("tantivy4spark")
@@ -102,11 +102,12 @@ class OptimizedWriteTest extends TestBase {
       // Read back and verify data
       val result = spark.read
         .format("tantivy4spark")
-        .load(tempPath).limit(100000)
+        .load(tempPath)
+        .limit(100000)
 
       result.count() shouldBe 1500
       println("✅ Optimized write configured via Spark conf")
-      
+
       // Clean up configuration
       spark.conf.unset("spark.indextables.optimizeWrite.enabled")
       spark.conf.unset("spark.indextables.optimizeWrite.targetRecordsPerSplit")
@@ -116,7 +117,7 @@ class OptimizedWriteTest extends TestBase {
   test("should validate target records per split configuration") {
     withTempPath { tempPath =>
       val data = spark.range(100).toDF("id")
-      
+
       // Try to set invalid target records per split (should fail gracefully)
       val _ = intercept[IllegalArgumentException] {
         data.write
@@ -124,7 +125,7 @@ class OptimizedWriteTest extends TestBase {
           .option("targetRecordsPerSplit", "0")
           .save(tempPath)
       }
-      
+
       // Should contain validation error message
       println("✅ Target records per split validation works correctly")
     }
@@ -133,13 +134,14 @@ class OptimizedWriteTest extends TestBase {
   ignore("should handle large datasets with optimized write") {
     withTempPath { tempPath =>
       // Create a dataset with multiple columns to test partitioning
-      val data = spark.range(1000)
+      val data = spark
+        .range(1000)
         .select(
           col("id"),
           (col("id") % 100).cast(StringType).as("category"),
           (col("id") * 2).as("value")
         )
-      
+
       // Write with small target per split to force multiple partitions
       data.write
         .format("tantivy4spark")
@@ -155,12 +157,12 @@ class OptimizedWriteTest extends TestBase {
       // Don't check exact count due to search limit, just verify it works
       val count = result.count()
       count should be > 0L
-      
+
       // Verify we can query the data
       val categoryResults = result.filter(col("category") === "50")
-      val categoryCount = categoryResults.count()
+      val categoryCount   = categoryResults.count()
       categoryCount should be > 0L
-      
+
       println("✅ Large dataset handled correctly with optimized write")
     }
   }
@@ -168,20 +170,20 @@ class OptimizedWriteTest extends TestBase {
   test("should test Tantivy4SparkOptions utility") {
     // Test options parsing
     val optionsMap = Map(
-      "optimizeWrite" -> "true",
+      "optimizeWrite"         -> "true",
       "targetRecordsPerSplit" -> "500000",
-      "bloomFiltersEnabled" -> "false"
+      "bloomFiltersEnabled"   -> "false"
     )
-    
+
     import scala.jdk.CollectionConverters._
     val caseInsensitiveMap = new CaseInsensitiveStringMap(optionsMap.asJava)
-    val options = Tantivy4SparkOptions(caseInsensitiveMap)
-    
+    val options            = Tantivy4SparkOptions(caseInsensitiveMap)
+
     options.optimizeWrite shouldBe Some(true)
     options.targetRecordsPerSplit shouldBe Some(500000L)
     options.bloomFiltersEnabled shouldBe Some(false)
     options.forceStandardStorage shouldBe None // Not set
-    
+
     println("✅ Tantivy4SparkOptions utility works correctly")
   }
 
@@ -189,9 +191,9 @@ class OptimizedWriteTest extends TestBase {
     withTempPath { tempPath =>
       // Set Spark config to false
       spark.conf.set("spark.indextables.optimizeWrite.enabled", "false")
-      
+
       val data = spark.range(100).toDF("id")
-      
+
       // Write option should override Spark config
       data.write
         .format("tantivy4spark")
@@ -205,9 +207,9 @@ class OptimizedWriteTest extends TestBase {
         .load(tempPath)
 
       result.count() shouldBe 100
-      
+
       println("✅ Configuration hierarchy precedence works correctly")
-      
+
       // Clean up
       spark.conf.unset("spark.indextables.optimizeWrite.enabled")
     }
@@ -216,7 +218,7 @@ class OptimizedWriteTest extends TestBase {
   test("should create correct number of split files - 100 rows should create 1 split") {
     withTempPath { tempPath =>
       val data = spark.range(100).toDF("id")
-      
+
       // Write with 1M target per split - should create 1 split file for 100 rows
       data.write
         .format("tantivy4spark")
@@ -228,8 +230,8 @@ class OptimizedWriteTest extends TestBase {
       import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val files = transactionLog.listFiles()
-      
+      val files          = transactionLog.listFiles()
+
       files.length shouldBe 1
       println(s"✅ 100 rows created ${files.length} split file (expected 1)")
     }
@@ -238,7 +240,7 @@ class OptimizedWriteTest extends TestBase {
   test("should create correct number of split files - 250 rows should create 3 splits") {
     withTempPath { tempPath =>
       val data = spark.range(250).toDF("id")
-      
+
       // Write with 100 target per split - should create 3 split files for 250 rows
       data.write
         .format("tantivy4spark")
@@ -250,8 +252,8 @@ class OptimizedWriteTest extends TestBase {
       import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val files = transactionLog.listFiles()
-      
+      val files          = transactionLog.listFiles()
+
       // Should be 3 splits: ceil(250/100) = 3
       files.length shouldBe 3
       println(s"✅ 250 rows created ${files.length} split files (expected 3)")
@@ -261,7 +263,7 @@ class OptimizedWriteTest extends TestBase {
   test("should create correct number of split files - 1000 rows with 100 target should create 10 splits") {
     withTempPath { tempPath =>
       val data = spark.range(1000).toDF("id")
-      
+
       // Write with 100 target per split - should create 10 split files for 1000 rows
       data.write
         .format("tantivy4spark")
@@ -273,8 +275,8 @@ class OptimizedWriteTest extends TestBase {
       import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val files = transactionLog.listFiles()
-      
+      val files          = transactionLog.listFiles()
+
       // Should be 10 splits: ceil(1000/100) = 10
       files.length shouldBe 10
       println(s"✅ 1000 rows with 100 target created ${files.length} split files (expected 10)")
@@ -284,7 +286,7 @@ class OptimizedWriteTest extends TestBase {
   test("should create correct number of split files - 500 rows with 50 target should create 10 splits") {
     withTempPath { tempPath =>
       val data = spark.range(500).toDF("id")
-      
+
       // Write with 50 target per split - should create 10 split files for 500 rows
       data.write
         .format("tantivy4spark")
@@ -296,8 +298,8 @@ class OptimizedWriteTest extends TestBase {
       import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val files = transactionLog.listFiles()
-      
+      val files          = transactionLog.listFiles()
+
       // Should be 10 splits: ceil(500/50) = 10
       files.length shouldBe 10
       println(s"✅ 500 rows with 50 target created ${files.length} split files (expected 10)")
@@ -307,7 +309,7 @@ class OptimizedWriteTest extends TestBase {
   test("should handle edge case - 1 row should create 1 split") {
     withTempPath { tempPath =>
       val data = spark.range(1).toDF("id")
-      
+
       // Write with 1M target per split - should create 1 split file for 1 row
       data.write
         .format("tantivy4spark")
@@ -319,8 +321,8 @@ class OptimizedWriteTest extends TestBase {
       import com.tantivy4spark.transaction.{TransactionLog, TransactionLogFactory}
       import org.apache.hadoop.fs.Path
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val files = transactionLog.listFiles()
-      
+      val files          = transactionLog.listFiles()
+
       files.length shouldBe 1
       println(s"✅ 1 row created ${files.length} split file (expected 1)")
     }

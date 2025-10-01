@@ -33,17 +33,16 @@ import java.security.MessageDigest
  * High-performance S3 multipart uploader with parallel part uploads.
  *
  * Features:
- * - Parallel upload of multiple parts
- * - Configurable part size (minimum 5MB for S3)
- * - Automatic retry logic for failed parts
- * - Efficient memory management with streaming
- * - Progress tracking and monitoring
- * - Fallback to single-part upload for small files
+ *   - Parallel upload of multiple parts
+ *   - Configurable part size (minimum 5MB for S3)
+ *   - Automatic retry logic for failed parts
+ *   - Efficient memory management with streaming
+ *   - Progress tracking and monitoring
+ *   - Fallback to single-part upload for small files
  */
 class S3MultipartUploader(
-    s3Client: S3Client,
-    config: S3MultipartConfig = S3MultipartConfig.default
-) {
+  s3Client: S3Client,
+  config: S3MultipartConfig = S3MultipartConfig.default) {
 
   private val logger = LoggerFactory.getLogger(classOf[S3MultipartUploader])
 
@@ -60,18 +59,26 @@ class S3MultipartUploader(
     Executors.newFixedThreadPool(config.maxConcurrency, threadFactory)
   }
 
-  private implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(uploadExecutor)
+  implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(uploadExecutor)
 
   /**
-   * Upload a file using multipart upload strategy.
-   * Automatically chooses between single-part and multipart based on file size.
+   * Upload a file using multipart upload strategy. Automatically chooses between single-part and multipart based on
+   * file size.
    *
-   * @param bucket S3 bucket name
-   * @param key S3 object key
-   * @param content File content as byte array
-   * @return Upload result with metadata
+   * @param bucket
+   *   S3 bucket name
+   * @param key
+   *   S3 object key
+   * @param content
+   *   File content as byte array
+   * @return
+   *   Upload result with metadata
    */
-  def uploadFile(bucket: String, key: String, content: Array[Byte]): S3UploadResult = {
+  def uploadFile(
+    bucket: String,
+    key: String,
+    content: Array[Byte]
+  ): S3UploadResult = {
     val contentLength = content.length.toLong
 
     if (contentLength < config.multipartThreshold) {
@@ -84,16 +91,25 @@ class S3MultipartUploader(
   }
 
   /**
-   * Upload a file from an InputStream using multipart upload.
-   * Reads the stream in chunks and uploads parts in parallel.
+   * Upload a file from an InputStream using multipart upload. Reads the stream in chunks and uploads parts in parallel.
    *
-   * @param bucket S3 bucket name
-   * @param key S3 object key
-   * @param inputStream Input stream containing file data
-   * @param contentLength Total content length (if known)
-   * @return Upload result with metadata
+   * @param bucket
+   *   S3 bucket name
+   * @param key
+   *   S3 object key
+   * @param inputStream
+   *   Input stream containing file data
+   * @param contentLength
+   *   Total content length (if known)
+   * @return
+   *   Upload result with metadata
    */
-  def uploadStream(bucket: String, key: String, inputStream: InputStream, contentLength: Option[Long] = None): S3UploadResult = {
+  def uploadStream(
+    bucket: String,
+    key: String,
+    inputStream: InputStream,
+    contentLength: Option[Long] = None
+  ): S3UploadResult =
     contentLength match {
       case Some(length) if length < config.multipartThreshold =>
         // For small streams, read everything into memory and use single-part
@@ -106,22 +122,24 @@ class S3MultipartUploader(
         logger.info(s"Using multipart upload for stream: s3://$bucket/$key")
         uploadMultipartFromStream(bucket, key, inputStream, contentLength)
     }
-  }
 
-  /**
-   * Single-part upload for small files
-   */
-  private def uploadSinglePart(bucket: String, key: String, content: Array[Byte]): S3UploadResult = {
+  /** Single-part upload for small files */
+  private def uploadSinglePart(
+    bucket: String,
+    key: String,
+    content: Array[Byte]
+  ): S3UploadResult = {
     val startTime = System.currentTimeMillis()
 
     try {
-      val request = PutObjectRequest.builder()
+      val request = PutObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .contentLength(content.length.toLong)
         .build()
 
-      val response = s3Client.putObject(request, RequestBody.fromBytes(content))
+      val response   = s3Client.putObject(request, RequestBody.fromBytes(content))
       val uploadTime = System.currentTimeMillis() - startTime
 
       logger.info(s"✅ Single-part upload completed: s3://$bucket/$key in ${uploadTime}ms")
@@ -143,15 +161,17 @@ class S3MultipartUploader(
     }
   }
 
-  /**
-   * Multipart upload for large files
-   */
-  private def uploadMultipart(bucket: String, key: String, content: Array[Byte]): S3UploadResult = {
-    val startTime = System.currentTimeMillis()
+  /** Multipart upload for large files */
+  private def uploadMultipart(
+    bucket: String,
+    key: String,
+    content: Array[Byte]
+  ): S3UploadResult = {
+    val startTime     = System.currentTimeMillis()
     val contentLength = content.length.toLong
 
     // Calculate part size and count
-    val partSize = calculateOptimalPartSize(contentLength)
+    val partSize  = calculateOptimalPartSize(contentLength)
     val partCount = ((contentLength + partSize - 1) / partSize).toInt
 
     logger.info(s"🚀 Starting multipart upload: s3://$bucket/$key")
@@ -164,7 +184,8 @@ class S3MultipartUploader(
 
     try {
       // 1. Initiate multipart upload
-      val createRequest = CreateMultipartUploadRequest.builder()
+      val createRequest = CreateMultipartUploadRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
@@ -178,14 +199,20 @@ class S3MultipartUploader(
       val uploadedParts = uploadPartsInParallel(bucket, key, uploadId, content, partSize, partCount)
 
       // 3. Complete multipart upload
-      val completedParts = uploadedParts.zipWithIndex.map { case (etag, index) =>
-        CompletedPart.builder()
-          .partNumber(index + 1)
-          .eTag(etag)
-          .build()
-      }.toList.asJava
+      val completedParts = uploadedParts.zipWithIndex
+        .map {
+          case (etag, index) =>
+            CompletedPart
+              .builder()
+              .partNumber(index + 1)
+              .eTag(etag)
+              .build()
+        }
+        .toList
+        .asJava
 
-      val completeRequest = CompleteMultipartUploadRequest.builder()
+      val completeRequest = CompleteMultipartUploadRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .uploadId(uploadId)
@@ -193,7 +220,7 @@ class S3MultipartUploader(
         .build()
 
       val completeResponse = s3Client.completeMultipartUpload(completeRequest)
-      val uploadTime = System.currentTimeMillis() - startTime
+      val uploadTime       = System.currentTimeMillis() - startTime
 
       logger.info(s"✅ Multipart upload completed: s3://$bucket/$key in ${uploadTime}ms")
       logger.info(s"   Final ETag: ${completeResponse.eTag()}")
@@ -217,7 +244,8 @@ class S3MultipartUploader(
         // Clean up failed upload
         if (uploadId != null) {
           try {
-            val abortRequest = AbortMultipartUploadRequest.builder()
+            val abortRequest = AbortMultipartUploadRequest
+              .builder()
               .bucket(bucket)
               .key(key)
               .uploadId(uploadId)
@@ -234,24 +262,22 @@ class S3MultipartUploader(
     }
   }
 
-  /**
-   * Upload parts in parallel using futures
-   */
+  /** Upload parts in parallel using futures */
   private def uploadPartsInParallel(
-      bucket: String,
-      key: String,
-      uploadId: String,
-      content: Array[Byte],
-      partSize: Long,
-      partCount: Int
+    bucket: String,
+    key: String,
+    uploadId: String,
+    content: Array[Byte],
+    partSize: Long,
+    partCount: Int
   ): Array[String] = {
 
     val futures = (0 until partCount).map { partIndex =>
       Future {
-        val partNumber = partIndex + 1
+        val partNumber  = partIndex + 1
         val startOffset = partIndex * partSize
-        val endOffset = math.min(startOffset + partSize, content.length)
-        val partData = java.util.Arrays.copyOfRange(content, startOffset.toInt, endOffset.toInt)
+        val endOffset   = math.min(startOffset + partSize, content.length)
+        val partData    = java.util.Arrays.copyOfRange(content, startOffset.toInt, endOffset.toInt)
 
         uploadSinglePart(bucket, key, uploadId, partNumber, partData)
       }
@@ -266,30 +292,28 @@ class S3MultipartUploader(
 
       val allFutures = Future.sequence(futures)
       Await.result(allFutures, config.uploadTimeout).toArray
-    } finally {
+    } finally
       pool.shutdown()
-    }
   }
 
-  /**
-   * Upload a single part with retry logic
-   */
+  /** Upload a single part with retry logic */
   private def uploadSinglePart(
-      bucket: String,
-      key: String,
-      uploadId: String,
-      partNumber: Int,
-      partData: Array[Byte]
+    bucket: String,
+    key: String,
+    uploadId: String,
+    partNumber: Int,
+    partData: Array[Byte]
   ): String = {
 
-    var attempt = 0
+    var attempt                  = 0
     var lastException: Exception = null
 
-    while (attempt < config.maxRetries) {
+    while (attempt < config.maxRetries)
       try {
         val partStartTime = System.currentTimeMillis()
 
-        val request = UploadPartRequest.builder()
+        val request = UploadPartRequest
+          .builder()
           .bucket(bucket)
           .key(key)
           .uploadId(uploadId)
@@ -310,30 +334,30 @@ class S3MultipartUploader(
 
           if (attempt < config.maxRetries) {
             val delay = config.baseRetryDelay * math.pow(2, attempt - 1).toLong
-            logger.warn(s"⚠️ Part $partNumber upload failed (attempt $attempt/${config.maxRetries}), retrying in ${delay}ms", ex)
+            logger.warn(
+              s"⚠️ Part $partNumber upload failed (attempt $attempt/${config.maxRetries}), retrying in ${delay}ms",
+              ex
+            )
 
-            try {
+            try
               Thread.sleep(delay)
-            } catch {
+            catch {
               case _: InterruptedException =>
                 Thread.currentThread().interrupt()
                 throw new RuntimeException("Upload interrupted", ex)
             }
           }
       }
-    }
 
     throw new RuntimeException(s"Part $partNumber upload failed after ${config.maxRetries} attempts", lastException)
   }
 
-  /**
-   * Multipart upload from input stream (for very large files that don't fit in memory)
-   */
+  /** Multipart upload from input stream (for very large files that don't fit in memory) */
   private def uploadMultipartFromStream(
-      bucket: String,
-      key: String,
-      inputStream: InputStream,
-      contentLength: Option[Long]
+    bucket: String,
+    key: String,
+    inputStream: InputStream,
+    contentLength: Option[Long]
   ): S3UploadResult = {
 
     val startTime = System.currentTimeMillis()
@@ -343,12 +367,13 @@ class S3MultipartUploader(
     logger.info(s"🚀 Starting multipart upload from stream: s3://$bucket/$key")
 
     var uploadId: String = null
-    val uploadedParts = scala.collection.mutable.ArrayBuffer[String]()
-    var totalBytesRead = 0L
+    val uploadedParts    = scala.collection.mutable.ArrayBuffer[String]()
+    var totalBytesRead   = 0L
 
     try {
       // 1. Initiate multipart upload
-      val createRequest = CreateMultipartUploadRequest.builder()
+      val createRequest = CreateMultipartUploadRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
@@ -359,11 +384,11 @@ class S3MultipartUploader(
       logger.info(s"📝 Initiated streaming multipart upload with ID: $uploadId")
 
       // 2. Read stream in chunks and upload parts
-      val buffer = new Array[Byte](config.partSize.toInt)
+      val buffer     = new Array[Byte](config.partSize.toInt)
       var partNumber = 1
-      var bytesRead = 0
+      var bytesRead  = 0
 
-      while ({bytesRead = inputStream.read(buffer); bytesRead} > 0) {
+      while ({ bytesRead = inputStream.read(buffer); bytesRead } > 0) {
         val partData = if (bytesRead == buffer.length) buffer.clone() else java.util.Arrays.copyOf(buffer, bytesRead)
 
         val etag = uploadSinglePart(bucket, key, uploadId, partNumber, partData)
@@ -372,18 +397,26 @@ class S3MultipartUploader(
         totalBytesRead += bytesRead
         partNumber += 1
 
-        logger.debug(s"📊 Uploaded part $partNumber: ${formatBytes(partData.length)} (total: ${formatBytes(totalBytesRead)})")
+        logger.debug(
+          s"📊 Uploaded part $partNumber: ${formatBytes(partData.length)} (total: ${formatBytes(totalBytesRead)})"
+        )
       }
 
       // 3. Complete multipart upload
-      val completedParts = uploadedParts.zipWithIndex.map { case (etag, index) =>
-        CompletedPart.builder()
-          .partNumber(index + 1)
-          .eTag(etag)
-          .build()
-      }.toList.asJava
+      val completedParts = uploadedParts.zipWithIndex
+        .map {
+          case (etag, index) =>
+            CompletedPart
+              .builder()
+              .partNumber(index + 1)
+              .eTag(etag)
+              .build()
+        }
+        .toList
+        .asJava
 
-      val completeRequest = CompleteMultipartUploadRequest.builder()
+      val completeRequest = CompleteMultipartUploadRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .uploadId(uploadId)
@@ -391,7 +424,7 @@ class S3MultipartUploader(
         .build()
 
       val completeResponse = s3Client.completeMultipartUpload(completeRequest)
-      val uploadTime = System.currentTimeMillis() - startTime
+      val uploadTime       = System.currentTimeMillis() - startTime
 
       logger.info(s"✅ Streaming multipart upload completed: s3://$bucket/$key in ${uploadTime}ms")
       logger.info(s"   Total size: ${formatBytes(totalBytesRead)}")
@@ -416,7 +449,8 @@ class S3MultipartUploader(
         // Clean up failed upload
         if (uploadId != null) {
           try {
-            val abortRequest = AbortMultipartUploadRequest.builder()
+            val abortRequest = AbortMultipartUploadRequest
+              .builder()
               .bucket(bucket)
               .key(key)
               .uploadId(uploadId)
@@ -433,13 +467,11 @@ class S3MultipartUploader(
     }
   }
 
-  /**
-   * Calculate optimal part size for multipart upload
-   */
+  /** Calculate optimal part size for multipart upload */
   private def calculateOptimalPartSize(contentLength: Long): Long = {
     // AWS S3 limits: minimum 5MB per part (except last), maximum 10,000 parts
-    val minPartSize = 5L * 1024 * 1024  // 5MB
-    val maxParts = 10000L
+    val minPartSize = 5L * 1024 * 1024 // 5MB
+    val maxParts    = 10000L
 
     // Start with configured part size
     var partSize = config.partSize
@@ -448,9 +480,8 @@ class S3MultipartUploader(
     partSize = math.max(partSize, minPartSize)
 
     // Ensure we don't exceed maximum number of parts
-    while (contentLength / partSize > maxParts) {
+    while (contentLength / partSize > maxParts)
       partSize *= 2
-    }
 
     // Cap at reasonable maximum (1GB per part)
     val maxPartSize = 1024L * 1024 * 1024
@@ -459,9 +490,7 @@ class S3MultipartUploader(
     partSize
   }
 
-  /**
-   * Format bytes for human-readable output
-   */
+  /** Format bytes for human-readable output */
   private def formatBytes(bytes: Long): String = {
     val kb = 1024L
     val mb = kb * 1024
@@ -478,52 +507,44 @@ class S3MultipartUploader(
     }
   }
 
-  /**
-   * Shutdown the uploader and clean up resources
-   */
+  /** Shutdown the uploader and clean up resources */
   def shutdown(): Unit = {
     uploadExecutor.shutdown()
     logger.info("S3 multipart uploader shutdown complete")
   }
 }
 
-/**
- * Configuration for S3 multipart uploads
- */
+/** Configuration for S3 multipart uploads */
 case class S3MultipartConfig(
-    partSize: Long = 64L * 1024 * 1024,           // 64MB default part size
-    multipartThreshold: Long = 100L * 1024 * 1024, // 100MB threshold for multipart
-    maxConcurrency: Int = 4,                        // Maximum parallel part uploads
-    maxRetries: Int = 3,                           // Retry attempts per part
-    baseRetryDelay: Long = 1000,                   // Base retry delay in ms
-    uploadTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(30, "minutes")
-)
+  partSize: Long = 64L * 1024 * 1024,            // 64MB default part size
+  multipartThreshold: Long = 100L * 1024 * 1024, // 100MB threshold for multipart
+  maxConcurrency: Int = 4,                       // Maximum parallel part uploads
+  maxRetries: Int = 3,                           // Retry attempts per part
+  baseRetryDelay: Long = 1000,                   // Base retry delay in ms
+  uploadTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(30, "minutes"))
 
 object S3MultipartConfig {
   def default: S3MultipartConfig = S3MultipartConfig()
 
   def forLargeMergedSplits: S3MultipartConfig = S3MultipartConfig(
-    partSize = 128L * 1024 * 1024,          // 128MB parts for large splits
-    multipartThreshold = 200L * 1024 * 1024, // 200MB threshold
-    maxConcurrency = 6,                       // Higher concurrency for merge operations
-    maxRetries = 5,                          // More retries for critical merge uploads
+    partSize = 128L * 1024 * 1024,                                    // 128MB parts for large splits
+    multipartThreshold = 200L * 1024 * 1024,                          // 200MB threshold
+    maxConcurrency = 6,                                               // Higher concurrency for merge operations
+    maxRetries = 5,                                                   // More retries for critical merge uploads
     uploadTimeout = scala.concurrent.duration.Duration(60, "minutes") // Longer timeout
   )
 }
 
-/**
- * Result of S3 upload operation
- */
+/** Result of S3 upload operation */
 case class S3UploadResult(
-    bucket: String,
-    key: String,
-    etag: String,
-    uploadId: Option[String],
-    partCount: Int,
-    totalSize: Long,
-    uploadTimeMs: Long,
-    strategy: String
-) {
+  bucket: String,
+  key: String,
+  etag: String,
+  uploadId: Option[String],
+  partCount: Int,
+  totalSize: Long,
+  uploadTimeMs: Long,
+  strategy: String) {
   def uploadRateMBps: Double = (totalSize.toDouble / (1024 * 1024)) / (uploadTimeMs.toDouble / 1000)
 
   def s3Url: String = s"s3://$bucket/$key"

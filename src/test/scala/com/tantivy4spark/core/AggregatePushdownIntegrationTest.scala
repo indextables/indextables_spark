@@ -26,8 +26,8 @@ import java.nio.file.Files
 import scala.util.Random
 
 /**
- * Integration test that actually creates tantivy4java indexes and executes aggregations.
- * This validates the complete end-to-end aggregation pushdown functionality.
+ * Integration test that actually creates tantivy4java indexes and executes aggregations. This validates the complete
+ * end-to-end aggregation pushdown functionality.
  */
 class AggregatePushdownIntegrationTest extends AnyFunSuite {
 
@@ -48,12 +48,12 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"🔧 Searcher created successfully")
 
       // Create COUNT aggregation using value field (configured as fast field, as per new API)
-      val countAgg = new CountAggregation("value")
+      val countAgg     = new CountAggregation("value")
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
       aggregations.put("doc_count", countAgg)
 
       // Execute aggregation-only search
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.aggregate(query, aggregations)
 
       // Verify results
@@ -63,10 +63,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
 
       println(s"✅ COUNT aggregation: Expected $documentCount, Got ${countResult.getCount()}")
 
-    } finally {
+    } finally
       // Clean up
       deleteRecursively(tempDir)
-    }
   }
 
   test("tantivy4java SUM aggregation end-to-end") {
@@ -76,8 +75,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       // Create a test index with some data
       val (indexPath, documentCount, splitMetadata) = createTestIndex(tempDir, numDocs = 50)
 
-      val cacheConfig = new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
-        .withMaxCacheSize(50000000)
+      val cacheConfig =
+        new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
+          .withMaxCacheSize(50000000)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       println(s"🔧 Creating searcher for: file://$indexPath")
@@ -85,12 +85,12 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"🔧 Searcher created successfully")
 
       // Create SUM aggregation on score field
-      val sumAgg = new SumAggregation("score_sum", "score")
+      val sumAgg       = new SumAggregation("score_sum", "score")
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
       aggregations.put("score_sum", sumAgg)
 
       // Execute aggregation
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.aggregate(query, aggregations)
 
       // Verify results
@@ -105,9 +105,8 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
 
       println(s"✅ SUM aggregation: Expected $expectedSum, Got $actualSum")
 
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("tantivy4java AVG aggregation end-to-end") {
@@ -116,8 +115,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     try {
       val (indexPath, documentCount, splitMetadata) = createTestIndex(tempDir, numDocs = 10)
 
-      val cacheConfig = new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
-        .withMaxCacheSize(50000000)
+      val cacheConfig =
+        new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
+          .withMaxCacheSize(50000000)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       println(s"🔧 Creating searcher for: file://$indexPath")
@@ -125,12 +125,12 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"🔧 Searcher created successfully")
 
       // Create AVG aggregation on score field
-      val avgAgg = new AverageAggregation("score_avg", "score")
+      val avgAgg       = new AverageAggregation("score_avg", "score")
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
       aggregations.put("score_avg", avgAgg)
 
       // Execute aggregation
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.aggregate(query, aggregations)
 
       // Verify results
@@ -144,9 +144,8 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
 
       println(s"✅ AVG aggregation: Expected $expectedAvg, Got $actualAvg")
 
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("tantivy4java MIN/MAX aggregation end-to-end") {
@@ -155,8 +154,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     try {
       val (indexPath, documentCount, splitMetadata) = createTestIndex(tempDir, numDocs = 20)
 
-      val cacheConfig = new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
-        .withMaxCacheSize(50000000)
+      val cacheConfig =
+        new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
+          .withMaxCacheSize(50000000)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       println(s"🔧 Creating searcher for: file://$indexPath")
@@ -164,14 +164,14 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"🔧 Searcher created successfully")
 
       // Create MIN and MAX aggregations
-      val minAgg = new MinAggregation("score_min", "score")
-      val maxAgg = new MaxAggregation("score_max", "score")
+      val minAgg       = new MinAggregation("score_min", "score")
+      val maxAgg       = new MaxAggregation("score_max", "score")
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
       aggregations.put("score_min", minAgg)
       aggregations.put("score_max", maxAgg)
 
       // Execute aggregation
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.aggregate(query, aggregations)
 
       // Verify results
@@ -189,9 +189,8 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"✅ MIN aggregation: Expected 1.0, Got $actualMin")
       println(s"✅ MAX aggregation: Expected $documentCount, Got $actualMax")
 
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("tantivy4java STATS aggregation (all-in-one) end-to-end") {
@@ -200,8 +199,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     try {
       val (indexPath, documentCount, splitMetadata) = createTestIndex(tempDir, numDocs = 5)
 
-      val cacheConfig = new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
-        .withMaxCacheSize(50000000)
+      val cacheConfig =
+        new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
+          .withMaxCacheSize(50000000)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       println(s"🔧 Creating searcher for: file://$indexPath")
@@ -209,12 +209,12 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"🔧 Searcher created successfully")
 
       // Create STATS aggregation (computes all metrics at once)
-      val statsAgg = new StatsAggregation("score_stats", "score")
+      val statsAgg     = new StatsAggregation("score_stats", "score")
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
       aggregations.put("score_stats", statsAgg)
 
       // Execute aggregation
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.aggregate(query, aggregations)
 
       // Verify results
@@ -222,10 +222,10 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       val statsResult = result.getAggregation("score_stats").asInstanceOf[StatsResult]
 
       val count = statsResult.getCount()
-      val sum = statsResult.getSum()
-      val avg = statsResult.getAverage()
-      val min = statsResult.getMin()
-      val max = statsResult.getMax()
+      val sum   = statsResult.getSum()
+      val avg   = statsResult.getAverage()
+      val min   = statsResult.getMin()
+      val max   = statsResult.getMax()
 
       // Expected values for scores 1, 2, 3, 4, 5
       assert(count == documentCount, s"Count should be $documentCount, got $count")
@@ -241,9 +241,8 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       println(s"   Min: Expected 1.0, Got $min")
       println(s"   Max: Expected 5.0, Got $max")
 
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("tantivy4java multiple aggregations in single query") {
@@ -252,8 +251,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     try {
       val (indexPath, documentCount, splitMetadata) = createTestIndex(tempDir, numDocs = 10)
 
-      val cacheConfig = new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
-        .withMaxCacheSize(50000000)
+      val cacheConfig =
+        new SplitCacheManager.CacheConfig(s"test-cache-${System.currentTimeMillis()}-${util.Random.nextInt()}")
+          .withMaxCacheSize(50000000)
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
 
       println(s"🔧 Creating searcher for: file://$indexPath")
@@ -262,31 +262,31 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
 
       // Create multiple aggregations in one query (matching reference test pattern)
       val aggregations = new java.util.HashMap[String, SplitAggregation]()
-      aggregations.put("doc_count", new CountAggregation("value"))  // Count using value field
-      aggregations.put("score_sum", new SumAggregation("score"))    // Sum using field name only
+      aggregations.put("doc_count", new CountAggregation("value")) // Count using value field
+      aggregations.put("score_sum", new SumAggregation("score"))   // Sum using field name only
 
       // Execute all aggregations in single query using search method with Map
-      val query = new SplitMatchAllQuery()
+      val query  = new SplitMatchAllQuery()
       val result = searcher.search(query, 10, aggregations)
 
       // Verify results (simplified for 2 aggregations)
       assert(result.hasAggregations(), "Should have aggregation results")
 
       val countResult = result.getAggregation("doc_count").asInstanceOf[CountResult]
-      val sumResult = result.getAggregation("score_sum").asInstanceOf[SumResult]
+      val sumResult   = result.getAggregation("score_sum").asInstanceOf[SumResult]
 
       assert(countResult.getCount() == documentCount)
       assert(sumResult.getSum() == (1 to documentCount).sum.toDouble)
 
       println(s"✅ Multiple aggregations in single query (COUNT + SUM) - all passed")
 
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("auto-fast-field configuration with Spark DataSource") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AutoFastFieldTest")
       .master("local[*]")
       .getOrCreate()
@@ -301,12 +301,13 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
         ("doc3", "content3", 30, 300L)
       ).toDF("id", "content", "score", "value")
 
-      val tempDir = Files.createTempDirectory("auto-fast-field-test").toFile
+      val tempDir   = Files.createTempDirectory("auto-fast-field-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data WITHOUT explicit fast field configuration
       // This should trigger auto-fast-field configuration for the first numeric field (score)
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .mode("overwrite")
         .save(tablePath)
 
@@ -324,15 +325,11 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
-  /**
-   * Create a test tantivy index with sample data.
-   * Returns (indexPath, documentCount, splitMetadata).
-   */
+  /** Create a test tantivy index with sample data. Returns (indexPath, documentCount, splitMetadata). */
   private def createTestIndex(baseDir: File, numDocs: Int): (String, Int, QuickwitSplit.SplitMetadata) = {
     // Create unique identifiers to avoid cache conflicts between tests
     val uniqueId = s"agg_test_${System.nanoTime()}_${util.Random.nextInt(10000)}"
@@ -343,12 +340,12 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     // Configure numeric fields as fast fields for aggregation support
     val schema = new SchemaBuilder()
       .addTextField("content", true, false, "default", "position") // stored + indexed, not fast
-      .addIntegerField("score", true, true, true) // stored + indexed + fast (like reference test)
-      .addIntegerField("value", true, true, true) // stored + indexed + fast
+      .addIntegerField("score", true, true, true)                  // stored + indexed + fast (like reference test)
+      .addIntegerField("value", true, true, true)                  // stored + indexed + fast
       .build()
 
     // Create index and writer
-    val index = new Index(schema, indexDir.getAbsolutePath)
+    val index  = new Index(schema, indexDir.getAbsolutePath)
     val writer = index.writer(100000000, 1) // 100MB heap, 1 thread
 
     // Add documents (id field is implicit) - matching reference test pattern
@@ -356,8 +353,8 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     for (i <- 1 to numDocs) {
       val doc = new Document()
       doc.addText("content", s"content for document $i")
-      doc.addInteger("score", i.toLong)           // score: 1, 2, 3, ..., numDocs (like reference test)
-      doc.addInteger("value", (i + 9).toLong)     // value: 10, 11, 12, ..., numDocs + 9
+      doc.addInteger("score", i.toLong)       // score: 1, 2, 3, ..., numDocs (like reference test)
+      doc.addInteger("value", (i + 9).toLong) // value: 10, 11, 12, ..., numDocs + 9
 
       writer.addDocument(doc)
     }
@@ -372,9 +369,9 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     val splitDir = new File(baseDir, "splits")
     splitDir.mkdirs()
 
-    val splitPath = new File(splitDir, s"${uniqueId}.split").getAbsolutePath
+    val splitPath = new File(splitDir, s"$uniqueId.split").getAbsolutePath
     val splitConfig = new QuickwitSplit.SplitConfig(
-      uniqueId,  // Use the same unique ID for consistency
+      uniqueId, // Use the same unique ID for consistency
       "test-source",
       "test-node"
     )
@@ -387,9 +384,7 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
     (splitPath, numDocs, splitMetadata)
   }
 
-  /**
-   * Recursively delete a directory and all its contents.
-   */
+  /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)

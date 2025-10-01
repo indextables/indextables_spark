@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.storage
 
 import org.apache.hadoop.conf.Configuration
@@ -29,11 +28,11 @@ trait StorageStrategy extends Closeable {
 }
 
 object StorageStrategyFactory {
-  
+
   def createReader(path: Path, conf: Configuration): StorageStrategy = {
-    val protocol = path.toUri.getScheme
+    val protocol      = path.toUri.getScheme
     val forceStandard = conf.getBoolean("spark.indextables.storage.force.standard", false)
-    
+
     if (!forceStandard && (protocol == "s3" || protocol == "s3a" || protocol == "s3n")) {
       new S3OptimizedReader(path, conf)
     } else {

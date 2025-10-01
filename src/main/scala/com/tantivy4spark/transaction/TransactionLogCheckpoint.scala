@@ -28,51 +28,52 @@ import scala.concurrent.duration._
 
 case class CheckpointInfo(
   version: Long,
-  size: Long,  // Number of actions in checkpoint
+  size: Long, // Number of actions in checkpoint
   sizeInBytes: Long,
-  numFiles: Long,  // Number of AddActions
-  createdTime: Long
-)
+  numFiles: Long, // Number of AddActions
+  createdTime: Long)
 
 case class LastCheckpointInfo(
   version: Long,
   size: Long,
   sizeInBytes: Long,
   numFiles: Long,
-  createdTime: Long
-)
+  createdTime: Long)
 
 class TransactionLogCheckpoint(
   transactionLogPath: Path,
   cloudProvider: CloudStorageProvider,
-  options: org.apache.spark.sql.util.CaseInsensitiveStringMap
-) {
+  options: org.apache.spark.sql.util.CaseInsensitiveStringMap) {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCheckpoint])
 
   // Configuration matching Delta Lake capabilities but using our own parameters
   private val checkpointInterval = options.getInt("spark.indextables.checkpoint.interval", 10)
-  private val maxRetries = options.getInt("spark.indextables.checkpoint.maxRetries", 3)
-  private val parallelism = options.getInt("spark.indextables.checkpoint.parallelism", 4)
+  private val maxRetries         = options.getInt("spark.indextables.checkpoint.maxRetries", 3)
+  private val parallelism        = options.getInt("spark.indextables.checkpoint.parallelism", 4)
 
   // Retention configuration - matching Delta's log retention behavior
-  private val logRetentionDuration = options.getLong("spark.indextables.logRetention.duration", 30 * 24 * 60 * 60 * 1000L) // 30 days in ms
-  private val checkpointRetentionDuration = options.getLong("spark.indextables.checkpointRetention.duration", 2 * 60 * 60 * 1000L) // 2 hours in ms
+  private val logRetentionDuration =
+    options.getLong("spark.indextables.logRetention.duration", 30 * 24 * 60 * 60 * 1000L) // 30 days in ms
+  private val checkpointRetentionDuration =
+    options.getLong("spark.indextables.checkpointRetention.duration", 2 * 60 * 60 * 1000L) // 2 hours in ms
 
   // Performance configuration
   private val checkpointReadTimeoutSeconds = options.getInt("spark.indextables.checkpoint.read.timeoutSeconds", 30)
-  private val enableChecksumValidation = options.getBoolean("spark.indextables.checkpoint.checksumValidation.enabled", true)
+  private val enableChecksumValidation =
+    options.getBoolean("spark.indextables.checkpoint.checksumValidation.enabled", true)
 
   // Advanced configuration for large tables
   private val enableMultiPartCheckpoints = options.getBoolean("spark.indextables.checkpoint.multipart.enabled", false)
-  private val maxActionsPerCheckpointPart = options.getInt("spark.indextables.checkpoint.multipart.maxActionsPerPart", 50000)
+  private val maxActionsPerCheckpointPart =
+    options.getInt("spark.indextables.checkpoint.multipart.maxActionsPerPart", 50000)
 
   // Auto-compaction like Delta's auto-optimize
   private val autoCheckpointEnabled = options.getBoolean("spark.indextables.checkpoint.auto.enabled", true)
   private val autoCheckpointMinFileAge = options.getLong("spark.indextables.checkpoint.auto.minFileAge", 10 * 60 * 1000L) // 10 minutes
 
-  private val executor = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
-  private implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
+  private val executor                      = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
+  implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
   val LAST_CHECKPOINT = new Path(transactionLogPath, "_last_checkpoint")
 
@@ -83,14 +84,13 @@ class TransactionLogCheckpoint(
     }
   }
 
-  def shouldCreateCheckpoint(currentVersion: Long): Boolean = {
+  def shouldCreateCheckpoint(currentVersion: Long): Boolean =
     getLastCheckpointVersion() match {
       case Some(lastCheckpointVersion) =>
         (currentVersion - lastCheckpointVersion) >= checkpointInterval
       case None =>
         currentVersion >= checkpointInterval
     }
-  }
 
   def createCheckpoint(
     currentVersion: Long,
@@ -99,15 +99,15 @@ class TransactionLogCheckpoint(
     logger.info(s"Creating checkpoint for version $currentVersion with ${allActions.length} actions")
 
     try {
-      val checkpointPath = new Path(transactionLogPath, f"$currentVersion%020d.checkpoint.json")
+      val checkpointPath    = new Path(transactionLogPath, f"$currentVersion%020d.checkpoint.json")
       val checkpointPathStr = checkpointPath.toString
 
       val content = new StringBuilder()
       allActions.foreach { action =>
         val wrappedAction = action match {
           case metadata: MetadataAction => Map("metaData" -> metadata)
-          case add: AddAction => Map("add" -> add)
-          case remove: RemoveAction => Map("remove" -> remove)
+          case add: AddAction           => Map("add" -> add)
+          case remove: RemoveAction     => Map("remove" -> remove)
         }
 
         val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
@@ -135,10 +135,10 @@ class TransactionLogCheckpoint(
     }
   }
 
-  def getActionsFromCheckpoint(): Option[Seq[Action]] = {
+  def getActionsFromCheckpoint(): Option[Seq[Action]] =
     getLastCheckpointInfo().flatMap { info =>
       Try {
-        val checkpointPath = new Path(transactionLogPath, f"${info.version}%020d.checkpoint.json")
+        val checkpointPath    = new Path(transactionLogPath, f"${info.version}%020d.checkpoint.json")
         val checkpointPathStr = checkpointPath.toString
 
         if (!cloudProvider.exists(checkpointPathStr)) {
@@ -155,7 +155,6 @@ class TransactionLogCheckpoint(
           None
       }
     }
-  }
 
   def readVersionsInParallel(versions: Seq[Long]): Map[Long, Seq[Action]] = {
     logger.debug(s"Reading ${versions.length} versions in parallel with parallelism=$parallelism")
@@ -180,7 +179,7 @@ class TransactionLogCheckpoint(
   }
 
   private def readSingleVersion(version: Long): Seq[Action] = {
-    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
     if (!cloudProvider.exists(versionFilePath)) {
@@ -188,7 +187,7 @@ class TransactionLogCheckpoint(
     }
 
     var retries = 0
-    while (retries <= maxRetries) {
+    while (retries <= maxRetries)
       try {
         val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
         return parseActionsFromContent(content)
@@ -203,7 +202,6 @@ class TransactionLogCheckpoint(
             Thread.sleep(100 * retries) // Exponential backoff
           }
       }
-    }
 
     Seq.empty // Should never reach here
   }
@@ -258,26 +256,26 @@ class TransactionLogCheckpoint(
     }
   }
 
-  def getLastCheckpointVersion(): Option[Long] = {
+  def getLastCheckpointVersion(): Option[Long] =
     getLastCheckpointInfo().map(_.version)
-  }
 
-  def cleanupOldVersions(currentVersion: Long): Unit = {
+  def cleanupOldVersions(currentVersion: Long): Unit =
     getLastCheckpointVersion() match {
       case Some(checkpointVersion) if checkpointVersion < currentVersion =>
         val currentTime = System.currentTimeMillis()
 
         // Clean up old log files based on retention policy
         val versionsToCheck = (0L until currentVersion).filter(_ <= checkpointVersion)
-        var deletedCount = 0
+        var deletedCount    = 0
 
         versionsToCheck.foreach { version =>
-          val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+          val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
           val versionFilePath = versionFile.toString
 
           if (cloudProvider.exists(versionFilePath)) {
             try {
-              val fileInfo = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+              val fileInfo = cloudProvider
+                .listFiles(transactionLogPath.toString, recursive = false)
                 .find(f => new Path(f.path).getName == f"$version%020d.json")
 
               fileInfo match {
@@ -308,11 +306,10 @@ class TransactionLogCheckpoint(
       case _ =>
         logger.debug("No cleanup needed - no checkpoint available or checkpoint is current")
     }
-  }
 
-  private def cleanupOldCheckpoints(currentTime: Long): Unit = {
+  private def cleanupOldCheckpoints(currentTime: Long): Unit =
     try {
-      val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
+      val files           = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
       val checkpointFiles = files.filter(_.path.contains(".checkpoint.json"))
 
       var deletedCheckpoints = 0
@@ -335,11 +332,12 @@ class TransactionLogCheckpoint(
       }
 
       if (deletedCheckpoints > 0) {
-        logger.info(s"Cleaned up $deletedCheckpoints old checkpoint files (retention: ${checkpointRetentionDuration / 1000}s)")
+        logger.info(
+          s"Cleaned up $deletedCheckpoints old checkpoint files (retention: ${checkpointRetentionDuration / 1000}s)"
+        )
       }
     } catch {
       case e: Exception =>
         logger.warn("Failed during checkpoint cleanup", e)
     }
-  }
 }

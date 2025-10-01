@@ -25,18 +25,21 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("default field types should be string instead of text") {
     withTempPath { tablePath =>
-
       // Create DataFrame with string fields
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "content one"),
-        ("doc2", "content two")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "content one"),
+            ("doc2", "content two")
+          )
+        )
+        .toDF("id", "content")
 
       // Write without any field type configuration - should default to string
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read back and verify we can query with exact matching (string behavior)
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.filter(df("content") === "content one").collect()
 
       results should have length 1
@@ -46,15 +49,20 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("text field type configuration with tokenized queries") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "machine learning algorithms"),
-        ("doc2", "deep learning networks"),
-        ("doc3", "machine vision systems")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "machine learning algorithms"),
+            ("doc2", "deep learning networks"),
+            ("doc3", "machine vision systems")
+          )
+        )
+        .toDF("id", "content")
 
       // Configure content field as text type
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
@@ -76,18 +84,23 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("fast fields configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "content1", 100),
-        ("doc2", "content2", 200)
-      )).toDF("id", "content", "score")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "content1", 100),
+            ("doc2", "content2", 200)
+          )
+        )
+        .toDF("id", "content", "score")
 
       // Configure score as fast field
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.fastfields", "score")
         .save(tablePath)
 
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.filter(df("score") > 150).collect()
 
       results should have length 1
@@ -97,14 +110,19 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("store-only fields configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "searchable content", "metadata only"),
-        ("doc2", "more content", "more metadata")
-      )).toDF("id", "content", "metadata")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "searchable content", "metadata only"),
+            ("doc2", "more content", "more metadata")
+          )
+        )
+        .toDF("id", "content", "metadata")
 
       // Configure metadata as store-only (not indexed)
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.storeonlyfields", "metadata")
         .save(tablePath)
 
@@ -121,14 +139,19 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("index-only fields configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "searchable", "visible content"),
-        ("doc2", "findable", "more visible content")
-      )).toDF("id", "searchField", "displayField")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "searchable", "visible content"),
+            ("doc2", "findable", "more visible content")
+          )
+        )
+        .toDF("id", "searchField", "displayField")
 
       // Configure searchField as index-only (not stored)
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.indexonlyfields", "searchField")
         .save(tablePath)
 
@@ -145,19 +168,24 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("custom tokenizer configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "test@example.com"),
-        ("doc2", "user@domain.org")
-      )).toDF("id", "email")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "test@example.com"),
+            ("doc2", "user@domain.org")
+          )
+        )
+        .toDF("id", "email")
 
       // Configure email field with text type and custom tokenizer
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.typemap.email", "text")
         .option("spark.indextables.indexing.tokenizer.email", "whitespace")
         .save(tablePath)
 
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.filter(df("email") === "test@example.com").collect()
 
       results should have length 1
@@ -167,14 +195,19 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("json field type configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", """{"name": "john", "age": 30}"""),
-        ("doc2", """{"name": "jane", "age": 25}""")
-      )).toDF("id", "jsonData")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", """{"name": "john", "age": 30}"""),
+            ("doc2", """{"name": "jane", "age": 25}""")
+          )
+        )
+        .toDF("id", "jsonData")
 
       // Configure jsonData as json type
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.typemap.jsonData", "json")
         .save(tablePath)
 
@@ -192,23 +225,34 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("configuration validation against existing table") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "content1")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "content1")
+          )
+        )
+        .toDF("id", "content")
 
       // First write with text configuration
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
       // Second write with conflicting string configuration should fail
-      val moreData = spark.createDataFrame(Seq(
-        ("doc2", "content2")
-      )).toDF("id", "content")
+      val moreData = spark
+        .createDataFrame(
+          Seq(
+            ("doc2", "content2")
+          )
+        )
+        .toDF("id", "content")
 
       assertThrows[IllegalArgumentException] {
-        moreData.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("append")
+        moreData.write
+          .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+          .mode("append")
           .mode("append")
           .option("spark.indextables.indexing.typemap.content", "string")
           .save(tablePath)
@@ -218,14 +262,19 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
   test("mixed field type configuration") {
     withTempPath { tablePath =>
-
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "exact match", "tokenized content here", 100),
-        ("doc2", "another exact", "more tokenized words", 200)
-      )).toDF("id", "exactField", "textField", "numField")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "exact match", "tokenized content here", 100),
+            ("doc2", "another exact", "more tokenized words", 200)
+          )
+        )
+        .toDF("id", "exactField", "textField", "numField")
 
       // Configure mixed field types
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+        .mode("overwrite")
         .option("spark.indextables.indexing.typemap.exactField", "string")
         .option("spark.indextables.indexing.typemap.textField", "text")
         .option("spark.indextables.indexing.fastfields", "numField")

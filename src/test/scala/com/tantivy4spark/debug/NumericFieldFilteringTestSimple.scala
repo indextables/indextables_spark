@@ -5,8 +5,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
 class NumericFieldFilteringTestSimple extends TestBase {
-  
-  private def isNativeLibraryAvailable(): Boolean = {
+
+  private def isNativeLibraryAvailable(): Boolean =
     try {
       import com.tantivy4spark.search.TantivyNative
       TantivyNative.ensureLibraryLoaded()
@@ -14,11 +14,10 @@ class NumericFieldFilteringTestSimple extends TestBase {
     } catch {
       case _: Exception => false
     }
-  }
 
   test("numeric field filtering test") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping test")
-    
+
     withTempPath { testPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -26,7 +25,7 @@ class NumericFieldFilteringTestSimple extends TestBase {
       // Create test data with numeric fields
       val testData = Seq(
         (1, 25, 50000L, 85.5, true, "Alice"),
-        (2, 30, 60000L, 90.0, true, "Bob"), 
+        (2, 30, 60000L, 90.0, true, "Bob"),
         (3, 25, 45000L, 78.2, false, "Carol"),
         (4, 35, 70000L, 92.1, true, "David"),
         (5, 25, 55000L, 88.0, false, "Eve")
@@ -34,11 +33,11 @@ class NumericFieldFilteringTestSimple extends TestBase {
 
       // Save the data
       testData.write.format("tantivy4spark").mode("overwrite").save(testPath)
-      
+
       // Read back the data
       val readDf = spark.read.format("tantivy4spark").load(testPath)
       readDf.createOrReplaceTempView("employees")
-      
+
       println(s"Total rows: ${readDf.count()}")
 
       // Test 1: Integer equality
@@ -83,7 +82,7 @@ class NumericFieldFilteringTestSimple extends TestBase {
 
       // Test 5: SQL vs DataFrame API
       println("\n=== TEST 5: SQL vs DataFrame API ===")
-      val dfCount = readDf.filter($"age" === 25).collect().length
+      val dfCount  = readDf.filter($"age" === 25).collect().length
       val sqlCount = spark.sql("SELECT * FROM employees WHERE age = 25").collect().length
       println(s"DataFrame API: $dfCount rows")
       println(s"SQL API: $sqlCount rows")

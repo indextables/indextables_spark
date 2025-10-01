@@ -32,11 +32,11 @@ import scala.util.Random
  * Real AWS S3 multipart upload tests using test-tantivy4sparkbucket.
  *
  * Tests actual multipart upload functionality against real AWS S3:
- * - Small files using single-part upload
- * - Large files using multipart upload
- * - Custom multipart configuration
- * - Upload failure handling with retries
- * - Streaming uploads from input streams
+ *   - Small files using single-part upload
+ *   - Large files using multipart upload
+ *   - Custom multipart configuration
+ *   - Upload failure handling with retries
+ *   - Streaming uploads from input streams
  *
  * Credentials are loaded from ~/.aws/credentials file.
  */
@@ -46,11 +46,11 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
   private val S3_REGION = "us-east-2"
 
   // Generate unique test run ID to avoid conflicts
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId     = UUID.randomUUID().toString.substring(0, 8)
   private val testKeyPrefix = s"multipart-test-$testRunId"
 
-  private var awsCredentials: Option[(String, String)] = None
-  private var s3Client: Option[S3Client] = None
+  private var awsCredentials: Option[(String, String)]       = None
+  private var s3Client: Option[S3Client]                     = None
   private var multipartUploader: Option[S3MultipartUploader] = None
 
   override def beforeAll(): Unit = {
@@ -64,7 +64,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
 
       // Create S3Client for real AWS S3
       val credentials = AwsBasicCredentials.create(accessKey, secretKey)
-      val s3ClientInstance = S3Client.builder()
+      val s3ClientInstance = S3Client
+        .builder()
         .region(Region.of(S3_REGION))
         .credentialsProvider(StaticCredentialsProvider.create(credentials))
         .build()
@@ -93,12 +94,10 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     super.afterAll()
   }
 
-  /**
-   * Load AWS credentials from ~/.aws/credentials file.
-   */
-  private def loadAwsCredentials(): Option[(String, String)] = {
+  /** Load AWS credentials from ~/.aws/credentials file. */
+  private def loadAwsCredentials(): Option[(String, String)] =
     try {
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (!credFile.exists()) {
@@ -126,29 +125,28 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
         println(s"⚠️  Error loading AWS credentials: ${e.getMessage}")
         None
     }
-  }
 
-  /**
-   * Clean up test objects from S3.
-   */
-  private def cleanupTestObjects(): Unit = {
+  /** Clean up test objects from S3. */
+  private def cleanupTestObjects(): Unit =
     try {
       val client = s3Client.get
 
       // List all objects with our test prefix
-      val listRequest = ListObjectsV2Request.builder()
+      val listRequest = ListObjectsV2Request
+        .builder()
         .bucket(S3_BUCKET)
         .prefix(testKeyPrefix)
         .build()
 
       val response = client.listObjectsV2(listRequest)
-      val objects = response.contents()
+      val objects  = response.contents()
 
       if (!objects.isEmpty) {
         println(s"🧹 Cleaning up ${objects.size()} test objects from S3...")
 
         objects.forEach { obj =>
-          val deleteRequest = DeleteObjectRequest.builder()
+          val deleteRequest = DeleteObjectRequest
+            .builder()
             .bucket(S3_BUCKET)
             .key(obj.key())
             .build()
@@ -167,7 +165,6 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       case e: Exception =>
         println(s"⚠️  Warning: Could not clean up test objects: ${e.getMessage}")
     }
-  }
 
   ignore("Real S3: Small files should use single-part upload") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
@@ -175,7 +172,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
 
     val uploader = multipartUploader.get
-    val content = new Array[Byte](50 * 1024 * 1024) // 50MB - below default 100MB threshold
+    val content  = new Array[Byte](50 * 1024 * 1024) // 50MB - below default 100MB threshold
 
     // Fill with random data to make upload realistic
     val random = new Random(12345) // Fixed seed for reproducibility
@@ -197,7 +194,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assert(result.uploadId.isEmpty, "Upload ID should be empty for single-part upload")
 
     // Verify the object exists in S3
-    val headRequest = HeadObjectRequest.builder()
+    val headRequest = HeadObjectRequest
+      .builder()
       .bucket(S3_BUCKET)
       .key(key)
       .build()
@@ -214,7 +212,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
 
     val uploader = multipartUploader.get
-    val content = new Array[Byte](150 * 1024 * 1024) // 150MB - above default 100MB threshold
+    val content  = new Array[Byte](150 * 1024 * 1024) // 150MB - above default 100MB threshold
 
     // Fill with random data
     val random = new Random(54321) // Fixed seed for reproducibility
@@ -224,8 +222,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
 
     println(s"📤 Uploading large file (${content.length / (1024 * 1024)}MB) to s3://$S3_BUCKET/$key")
 
-    val startTime = System.currentTimeMillis()
-    val result = uploader.uploadFile(S3_BUCKET, key, content)
+    val startTime  = System.currentTimeMillis()
+    val result     = uploader.uploadFile(S3_BUCKET, key, content)
     val uploadTime = System.currentTimeMillis() - startTime
 
     println(s"✅ Upload completed in ${uploadTime}ms: strategy=${result.strategy}, parts=${result.partCount}, size=${result.totalSize}")
@@ -242,7 +240,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assert(result.partCount == expectedParts, s"Expected $expectedParts parts, got: ${result.partCount}")
 
     // Verify the object exists in S3 with correct size
-    val headRequest = HeadObjectRequest.builder()
+    val headRequest = HeadObjectRequest
+      .builder()
       .bucket(S3_BUCKET)
       .key(key)
       .build()
@@ -260,7 +259,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     val config = S3MultipartConfig(
       multipartThreshold = 50L * 1024 * 1024, // 50MB threshold (lower than default)
       partSize = 32L * 1024 * 1024,           // 32MB parts (smaller than default 64MB)
-      maxConcurrency = 2                       // 2 parallel uploads
+      maxConcurrency = 2                      // 2 parallel uploads
     )
 
     val customUploader = new S3MultipartUploader(s3Client.get, config)
@@ -285,11 +284,15 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
 
       // With 80MB file and 32MB part size, should have 3 parts (2 full + 1 partial)
       val expectedParts = math.ceil(content.length.toDouble / config.partSize).toInt
-      assert(result.partCount == expectedParts, s"Expected $expectedParts parts with custom config, got: ${result.partCount}")
+      assert(
+        result.partCount == expectedParts,
+        s"Expected $expectedParts parts with custom config, got: ${result.partCount}"
+      )
       assert(result.strategy == "multipart", "Should use multipart with custom threshold")
 
       // Verify object in S3
-      val headRequest = HeadObjectRequest.builder()
+      val headRequest = HeadObjectRequest
+        .builder()
         .bucket(S3_BUCKET)
         .key(key)
         .build()
@@ -299,9 +302,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
 
       println(s"✅ Custom configuration test passed with ${result.partCount} parts")
 
-    } finally {
+    } finally
       customUploader.shutdown()
-    }
   }
 
   ignore("Real S3: Streaming upload should work with input stream") {
@@ -310,20 +312,22 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
 
     val uploader = multipartUploader.get
-    val content = new Array[Byte](120 * 1024 * 1024) // 120MB - above 100MB threshold for multipart
+    val content  = new Array[Byte](120 * 1024 * 1024) // 120MB - above 100MB threshold for multipart
 
     // Fill with random data
     val random = new Random(11111)
     random.nextBytes(content)
 
     val inputStream = new ByteArrayInputStream(content)
-    val key = s"$testKeyPrefix/streaming-upload-test.dat"
+    val key         = s"$testKeyPrefix/streaming-upload-test.dat"
 
     println(s"📤 Uploading via stream (${content.length / (1024 * 1024)}MB) to s3://$S3_BUCKET/$key")
 
     val result = uploader.uploadStream(S3_BUCKET, key, inputStream, Some(content.length.toLong))
 
-    println(s"✅ Stream upload completed: strategy=${result.strategy}, parts=${result.partCount}, size=${result.totalSize}")
+    println(
+      s"✅ Stream upload completed: strategy=${result.strategy}, parts=${result.partCount}, size=${result.totalSize}"
+    )
 
     // Should use multipart-stream strategy
     assert(result.strategy == "multipart-stream", s"Expected multipart-stream, got: ${result.strategy}")
@@ -331,7 +335,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assert(result.partCount > 0, "Should have at least one part")
 
     // Verify object in S3
-    val headRequest = HeadObjectRequest.builder()
+    val headRequest = HeadObjectRequest
+      .builder()
       .bucket(S3_BUCKET)
       .key(key)
       .build()
@@ -346,7 +351,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
 
-    val config = S3MultipartConfig.forLargeMergedSplits
+    val config              = S3MultipartConfig.forLargeMergedSplits
     val performanceUploader = new S3MultipartUploader(s3Client.get, config)
 
     try {
@@ -365,8 +370,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       println(s"   - Concurrency: ${config.maxConcurrency}")
       println(s"   - Max retries: ${config.maxRetries}")
 
-      val startTime = System.currentTimeMillis()
-      val result = performanceUploader.uploadFile(S3_BUCKET, key, content)
+      val startTime  = System.currentTimeMillis()
+      val result     = performanceUploader.uploadFile(S3_BUCKET, key, content)
       val uploadTime = System.currentTimeMillis() - startTime
 
       val throughputMBps = (content.length.toDouble / (1024 * 1024)) / (uploadTime / 1000.0)
@@ -384,7 +389,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       assert(result.partCount == expectedParts, s"Expected $expectedParts parts, got: ${result.partCount}")
 
       // Verify object in S3
-      val headRequest = HeadObjectRequest.builder()
+      val headRequest = HeadObjectRequest
+        .builder()
         .bucket(S3_BUCKET)
         .key(key)
         .build()
@@ -394,8 +400,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
 
       println(f"✅ Performance test verified: throughput $throughputMBps%.2f MB/s")
 
-    } finally {
+    } finally
       performanceUploader.shutdown()
-    }
   }
 }

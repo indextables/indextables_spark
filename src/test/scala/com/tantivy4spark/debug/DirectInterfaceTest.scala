@@ -30,63 +30,64 @@ class DirectInterfaceTest extends TestBase {
 
   test("should work with direct interface - minimal test") {
     // Use unique field names to avoid global state collision
-    val schema = StructType(Array(
-      StructField("user_id", LongType, nullable = false),
-      StructField("user_name", StringType, nullable = false)
-    ))
-    
+    val schema = StructType(
+      Array(
+        StructField("user_id", LongType, nullable = false),
+        StructField("user_name", StringType, nullable = false)
+      )
+    )
+
     // Create unique split file to avoid cache collisions across test runs
-    val uniqueId = System.nanoTime()
-    val tempSplitFile = Files.createTempFile(s"test_split_minimal_${uniqueId}", ".split").toFile
+    val uniqueId      = System.nanoTime()
+    val tempSplitFile = Files.createTempFile(s"test_split_minimal_$uniqueId", ".split").toFile
     tempSplitFile.deleteOnExit()
-    
+
     val searchEngine = new TantivySearchEngine(schema)
-    
+
     try {
       // Add a single document
       val row = InternalRow(1L, UTF8String.fromString("test"))
       searchEngine.addDocument(row)
-      
+
       // Commit and create split
       val (splitPath, metadata) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
-      
+
       // Read from split instead of index with unique cache configuration - use metadata to avoid tantivy4java bug
-      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-minimal-${uniqueId}")
+      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-minimal-$uniqueId")
       val splitReader = SplitSearchEngine.fromSplitFileWithMetadata(schema, splitPath, metadata, uniqueCacheConfig)
-      
+
       try {
         val results = splitReader.searchAll(10)
-        
+
         println(s"Found ${results.length} documents")
-        results.foreach { row =>
-          println(s"Row: user_id=${row.getLong(0)}, user_name=${row.getUTF8String(1)}")
-        }
-        
+        results.foreach(row => println(s"Row: user_id=${row.getLong(0)}, user_name=${row.getUTF8String(1)}"))
+
         assert(results.length == 1, s"Should find exactly 1 document, got ${results.length}")
-      } finally {
+      } finally
         splitReader.close()
-      }
-      
+
     } finally {
       searchEngine.close()
       tempSplitFile.delete()
     }
   }
-  
+
   test("should work with multiple documents") {
     // Use completely different field names to avoid collision
-    val schema = StructType(Array(
-      StructField("person_id", LongType, nullable = false),
-      StructField("person_name", StringType, nullable = false)
-    ))
-    
+    val schema = StructType(
+      Array(
+        StructField("person_id", LongType, nullable = false),
+        StructField("person_name", StringType, nullable = false)
+      )
+    )
+
     // Create unique split file to avoid cache collisions across test runs
-    val uniqueId = System.nanoTime()
-    val tempSplitFile = Files.createTempFile(s"test_split_multi_${uniqueId}", ".split").toFile
+    val uniqueId      = System.nanoTime()
+    val tempSplitFile = Files.createTempFile(s"test_split_multi_$uniqueId", ".split").toFile
     tempSplitFile.deleteOnExit()
-    
+
     val searchEngine = new TantivySearchEngine(schema)
-    
+
     try {
       // Add multiple documents
       val rows = Array(
@@ -94,29 +95,26 @@ class DirectInterfaceTest extends TestBase {
         InternalRow(2L, UTF8String.fromString("Bob")),
         InternalRow(3L, UTF8String.fromString("Charlie"))
       )
-      
+
       rows.foreach(searchEngine.addDocument)
-      
+
       // Commit and create split
       val (splitPath, metadata) = searchEngine.commitAndCreateSplit(tempSplitFile.getAbsolutePath, 0L, "test-node")
-      
+
       // Read from split instead of index with unique cache configuration - use metadata to avoid tantivy4java bug
-      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-multi-${uniqueId}")
+      val uniqueCacheConfig = SplitCacheConfig(cacheName = s"test-cache-multi-$uniqueId")
       val splitReader = SplitSearchEngine.fromSplitFileWithMetadata(schema, splitPath, metadata, uniqueCacheConfig)
-      
+
       try {
         val results = splitReader.searchAll(10)
-        
+
         println(s"Found ${results.length} documents")
-        results.foreach { row =>
-          println(s"Row: person_id=${row.getLong(0)}, person_name=${row.getUTF8String(1)}")
-        }
-        
+        results.foreach(row => println(s"Row: person_id=${row.getLong(0)}, person_name=${row.getUTF8String(1)}"))
+
         assert(results.length == 3, s"Should find exactly 3 documents, got ${results.length}")
-      } finally {
+      } finally
         splitReader.close()
-      }
-      
+
     } finally {
       searchEngine.close()
       tempSplitFile.delete()

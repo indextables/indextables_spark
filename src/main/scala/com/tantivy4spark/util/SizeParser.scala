@@ -24,9 +24,9 @@ import scala.util.{Try, Success, Failure}
  * Utility for parsing size strings in various formats (bytes, MB, GB).
  *
  * Supported formats:
- * - Pure numbers: "123456" -> 123456 bytes
- * - Megabytes: "1M", "100M" -> bytes
- * - Gigabytes: "1G", "2G" -> bytes
+ *   - Pure numbers: "123456" -> 123456 bytes
+ *   - Megabytes: "1M", "100M" -> bytes
+ *   - Gigabytes: "1G", "2G" -> bytes
  */
 object SizeParser {
 
@@ -40,9 +40,12 @@ object SizeParser {
   /**
    * Parse a size string into bytes.
    *
-   * @param sizeStr Size string (e.g., "100M", "1G", "123456")
-   * @return Size in bytes
-   * @throws IllegalArgumentException if the format is invalid
+   * @param sizeStr
+   *   Size string (e.g., "100M", "1G", "123456")
+   * @return
+   *   Size in bytes
+   * @throws IllegalArgumentException
+   *   if the format is invalid
    */
   def parseSize(sizeStr: String): Long = {
     if (sizeStr == null || sizeStr.trim.isEmpty) {
@@ -55,21 +58,21 @@ object SizeParser {
       // Check for unit suffixes
       if (trimmed.endsWith("G")) {
         val numberPart = trimmed.dropRight(1)
-        val value = numberPart.toLong
+        val value      = numberPart.toLong
         if (value <= 0) {
           throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
         value * GB
       } else if (trimmed.endsWith("M")) {
         val numberPart = trimmed.dropRight(1)
-        val value = numberPart.toLong
+        val value      = numberPart.toLong
         if (value <= 0) {
           throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
         value * MB
       } else if (trimmed.endsWith("K")) {
         val numberPart = trimmed.dropRight(1)
-        val value = numberPart.toLong
+        val value      = numberPart.toLong
         if (value <= 0) {
           throw new IllegalArgumentException(s"Size value must be positive for unit suffixes: $sizeStr")
         }
@@ -87,17 +90,22 @@ object SizeParser {
         logger.debug(s"Parsed size '$sizeStr' to $size bytes")
         size
       case Failure(ex) =>
-        throw new IllegalArgumentException(s"Invalid size format: '$sizeStr'. Supported formats: '123456' (bytes), '1M' (megabytes), '1G' (gigabytes)", ex)
+        throw new IllegalArgumentException(
+          s"Invalid size format: '$sizeStr'. Supported formats: '123456' (bytes), '1M' (megabytes), '1G' (gigabytes)",
+          ex
+        )
     }
   }
 
   /**
    * Format bytes into a human-readable string.
    *
-   * @param bytes Size in bytes
-   * @return Human-readable size string
+   * @param bytes
+   *   Size in bytes
+   * @return
+   *   Human-readable size string
    */
-  def formatBytes(bytes: Long): String = {
+  def formatBytes(bytes: Long): String =
     if (bytes >= GB && bytes % GB == 0) {
       s"${bytes / GB}G"
     } else if (bytes >= MB && bytes % MB == 0) {
@@ -107,15 +115,15 @@ object SizeParser {
     } else {
       s"$bytes bytes"
     }
-  }
 
   /**
    * Validate that a size string is in a supported format.
    *
-   * @param sizeStr Size string to validate
-   * @return true if valid, false otherwise
+   * @param sizeStr
+   *   Size string to validate
+   * @return
+   *   true if valid, false otherwise
    */
-  def isValidSizeFormat(sizeStr: String): Boolean = {
+  def isValidSizeFormat(sizeStr: String): Boolean =
     Try(parseSize(sizeStr)).isSuccess
-  }
 }

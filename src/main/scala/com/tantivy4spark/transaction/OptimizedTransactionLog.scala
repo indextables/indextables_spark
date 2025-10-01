@@ -31,15 +31,14 @@ import scala.concurrent.{Await, Future}
 import java.util.concurrent.atomic.{AtomicReference, AtomicLong}
 
 /**
- * Optimized transaction log implementation that integrates all performance enhancements
- * from the optimization plan including thread pools, advanced caching, parallel operations,
- * memory optimization, and advanced features.
+ * Optimized transaction log implementation that integrates all performance enhancements from the optimization plan
+ * including thread pools, advanced caching, parallel operations, memory optimization, and advanced features.
  */
 class OptimizedTransactionLog(
-    tablePath: Path,
-    spark: SparkSession,
-    options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-) extends AutoCloseable {
+  tablePath: Path,
+  spark: SparkSession,
+  options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
+    extends AutoCloseable {
 
   private val logger = LoggerFactory.getLogger(classOf[OptimizedTransactionLog])
 
@@ -63,13 +62,21 @@ class OptimizedTransactionLog(
 
     new EnhancedTransactionLogCache(
       logCacheSize = options.getLong("spark.indextables.cache.log.size", 1000),
-      logCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.log.ttl", 5),
+      logCacheTTLMinutes =
+        if (legacyExpirationMinutes > 0) legacyExpirationMinutes
+        else options.getLong("spark.indextables.cache.log.ttl", 5),
       snapshotCacheSize = options.getLong("spark.indextables.cache.snapshot.size", 100),
-      snapshotCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.snapshot.ttl", 10),
+      snapshotCacheTTLMinutes =
+        if (legacyExpirationMinutes > 0) legacyExpirationMinutes
+        else options.getLong("spark.indextables.cache.snapshot.ttl", 10),
       fileListCacheSize = options.getLong("spark.indextables.cache.filelist.size", 50),
-      fileListCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.filelist.ttl", 2),
+      fileListCacheTTLMinutes =
+        if (legacyExpirationMinutes > 0) legacyExpirationMinutes
+        else options.getLong("spark.indextables.cache.filelist.ttl", 2),
       metadataCacheSize = options.getLong("spark.indextables.cache.metadata.size", 100),
-      metadataCacheTTLMinutes = if (legacyExpirationMinutes > 0) legacyExpirationMinutes else options.getLong("spark.indextables.cache.metadata.ttl", 30)
+      metadataCacheTTLMinutes =
+        if (legacyExpirationMinutes > 0) legacyExpirationMinutes
+        else options.getLong("spark.indextables.cache.metadata.ttl", 30)
     )
   }
 
@@ -107,7 +114,7 @@ class OptimizedTransactionLog(
   private val versionCounter = new AtomicLong(-1L)
 
   // Performance configuration
-  private val maxStaleness = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
+  private val maxStaleness        = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
   private val asyncUpdatesEnabled = options.getBoolean("spark.indextables.async.updates.enabled", false) // Disabled by default for stability
 
@@ -121,15 +128,13 @@ class OptimizedTransactionLog(
     // Note: Thread pools are managed globally and not closed here
   }
 
-  /**
-   * Initialize transaction log with schema
-   */
-  def initialize(schema: StructType, partitionColumns: Seq[String] = Seq.empty): Unit = {
+  /** Initialize transaction log with schema */
+  def initialize(schema: StructType, partitionColumns: Seq[String] = Seq.empty): Unit =
     if (!cloudProvider.exists(transactionLogPath.toString)) {
       cloudProvider.createDirectory(transactionLogPath.toString)
 
       // Validate partition columns
-      val schemaFields = schema.fieldNames.toSet
+      val schemaFields         = schema.fieldNames.toSet
       val invalidPartitionCols = partitionColumns.filterNot(schemaFields.contains)
       if (invalidPartitionCols.nonEmpty) {
         throw new IllegalArgumentException(
@@ -152,11 +157,8 @@ class OptimizedTransactionLog(
 
       writeAction(0, metadataAction)
     }
-  }
 
-  /**
-   * Add files using parallel batch write
-   */
+  /** Add files using parallel batch write */
   def addFiles(addActions: Seq[AddAction]): Long = {
     if (addActions.isEmpty) {
       return getLatestVersion()
@@ -187,9 +189,7 @@ class OptimizedTransactionLog(
     version
   }
 
-  /**
-   * Remove a single file by adding a RemoveAction
-   */
+  /** Remove a single file by adding a RemoveAction */
   def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
     // Use atomic version generation to prevent race conditions
     val version = getNextVersion()
@@ -217,12 +217,9 @@ class OptimizedTransactionLog(
   }
 
   /**
-   * Overwrite files with optimized operations
-   * For overwrite, we need to:
-   * 1. Get all existing files
-   * 2. Create RemoveActions for all of them
-   * 3. Add the new files
-   * 4. Write both removes and adds in the same transaction
+   * Overwrite files with optimized operations For overwrite, we need to:
+   *   1. Get all existing files 2. Create RemoveActions for all of them 3. Add the new files 4. Write both removes and
+   *      adds in the same transaction
    */
   def overwriteFiles(addActions: Seq[AddAction]): Long = {
     println(s"[DEBUG OVERWRITE] Starting overwrite operation with ${addActions.size} files")
@@ -271,74 +268,69 @@ class OptimizedTransactionLog(
     version
   }
 
-  /**
-   * List files with enhanced caching and parallel operations
-   */
-  def listFiles(): Seq[AddAction] = {
+  /** List files with enhanced caching and parallel operations */
+  def listFiles(): Seq[AddAction] =
     listFilesOptimized()
-  }
 
   private def listFilesOptimized(): Seq[AddAction] = {
     // Get versions once and pass consistently to avoid FileSystem caching issues
-    val versions = getVersions()
+    val versions      = getVersions()
     val latestVersion = versions.sorted.lastOption.getOrElse(-1L)
-    val checksum = computeCurrentChecksumWithVersions(versions)
+    val checksum      = computeCurrentChecksumWithVersions(versions)
     println(s"[DEBUG] Computed checksum: $checksum, latest version: $latestVersion")
 
-    val cached = enhancedCache.getOrComputeFileList(tablePath.toString, checksum, {
-      println(s"[DEBUG] Cache miss, computing file list for checksum: $checksum")
-      logger.info(s"Computing file list using optimized operations for checksum: $checksum")
+    val cached = enhancedCache.getOrComputeFileList(
+      tablePath.toString,
+      checksum, {
+        println(s"[DEBUG] Cache miss, computing file list for checksum: $checksum")
+        logger.info(s"Computing file list using optimized operations for checksum: $checksum")
 
-      // Try to get from current snapshot first, but verify it's up to date with latest version
-      currentSnapshot.get() match {
-        case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
-          println(s"[DEBUG] Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
-          snapshot.files
+        // Try to get from current snapshot first, but verify it's up to date with latest version
+        currentSnapshot.get() match {
+          case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
+            println(s"[DEBUG] Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
+            snapshot.files
 
-        case Some(snapshot) =>
-          println(s"[DEBUG] Snapshot is stale (version ${snapshot.version} < $latestVersion), rebuilding")
-          // Clear stale snapshot
-          currentSnapshot.set(None)
-          reconstructStateStandard(versions)
+          case Some(snapshot) =>
+            println(s"[DEBUG] Snapshot is stale (version ${snapshot.version} < $latestVersion), rebuilding")
+            // Clear stale snapshot
+            currentSnapshot.set(None)
+            reconstructStateStandard(versions)
 
-        case None =>
-          // Always use standard reconstruction with consistent versions to avoid caching issues
-          println(s"[DEBUG] No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
-          reconstructStateStandard(versions)
+          case None =>
+            // Always use standard reconstruction with consistent versions to avoid caching issues
+            println(s"[DEBUG] No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
+            reconstructStateStandard(versions)
+        }
       }
-    })
+    )
 
     println(s"[DEBUG] Returning ${cached.size} files from listFilesOptimized")
     cached
   }
 
-  /**
-   * Get metadata with enhanced caching
-   */
-  def getMetadata(): MetadataAction = {
-    enhancedCache.getOrComputeMetadata(tablePath.toString, {
-      logger.info("Computing metadata from transaction log")
+  /** Get metadata with enhanced caching */
+  def getMetadata(): MetadataAction =
+    enhancedCache.getOrComputeMetadata(
+      tablePath.toString, {
+        logger.info("Computing metadata from transaction log")
 
-      // Look for metadata in reverse chronological order
-      val latestVersion = getLatestVersion()
-      for (version <- latestVersion to 0L by -1) {
-        val actions = readVersionOptimized(version)
-        actions.collectFirst {
-          case metadata: MetadataAction => metadata
-        } match {
-          case Some(metadata) => return metadata
-          case None => // Continue searching
+        // Look for metadata in reverse chronological order
+        val latestVersion = getLatestVersion()
+        for (version <- latestVersion to 0L by -1) {
+          val actions = readVersionOptimized(version)
+          actions.collectFirst { case metadata: MetadataAction => metadata } match {
+            case Some(metadata) => return metadata
+            case None           => // Continue searching
+          }
         }
+
+        throw new RuntimeException("No metadata found in transaction log")
       }
+    )
 
-      throw new RuntimeException("No metadata found in transaction log")
-    })
-  }
-
-  /**
-   * Get total row count using optimized operations
-   */
-  def getTotalRowCount(): Long = {
+  /** Get total row count using optimized operations */
+  def getTotalRowCount(): Long =
     // First try to get from checkpoint info
     checkpoint.flatMap(_.getLastCheckpointInfo()) match {
       case Some(info) if info.numFiles > 0 =>
@@ -350,27 +342,20 @@ class OptimizedTransactionLog(
         // Compute from files
         listFilesOptimized().flatMap(_.numRecords).sum
     }
-  }
 
-  /**
-   * Get partition columns
-   */
-  def getPartitionColumns(): Seq[String] = {
+  /** Get partition columns */
+  def getPartitionColumns(): Seq[String] =
     Try(getMetadata().partitionColumns).getOrElse(Seq.empty)
-  }
 
-  /**
-   * Check if table is partitioned
-   */
-  def isPartitioned(): Boolean = {
+  /** Check if table is partitioned */
+  def isPartitioned(): Boolean =
     getPartitionColumns().nonEmpty
-  }
 
   // Private helper methods
 
   private def getLatestVersion(): Long = {
     val versions = getVersions()
-    val latest = versions.sorted.lastOption.getOrElse(-1L)
+    val latest   = versions.sorted.lastOption.getOrElse(-1L)
     println(s"[DEBUG] getLatestVersion: found versions ${versions.sorted.mkString(", ")}, latest = $latest")
 
     // Update version counter if we found a higher version
@@ -391,14 +376,12 @@ class OptimizedTransactionLog(
   private def getVersions(): Seq[Long] = {
     val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
     println(s"[DEBUG] getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}")
-    val versions = files.flatMap { file =>
-      parseVersionFromPath(file.path)
-    }.distinct
+    val versions = files.flatMap(file => parseVersionFromPath(file.path)).distinct
     println(s"[DEBUG] getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
     versions
   }
 
-  private def parseVersionFromPath(path: String): Option[Long] = {
+  private def parseVersionFromPath(path: String): Option[Long] =
     Try {
       val fileName = new Path(path).getName
       if (fileName.endsWith(".json") && !fileName.contains(".checkpoint.")) {
@@ -408,17 +391,13 @@ class OptimizedTransactionLog(
         -1L
       }
     }.toOption.filter(_ >= 0)
-  }
 
-  private def readVersionOptimized(version: Long): Seq[Action] = {
+  private def readVersionOptimized(version: Long): Seq[Action] =
     // Use cache with proper invalidation - version-specific caching should be safe
-    enhancedCache.getOrComputeVersionActions(tablePath.toString, version, {
-      readVersionDirect(version)
-    })
-  }
+    enhancedCache.getOrComputeVersionActions(tablePath.toString, version, readVersionDirect(version))
 
   private def readVersionDirect(version: Long): Seq[Action] = {
-    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
     if (!cloudProvider.exists(versionFilePath)) {
@@ -438,16 +417,20 @@ class OptimizedTransactionLog(
     }
   }
 
-  private def parseActionsFromContent(content: String): Seq[Action] = {
-    content.split("\n").filter(_.nonEmpty).flatMap { line =>
-      Try {
-        val jsonNode = JsonUtil.mapper.readTree(line)
-        parseAction(jsonNode)
-      }.toOption
-    }.flatten.toSeq
-  }
+  private def parseActionsFromContent(content: String): Seq[Action] =
+    content
+      .split("\n")
+      .filter(_.nonEmpty)
+      .flatMap { line =>
+        Try {
+          val jsonNode = JsonUtil.mapper.readTree(line)
+          parseAction(jsonNode)
+        }.toOption
+      }
+      .flatten
+      .toSeq
 
-  private def parseAction(jsonNode: com.fasterxml.jackson.databind.JsonNode): Option[Action] = {
+  private def parseAction(jsonNode: com.fasterxml.jackson.databind.JsonNode): Option[Action] =
     if (jsonNode.has("metaData")) {
       val metadataNode = jsonNode.get("metaData")
       Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
@@ -463,23 +446,21 @@ class OptimizedTransactionLog(
     } else {
       None
     }
-  }
 
-  private def writeAction(version: Long, action: Action): Unit = {
+  private def writeAction(version: Long, action: Action): Unit =
     writeActions(version, Seq(action))
-  }
 
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
-    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
     val content = new StringBuilder()
     actions.foreach { action =>
       val wrappedAction = action match {
         case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction => Map("add" -> add)
-        case remove: RemoveAction => Map("remove" -> remove)
-        case skip: SkipAction => Map("mergeskip" -> skip)
+        case add: AddAction           => Map("add" -> add)
+        case remove: RemoveAction     => Map("remove" -> remove)
+        case skip: SkipAction         => Map("mergeskip" -> skip)
       }
       content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
     }
@@ -499,11 +480,12 @@ class OptimizedTransactionLog(
     val addActions = actions.collect { case add: AddAction => add }
     if (addActions.nonEmpty) {
       // Compute new file list state by getting current state and applying changes
-      val currentFiles = try {
-        listFiles()
-      } catch {
-        case _: Exception => Seq.empty[AddAction]
-      }
+      val currentFiles =
+        try
+          listFiles()
+        catch {
+          case _: Exception => Seq.empty[AddAction]
+        }
 
       // Create a checksum for the current file list state
       val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
@@ -527,14 +509,14 @@ class OptimizedTransactionLog(
     }
   }
 
-  private def createCheckpointOptimized(version: Long): Unit = {
+  private def createCheckpointOptimized(version: Long): Unit =
     try {
       val allActions = getAllCurrentActions(version)
 
       if (allActions.size > 50000) {
         // Use streaming checkpoint for large tables
         val iterator = allActions.iterator
-        val info = memoryOps.createStreamingCheckpoint(version, iterator)
+        val info     = memoryOps.createStreamingCheckpoint(version, iterator)
         logger.info(s"Created streaming checkpoint at version $version with ${info.size} actions")
       } else {
         // Use parallel checkpoint creation
@@ -548,7 +530,6 @@ class OptimizedTransactionLog(
       case e: Exception =>
         logger.error(s"Failed to create checkpoint at version $version", e)
     }
-  }
 
   private def getAllCurrentActions(upToVersion: Long): Seq[Action] = {
     val versions = getVersions().filter(_ <= upToVersion)
@@ -570,8 +551,12 @@ class OptimizedTransactionLog(
 
     for (version <- versions.sorted) {
       val actions = readVersionOptimized(version)
-      println(s"[DEBUG] Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
-      logger.info(s"Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}")
+      println(
+        s"[DEBUG] Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      )
+      logger.info(
+        s"Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      )
       actions.foreach { action =>
         logger.debug(s"Processing action: ${action.getClass.getSimpleName}")
         action match {
@@ -592,9 +577,8 @@ class OptimizedTransactionLog(
   }
 
   // Backward compatibility method
-  private def reconstructStateStandard(): Seq[AddAction] = {
+  private def reconstructStateStandard(): Seq[AddAction] =
     reconstructStateStandard(getVersions())
-  }
 
   private def reconstructStateFromListing(listing: FileListingResult): Seq[AddAction] = {
     // Implement state reconstruction from listing result
@@ -618,38 +602,32 @@ class OptimizedTransactionLog(
   private def updateSnapshot(version: Long): Unit = {
     // Avoid recursive calls to listFilesOptimized - compute files directly
     val versions = getVersions()
-    val files = reconstructStateStandard(versions)
+    val files    = reconstructStateStandard(versions)
     val metadata = getMetadata()
     val snapshot = Snapshot(version, files, metadata)
     currentSnapshot.set(Some(snapshot))
     println(s"[DEBUG] Updated snapshot to version $version with ${files.size} files")
   }
 
-  private def computeCurrentChecksum(): String = {
+  private def computeCurrentChecksum(): String =
     // Simple checksum based on latest version
     s"${tablePath.toString}-${getLatestVersion()}"
-  }
 
   private def computeCurrentChecksumWithVersions(versions: Seq[Long]): String = {
     // Include sorted version list in key, not just latest - this ensures cache invalidation
     // when new versions are written
     val versionHash = versions.sorted.mkString(",").hashCode
-    s"${tablePath.toString}-${versionHash}"
+    s"${tablePath.toString}-$versionHash"
   }
 
   /**
-   * Get cache statistics for monitoring and debugging.
-   * Returns the enhanced cache statistics from the multi-level cache system.
+   * Get cache statistics for monitoring and debugging. Returns the enhanced cache statistics from the multi-level cache
+   * system.
    */
-  def getCacheStatistics(): CacheStatistics = {
+  def getCacheStatistics(): CacheStatistics =
     enhancedCache.getStatistics()
-  }
 
-  /**
-   * Invalidate all cached data for this table.
-   * Useful for testing or after external modifications.
-   */
-  def invalidateCache(tablePath: String): Unit = {
+  /** Invalidate all cached data for this table. Useful for testing or after external modifications. */
+  def invalidateCache(tablePath: String): Unit =
     enhancedCache.invalidateTable(tablePath)
-  }
 }

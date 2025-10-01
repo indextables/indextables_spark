@@ -20,9 +20,7 @@ package com.tantivy4spark.util
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-/**
- * Unit tests for SizeParser that don't require Spark initialization.
- */
+/** Unit tests for SizeParser that don't require Spark initialization. */
 class SizeParserUnitTest extends AnyFunSuite with Matchers {
 
   test("SizeParser should parse bytes correctly") {
@@ -140,16 +138,16 @@ class SizeParserUnitTest extends AnyFunSuite with Matchers {
 
   test("SizeParser should handle round trip conversion correctly") {
     val testSizes = List(
-      1024L,         // 1K
-      1024L * 1024L, // 1M
-      2L * 1024L * 1024L, // 2M
-      1024L * 1024L * 1024L, // 1G
-      5L * 1024L * 1024L * 1024L  // 5G
+      1024L,                     // 1K
+      1024L * 1024L,             // 1M
+      2L * 1024L * 1024L,        // 2M
+      1024L * 1024L * 1024L,     // 1G
+      5L * 1024L * 1024L * 1024L // 5G
     )
 
     testSizes.foreach { size =>
       val formatted = SizeParser.formatBytes(size)
-      val parsed = SizeParser.parseSize(formatted)
+      val parsed    = SizeParser.parseSize(formatted)
       assert(parsed == size, s"Round trip failed: $size -> $formatted -> $parsed")
     }
   }

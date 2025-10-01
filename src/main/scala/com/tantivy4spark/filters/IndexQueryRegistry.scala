@@ -22,13 +22,13 @@ import scala.collection.mutable
 import scala.collection.concurrent
 
 /**
- * Registry for IndexQuery information that uses query-scoped keys for distributed safety.
- * Instead of relying on ThreadLocal, we use query IDs to scope the IndexQuery information.
+ * Registry for IndexQuery information that uses query-scoped keys for distributed safety. Instead of relying on
+ * ThreadLocal, we use query IDs to scope the IndexQuery information.
  */
 object IndexQueryRegistry {
 
   // Use concurrent maps for thread-safety
-  private val queryIndexQueries = concurrent.TrieMap[String, mutable.Buffer[IndexQueryFilter]]()
+  private val queryIndexQueries   = concurrent.TrieMap[String, mutable.Buffer[IndexQueryFilter]]()
   private val queryIndexQueryAlls = concurrent.TrieMap[String, mutable.Buffer[IndexQueryAllFilter]]()
 
   // Track the current query ID per thread (this is safe since query planning happens on driver)
@@ -46,22 +46,22 @@ object IndexQueryRegistry {
     println(s"🔍 IndexQueryRegistry: Set current query ID: $queryId")
   }
 
-  def getCurrentQueryId(): Option[String] = {
+  def getCurrentQueryId(): Option[String] =
     Option(currentQueryId.get())
-  }
 
-  def registerIndexQuery(columnName: String, queryString: String): Unit = {
+  def registerIndexQuery(columnName: String, queryString: String): Unit =
     getCurrentQueryId() match {
       case Some(queryId) =>
         val filters = queryIndexQueries.getOrElseUpdate(queryId, mutable.Buffer.empty)
         filters += IndexQueryFilter(columnName, queryString)
-        println(s"🔍 IndexQueryRegistry: Registered IndexQuery for query $queryId - column: $columnName, query: $queryString")
+        println(
+          s"🔍 IndexQueryRegistry: Registered IndexQuery for query $queryId - column: $columnName, query: $queryString"
+        )
       case None =>
         println(s"🔍 IndexQueryRegistry: WARNING - No current query ID, cannot register IndexQuery")
     }
-  }
 
-  def registerIndexQueryAll(queryString: String): Unit = {
+  def registerIndexQueryAll(queryString: String): Unit =
     getCurrentQueryId() match {
       case Some(queryId) =>
         val filters = queryIndexQueryAlls.getOrElseUpdate(queryId, mutable.Buffer.empty)
@@ -70,12 +70,11 @@ object IndexQueryRegistry {
       case None =>
         println(s"🔍 IndexQueryRegistry: WARNING - No current query ID, cannot register IndexQueryAll")
     }
-  }
 
   def getIndexQueriesForQuery(queryId: String): Seq[Any] = {
-    val indexQueries = queryIndexQueries.getOrElse(queryId, mutable.Buffer.empty).toSeq
+    val indexQueries   = queryIndexQueries.getOrElse(queryId, mutable.Buffer.empty).toSeq
     val indexQueryAlls = queryIndexQueryAlls.getOrElse(queryId, mutable.Buffer.empty).toSeq
-    val result = indexQueries ++ indexQueryAlls
+    val result         = indexQueries ++ indexQueryAlls
     println(s"🔍 IndexQueryRegistry: Retrieved ${result.length} IndexQuery filters for query $queryId")
     result
   }

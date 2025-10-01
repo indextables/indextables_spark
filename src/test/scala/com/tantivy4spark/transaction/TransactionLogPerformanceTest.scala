@@ -28,17 +28,19 @@ class TransactionLogPerformanceTest extends TestBase {
 
   test("transaction log with checkpoints should be faster than without for many transactions") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_table")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false),
-        StructField("name", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("name", StringType, nullable = true)
+        )
+      )
 
       // Test without checkpoints
       val optionsWithoutCheckpoints = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "false",
+          "spark.indextables.checkpoint.enabled"        -> "false",
           "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
@@ -72,25 +74,24 @@ class TransactionLogPerformanceTest extends TestBase {
         assert(files2.length == 50)
         assert(files3.length == 50)
 
-      } finally {
+      } finally
         logWithoutCheckpoints.close()
-      }
 
       val timeWithoutCheckpoints = System.currentTimeMillis() - startTimeWithoutCheckpoints
 
       // Test with checkpoints
       val optionsWithCheckpoints = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.enabled"  -> "true",
           "spark.indextables.checkpoint.interval" -> "100", // Create checkpoint less frequently to avoid interference
-          "spark.indextables.checkpoint.parallelism" -> "4",
+          "spark.indextables.checkpoint.parallelism"    -> "4",
           "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
 
       val startTimeWithCheckpoints = System.currentTimeMillis()
 
-      val tablePath2 = new Path(tempDir.getCanonicalPath, "test_table_with_checkpoints")
+      val tablePath2         = new Path(tempDir.getCanonicalPath, "test_table_with_checkpoints")
       val logWithCheckpoints = TransactionLogFactory.create(tablePath2, spark, optionsWithCheckpoints)
       try {
         logWithCheckpoints.initialize(schema)
@@ -121,9 +122,8 @@ class TransactionLogPerformanceTest extends TestBase {
         assert(files2.length == 50)
         assert(files3.length == 50)
 
-      } finally {
+      } finally
         logWithCheckpoints.close()
-      }
 
       val timeWithCheckpoints = System.currentTimeMillis() - startTimeWithCheckpoints
 
@@ -142,16 +142,18 @@ class TransactionLogPerformanceTest extends TestBase {
 
   test("parallel retrieval should work correctly") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_parallel")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false)
+        )
+      )
 
       val optionsWithParallel = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "20", // No checkpoints during this test
+          "spark.indextables.checkpoint.enabled"     -> "true",
+          "spark.indextables.checkpoint.interval"    -> "20", // No checkpoints during this test
           "spark.indextables.checkpoint.parallelism" -> "4"
         ).asJava
       )
@@ -179,31 +181,33 @@ class TransactionLogPerformanceTest extends TestBase {
         assert(files.length == 15)
 
         // Verify all files are present
-        for (i <- 1 to 15) {
-          assert(files.exists(_.path == s"parallel_file_$i.split"),
-            s"Missing file parallel_file_$i.split in results: ${files.map(_.path).mkString(", ")}")
-        }
+        for (i <- 1 to 15)
+          assert(
+            files.exists(_.path == s"parallel_file_$i.split"),
+            s"Missing file parallel_file_$i.split in results: ${files.map(_.path).mkString(", ")}"
+          )
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 
   test("checkpoint configuration should be respected") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_config")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false)
+        )
+      )
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "3",
+          "spark.indextables.checkpoint.enabled"     -> "true",
+          "spark.indextables.checkpoint.interval"    -> "3",
           "spark.indextables.checkpoint.parallelism" -> "2",
-          "spark.indextables.transaction.optimized.enabled" -> "false"  // Use standard transaction log for checkpoint testing
+          "spark.indextables.transaction.optimized.enabled" -> "false" // Use standard transaction log for checkpoint testing
         ).asJava
       )
 
@@ -227,35 +231,39 @@ class TransactionLogPerformanceTest extends TestBase {
 
         // Check that checkpoints were created at intervals
         val checkpointDir = new Path(tablePath, "_transaction_log")
-        val fs = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
-        val files = fs.listStatus(checkpointDir).map(_.getPath.getName)
+        val fs            = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
+        val files         = fs.listStatus(checkpointDir).map(_.getPath.getName)
 
-        val checkpointFiles = files.filter(_.contains("checkpoint.json"))
+        val checkpointFiles    = files.filter(_.contains("checkpoint.json"))
         val lastCheckpointFile = files.find(_ == "_last_checkpoint")
 
-        assert(checkpointFiles.nonEmpty, s"Expected checkpoint files with interval=3, but found: ${files.mkString(", ")}")
+        assert(
+          checkpointFiles.nonEmpty,
+          s"Expected checkpoint files with interval=3, but found: ${files.mkString(", ")}"
+        )
         assert(lastCheckpointFile.isDefined, "Expected _last_checkpoint file")
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 
   test("checkpoint compaction and reading should work correctly") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_compaction")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false),
-        StructField("name", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("name", StringType, nullable = true)
+        )
+      )
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "5", // Create checkpoint every 5 transactions
-          "spark.indextables.checkpoint.parallelism" -> "4",
+          "spark.indextables.checkpoint.enabled"        -> "true",
+          "spark.indextables.checkpoint.interval"       -> "5",    // Create checkpoint every 5 transactions
+          "spark.indextables.checkpoint.parallelism"    -> "4",
           "spark.indextables.transaction.cache.enabled" -> "false" // Disable cache to test actual checkpoint reading
         ).asJava
       )
@@ -282,12 +290,13 @@ class TransactionLogPerformanceTest extends TestBase {
 
         // Verify checkpoints were created
         val checkpointDir = new Path(tablePath, "_transaction_log")
-        val fs = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
-        val files = fs.listStatus(checkpointDir).map(_.getPath.getName)
+        val fs            = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
+        val files         = fs.listStatus(checkpointDir).map(_.getPath.getName)
 
-        val checkpointFiles = files.filter(_.contains("checkpoint.json"))
+        val checkpointFiles    = files.filter(_.contains("checkpoint.json"))
         val lastCheckpointFile = files.find(_ == "_last_checkpoint")
-        val transactionFiles = files.filter(_.endsWith(".json")).filterNot(_.contains("checkpoint")).filterNot(_ == "_last_checkpoint")
+        val transactionFiles =
+          files.filter(_.endsWith(".json")).filterNot(_.contains("checkpoint")).filterNot(_ == "_last_checkpoint")
 
         println(s"Found ${checkpointFiles.length} checkpoint files: ${checkpointFiles.mkString(", ")}")
         println(s"Found ${transactionFiles.length} transaction files: ${transactionFiles.take(5).mkString(", ")}...")
@@ -322,12 +331,17 @@ class TransactionLogPerformanceTest extends TestBase {
           // - Incremental transactions contain files 6-10 (versions 6-10)
 
           // Verify we get all files correctly
-          assert(filesFromCheckpoint.length == 10, s"Expected 10 files (checkpoint + incremental), got ${filesFromCheckpoint.length}")
+          assert(
+            filesFromCheckpoint.length == 10,
+            s"Expected 10 files (checkpoint + incremental), got ${filesFromCheckpoint.length}"
+          )
 
           for (i <- 1 to 10) {
             val expectedFile = s"compaction_file_$i.split"
-            assert(filesFromCheckpoint.exists(_.path == expectedFile),
-              s"Missing file $expectedFile in checkpoint+incremental read")
+            assert(
+              filesFromCheckpoint.exists(_.path == expectedFile),
+              s"Missing file $expectedFile in checkpoint+incremental read"
+            )
           }
 
           // Verify files are in correct state (all should be active)
@@ -339,32 +353,32 @@ class TransactionLogPerformanceTest extends TestBase {
           println("✅ Complete checkpoint + incremental transaction reading test passed!")
           println("🎉 Incremental transaction reading after checkpoint is now working!")
 
-        } finally {
+        } finally
           log2.close()
-        }
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 
   test("checkpoint cleanup and pre-checkpoint avoidance should work correctly") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_cleanup")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false),
-        StructField("name", StringType, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("name", StringType, nullable = true)
+        )
+      )
 
       // Use very short retention period to force cleanup in tests
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
-          "spark.indextables.logRetention.duration" -> "100", // 100ms retention (very short for testing)
-          "spark.indextables.checkpoint.parallelism" -> "2",
+          "spark.indextables.checkpoint.enabled"        -> "true",
+          "spark.indextables.checkpoint.interval"       -> "3",   // Checkpoint every 3 transactions
+          "spark.indextables.logRetention.duration"     -> "100", // 100ms retention (very short for testing)
+          "spark.indextables.checkpoint.parallelism"    -> "2",
           "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
@@ -404,11 +418,12 @@ class TransactionLogPerformanceTest extends TestBase {
 
         // Check what files exist now
         val checkpointDir = new Path(tablePath, "_transaction_log")
-        val fs = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
-        val files = fs.listStatus(checkpointDir).map(_.getPath.getName)
+        val fs            = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
+        val files         = fs.listStatus(checkpointDir).map(_.getPath.getName)
 
         val checkpointFiles = files.filter(_.contains("checkpoint.json"))
-        val transactionFiles = files.filter(_.endsWith(".json")).filterNot(_.contains("checkpoint")).filterNot(_ == "_last_checkpoint")
+        val transactionFiles =
+          files.filter(_.endsWith(".json")).filterNot(_.contains("checkpoint")).filterNot(_ == "_last_checkpoint")
 
         println(s"After cleanup - Checkpoint files: ${checkpointFiles.mkString(", ")}")
         println(s"After cleanup - Transaction files: ${transactionFiles.mkString(", ")}")
@@ -428,43 +443,45 @@ class TransactionLogPerformanceTest extends TestBase {
 
           for (i <- 1 to 7) {
             val expectedFile = s"cleanup_file_$i.split"
-            assert(allFiles.exists(_.path == expectedFile),
-              s"Missing file $expectedFile after cleanup")
+            assert(allFiles.exists(_.path == expectedFile), s"Missing file $expectedFile after cleanup")
           }
 
           println("✅ Cleanup and checkpoint-based reading test passed!")
 
-        } finally {
+        } finally
           log2.close()
-        }
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 
   test("pre-checkpoint files should not be read when checkpoint exists") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_avoid_prereads")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false)
+        )
+      )
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "3",
-          "spark.indextables.checkpoint.parallelism" -> "2",
-          "spark.indextables.transaction.cache.enabled" -> "false",
-          "spark.indextables.transaction.allowDirectUsage" -> "true"  // Allow direct usage for test
+          "spark.indextables.checkpoint.enabled"           -> "true",
+          "spark.indextables.checkpoint.interval"          -> "3",
+          "spark.indextables.checkpoint.parallelism"       -> "2",
+          "spark.indextables.transaction.cache.enabled"    -> "false",
+          "spark.indextables.transaction.allowDirectUsage" -> "true" // Allow direct usage for test
         ).asJava
       )
 
       // Create a custom TransactionLog subclass that tracks which versions are read
-      class TrackingTransactionLog(tablePath: Path, spark: org.apache.spark.sql.SparkSession, options: org.apache.spark.sql.util.CaseInsensitiveStringMap)
-        extends TransactionLog(tablePath, spark, options) {
+      class TrackingTransactionLog(
+        tablePath: Path,
+        spark: org.apache.spark.sql.SparkSession,
+        options: org.apache.spark.sql.util.CaseInsensitiveStringMap)
+          extends TransactionLog(tablePath, spark, options) {
 
         val readVersions = scala.collection.mutable.Set[Long]()
 
@@ -498,28 +515,28 @@ class TransactionLogPerformanceTest extends TestBase {
           log2.readVersions.clear()
 
           val files = log2.listFiles()
-          val _ = files // Suppress unused warning
+          val _     = files // Suppress unused warning
 
           println(s"Versions read during listFiles(): ${log2.readVersions.toSeq.sorted.mkString(", ")}")
           println(s"Checkpoint version: ${log2.getLastCheckpointVersion().getOrElse("None")}")
 
           // If checkpoint is working correctly, we should NOT read versions 0, 1, 2
           // because they're included in the checkpoint
-          val checkpointVersion = log2.getLastCheckpointVersion().getOrElse(-1L)
+          val checkpointVersion         = log2.getLastCheckpointVersion().getOrElse(-1L)
           val preCheckpointVersionsRead = log2.readVersions.filter(_ <= checkpointVersion)
 
-          assert(preCheckpointVersionsRead.isEmpty,
-            s"Should not read pre-checkpoint versions, but read: ${preCheckpointVersionsRead.mkString(", ")}")
+          assert(
+            preCheckpointVersionsRead.isEmpty,
+            s"Should not read pre-checkpoint versions, but read: ${preCheckpointVersionsRead.mkString(", ")}"
+          )
 
           println("✅ Pre-checkpoint avoidance test passed!")
 
-        } finally {
+        } finally
           log2.close()
-        }
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 }

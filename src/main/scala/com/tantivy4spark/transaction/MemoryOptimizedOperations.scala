@@ -32,14 +32,13 @@ import scala.util.{Failure, Success, Try, Using}
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Memory-optimized operations for transaction log processing.
- * Implements streaming, columnar processing, and external sorting for large datasets.
+ * Memory-optimized operations for transaction log processing. Implements streaming, columnar processing, and external
+ * sorting for large datasets.
  */
 class MemoryOptimizedOperations(
-    transactionLogPath: Path,
-    cloudProvider: CloudStorageProvider,
-    spark: SparkSession
-) {
+  transactionLogPath: Path,
+  cloudProvider: CloudStorageProvider,
+  spark: SparkSession) {
 
   private val logger = LoggerFactory.getLogger(classOf[MemoryOptimizedOperations])
 
@@ -47,10 +46,10 @@ class MemoryOptimizedOperations(
 
   // Configuration
   private val memoryThreshold = 512 * 1024 * 1024L // 512MB threshold for external sorting
-  private val bufferSize = 64 * 1024 // 64KB buffer for streaming operations
-  private val batchSize = 10000 // Records per batch for streaming
-  private val tempDirectory = System.getProperty("spark.indextables.indexWriter.tempDirectoryPath",
-                                                  System.getProperty("java.io.tmpdir"))
+  private val bufferSize      = 64 * 1024          // 64KB buffer for streaming operations
+  private val batchSize       = 10000              // Records per batch for streaming
+  private val tempDirectory =
+    System.getProperty("spark.indextables.indexWriter.tempDirectoryPath", System.getProperty("java.io.tmpdir"))
 
   // Note: Dataset-based reconstruction is not currently used.
   // The ParallelTransactionLogOperations.reconstructStateParallel is used instead.
@@ -61,20 +60,18 @@ class MemoryOptimizedOperations(
     // Implementation deferred until needed
     ???
   }
-  */
-
-  /**
-   * Create checkpoint with streaming to avoid memory issues for large tables
    */
+
+  /** Create checkpoint with streaming to avoid memory issues for large tables */
   def createStreamingCheckpoint(
-      version: Long,
-      actionsIterator: Iterator[Action]
+    version: Long,
+    actionsIterator: Iterator[Action]
   ): CheckpointInfo = {
 
     val checkpointPath = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
-    val tempFile = Files.createTempFile(Paths.get(tempDirectory), "checkpoint_", ".tmp")
-    val totalActions = new AtomicLong(0)
-    val numFiles = new AtomicLong(0)
+    val tempFile       = Files.createTempFile(Paths.get(tempDirectory), "checkpoint_", ".tmp")
+    val totalActions   = new AtomicLong(0)
+    val numFiles       = new AtomicLong(0)
 
     try {
       // Write to temporary file first
@@ -108,15 +105,12 @@ class MemoryOptimizedOperations(
         createdTime = System.currentTimeMillis()
       )
 
-    } finally {
+    } finally
       // Clean up temporary file
       Files.deleteIfExists(tempFile)
-    }
   }
 
-  /**
-   * Memory-efficient merge operation using external sorting for large datasets
-   */
+  /** Memory-efficient merge operation using external sorting for large datasets */
   def mergeSplitsOptimized(splits: Seq[SplitInfo]): MergeResult = {
     val totalSize = splits.map(_.sizeBytes).sum
 
@@ -129,11 +123,9 @@ class MemoryOptimizedOperations(
     }
   }
 
-  /**
-   * External merge sort for very large datasets
-   */
+  /** External merge sort for very large datasets */
   private def externalMergeSort(splits: Seq[SplitInfo]): MergeResult = {
-    val tempFiles = mutable.ListBuffer[File]()
+    val tempFiles        = mutable.ListBuffer[File]()
     val recordsProcessed = new AtomicLong(0)
 
     try {
@@ -142,12 +134,13 @@ class MemoryOptimizedOperations(
         val tempFile = Files.createTempFile(Paths.get(tempDirectory), s"merge_${split.id}_", ".tmp").toFile
         tempFiles += tempFile
 
-        Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tempFile), bufferSize))) { out =>
-          val records = readSplitRecords(split).sortBy(_.sortKey)
-          records.foreach { record =>
-            writeRecord(out, record)
-            recordsProcessed.incrementAndGet()
-          }
+        Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tempFile), bufferSize))) {
+          out =>
+            val records = readSplitRecords(split).sortBy(_.sortKey)
+            records.foreach { record =>
+              writeRecord(out, record)
+              recordsProcessed.incrementAndGet()
+            }
         }
 
         SortedTempFile(tempFile, getFileRecordCount(tempFile))
@@ -170,15 +163,12 @@ class MemoryOptimizedOperations(
         success = true
       )
 
-    } finally {
+    } finally
       // Clean up all temp files
       tempFiles.foreach(_.delete())
-    }
   }
 
-  /**
-   * In-memory merge for smaller datasets
-   */
+  /** In-memory merge for smaller datasets */
   private def inMemoryMerge(splits: Seq[SplitInfo]): MergeResult = {
     // Collect all records in memory
     val allRecords = splits.flatMap(readSplitRecords)
@@ -188,11 +178,11 @@ class MemoryOptimizedOperations(
 
     // Write to output
     val outputPath = new Path(transactionLogPath.getParent, s"merged_${System.currentTimeMillis()}.split")
-    val tempFile = Files.createTempFile(Paths.get(tempDirectory), "inmem_merge_", ".tmp").toFile
+    val tempFile   = Files.createTempFile(Paths.get(tempDirectory), "inmem_merge_", ".tmp").toFile
 
     try {
-      Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tempFile), bufferSize))) { out =>
-        sortedRecords.foreach(record => writeRecord(out, record))
+      Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(tempFile), bufferSize))) {
+        out => sortedRecords.foreach(record => writeRecord(out, record))
       }
 
       uploadFile(tempFile, outputPath)
@@ -204,65 +194,56 @@ class MemoryOptimizedOperations(
         success = true
       )
 
-    } finally {
+    } finally
       tempFile.delete()
-    }
   }
 
-  /**
-   * K-way merge of sorted files
-   */
+  /** K-way merge of sorted files */
   private def kWayMerge(sortedFiles: Seq[SortedTempFile], outputFile: File): Unit = {
     // Create readers for each file
-    val readers = sortedFiles.map { file =>
-      new BufferedRecordReader(file.file, bufferSize)
-    }
+    val readers = sortedFiles.map(file => new BufferedRecordReader(file.file, bufferSize))
 
-    Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile), bufferSize))) { out =>
-      // Priority queue for k-way merge
-      implicit val ordering: Ordering[RecordWithReader] = Ordering.by[RecordWithReader, String](_.record.sortKey).reverse
-      val pq = mutable.PriorityQueue[RecordWithReader]()
+    Using.resource(new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile), bufferSize))) {
+      out =>
+        // Priority queue for k-way merge
+        implicit val ordering: Ordering[RecordWithReader] =
+          Ordering.by[RecordWithReader, String](_.record.sortKey).reverse
+        val pq = mutable.PriorityQueue[RecordWithReader]()
 
-      // Initialize with first record from each reader
-      readers.zipWithIndex.foreach { case (reader, idx) =>
-        reader.nextRecord().foreach { record =>
-          pq.enqueue(RecordWithReader(record, idx))
+        // Initialize with first record from each reader
+        readers.zipWithIndex.foreach {
+          case (reader, idx) =>
+            reader.nextRecord().foreach(record => pq.enqueue(RecordWithReader(record, idx)))
         }
-      }
 
-      // Merge process
-      while (pq.nonEmpty) {
-        val RecordWithReader(record, readerIdx) = pq.dequeue()
-        writeRecord(out, record)
+        // Merge process
+        while (pq.nonEmpty) {
+          val RecordWithReader(record, readerIdx) = pq.dequeue()
+          writeRecord(out, record)
 
-        // Get next record from the same reader
-        readers(readerIdx).nextRecord().foreach { nextRecord =>
-          pq.enqueue(RecordWithReader(nextRecord, readerIdx))
+          // Get next record from the same reader
+          readers(readerIdx).nextRecord().foreach(nextRecord => pq.enqueue(RecordWithReader(nextRecord, readerIdx)))
         }
-      }
     }
 
     // Close all readers
     readers.foreach(_.close())
   }
 
-  /**
-   * Streaming action processor for memory-efficient processing
-   */
+  /** Streaming action processor for memory-efficient processing */
   def processActionsStreaming[T](
-      versions: Seq[Long],
-      processor: Action => Option[T]
-  ): Iterator[T] = {
-
+    versions: Seq[Long],
+    processor: Action => Option[T]
+  ): Iterator[T] =
     new Iterator[T] {
-      private var currentVersionIdx = 0
+      private var currentVersionIdx                = 0
       private var currentActions: Iterator[Action] = Iterator.empty
-      private var nextValue: Option[T] = None
+      private var nextValue: Option[T]             = None
 
       override def hasNext: Boolean = {
         if (nextValue.isDefined) return true
 
-        while (currentVersionIdx < versions.length || currentActions.hasNext) {
+        while (currentVersionIdx < versions.length || currentActions.hasNext)
           if (currentActions.hasNext) {
             processor(currentActions.next()) match {
               case Some(value) =>
@@ -275,7 +256,6 @@ class MemoryOptimizedOperations(
             currentActions = readVersionStreaming(versions(currentVersionIdx))
             currentVersionIdx += 1
           }
-        }
 
         false
       }
@@ -287,11 +267,8 @@ class MemoryOptimizedOperations(
         value
       }
     }
-  }
 
-  /**
-   * Read version actions in streaming fashion
-   */
+  /** Read version actions in streaming fashion */
   private def readVersionStreaming(version: Long): Iterator[Action] = {
     val versionFile = new Path(transactionLogPath, f"$version%020d.json")
 
@@ -300,7 +277,7 @@ class MemoryOptimizedOperations(
     }
 
     val inputStream = cloudProvider.openInputStream(versionFile.toString)
-    val reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"), bufferSize)
+    val reader      = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"), bufferSize)
 
     new Iterator[Action] {
       private var nextLine: Option[String] = Option(reader.readLine())
@@ -327,18 +304,17 @@ class MemoryOptimizedOperations(
 
   private def getOptimalPartitions(actions: Dataset[_]): Int = {
     val defaultParallelism = spark.sparkContext.defaultParallelism
-    val dataSize = actions.rdd.partitions.length
+    val dataSize           = actions.rdd.partitions.length
     Math.min(Math.max(dataSize, defaultParallelism), 200)
   }
 
-  private def wrapAction(action: Action): Map[String, Any] = {
+  private def wrapAction(action: Action): Map[String, Any] =
     action match {
       case metadata: MetadataAction => Map("metaData" -> metadata)
-      case add: AddAction => Map("add" -> add)
-      case remove: RemoveAction => Map("remove" -> remove)
-      case skip: SkipAction => Map("mergeskip" -> skip)
+      case add: AddAction           => Map("add" -> add)
+      case remove: RemoveAction     => Map("remove" -> remove)
+      case skip: SkipAction         => Map("mergeskip" -> skip)
     }
-  }
 
   private def parseAction(line: String): Action = {
     val jsonNode = JsonUtil.mapper.readTree(line)
@@ -356,10 +332,9 @@ class MemoryOptimizedOperations(
     }
   }
 
-  private def readSplitRecords(split: SplitInfo): Seq[MergeRecord] = {
+  private def readSplitRecords(split: SplitInfo): Seq[MergeRecord] =
     // Simplified implementation - would read actual split data
     Seq.empty
-  }
 
   private def writeRecord(out: DataOutputStream, record: MergeRecord): Unit = {
     out.writeUTF(record.key)
@@ -368,26 +343,22 @@ class MemoryOptimizedOperations(
     out.write(record.data)
   }
 
-  private def getFileRecordCount(file: File): Long = {
+  private def getFileRecordCount(file: File): Long =
     // Count records in file
     0L
-  }
 
-  private def uploadFile(localFile: File, remotePath: Path): Unit = {
+  private def uploadFile(localFile: File, remotePath: Path): Unit =
     Using.resource(Files.newInputStream(localFile.toPath)) { inputStream =>
       cloudProvider.writeFileFromStream(remotePath.toString, inputStream, Some(localFile.length()))
     }
-  }
 }
 
-/**
- * In-memory log replay for state reconstruction
- */
+/** In-memory log replay for state reconstruction */
 class InMemoryLogReplay {
-  private val activeFiles = mutable.HashMap[String, AddAction]()
+  private val activeFiles                            = mutable.HashMap[String, AddAction]()
   private var latestMetadata: Option[MetadataAction] = None
 
-  def append(actions: Iterator[Action]): Unit = {
+  def append(actions: Iterator[Action]): Unit =
     actions.foreach {
       case add: AddAction =>
         activeFiles(add.path) = add
@@ -397,9 +368,8 @@ class InMemoryLogReplay {
         latestMetadata = Some(metadata)
       case _ => // Ignore other actions
     }
-  }
 
-  def getActiveFiles: Seq[FileState] = {
+  def getActiveFiles: Seq[FileState] =
     activeFiles.values.map { add =>
       FileState(
         path = add.path,
@@ -409,14 +379,11 @@ class InMemoryLogReplay {
         partitionValues = add.partitionValues
       )
     }.toSeq
-  }
 
   def getMetadata: Option[MetadataAction] = latestMetadata
 }
 
-/**
- * Buffered record reader for efficient file reading
- */
+/** Buffered record reader for efficient file reading */
 class BufferedRecordReader(file: File, bufferSize: Int) extends Closeable {
   private val input = new DataInputStream(new BufferedInputStream(new FileInputStream(file), bufferSize))
   private var nextRec: Option[MergeRecord] = readNextRecord()
@@ -427,16 +394,15 @@ class BufferedRecordReader(file: File, bufferSize: Int) extends Closeable {
     current
   }
 
-  private def readNextRecord(): Option[MergeRecord] = {
+  private def readNextRecord(): Option[MergeRecord] =
     Try {
-      val key = input.readUTF()
+      val key       = input.readUTF()
       val timestamp = input.readLong()
-      val dataLen = input.readInt()
-      val data = new Array[Byte](dataLen)
+      val dataLen   = input.readInt()
+      val data      = new Array[Byte](dataLen)
       input.readFully(data)
       MergeRecord(key, timestamp, data)
     }.toOption
-  }
 
   override def close(): Unit = input.close()
 }
@@ -448,36 +414,30 @@ case class FileState(
   size: Long,
   modificationTime: Long,
   dataChange: Boolean,
-  partitionValues: Map[String, String]
-)
+  partitionValues: Map[String, String])
 
 case class SplitInfo(
   id: String,
   path: String,
-  sizeBytes: Long
-)
+  sizeBytes: Long)
 
 case class MergeResult(
   outputPath: String,
   recordCount: Long,
   sizeBytes: Long,
-  success: Boolean
-)
+  success: Boolean)
 
 case class MergeRecord(
   key: String,
   timestamp: Long,
-  data: Array[Byte]
-) {
+  data: Array[Byte]) {
   def sortKey: String = s"$key-$timestamp"
 }
 
 case class SortedTempFile(
   file: File,
-  recordCount: Long
-)
+  recordCount: Long)
 
 case class RecordWithReader(
   record: MergeRecord,
-  readerIndex: Int
-)
+  readerIndex: Int)

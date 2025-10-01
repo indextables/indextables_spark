@@ -27,8 +27,8 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * Test to validate that aggregate scans (both simple and GROUP BY) properly implement
- * cache locality via preferredLocations() method for optimal task scheduling.
+ * Test to validate that aggregate scans (both simple and GROUP BY) properly implement cache locality via
+ * preferredLocations() method for optimal task scheduling.
  */
 class AggregationCacheLocalityValidationTest extends TestBase {
 
@@ -53,7 +53,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
     val testData = (1 to 100).map(i => (i, s"item_$i", i * 10))
-    val df = spark.createDataFrame(testData).toDF("id", "name", "value")
+    val df       = spark.createDataFrame(testData).toDF("id", "name", "value")
 
     // Write using V2 API for proper partition column indexing
     df.write
@@ -99,8 +99,8 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     // Handle both Integer and Long types for sum result
     val sumValue = sumResult(0).get(0) match {
       case i: Integer => i.toLong
-      case l: Long => l
-      case other => throw new IllegalStateException(s"Unexpected sum result type: ${other.getClass}")
+      case l: Long    => l
+      case other      => throw new IllegalStateException(s"Unexpected sum result type: ${other.getClass}")
     }
     assert(sumValue == 50500)
     println(s"✅ SUM(value) aggregation completed with cache locality support")
@@ -115,13 +115,13 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     // Handle both Integer and Long types for min/max results
     val minValue = minMaxResult(0).get(0) match {
       case i: Integer => i.toLong
-      case l: Long => l
-      case other => throw new IllegalStateException(s"Unexpected min result type: ${other.getClass}")
+      case l: Long    => l
+      case other      => throw new IllegalStateException(s"Unexpected min result type: ${other.getClass}")
     }
     val maxValue = minMaxResult(0).get(1) match {
       case i: Integer => i.toLong
-      case l: Long => l
-      case other => throw new IllegalStateException(s"Unexpected max result type: ${other.getClass}")
+      case l: Long    => l
+      case other      => throw new IllegalStateException(s"Unexpected max result type: ${other.getClass}")
     }
     assert(minValue == 10)
     assert(maxValue == 1000)
@@ -129,8 +129,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
 
     // Verify that preferredLocations was used by checking broadcast manager
     val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(splits.head.path)
-    assert(preferredHosts.contains(hostname),
-      s"Expected preferredLocations to include '$hostname' for cached split")
+    assert(preferredHosts.contains(hostname), s"Expected preferredLocations to include '$hostname' for cached split")
     println(s"✅ Verified preferredLocations includes cached host: ${preferredHosts.mkString(", ")}")
   }
 
@@ -211,8 +210,10 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     // Verify that preferredLocations was used for all splits
     splits.foreach { split =>
       val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(split.path)
-      assert(preferredHosts.contains(hostname),
-        s"Expected preferredLocations to include '$hostname' for cached split '${split.path}'")
+      assert(
+        preferredHosts.contains(hostname),
+        s"Expected preferredLocations to include '$hostname' for cached split '${split.path}'"
+      )
     }
     println(s"✅ Verified all splits use preferredLocations for cache locality in GROUP BY")
   }
@@ -228,7 +229,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
     val testData = (1 to 50).map(i => (i, s"item_$i", i * 5))
-    val df = spark.createDataFrame(testData).toDF("id", "name", "value")
+    val df       = spark.createDataFrame(testData).toDF("id", "name", "value")
 
     // Write using V2 API
     df.write

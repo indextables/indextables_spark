@@ -26,18 +26,17 @@ import org.slf4j.LoggerFactory
 
 /**
  * SQL command to flush Tantivy4Spark searcher cache.
- * 
+ *
  * Syntax: FLUSH TANTIVY4SPARK SEARCHER CACHE
- * 
+ *
  * This command:
- * 1. Flushes all JVM-wide split cache managers
- * 2. Clears split location registry
- * 3. Calls tantivy4java's cache flush functionality
+ *   1. Flushes all JVM-wide split cache managers 2. Clears split location registry 3. Calls tantivy4java's cache flush
+ *      functionality
  */
 case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
-  
+
   private val logger = LoggerFactory.getLogger(classOf[FlushTantivyCacheCommand])
-  
+
   override val output: Seq[Attribute] = Seq(
     AttributeReference("cache_type", StringType, nullable = false)(),
     AttributeReference("status", StringType, nullable = false)(),
@@ -47,28 +46,28 @@ case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
     logger.info("Executing FLUSH TANTIVY4SPARK SEARCHER CACHE command")
-    
+
     val results = scala.collection.mutable.ArrayBuffer[Row]()
-    
+
     try {
       // 1. Flush GlobalSplitCacheManager instances
       val splitCacheResult = GlobalSplitCacheManager.flushAllCaches()
       results += Row(
-        "split_cache", 
-        "success", 
+        "split_cache",
+        "success",
         splitCacheResult.flushedManagers.toLong,
         s"Flushed ${splitCacheResult.flushedManagers} split cache managers"
       )
-      
+
       // 2. Clear SplitLocationRegistry
       val locationResult = SplitLocationRegistry.clearAllLocations()
       results += Row(
         "location_registry",
-        "success", 
+        "success",
         locationResult.clearedEntries.toLong,
         s"Cleared ${locationResult.clearedEntries} split location entries"
       )
-      
+
       // 3. Flush tantivy4java searcher cache
       val tantivyResult = flushTantivyJavaCache()
       results += Row(
@@ -77,24 +76,24 @@ case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
         tantivyResult.flushedCaches.toLong,
         tantivyResult.message
       )
-      
+
       logger.info(s"FLUSH TANTIVY4SPARK SEARCHER CACHE completed successfully. Results: ${results.length} operations")
-      
+
     } catch {
       case ex: Exception =>
         logger.error("Error executing FLUSH TANTIVY4SPARK SEARCHER CACHE", ex)
         results += Row(
           "error",
-          "failed", 
+          "failed",
           0L,
           s"Cache flush failed: ${ex.getMessage}"
         )
     }
-    
+
     results.toSeq
   }
-  
-  private def flushTantivyJavaCache(): TantivyFlushResult = {
+
+  private def flushTantivyJavaCache(): TantivyFlushResult =
     // Flush tantivy4java caches by closing our SplitCacheManager instances
     // This is the proper way to flush native resources in tantivy4java
     try {
@@ -102,7 +101,7 @@ case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
       TantivyFlushResult(
         success = true,
         flushedCaches = flushedCount,
-        message = s"Flushed ${flushedCount} tantivy4java native caches via SplitCacheManager close operations"
+        message = s"Flushed $flushedCount tantivy4java native caches via SplitCacheManager close operations"
       )
     } catch {
       case ex: Exception =>
@@ -113,32 +112,34 @@ case class FlushTantivyCacheCommand() extends LeafRunnableCommand {
           message = s"tantivy4java cache flush failed: ${ex.getMessage}"
         )
     }
-  }
-  
+
   private def flushViaSplitCacheManagers(): Int = {
     // This method flushes tantivy4java caches by going through our SplitCacheManager instances
     // and calling their close() methods, which releases native tantivy4java resources
     var flushedCount = 0
-    
+
     // The GlobalSplitCacheManager.flushAllCaches() will close all the SplitCacheManager instances
     // When each SplitCacheManager closes, it releases its native tantivy4java resources (searchers, readers, etc.)
     val result = GlobalSplitCacheManager.flushAllCaches()
     flushedCount += result.flushedManagers
-    
+
     // Additionally, try to call any global tantivy4java flush if available via reflection
     try {
       // Some versions of tantivy4java may have a global flush method
-      val clazz = Class.forName("com.tantivy4java.SplitCacheManager")
+      val clazz  = Class.forName("com.tantivy4java.SplitCacheManager")
       val method = clazz.getDeclaredMethod("clearGlobalCache")
       method.invoke(null)
       flushedCount += 1
     } catch {
-      case _: Exception => 
-        // Method doesn't exist or failed - that's okay, we already flushed via SplitCacheManager.close()
+      case _: Exception =>
+      // Method doesn't exist or failed - that's okay, we already flushed via SplitCacheManager.close()
     }
-    
+
     flushedCount
   }
 }
 
-case class TantivyFlushResult(success: Boolean, flushedCaches: Int, message: String)
+case class TantivyFlushResult(
+  success: Boolean,
+  flushedCaches: Int,
+  message: String)

@@ -24,16 +24,18 @@ import org.mockito.Mockito._
 import com.tantivy4spark.storage.SplitCacheConfig
 
 /**
- * Tests for SplitSearchEngine validation of metadata when creating searchers.
- * Verifies that proper exceptions are thrown when invalid metadata is provided.
+ * Tests for SplitSearchEngine validation of metadata when creating searchers. Verifies that proper exceptions are
+ * thrown when invalid metadata is provided.
  */
 class SplitSearchEngineValidationTest extends AnyFunSuite {
 
-  val testSchema = StructType(Array(
-    StructField("id", LongType, nullable = false),
-    StructField("title", StringType, nullable = true),
-    StructField("content", StringType, nullable = true)
-  ))
+  val testSchema = StructType(
+    Array(
+      StructField("id", LongType, nullable = false),
+      StructField("title", StringType, nullable = true),
+      StructField("content", StringType, nullable = true)
+    )
+  )
 
   test("should throw IllegalArgumentException when metadata is null") {
     val exception = intercept[IllegalArgumentException] {
@@ -191,10 +193,11 @@ class SplitSearchEngineValidationTest extends AnyFunSuite {
       println(s"✅ Valid metadata passed all validation checks and created successfully!")
 
     } catch {
-      case e: IllegalArgumentException if e.getMessage.contains("Split metadata cannot be null") ||
-                                        e.getMessage.contains("does not contain required footer offsets") ||
-                                        e.getMessage.contains("invalid footer offsets") ||
-                                        e.getMessage.contains("must contain valid document mapping JSON") =>
+      case e: IllegalArgumentException
+          if e.getMessage.contains("Split metadata cannot be null") ||
+            e.getMessage.contains("does not contain required footer offsets") ||
+            e.getMessage.contains("invalid footer offsets") ||
+            e.getMessage.contains("must contain valid document mapping JSON") =>
         // These are our validation exceptions - should not happen with valid metadata
         fail(s"Valid metadata should not trigger validation errors: ${e.getMessage}")
 

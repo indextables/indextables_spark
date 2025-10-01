@@ -26,16 +26,16 @@ import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 
-/**
- * Builder that converts ANTLR parse trees into Catalyst logical plans.
- */
+/** Builder that converts ANTLR parse trees into Catalyst logical plans. */
 class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef] {
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def visit(tree: org.antlr.v4.runtime.tree.ParseTree): AnyRef = {
     logger.debug(s"AST Builder visit() called with tree type: ${tree.getClass.getSimpleName}")
     val result = super.visit(tree)
-    logger.debug(s"AST Builder visit() result: $result, type: ${if (result != null) result.getClass.getName else "null"}")
+    logger.debug(
+      s"AST Builder visit() result: $result, type: ${if (result != null) result.getClass.getName else "null"}"
+    )
     result
   }
 
@@ -43,7 +43,9 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     logger.debug("visitSingleStatement called")
     // Visit the statement child directly instead of calling super
     val result = visit(ctx.statement())
-    logger.debug(s"visitSingleStatement result: $result, type: ${if (result != null) result.getClass.getName else "null"}")
+    logger.debug(
+      s"visitSingleStatement result: $result, type: ${if (result != null) result.getClass.getName else "null"}"
+    )
     result
   }
 
@@ -90,9 +92,9 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
       // Extract TARGET SIZE
       val targetSize = if (ctx.targetSize != null) {
         logger.debug(s"Found TARGET SIZE: ${ctx.targetSize.getText}")
-        try {
+        try
           Some(parseAlphanumericSize(ctx.targetSize.getText))
-        } catch {
+        catch {
           case _: NumberFormatException =>
             throw new NumberFormatException(s"Invalid target size: ${ctx.targetSize.getText}")
         }
@@ -124,7 +126,9 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
       logger.debug(s"PRECOMMIT flag: $preCommit")
 
       // Create command
-      logger.debug(s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, maxGroups=$maxGroups")
+      logger.debug(
+        s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, maxGroups=$maxGroups"
+      )
       val result = MergeSplitsCommand.apply(
         pathOption,
         tableIdOption,
@@ -142,13 +146,13 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     }
   }
 
-  override def visitFlushTantivyCache(ctx: FlushTantivyCacheContext): LogicalPlan = {
+  override def visitFlushTantivyCache(ctx: FlushTantivyCacheContext): LogicalPlan =
     FlushTantivyCacheCommand()
-  }
 
-  override def visitInvalidateTantivyTransactionLogCache(ctx: InvalidateTantivyTransactionLogCacheContext): LogicalPlan = {
+  override def visitInvalidateTantivyTransactionLogCache(ctx: InvalidateTantivyTransactionLogCacheContext)
+    : LogicalPlan = {
     logger.debug(s"visitInvalidateTantivyTransactionLogCache called with context: $ctx")
-    
+
     // Extract table path or identifier if provided
     val pathOption = if (ctx.path != null) {
       logger.debug(s"Processing path: ${ctx.path.getText}")
@@ -164,7 +168,7 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
       logger.debug("No path or table specified - global cache invalidation")
       None
     }
-    
+
     val result = InvalidateTransactionLogCacheCommand(pathOption)
     logger.debug(s"Created InvalidateTransactionLogCacheCommand: $result")
     result
@@ -175,18 +179,15 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     null // This indicates the delegate parser should handle it
   }
 
-  override def visitQualifiedName(ctx: QualifiedNameContext): Seq[String] = {
+  override def visitQualifiedName(ctx: QualifiedNameContext): Seq[String] =
     ctx.identifier().asScala.map(_.getText).toSeq
-  }
 
-  /**
-   * Parse alphanumeric size value (e.g., "100M", "5G", "1024", "-500M")
-   */
+  /** Parse alphanumeric size value (e.g., "100M", "5G", "1024", "-500M") */
   private def parseAlphanumericSize(value: String): Long = {
     val trimmed = value.trim.stripPrefix("'").stripSuffix("'") // Remove quotes if present
 
     // Handle negative sign
-    val isNegative = trimmed.startsWith("-")
+    val isNegative    = trimmed.startsWith("-")
     val absoluteValue = if (isNegative) trimmed.substring(1) else trimmed
 
     // Extract number and suffix
@@ -198,16 +199,17 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
       throw new NumberFormatException(s"Invalid size format: $value")
     }
 
-    val baseValue = try {
-      numStr.toLong
-    } catch {
-      case _: NumberFormatException => throw new NumberFormatException(s"Invalid numeric value: $numStr")
-    }
+    val baseValue =
+      try
+        numStr.toLong
+      catch {
+        case _: NumberFormatException => throw new NumberFormatException(s"Invalid numeric value: $numStr")
+      }
 
     val multiplier = suffix match {
-      case "" => 1L
-      case "M" => 1024L * 1024L      // Megabytes
-      case "G" => 1024L * 1024L * 1024L  // Gigabytes
+      case ""    => 1L
+      case "M"   => 1024L * 1024L         // Megabytes
+      case "G"   => 1024L * 1024L * 1024L // Gigabytes
       case other => throw new IllegalArgumentException(s"Unsupported size suffix: $other")
     }
 
@@ -215,28 +217,26 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
     if (isNegative) -result else result
   }
 
-  /**
-   * Parse alphanumeric integer value (e.g., "5", "-10")
-   */
+  /** Parse alphanumeric integer value (e.g., "5", "-10") */
   private def parseAlphanumericInt(value: String): Int = {
     val trimmed = value.trim.stripPrefix("'").stripSuffix("'") // Remove quotes if present
-    try {
+    try
       trimmed.toInt
-    } catch {
+    catch {
       case _: NumberFormatException => throw new NumberFormatException(s"Invalid integer format: $value")
     }
   }
 
   /**
-   * Extract raw text from a parser rule context (Delta Lake approach).
-   * This preserves the original formatting including spacing.
+   * Extract raw text from a parser rule context (Delta Lake approach). This preserves the original formatting including
+   * spacing.
    */
   private def extractRawText(exprContext: ParserRuleContext): String = {
     import org.antlr.v4.runtime.misc.Interval
     // Extract the raw expression which will be parsed later
-    exprContext.getStart.getInputStream.getText(new Interval(
-      exprContext.getStart.getStartIndex,
-      exprContext.getStop.getStopIndex))
+    exprContext.getStart.getInputStream.getText(
+      new Interval(exprContext.getStart.getStartIndex, exprContext.getStop.getStopIndex)
+    )
   }
 
   // No need to override defaultResult() - let ANTLR handle it naturally

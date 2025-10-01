@@ -22,8 +22,8 @@ import org.scalatest.matchers.should.Matchers._
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Test to verify that S3CloudStorageProvider correctly adds trailing slashes
- * when listing directory contents to avoid matching similarly named directories.
+ * Test to verify that S3CloudStorageProvider correctly adds trailing slashes when listing directory contents to avoid
+ * matching similarly named directories.
  */
 class S3TrailingSlashTest extends AnyFunSuite with BeforeAndAfterAll {
 
@@ -32,33 +32,34 @@ class S3TrailingSlashTest extends AnyFunSuite with BeforeAndAfterAll {
     // we'll validate the logic through unit testing the transformation
     testTrailingSlashLogic()
   }
-  
+
   test("trailing slash should be added to non-empty directory paths") {
     testTrailingSlashLogic()
   }
-  
+
   private def testTrailingSlashLogic(): Unit = {
     // Test cases for the trailing slash logic
     val testCases = Seq(
-      ("path/_transaction_log", "path/_transaction_log/"),  // Should add trailing slash
-      ("path/to/dir", "path/to/dir/"),                      // Should add trailing slash
-      ("already/has/slash/", "already/has/slash/"),         // Should keep existing slash
-      ("", ""),                                              // Empty path stays empty
-      ("/", "/")                                             // Root slash stays as is
+      ("path/_transaction_log", "path/_transaction_log/"), // Should add trailing slash
+      ("path/to/dir", "path/to/dir/"),                     // Should add trailing slash
+      ("already/has/slash/", "already/has/slash/"),        // Should keep existing slash
+      ("", ""),                                            // Empty path stays empty
+      ("/", "/")                                           // Root slash stays as is
     )
-    
-    testCases.foreach { case (input, expected) =>
-      val result = if (input.nonEmpty && !input.endsWith("/")) {
-        input + "/"
-      } else {
-        input
-      }
-      
-      result shouldBe expected
-      println(s"✅ Path transformation: '$input' → '$result' (expected: '$expected')")
+
+    testCases.foreach {
+      case (input, expected) =>
+        val result = if (input.nonEmpty && !input.endsWith("/")) {
+          input + "/"
+        } else {
+          input
+        }
+
+        result shouldBe expected
+        println(s"✅ Path transformation: '$input' → '$result' (expected: '$expected')")
     }
   }
-  
+
   test("listFiles should not match similarly named directories without trailing slash") {
     // This test validates the problem scenario:
     // Without trailing slash: "_transaction_log" would match:
@@ -66,34 +67,34 @@ class S3TrailingSlashTest extends AnyFunSuite with BeforeAndAfterAll {
     //   - _transaction_log_backup/file.json (undesired)
     // With trailing slash: "_transaction_log/" only matches:
     //   - _transaction_log/file.json (desired)
-    
+
     val prefixWithoutSlash = "path/_transaction_log"
-    val prefixWithSlash = "path/_transaction_log/"
-    
+    val prefixWithSlash    = "path/_transaction_log/"
+
     // Simulate S3 key matching
     val s3Keys = Seq(
-      "path/_transaction_log/00000000000000000000.json",      // Should match
-      "path/_transaction_log/00000000000000000001.json",      // Should match
-      "path/_transaction_log_backup/backup.json",             // Should NOT match
-      "path/_transaction_logs/other.json",                    // Should NOT match
-      "path/_transaction_log.old/archive.json"                // Should NOT match
+      "path/_transaction_log/00000000000000000000.json", // Should match
+      "path/_transaction_log/00000000000000000001.json", // Should match
+      "path/_transaction_log_backup/backup.json",        // Should NOT match
+      "path/_transaction_logs/other.json",               // Should NOT match
+      "path/_transaction_log.old/archive.json"           // Should NOT match
     )
-    
+
     // Test WITHOUT trailing slash (the bug)
     val matchesWithoutSlash = s3Keys.filter(_.startsWith(prefixWithoutSlash))
-    matchesWithoutSlash.size shouldBe 5  // Incorrectly matches all 5
-    
+    matchesWithoutSlash.size shouldBe 5 // Incorrectly matches all 5
+
     // Test WITH trailing slash (the fix)
     val matchesWithSlash = s3Keys.filter(_.startsWith(prefixWithSlash))
-    matchesWithSlash.size shouldBe 2  // Correctly matches only 2
-    
+    matchesWithSlash.size shouldBe 2 // Correctly matches only 2
+
     // Verify correct files are matched
     matchesWithSlash should contain("path/_transaction_log/00000000000000000000.json")
     matchesWithSlash should contain("path/_transaction_log/00000000000000000001.json")
-    matchesWithSlash should not contain("path/_transaction_log_backup/backup.json")
-    matchesWithSlash should not contain("path/_transaction_logs/other.json")
-    matchesWithSlash should not contain("path/_transaction_log.old/archive.json")
-    
+    matchesWithSlash should not contain "path/_transaction_log_backup/backup.json"
+    matchesWithSlash should not contain "path/_transaction_logs/other.json"
+    matchesWithSlash should not contain "path/_transaction_log.old/archive.json"
+
     println(s"✅ Without slash: matched ${matchesWithoutSlash.size} files (incorrect)")
     println(s"✅ With slash: matched ${matchesWithSlash.size} files (correct)")
   }

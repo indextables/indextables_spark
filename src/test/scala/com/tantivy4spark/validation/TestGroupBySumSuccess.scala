@@ -8,7 +8,8 @@ import java.nio.file.Files
 class TestGroupBySumSuccess extends AnyFunSuite {
 
   test("GROUP BY with SUM where BOTH fields are fast (should be accepted)") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("TestGroupBySumSuccess")
       .master("local[*]")
       .getOrCreate()
@@ -23,15 +24,16 @@ class TestGroupBySumSuccess extends AnyFunSuite {
         ("doc3", "category_b", 300)
       ).toDF("id", "category", "amount")
 
-      val tempDir = java.nio.file.Files.createTempDirectory("groupby-sum-success-test").toFile
+      val tempDir   = java.nio.file.Files.createTempDirectory("groupby-sum-success-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       println("🧪 Test: GROUP BY with SUM where BOTH fields are fast (should be accepted)")
 
       // Write data with BOTH category and amount as fast fields
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.category", "string")
-        .option("spark.indextables.indexing.fastfields", "category,amount")  // Both fields fast
+        .option("spark.indextables.indexing.fastfields", "category,amount") // Both fields fast
         .mode("overwrite")
         .save(tablePath)
 
@@ -73,14 +75,11 @@ class TestGroupBySumSuccess extends AnyFunSuite {
       }
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
-  /**
-   * Recursively delete a directory and all its contents.
-   */
+  /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)

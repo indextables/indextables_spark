@@ -25,20 +25,23 @@ import java.nio.file.Files
 import scala.collection.JavaConverters._
 
 /**
- * Test suite for aggregate pushdown validation logic.
- * Uses correct configuration parameters as noted by the user: io.indextables.* not tantivy4spark.*
+ * Test suite for aggregate pushdown validation logic. Uses correct configuration parameters as noted by the user:
+ * io.indextables.* not tantivy4spark.*
  */
 class AggregatePushdownValidationTest extends AnyFunSuite {
 
-  val testSchema = StructType(Seq(
-    StructField("id", StringType, nullable = false),
-    StructField("content", StringType, nullable = false),
-    StructField("score", IntegerType, nullable = false),  // Numeric field for aggregation
-    StructField("value", LongType, nullable = false)      // Numeric field for aggregation
-  ))
+  val testSchema = StructType(
+    Seq(
+      StructField("id", StringType, nullable = false),
+      StructField("content", StringType, nullable = false),
+      StructField("score", IntegerType, nullable = false), // Numeric field for aggregation
+      StructField("value", LongType, nullable = false)     // Numeric field for aggregation
+    )
+  )
 
   test("ScanBuilder implements SupportsPushDownAggregates interface") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
@@ -46,9 +49,9 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
     try {
       // Use correct configuration parameters as per user note: spark.indextables.*
       val optionsMap = Map(
-        "spark.indextables.indexing.fastfields" -> "score,value",
+        "spark.indextables.indexing.fastfields"      -> "score,value",
         "spark.indextables.indexing.typemap.content" -> "text",
-        "spark.indextables.indexing.typemap.id" -> "string"
+        "spark.indextables.indexing.typemap.id"      -> "string"
       )
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
@@ -61,7 +64,11 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig.value
+        spark,
+        transactionLog,
+        testSchema,
+        options,
+        broadcastConfig.value
       )
 
       // Verify interface implementation
@@ -71,13 +78,13 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       // Clean up
       tempDir.delete()
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("fast field validation logic") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
@@ -98,12 +105,16 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig1 = spark.sparkContext.broadcast(optionsWithFastFields)
 
       val scanBuilder1 = new Tantivy4SparkScanBuilder(
-        spark, transactionLog1, testSchema, options1, broadcastConfig1.value
+        spark,
+        transactionLog1,
+        testSchema,
+        options1,
+        broadcastConfig1.value
       )
 
       // Test Tantivy4SparkOptions fast field detection
       val tantivyOptions1 = new Tantivy4SparkOptions(options1)
-      val fastFields1 = tantivyOptions1.getFastFields
+      val fastFields1     = tantivyOptions1.getFastFields
       assert(fastFields1.contains("score"), "score should be detected as fast field")
       assert(fastFields1.contains("value"), "value should be detected as fast field")
       assert(!fastFields1.contains("content"), "content should not be detected as fast field")
@@ -112,12 +123,12 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
 
       // Test without score as fast field
       val optionsWithoutFastFields = Map(
-        "spark.indextables.indexing.fastfields" -> "value"  // score not included
+        "spark.indextables.indexing.fastfields" -> "value" // score not included
       )
       val options2 = new CaseInsensitiveStringMap(optionsWithoutFastFields.asJava)
 
       val tantivyOptions2 = new Tantivy4SparkOptions(options2)
-      val fastFields2 = tantivyOptions2.getFastFields
+      val fastFields2     = tantivyOptions2.getFastFields
       assert(!fastFields2.contains("score"), "score should not be detected as fast field")
       assert(fastFields2.contains("value"), "value should be detected as fast field")
 
@@ -126,13 +137,13 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       // Clean up
       tempDir1.delete()
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("field type mapping validation") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
@@ -141,12 +152,12 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       // Test field type mapping with io.indextables.* configuration
       val optionsMap = Map(
         "spark.indextables.indexing.typemap.content" -> "text",
-        "spark.indextables.indexing.typemap.id" -> "string",
-        "spark.indextables.indexing.fastfields" -> "score,value"
+        "spark.indextables.indexing.typemap.id"      -> "string",
+        "spark.indextables.indexing.fastfields"      -> "score,value"
       )
       val options = new CaseInsensitiveStringMap(optionsMap.asJava)
 
-      val tantivyOptions = new Tantivy4SparkOptions(options)
+      val tantivyOptions   = new Tantivy4SparkOptions(options)
       val fieldTypeMapping = tantivyOptions.getFieldTypeMapping
 
       assert(fieldTypeMapping.contains("content"), "content field type mapping should be present")
@@ -156,20 +167,20 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
 
       println("✅ Field type mapping with io.indextables.* configuration passed")
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("numeric type detection") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
 
     try {
       val optionsMap = Map[String, String]()
-      val options = new CaseInsensitiveStringMap(optionsMap.asJava)
+      val options    = new CaseInsensitiveStringMap(optionsMap.asJava)
 
       val tempDir = Files.createTempDirectory("aggregate-test").toFile
       val transactionLog = com.tantivy4spark.transaction.TransactionLogFactory.create(
@@ -180,12 +191,17 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig.value
+        spark,
+        transactionLog,
+        testSchema,
+        options,
+        broadcastConfig.value
       )
 
       // Test numeric type detection using reflection since the method is private
       val scanBuilderClass = scanBuilder.getClass
-      val isNumericTypeMethod = scanBuilderClass.getDeclaredMethod("isNumericType", classOf[org.apache.spark.sql.types.DataType])
+      val isNumericTypeMethod =
+        scanBuilderClass.getDeclaredMethod("isNumericType", classOf[org.apache.spark.sql.types.DataType])
       isNumericTypeMethod.setAccessible(true)
 
       import org.apache.spark.sql.types._
@@ -197,28 +213,34 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       assert(isNumericTypeMethod.invoke(scanBuilder, DoubleType).asInstanceOf[Boolean], "DoubleType should be numeric")
 
       // Test non-numeric types
-      assert(!isNumericTypeMethod.invoke(scanBuilder, StringType).asInstanceOf[Boolean], "StringType should not be numeric")
-      assert(!isNumericTypeMethod.invoke(scanBuilder, BooleanType).asInstanceOf[Boolean], "BooleanType should not be numeric")
+      assert(
+        !isNumericTypeMethod.invoke(scanBuilder, StringType).asInstanceOf[Boolean],
+        "StringType should not be numeric"
+      )
+      assert(
+        !isNumericTypeMethod.invoke(scanBuilder, BooleanType).asInstanceOf[Boolean],
+        "BooleanType should not be numeric"
+      )
 
       println("✅ Numeric type detection passed")
 
       // Clean up
       tempDir.delete()
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("transaction log count scan creation") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
 
     try {
       val optionsMap = Map[String, String]()
-      val options = new CaseInsensitiveStringMap(optionsMap.asJava)
+      val options    = new CaseInsensitiveStringMap(optionsMap.asJava)
 
       val tempDir = Files.createTempDirectory("aggregate-test").toFile
       val transactionLog = com.tantivy4spark.transaction.TransactionLogFactory.create(
@@ -229,7 +251,11 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
       val scanBuilder = new Tantivy4SparkScanBuilder(
-        spark, transactionLog, testSchema, options, broadcastConfig.value
+        spark,
+        transactionLog,
+        testSchema,
+        options,
+        broadcastConfig.value
       )
 
       // Test TransactionLogCountScan creation
@@ -246,16 +272,16 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       // Clean up
       tempDir.delete()
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("configuration parameter compatibility") {
     // Test that io.indextables.* parameters are properly supported
     // This validates the user's requirement for using the correct provider configuration
 
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("AggregatePushdownValidationTest")
       .master("local[*]")
       .getOrCreate()
@@ -263,17 +289,17 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
     try {
       // Test both tantivy4spark and indextables configurations for compatibility
       val indextablesOptions = Map(
-        "spark.indextables.indexing.fastfields" -> "score,value",
+        "spark.indextables.indexing.fastfields"      -> "score,value",
         "spark.indextables.indexing.typemap.content" -> "text"
       )
 
       val tantivyOptions = Map(
-        "spark.indextables.indexing.fastfields" -> "score,value",
+        "spark.indextables.indexing.fastfields"      -> "score,value",
         "spark.indextables.indexing.typemap.content" -> "text"
       )
 
       // Test indextables configuration (preferred)
-      val options1 = new CaseInsensitiveStringMap(indextablesOptions.asJava)
+      val options1        = new CaseInsensitiveStringMap(indextablesOptions.asJava)
       val tantivyOptions1 = new Tantivy4SparkOptions(options1)
 
       // Both should work, but indextables is the preferred configuration
@@ -284,7 +310,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       assert(typeMapping1.contains("content"), "indextables config should work for type mapping")
 
       // Test tantivy4spark configuration (legacy)
-      val options2 = new CaseInsensitiveStringMap(tantivyOptions.asJava)
+      val options2        = new CaseInsensitiveStringMap(tantivyOptions.asJava)
       val tantivyOptions2 = new Tantivy4SparkOptions(options2)
 
       val fastFields2 = tantivyOptions2.getFastFields
@@ -293,8 +319,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       println("✅ Configuration parameter compatibility passed")
       println("✅ io.indextables.* configuration properly supported")
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 }

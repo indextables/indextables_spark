@@ -23,8 +23,8 @@ import org.apache.spark.sql.sources._
 import java.sql.Date
 
 /**
- * Unit tests for date filtering in partition pruning that don't require Spark.
- * Tests the core logic of comparing partition values (stored as strings) with filter values.
+ * Unit tests for date filtering in partition pruning that don't require Spark. Tests the core logic of comparing
+ * partition values (stored as strings) with filter values.
  */
 class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
@@ -34,7 +34,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
     // Test exact string match
     val stringFilter = EqualTo("event_date", "2023-02-20")
-    val result = PartitionPruning.evaluateFilter(partitionValues, stringFilter)
+    val result       = PartitionPruning.evaluateFilter(partitionValues, stringFilter)
 
     result shouldBe true
   }
@@ -44,7 +44,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
     // Test with Date object (Spark may convert string literals to Date objects)
     val dateFilter = EqualTo("event_date", Date.valueOf("2023-02-20"))
-    val result = PartitionPruning.evaluateFilter(partitionValues, dateFilter)
+    val result     = PartitionPruning.evaluateFilter(partitionValues, dateFilter)
 
     result shouldBe true
   }
@@ -122,7 +122,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
       )
     )
 
-    val partitionColumns = Seq("event_date")
+    val partitionColumns           = Seq("event_date")
     val exactFilter: Array[Filter] = Array(EqualTo("event_date", "2023-02-20"))
 
     val prunedActions = PartitionPruning.prunePartitions(addActions, partitionColumns, exactFilter)
@@ -149,7 +149,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
       )
     )
 
-    val partitionColumns = Seq("event_date")
+    val partitionColumns                 = Seq("event_date")
     val nonExistentFilter: Array[Filter] = Array(EqualTo("event_date", "2025-01-01"))
 
     val prunedActions = PartitionPruning.prunePartitions(addActions, partitionColumns, nonExistentFilter)
@@ -165,7 +165,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
       "2023-02-20",
       "2023-12-31",
       "2024-01-01",
-      "2024-02-29"  // leap year
+      "2024-02-29" // leap year
     )
 
     val sortedDates = dates.sorted
@@ -206,7 +206,7 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
       )
     )
 
-    val partitionColumns = Seq("event_date")
+    val partitionColumns        = Seq("event_date")
     val inFilter: Array[Filter] = Array(In("event_date", Array("2023-01-15", "2024-01-05")))
 
     val prunedActions = PartitionPruning.prunePartitions(addActions, partitionColumns, inFilter)
@@ -222,20 +222,20 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
     // Test with java.sql.Date object
     val dateFilter = EqualTo("event_date", java.sql.Date.valueOf("2023-02-20"))
-    val result = PartitionPruning.evaluateFilter(partitionValues, dateFilter)
+    val result     = PartitionPruning.evaluateFilter(partitionValues, dateFilter)
     result shouldBe true
 
     // Test with different date
     val differentDateFilter = EqualTo("event_date", java.sql.Date.valueOf("2023-02-21"))
-    val differentResult = PartitionPruning.evaluateFilter(partitionValues, differentDateFilter)
+    val differentResult     = PartitionPruning.evaluateFilter(partitionValues, differentDateFilter)
     differentResult shouldBe false
 
     // Test with range using Date objects
     val rangeStartFilter = GreaterThanOrEqual("event_date", java.sql.Date.valueOf("2023-02-01"))
-    val rangeEndFilter = LessThan("event_date", java.sql.Date.valueOf("2023-03-01"))
+    val rangeEndFilter   = LessThan("event_date", java.sql.Date.valueOf("2023-03-01"))
 
     val rangeStartResult = PartitionPruning.evaluateFilter(partitionValues, rangeStartFilter)
-    val rangeEndResult = PartitionPruning.evaluateFilter(partitionValues, rangeEndFilter)
+    val rangeEndResult   = PartitionPruning.evaluateFilter(partitionValues, rangeEndFilter)
 
     rangeStartResult shouldBe true
     rangeEndResult shouldBe true
@@ -245,22 +245,22 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
     // Test with ISO timestamp string partition value
     val timestampPartitionValues = Map("event_time" -> "2023-02-20 14:30:00")
 
-    val timestamp = java.sql.Timestamp.valueOf("2023-02-20 14:30:00")
+    val timestamp       = java.sql.Timestamp.valueOf("2023-02-20 14:30:00")
     val timestampFilter = EqualTo("event_time", timestamp)
-    val result = PartitionPruning.evaluateFilter(timestampPartitionValues, timestampFilter)
+    val result          = PartitionPruning.evaluateFilter(timestampPartitionValues, timestampFilter)
     result shouldBe true
 
     // Test with different timestamp
     val differentTimestamp = java.sql.Timestamp.valueOf("2023-02-20 14:30:01")
-    val differentFilter = EqualTo("event_time", differentTimestamp)
-    val differentResult = PartitionPruning.evaluateFilter(timestampPartitionValues, differentFilter)
+    val differentFilter    = EqualTo("event_time", differentTimestamp)
+    val differentResult    = PartitionPruning.evaluateFilter(timestampPartitionValues, differentFilter)
     differentResult shouldBe false
 
     // Test with epoch millis partition value
     val epochPartitionValues = Map("event_time" -> "1676902200000") // 2023-02-20 14:30:00 UTC in millis
-    val epochTimestamp = new java.sql.Timestamp(1676902200000L)
-    val epochFilter = EqualTo("event_time", epochTimestamp)
-    val epochResult = PartitionPruning.evaluateFilter(epochPartitionValues, epochFilter)
+    val epochTimestamp       = new java.sql.Timestamp(1676902200000L)
+    val epochFilter          = EqualTo("event_time", epochTimestamp)
+    val epochResult          = PartitionPruning.evaluateFilter(epochPartitionValues, epochFilter)
     epochResult shouldBe true
   }
 
@@ -269,20 +269,20 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
     // Test with java.math.BigDecimal
     val javaBigDecimal = new java.math.BigDecimal("123.456")
-    val javaFilter = EqualTo("price", javaBigDecimal)
-    val javaResult = PartitionPruning.evaluateFilter(decimalPartitionValues, javaFilter)
+    val javaFilter     = EqualTo("price", javaBigDecimal)
+    val javaResult     = PartitionPruning.evaluateFilter(decimalPartitionValues, javaFilter)
     javaResult shouldBe true
 
     // Test with scala.math.BigDecimal
     val scalaBigDecimal = scala.math.BigDecimal("123.456")
-    val scalaFilter = EqualTo("price", scalaBigDecimal)
-    val scalaResult = PartitionPruning.evaluateFilter(decimalPartitionValues, scalaFilter)
+    val scalaFilter     = EqualTo("price", scalaBigDecimal)
+    val scalaResult     = PartitionPruning.evaluateFilter(decimalPartitionValues, scalaFilter)
     scalaResult shouldBe true
 
     // Test with different decimal value
     val differentDecimal = new java.math.BigDecimal("123.457")
-    val differentFilter = EqualTo("price", differentDecimal)
-    val differentResult = PartitionPruning.evaluateFilter(decimalPartitionValues, differentFilter)
+    val differentFilter  = EqualTo("price", differentDecimal)
+    val differentResult  = PartitionPruning.evaluateFilter(decimalPartitionValues, differentFilter)
     differentResult shouldBe false
 
     // Test range comparison
@@ -494,9 +494,9 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
     // - 2023-01-15/active/eu (matches first AND)
     // - 2023-02-20/inactive/us (matches second AND)
     complexResult should have length 3
-    val resultKeys = complexResult.map(a =>
-      s"${a.partitionValues("date")}/${a.partitionValues("status")}/${a.partitionValues("region")}"
-    ).sorted
+    val resultKeys = complexResult
+      .map(a => s"${a.partitionValues("date")}/${a.partitionValues("status")}/${a.partitionValues("region")}")
+      .sorted
     resultKeys shouldBe Array("2023-01-15/active/eu", "2023-01-15/active/us", "2023-02-20/inactive/us")
   }
 
@@ -580,16 +580,16 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
 
     // Test 2: Filter only on non-partition columns - should be ignored (all partitions returned)
     val nonPartitionFilters: Array[Filter] = Array(
-      EqualTo("content", "some text")  // 'content' is not a partition column
+      EqualTo("content", "some text") // 'content' is not a partition column
     )
     val nonPartitionResult = PartitionPruning.prunePartitions(addActions, partitionColumns, nonPartitionFilters)
-    nonPartitionResult should have length 2  // Should return all partitions since filter can't be applied
+    nonPartitionResult should have length 2 // Should return all partitions since filter can't be applied
 
     // Test 3: Mixed filter (partition + non-partition columns) - needs special handling
     val mixedFilters: Array[Filter] = Array(
       And(
-        EqualTo("date", "2023-01-15"),     // partition column
-        EqualTo("content", "some text")    // non-partition column
+        EqualTo("date", "2023-01-15"),  // partition column
+        EqualTo("content", "some text") // non-partition column
       )
     )
     val mixedResult = PartitionPruning.prunePartitions(addActions, partitionColumns, mixedFilters)
@@ -629,12 +629,12 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
     val complexFilters: Array[Filter] = Array(
       Or(
         And(
-          GreaterThanOrEqual("date", "2023-02-01"),  // partition column
-          EqualTo("region", "us")                    // partition column
+          GreaterThanOrEqual("date", "2023-02-01"), // partition column
+          EqualTo("region", "us")                   // partition column
         ),
         And(
-          EqualTo("user_id", "123"),                 // non-partition column
-          StringContains("content", "test")          // non-partition column
+          EqualTo("user_id", "123"),        // non-partition column
+          StringContains("content", "test") // non-partition column
         )
       )
     )
@@ -691,8 +691,8 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
     // Test 2: Mixed filter should extract only partition parts
     val mixedFilter: Array[Filter] = Array(
       And(
-        EqualTo("date", "2023-01-15"),        // partition column - should be applied
-        EqualTo("content", "some text")       // non-partition column - should be ignored
+        EqualTo("date", "2023-01-15"),  // partition column - should be applied
+        EqualTo("content", "some text") // non-partition column - should be ignored
       )
     )
     val mixedResult = PartitionPruning.prunePartitions(addActions, partitionColumns, mixedFilter)
@@ -704,12 +704,12 @@ class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
     val complexMixedFilter: Array[Filter] = Array(
       Or(
         And(
-          GreaterThanOrEqual("date", "2023-02-01"),  // partition column
-          EqualTo("region", "us")                    // partition column
+          GreaterThanOrEqual("date", "2023-02-01"), // partition column
+          EqualTo("region", "us")                   // partition column
         ),
         And(
-          EqualTo("user_id", "123"),                 // non-partition column - should be ignored
-          StringContains("content", "test")          // non-partition column - should be ignored
+          EqualTo("user_id", "123"),        // non-partition column - should be ignored
+          StringContains("content", "test") // non-partition column - should be ignored
         )
       )
     )

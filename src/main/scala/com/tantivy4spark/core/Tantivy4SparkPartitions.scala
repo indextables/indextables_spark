@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -26,30 +25,36 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import com.tantivy4spark.transaction.{AddAction, PartitionUtils}
 import com.tantivy4spark.search.{TantivySearchEngine, SplitSearchEngine}
-import com.tantivy4spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, SplitLocationRegistry, BroadcastSplitLocalityManager}
+import com.tantivy4spark.storage.{
+  SplitCacheConfig,
+  GlobalSplitCacheManager,
+  SplitLocationRegistry,
+  BroadcastSplitLocalityManager
+}
 import com.tantivy4spark.prewarm.PreWarmManager
 import com.tantivy4spark.util.StatisticsCalculator
 import java.util.UUID
-import com.tantivy4spark.io.{CloudStorageProviderFactory}
+import com.tantivy4spark.io.CloudStorageProviderFactory
 import org.apache.hadoop.fs.Path
 import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 import java.io.{IOException, ByteArrayOutputStream}
 import scala.jdk.CollectionConverters._
 
-/**
- * Utility for consistent path resolution across different scan types.
- */
+/** Utility for consistent path resolution across different scan types. */
 object PathResolutionUtils {
 
   /**
    * Resolves a path from AddAction against a table path, handling absolute and relative paths correctly.
    *
-   * @param splitPath Path from AddAction (could be relative like "part-00000-xxx.split" or absolute)
-   * @param tablePath Base table path for resolving relative paths
-   * @return Resolved Hadoop Path object
+   * @param splitPath
+   *   Path from AddAction (could be relative like "part-00000-xxx.split" or absolute)
+   * @param tablePath
+   *   Base table path for resolving relative paths
+   * @return
+   *   Resolved Hadoop Path object
    */
-  def resolveSplitPath(splitPath: String, tablePath: String): Path = {
+  def resolveSplitPath(splitPath: String, tablePath: String): Path =
     if (isAbsolutePath(splitPath)) {
       // Already absolute path - handle file:/ URIs properly
       if (splitPath.startsWith("file:")) {
@@ -63,16 +68,18 @@ object PathResolutionUtils {
       // Relative path, resolve against table path
       new Path(tablePath, splitPath)
     }
-  }
 
   /**
    * Resolves a path and returns it as a string suitable for tantivy4java.
    *
-   * @param splitPath Path from AddAction
-   * @param tablePath Base table path for resolving relative paths
-   * @return Resolved path as string
+   * @param splitPath
+   *   Path from AddAction
+   * @param tablePath
+   *   Base table path for resolving relative paths
+   * @return
+   *   Resolved path as string
    */
-  def resolveSplitPathAsString(splitPath: String, tablePath: String): String = {
+  def resolveSplitPathAsString(splitPath: String, tablePath: String): String =
     if (isAbsolutePath(splitPath)) {
       // Already absolute path - handle file:/ URIs properly
       if (splitPath.startsWith("file:")) {
@@ -92,46 +99,42 @@ object PathResolutionUtils {
         new Path(tablePath, splitPath).toString
       }
     }
-  }
 
-  /**
-   * Checks if a path is absolute (starts with "/", contains "://" for URLs, or starts with "file:").
-   */
-  private def isAbsolutePath(path: String): Boolean = {
+  /** Checks if a path is absolute (starts with "/", contains "://" for URLs, or starts with "file:"). */
+  private def isAbsolutePath(path: String): Boolean =
     path.startsWith("/") || path.contains("://") || path.startsWith("file:")
-  }
 }
 
 class Tantivy4SparkInputPartition(
-    val addAction: AddAction,
-    val readSchema: StructType,
-    val filters: Array[Filter],
-    val partitionId: Int,
-    val limit: Option[Int] = None,
-    val indexQueryFilters: Array[Any] = Array.empty
-) extends InputPartition {
+  val addAction: AddAction,
+  val readSchema: StructType,
+  val filters: Array[Filter],
+  val partitionId: Int,
+  val limit: Option[Int] = None,
+  val indexQueryFilters: Array[Any] = Array.empty)
+    extends InputPartition {
 
   /**
-   * Provide preferred locations for this partition based on split cache locality.
-   * Spark will try to schedule tasks on these hosts to take advantage of cached splits.
-   * Uses broadcast-based locality information for accurate cluster-wide cache tracking.
+   * Provide preferred locations for this partition based on split cache locality. Spark will try to schedule tasks on
+   * these hosts to take advantage of cached splits. Uses broadcast-based locality information for accurate cluster-wide
+   * cache tracking.
    */
   override def preferredLocations(): Array[String] = {
-    println(s"🎯 [PARTITION-${partitionId}] preferredLocations() called for split: ${addAction.path}")
+    println(s"🎯 [PARTITION-$partitionId] preferredLocations() called for split: ${addAction.path}")
 
     val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(addAction.path)
     if (preferredHosts.nonEmpty) {
-      println(s"🎯 [PARTITION-${partitionId}] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
+      println(s"🎯 [PARTITION-$partitionId] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
       preferredHosts
     } else {
-      println(s"🎯 [PARTITION-${partitionId}] No broadcast hosts found, trying legacy registry")
+      println(s"🎯 [PARTITION-$partitionId] No broadcast hosts found, trying legacy registry")
       // Fallback to legacy registry for compatibility
       val legacyHosts = SplitLocationRegistry.getPreferredHosts(addAction.path)
       if (legacyHosts.nonEmpty) {
-        println(s"🎯 [PARTITION-${partitionId}] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
+        println(s"🎯 [PARTITION-$partitionId] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
         legacyHosts
       } else {
-        println(s"🎯 [PARTITION-${partitionId}] No preferred hosts found - letting Spark decide")
+        println(s"🎯 [PARTITION-$partitionId] No preferred hosts found - letting Spark decide")
         // No cache history available, let Spark decide
         Array.empty[String]
       }
@@ -140,11 +143,11 @@ class Tantivy4SparkInputPartition(
 }
 
 class Tantivy4SparkReaderFactory(
-    readSchema: StructType,
-    limit: Option[Int] = None,
-    config: Map[String, String],  // Direct config instead of broadcast
-    tablePath: Path
-) extends PartitionReaderFactory {
+  readSchema: StructType,
+  limit: Option[Int] = None,
+  config: Map[String, String], // Direct config instead of broadcast
+  tablePath: Path)
+    extends PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkReaderFactory])
 
@@ -165,14 +168,14 @@ class Tantivy4SparkReaderFactory(
 }
 
 class Tantivy4SparkPartitionReader(
-    addAction: AddAction,
-    readSchema: StructType,
-    filters: Array[Filter],
-    limit: Option[Int] = None,
-    config: Map[String, String],  // Direct config instead of broadcast
-    tablePath: Path,
-    indexQueryFilters: Array[Any] = Array.empty
-) extends PartitionReader[InternalRow] {
+  addAction: AddAction,
+  readSchema: StructType,
+  filters: Array[Filter],
+  limit: Option[Int] = None,
+  config: Map[String, String], // Direct config instead of broadcast
+  tablePath: Path,
+  indexQueryFilters: Array[Any] = Array.empty)
+    extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkPartitionReader])
 
@@ -182,10 +185,9 @@ class Tantivy4SparkPartitionReader(
   // Resolve relative path from AddAction against table path
   private val filePath = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
 
-  private var splitSearchEngine: SplitSearchEngine = _
+  private var splitSearchEngine: SplitSearchEngine  = _
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
-  private var initialized = false
-
+  private var initialized                           = false
 
   private def createCacheConfig(): SplitCacheConfig = {
     logger.error(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
@@ -195,14 +197,15 @@ class Tantivy4SparkPartitionReader(
 
     // Debug: Log broadcast configuration received in executor
     logger.error(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
-    broadcasted.foreach { case (k, v) =>
-      val safeValue = Option(v).getOrElse("null")
-      logger.error(s"🔍 Broadcast config: $k -> $safeValue")
+    broadcasted.foreach {
+      case (k, v) =>
+        val safeValue = Option(v).getOrElse("null")
+        logger.error(s"🔍 Broadcast config: $k -> $safeValue")
     }
 
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
-      val value = broadcasted.getOrElse(configKey, default)
+      val value     = broadcasted.getOrElse(configKey, default)
       val safeValue = Option(value).getOrElse(default)
       logger.error(s"🔍 PartitionReader broadcast config for $configKey: ${Option(safeValue).getOrElse("null")}")
       safeValue
@@ -228,9 +231,9 @@ class Tantivy4SparkPartitionReader(
       },
       maxCacheSize = {
         val value = getBroadcastConfig("spark.indextables.cache.maxSize", "200000000")
-        try {
+        try
           value.toLong
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.error(s"Invalid numeric value for spark.indextables.cache.maxSize: '$value'")
             throw e
@@ -238,9 +241,9 @@ class Tantivy4SparkPartitionReader(
       },
       maxConcurrentLoads = {
         val value = getBroadcastConfig("spark.indextables.cache.maxConcurrentLoads", "8")
-        try {
+        try
           value.toInt
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.error(s"Invalid numeric value for spark.indextables.cache.maxConcurrentLoads: '$value'")
             throw e
@@ -271,7 +274,9 @@ class Tantivy4SparkPartitionReader(
     // Debug: Log final cache configuration
     logger.debug(s"🔍 Created SplitCacheConfig with AWS region: ${cacheConfig.awsRegion.getOrElse("None")}")
     logger.debug(s"🔍 Created SplitCacheConfig with AWS endpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
-    logger.debug(s"🔍 Created SplitCacheConfig with AWS pathStyleAccess: ${cacheConfig.awsPathStyleAccess.getOrElse("None")}")
+    logger.debug(
+      s"🔍 Created SplitCacheConfig with AWS pathStyleAccess: ${cacheConfig.awsPathStyleAccess.getOrElse("None")}"
+    )
 
     cacheConfig
   }
@@ -290,12 +295,12 @@ class Tantivy4SparkPartitionReader(
         logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
 
         // Check if pre-warm is enabled and try to join warmup future
-        val broadcasted = config
+        val broadcasted      = config
         val isPreWarmEnabled = broadcasted.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
         if (isPreWarmEnabled) {
           // Generate query hash from filters for warmup future lookup
-          val allFilters = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-          val queryHash = generateQueryHash(allFilters)
+          val allFilters   = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+          val queryHash    = generateQueryHash(allFilters)
           val warmupJoined = PreWarmManager.joinWarmupFuture(addAction.path, queryHash, isPreWarmEnabled)
           if (warmupJoined) {
             logger.info(s"🔥 Successfully joined warmup future for split: ${addAction.path}")
@@ -323,7 +328,9 @@ class Tantivy4SparkPartitionReader(
 
         // Footer offset metadata is required for all split reading operations
         if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
-          throw new RuntimeException(s"AddAction for $actualPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata.")
+          throw new RuntimeException(
+            s"AddAction for $actualPath does not contain required footer offsets. All 'add' entries in the transaction log must contain footer offset metadata."
+          )
         }
 
         // Reconstruct COMPLETE SplitMetadata from AddAction - all fields required for proper operation
@@ -332,63 +339,73 @@ class Tantivy4SparkPartitionReader(
 
         // Safe conversion functions for Option[Any] to Long to handle JSON deserialization type variations
         def toLongSafeOption(opt: Option[Any]): Long = opt match {
-          case Some(value) => value match {
-            case l: Long => l
-            case i: Int => i.toLong
-            case i: java.lang.Integer => i.toLong
-            case l: java.lang.Long => l
-            case _ => value.toString.toLong
-          }
+          case Some(value) =>
+            value match {
+              case l: Long              => l
+              case i: Int               => i.toLong
+              case i: java.lang.Integer => i.toLong
+              case l: java.lang.Long    => l
+              case _                    => value.toString.toLong
+            }
           case None => 0L
         }
 
-        logger.warn(s"🔍 RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined) s"PRESENT (${addAction.docMappingJson.get.length} chars)" else "MISSING/NULL"}")
+        logger.warn(
+          s"🔍 RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined)
+              s"PRESENT (${addAction.docMappingJson.get.length} chars)"
+            else "MISSING/NULL"}"
+        )
         if (addAction.docMappingJson.isDefined) {
-          logger.warn(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get.take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
+          logger.warn(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get
+              .take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
         }
 
         val splitMetadata = new com.tantivy4java.QuickwitSplit.SplitMetadata(
-          addAction.path.split("/").last.replace(".split", ""), // splitId from filename
-          "tantivy4spark-index", // indexUid (NEW - required)
-          0L, // partitionId (NEW - required)
-          "tantivy4spark-source", // sourceId (NEW - required)
-          "tantivy4spark-node", // nodeId (NEW - required)
-          toLongSafeOption(addAction.numRecords), // numDocs
-          toLongSafeOption(addAction.uncompressedSizeBytes), // uncompressedSizeBytes
-          addAction.timeRangeStart.map(Instant.parse).orNull, // timeRangeStart
-          addAction.timeRangeEnd.map(Instant.parse).orNull, // timeRangeEnd
-          System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
-          "Mature", // maturity (NEW - required)
+          addAction.path.split("/").last.replace(".split", ""),    // splitId from filename
+          "tantivy4spark-index",                                   // indexUid (NEW - required)
+          0L,                                                      // partitionId (NEW - required)
+          "tantivy4spark-source",                                  // sourceId (NEW - required)
+          "tantivy4spark-node",                                    // nodeId (NEW - required)
+          toLongSafeOption(addAction.numRecords),                  // numDocs
+          toLongSafeOption(addAction.uncompressedSizeBytes),       // uncompressedSizeBytes
+          addAction.timeRangeStart.map(Instant.parse).orNull,      // timeRangeStart
+          addAction.timeRangeEnd.map(Instant.parse).orNull,        // timeRangeEnd
+          System.currentTimeMillis() / 1000,                       // createTimestamp (NEW - required)
+          "Mature",                                                // maturity (NEW - required)
           addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
-          toLongSafeOption(addAction.footerStartOffset), // footerStartOffset
-          toLongSafeOption(addAction.footerEndOffset), // footerEndOffset
-          toLongSafeOption(addAction.deleteOpstamp), // deleteOpstamp
-          addAction.numMergeOps.getOrElse(0), // numMergeOps (Int is OK for this field)
-          "doc-mapping-uid", // docMappingUid (NEW - required)
-          addAction.docMappingJson.orNull, // docMappingJson (MOVED - for performance)
-          java.util.Collections.emptyList[String]() // skippedSplits
+          toLongSafeOption(addAction.footerStartOffset),           // footerStartOffset
+          toLongSafeOption(addAction.footerEndOffset),             // footerEndOffset
+          toLongSafeOption(addAction.deleteOpstamp),               // deleteOpstamp
+          addAction.numMergeOps.getOrElse(0),                      // numMergeOps (Int is OK for this field)
+          "doc-mapping-uid",                                       // docMappingUid (NEW - required)
+          addAction.docMappingJson.orNull,                         // docMappingJson (MOVED - for performance)
+          java.util.Collections.emptyList[String]()                // skippedSplits
         )
 
         // Use full readSchema since partition values are stored directly in splits (consistent with Quickwit)
-        splitSearchEngine = SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
+        splitSearchEngine =
+          SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
 
         // Get the schema from the split to validate filters
         val splitSchema = splitSearchEngine.getSchema()
-        val splitFieldNames = try {
-          import scala.jdk.CollectionConverters._
-          val fieldNames = splitSchema.getFieldNames().asScala.toSet
-          logger.info(s"Split schema contains fields: ${fieldNames.mkString(", ")}")
-          fieldNames
-        } catch {
-          case e: Exception =>
-            logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
-            Set.empty[String]
-        }
+        val splitFieldNames =
+          try {
+            import scala.jdk.CollectionConverters._
+            val fieldNames = splitSchema.getFieldNames().asScala.toSet
+            logger.info(s"Split schema contains fields: ${fieldNames.mkString(", ")}")
+            fieldNames
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
+              Set.empty[String]
+          }
 
         // Log the filters and limit for debugging
         logger.error(s"🔍 PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
         logger.error(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
-        logger.error(s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}")
+        logger.error(
+          s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}"
+        )
         logger.error(s"  - Limit: $effectiveLimit")
 
         // Since partition values are stored in splits, we can apply all filters at the split level
@@ -404,12 +421,18 @@ class Tantivy4SparkPartitionReader(
 
           val queryObj = if (splitFieldNames.nonEmpty) {
             // Use mixed filter converter to handle both Spark filters and IndexQuery filters
-            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, Some(splitFieldNames), Some(optionsFromBroadcast))
+            val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(
+              allFilters,
+              splitSearchEngine,
+              Some(splitFieldNames),
+              Some(optionsFromBroadcast)
+            )
             logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
-            val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
+            val fallbackQuery =
+              FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
             logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }
@@ -441,7 +464,7 @@ class Tantivy4SparkPartitionReader(
     }
   }
 
-  override def next(): Boolean = {
+  override def next(): Boolean =
     try {
       initialize()
       if (resultIterator != null) {
@@ -458,25 +481,20 @@ class Tantivy4SparkPartitionReader(
         }
         false
     }
-  }
 
-  override def get(): InternalRow = {
+  override def get(): InternalRow =
     if (resultIterator != null) {
       resultIterator.next()
     } else {
       throw new IllegalStateException(s"No data available for ${addAction.path}")
     }
-  }
 
-  override def close(): Unit = {
+  override def close(): Unit =
     if (splitSearchEngine != null) {
       splitSearchEngine.close()
     }
-  }
 
-  /**
-   * Generate a consistent hash for the query filters to identify warmup futures.
-   */
+  /** Generate a consistent hash for the query filters to identify warmup futures. */
   private def generateQueryHash(allFilters: Array[Any]): String = {
     val filterString = allFilters.map(_.toString).mkString("|")
     java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
@@ -484,12 +502,12 @@ class Tantivy4SparkPartitionReader(
 }
 
 class Tantivy4SparkWriterFactory(
-    tablePath: Path,
-    writeSchema: StructType,
-    serializedOptions: Map[String, String],
-    serializedHadoopConfig: Map[String, String],  // Use serializable Map instead of Configuration
-    partitionColumns: Seq[String] = Seq.empty
-) extends DataWriterFactory {
+  tablePath: Path,
+  writeSchema: StructType,
+  serializedOptions: Map[String, String],
+  serializedHadoopConfig: Map[String, String], // Use serializable Map instead of Configuration
+  partitionColumns: Seq[String] = Seq.empty)
+    extends DataWriterFactory {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkWriterFactory])
 
@@ -501,22 +519,31 @@ class Tantivy4SparkWriterFactory(
 
     // Reconstruct Hadoop Configuration from serialized properties
     val reconstructedHadoopConf = new org.apache.hadoop.conf.Configuration()
-    serializedHadoopConfig.foreach { case (key, value) =>
-      reconstructedHadoopConf.set(key, value)
+    serializedHadoopConfig.foreach {
+      case (key, value) =>
+        reconstructedHadoopConf.set(key, value)
     }
 
-    new Tantivy4SparkDataWriter(tablePath, writeSchema, partitionId, taskId, serializedOptions, reconstructedHadoopConf, partitionColumns)
+    new Tantivy4SparkDataWriter(
+      tablePath,
+      writeSchema,
+      partitionId,
+      taskId,
+      serializedOptions,
+      reconstructedHadoopConf,
+      partitionColumns
+    )
   }
 }
 
 class Tantivy4SparkDataWriter(
-    tablePath: Path,
-    writeSchema: StructType,
-    partitionId: Int,
-    taskId: Long,
-    serializedOptions: Map[String, String],
-    hadoopConf: org.apache.hadoop.conf.Configuration,
-    partitionColumns: Seq[String] = Seq.empty  // Partition columns from metadata
+  tablePath: Path,
+  writeSchema: StructType,
+  partitionId: Int,
+  taskId: Long,
+  serializedOptions: Map[String, String],
+  hadoopConf: org.apache.hadoop.conf.Configuration,
+  partitionColumns: Seq[String] = Seq.empty // Partition columns from metadata
 ) extends DataWriter[InternalRow] {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkDataWriter])
@@ -554,16 +581,27 @@ class Tantivy4SparkDataWriter(
 
   // For partitioned tables, we need to maintain separate writers per unique partition value combination
   // Key: serialized partition values (e.g., "event_date=2023-01-15"), Value: (searchEngine, statistics, recordCount)
-  private val partitionWriters = scala.collection.mutable.Map[String, (TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)]()
+  private val partitionWriters =
+    scala.collection.mutable.Map[String, (TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)]()
 
   // For non-partitioned tables, use a single writer
   private var singleWriter: Option[(TantivySearchEngine, StatisticsCalculator.DatasetStatistics, Long)] =
-    if (partitionColumns.isEmpty) Some((new TantivySearchEngine(writeSchema, options, hadoopConf), new StatisticsCalculator.DatasetStatistics(writeSchema), 0L)) else None
+    if (partitionColumns.isEmpty)
+      Some(
+        (
+          new TantivySearchEngine(writeSchema, options, hadoopConf),
+          new StatisticsCalculator.DatasetStatistics(writeSchema),
+          0L
+        )
+      )
+    else None
 
   // Debug: log partition columns being used
-  logger.warn(s"🔍 DATAWRITER INIT: partition $partitionId, partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}")
+  logger.warn(
+    s"🔍 DATAWRITER INIT: partition $partitionId, partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}"
+  )
 
-  override def write(record: InternalRow): Unit = {
+  override def write(record: InternalRow): Unit =
     if (partitionColumns.isEmpty) {
       // Non-partitioned write - use single writer
       val (engine, stats, count) = singleWriter.get
@@ -573,7 +611,7 @@ class Tantivy4SparkDataWriter(
     } else {
       // Partitioned write - extract partition values and route to appropriate writer
       val partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
-      val partitionKey = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
+      val partitionKey    = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
 
       // Debug: log record details for the problematic partition
       val idValue = if (writeSchema.fieldNames.contains("id")) {
@@ -588,17 +626,22 @@ class Tantivy4SparkDataWriter(
       logger.warn(s"🔍 WRITE DEBUG: partition $partitionId writing record to partition '$partitionKey' with id=$idValue, values=$partitionValues")
 
       // Get or create writer for this partition value combination
-      val (engine, stats, count) = partitionWriters.getOrElseUpdate(partitionKey, {
-        logger.info(s"Creating new writer for partition values: $partitionValues")
-        (new TantivySearchEngine(writeSchema, options, hadoopConf), new StatisticsCalculator.DatasetStatistics(writeSchema), 0L)
-      })
+      val (engine, stats, count) = partitionWriters.getOrElseUpdate(
+        partitionKey, {
+          logger.info(s"Creating new writer for partition values: $partitionValues")
+          (
+            new TantivySearchEngine(writeSchema, options, hadoopConf),
+            new StatisticsCalculator.DatasetStatistics(writeSchema),
+            0L
+          )
+        }
+      )
 
       // Store the complete record in the split (including partition columns)
       engine.addDocument(record)
       stats.updateRow(record)
       partitionWriters(partitionKey) = (engine, stats, count + 1)
     }
-  }
 
   override def commit(): WriterCommitMessage = {
     val allAddActions = scala.collection.mutable.ArrayBuffer[AddAction]()
@@ -619,14 +662,15 @@ class Tantivy4SparkDataWriter(
     if (partitionWriters.nonEmpty) {
       logger.info(s"Committing ${partitionWriters.size} partition writers")
 
-      partitionWriters.foreach { case (partitionKey, (searchEngine, statistics, recordCount)) =>
-        if (recordCount > 0) {
-          val partitionValues = parsePartitionKey(partitionKey)
-          val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
-          allAddActions += addAction
-        } else {
-          logger.warn(s"Skipping empty partition: $partitionKey")
-        }
+      partitionWriters.foreach {
+        case (partitionKey, (searchEngine, statistics, recordCount)) =>
+          if (recordCount > 0) {
+            val partitionValues = parsePartitionKey(partitionKey)
+            val addAction       = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
+            allAddActions += addAction
+          } else {
+            logger.warn(s"Skipping empty partition: $partitionKey")
+          }
       }
     }
 
@@ -639,26 +683,28 @@ class Tantivy4SparkDataWriter(
     Tantivy4SparkCommitMessage(allAddActions.toSeq)
   }
 
-  private def parsePartitionKey(partitionKey: String): Map[String, String] = {
+  private def parsePartitionKey(partitionKey: String): Map[String, String] =
     // Parse partition key like "event_date=2023-01-15" into Map("event_date" -> "2023-01-15")
-    partitionKey.split("/").map { part =>
-      val Array(key, value) = part.split("=", 2)
-      key -> value
-    }.toMap
-  }
+    partitionKey
+      .split("/")
+      .map { part =>
+        val Array(key, value) = part.split("=", 2)
+        key -> value
+      }
+      .toMap
 
   private def commitWriter(
-      searchEngine: TantivySearchEngine,
-      statistics: StatisticsCalculator.DatasetStatistics,
-      recordCount: Long,
-      partitionValues: Map[String, String],
-      partitionKey: String
+    searchEngine: TantivySearchEngine,
+    statistics: StatisticsCalculator.DatasetStatistics,
+    recordCount: Long,
+    partitionValues: Map[String, String],
+    partitionKey: String
   ): AddAction = {
     logger.debug(s"Committing Tantivy index with $recordCount documents for partition: $partitionKey")
 
     // Create split file name with UUID for guaranteed uniqueness
     // Format: [partitionDir/]part-{partitionId}-{taskId}-{uuid}.split
-    val splitId = UUID.randomUUID().toString
+    val splitId  = UUID.randomUUID().toString
     val fileName = f"part-$partitionId%05d-$taskId-$splitId.split"
 
     // For partitioned tables, create file in partition directory
@@ -682,7 +728,7 @@ class Tantivy4SparkDataWriter(
 
     // Generate node ID for the split (hostname + executor ID)
     val nodeId = java.net.InetAddress.getLocalHost.getHostName + "-" +
-                 Option(System.getProperty("spark.executor.id")).getOrElse("driver")
+      Option(System.getProperty("spark.executor.id")).getOrElse("driver")
 
     // Create split from the index using the search engine
     val (splitPath, splitMetadata) = searchEngine.commitAndCreateSplit(outputPath, partitionId.toLong, nodeId)
@@ -696,19 +742,17 @@ class Tantivy4SparkDataWriter(
           logger.warn(s"Could not get file info for $outputPath using cloud provider")
           0L
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
 
     // Normalize the splitPath for tantivy4java compatibility (convert s3a:// to s3://)
     val _ = {
       val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
-      try {
+      try
         cloudProvider.normalizePathForTantivy(splitPath)
-      } finally {
+      finally
         cloudProvider.close()
-      }
     }
 
     logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
@@ -724,12 +768,12 @@ class Tantivy4SparkDataWriter(
     } else if (outputPath != filePath.toString) {
       // Path normalization was applied - calculate relative path from table path to normalized output path
       val tablePath = normalizedTablePath.toString
-      val tableUri = java.net.URI.create(tablePath)
+      val tableUri  = java.net.URI.create(tablePath)
       val outputUri = java.net.URI.create(outputPath)
 
       if (tableUri.getScheme == outputUri.getScheme && tableUri.getHost == outputUri.getHost) {
         // Same scheme and host - calculate relative path
-        val tableKey = tableUri.getPath.stripPrefix("/")
+        val tableKey  = tableUri.getPath.stripPrefix("/")
         val outputKey = outputUri.getPath.stripPrefix("/")
 
         // For S3Mock flattening, we need to store the complete relative path that will
@@ -749,21 +793,33 @@ class Tantivy4SparkDataWriter(
         fileName
       }
     } else {
-      fileName  // No normalization was applied
+      fileName // No normalization was applied
     }
 
     // Extract ALL metadata from tantivy4java SplitMetadata for complete pipeline coverage
-    val (footerStartOffset, footerEndOffset, hasFooterOffsets,
-         timeRangeStart, timeRangeEnd, splitTags, deleteOpstamp, numMergeOps, docMappingJson, uncompressedSizeBytes) =
+    val (
+      footerStartOffset,
+      footerEndOffset,
+      hasFooterOffsets,
+      timeRangeStart,
+      timeRangeEnd,
+      splitTags,
+      deleteOpstamp,
+      numMergeOps,
+      docMappingJson,
+      uncompressedSizeBytes
+    ) =
       if (splitMetadata != null) {
         val timeStart = Option(splitMetadata.getTimeRangeStart()).map(_.toString)
-        val timeEnd = Option(splitMetadata.getTimeRangeEnd()).map(_.toString)
+        val timeEnd   = Option(splitMetadata.getTimeRangeEnd()).map(_.toString)
         val tags = Option(splitMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
           import scala.jdk.CollectionConverters._
           tagSet.asScala.toSet
         }
         val originalDocMapping = Option(splitMetadata.getDocMappingJson())
-        logger.warn(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined) s"PRESENT (${originalDocMapping.get.length} chars)" else "MISSING/NULL"}")
+        logger.warn(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined)
+            s"PRESENT (${originalDocMapping.get.length} chars)"
+          else "MISSING/NULL"}")
 
         val docMapping = if (originalDocMapping.isDefined) {
           logger.warn(s"🔍 docMappingJson FULL CONTENT: ${originalDocMapping.get}")
@@ -774,50 +830,61 @@ class Tantivy4SparkDataWriter(
 
           // Create a minimal field mapping that tantivy4java can understand
           // Based on Quickwit/Tantivy schema format expectations
-          val fieldMappings = writeSchema.fields.map { field =>
-            val fieldType = field.dataType.typeName match {
-              case "string" => "text"
-              case "integer" | "long" => "i64"
-              case "float" | "double" => "f64"
-              case "boolean" => "bool"
-              case "date" | "timestamp" => "datetime"
-              case _ => "text" // Default fallback
+          val fieldMappings = writeSchema.fields
+            .map { field =>
+              val fieldType = field.dataType.typeName match {
+                case "string"             => "text"
+                case "integer" | "long"   => "i64"
+                case "float" | "double"   => "f64"
+                case "boolean"            => "bool"
+                case "date" | "timestamp" => "datetime"
+                case _                    => "text" // Default fallback
+              }
+              s""""${field.name}": {"type": "$fieldType", "indexed": true}"""
             }
-            s""""${field.name}": {"type": "$fieldType", "indexed": true}"""
-          }.mkString(", ")
+            .mkString(", ")
 
           val minimalSchema = s"""{"fields": {$fieldMappings}}"""
-          logger.warn(s"🔧 Using minimal field mapping as docMappingJson: ${minimalSchema.take(200)}${if (minimalSchema.length > 200) "..." else ""}")
+          logger.warn(s"🔧 Using minimal field mapping as docMappingJson: ${minimalSchema
+              .take(200)}${if (minimalSchema.length > 200) "..." else ""}")
 
           Some(minimalSchema)
         }
 
         if (splitMetadata.hasFooterOffsets()) {
-          (Some(splitMetadata.getFooterStartOffset()),
-           Some(splitMetadata.getFooterEndOffset()),
-           true,
-           timeStart,
-           timeEnd,
-           tags,
-           Some(splitMetadata.getDeleteOpstamp()),
-           Some(splitMetadata.getNumMergeOps()),
-           docMapping,
-           Some(splitMetadata.getUncompressedSizeBytes()))
+          (
+            Some(splitMetadata.getFooterStartOffset()),
+            Some(splitMetadata.getFooterEndOffset()),
+            true,
+            timeStart,
+            timeEnd,
+            tags,
+            Some(splitMetadata.getDeleteOpstamp()),
+            Some(splitMetadata.getNumMergeOps()),
+            docMapping,
+            Some(splitMetadata.getUncompressedSizeBytes())
+          )
         } else {
-          (None, None, false,
-           timeStart, timeEnd, tags,
-           Some(splitMetadata.getDeleteOpstamp()),
-           Some(splitMetadata.getNumMergeOps()),
-           docMapping,
-           Some(splitMetadata.getUncompressedSizeBytes()))
+          (
+            None,
+            None,
+            false,
+            timeStart,
+            timeEnd,
+            tags,
+            Some(splitMetadata.getDeleteOpstamp()),
+            Some(splitMetadata.getNumMergeOps()),
+            docMapping,
+            Some(splitMetadata.getUncompressedSizeBytes())
+          )
         }
       } else {
         (None, None, false, None, None, None, None, None, None, None)
       }
 
     val addAction = AddAction(
-      path = addActionPath,  // Use the path that will correctly resolve during read
-      partitionValues = partitionValues,  // Use extracted partition values for metadata
+      path = addActionPath,              // Use the path that will correctly resolve during read
+      partitionValues = partitionValues, // Use extracted partition values for metadata
       size = splitSize,
       modificationTime = System.currentTimeMillis(),
       dataChange = true,
@@ -842,7 +909,7 @@ class Tantivy4SparkDataWriter(
     )
 
     if (partitionValues.nonEmpty) {
-      logger.info(s"📁 Created partitioned split with values: ${partitionValues}")
+      logger.info(s"📁 Created partitioned split with values: $partitionValues")
     }
 
     // Log footer offset optimization status

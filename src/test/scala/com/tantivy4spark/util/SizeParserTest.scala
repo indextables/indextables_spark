@@ -19,9 +19,7 @@ package com.tantivy4spark.util
 
 import com.tantivy4spark.TestBase
 
-/**
- * Comprehensive tests for SizeParser utility - parsing size strings in various formats.
- */
+/** Comprehensive tests for SizeParser utility - parsing size strings in various formats. */
 class SizeParserTest extends TestBase {
 
   test("SizeParser should parse bytes correctly") {
@@ -134,8 +132,8 @@ class SizeParserTest extends TestBase {
   }
 
   test("SizeParser should format non-exact sizes as bytes") {
-    assert(SizeParser.formatBytes(1025L) == "1025 bytes") // Not exactly 1K
-    assert(SizeParser.formatBytes(1024L * 1024L + 1L) == "1048577 bytes") // Not exactly 1M
+    assert(SizeParser.formatBytes(1025L) == "1025 bytes")                            // Not exactly 1K
+    assert(SizeParser.formatBytes(1024L * 1024L + 1L) == "1048577 bytes")            // Not exactly 1M
     assert(SizeParser.formatBytes(1024L * 1024L * 1024L + 1L) == "1073741825 bytes") // Not exactly 1G
   }
 
@@ -155,16 +153,16 @@ class SizeParserTest extends TestBase {
 
   test("SizeParser should handle round trip conversion correctly") {
     val testSizes = List(
-      1024L,         // 1K
-      1024L * 1024L, // 1M
-      2L * 1024L * 1024L, // 2M
-      1024L * 1024L * 1024L, // 1G
-      5L * 1024L * 1024L * 1024L  // 5G
+      1024L,                     // 1K
+      1024L * 1024L,             // 1M
+      2L * 1024L * 1024L,        // 2M
+      1024L * 1024L * 1024L,     // 1G
+      5L * 1024L * 1024L * 1024L // 5G
     )
 
     testSizes.foreach { size =>
       val formatted = SizeParser.formatBytes(size)
-      val parsed = SizeParser.parseSize(formatted)
+      val parsed    = SizeParser.parseSize(formatted)
       assert(parsed == size, s"Round trip failed: $size -> $formatted -> $parsed")
     }
   }

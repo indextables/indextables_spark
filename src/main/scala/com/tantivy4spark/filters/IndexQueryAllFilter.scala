@@ -20,78 +20,85 @@ package com.tantivy4spark.filters
 /**
  * Custom filter for IndexQueryAll pushdown operations.
  *
- * This filter represents a query that should search across all fields in a Tantivy index
- * without requiring explicit column specification. It's designed to be pushed down to
- * the native Tantivy search engine for optimal performance.
+ * This filter represents a query that should search across all fields in a Tantivy index without requiring explicit
+ * column specification. It's designed to be pushed down to the native Tantivy search engine for optimal performance.
  *
- * Note: This does not extend Spark's sealed Filter class to avoid inheritance restrictions.
- * Instead, it provides the necessary methods for integration with the pushdown system.
+ * Note: This does not extend Spark's sealed Filter class to avoid inheritance restrictions. Instead, it provides the
+ * necessary methods for integration with the pushdown system.
  *
- * @param queryString The Tantivy query string to search across all fields
+ * @param queryString
+ *   The Tantivy query string to search across all fields
  */
 case class IndexQueryAllFilter(queryString: String) {
-  
+
   /**
-   * Returns an empty array since this filter doesn't reference specific columns.
-   * The search operates across all available fields in the index.
-   * 
-   * @return Empty array indicating no specific column references
+   * Returns an empty array since this filter doesn't reference specific columns. The search operates across all
+   * available fields in the index.
+   *
+   * @return
+   *   Empty array indicating no specific column references
    */
   def references: Array[String] = Array.empty
-  
+
   /**
    * Validates that this filter can be used for pushdown.
-   * 
-   * @return true if the query string is non-empty and valid for pushdown
+   *
+   * @return
+   *   true if the query string is non-empty and valid for pushdown
    */
   def isValid: Boolean = queryString.nonEmpty
-  
+
   /**
    * Provides a string representation for debugging and logging.
-   * 
-   * @return String representation of this filter
+   *
+   * @return
+   *   String representation of this filter
    */
   override def toString: String = s"IndexQueryAllFilter($queryString)"
-  
+
   /**
    * Checks if this filter is compatible with another filter for combining.
-   * 
-   * @param other Another IndexQueryAllFilter to check compatibility with
-   * @return true if the filters can be logically combined
+   *
+   * @param other
+   *   Another IndexQueryAllFilter to check compatibility with
+   * @return
+   *   true if the filters can be logically combined
    */
-  def isCompatibleWith(other: IndexQueryAllFilter): Boolean = {
+  def isCompatibleWith(other: IndexQueryAllFilter): Boolean =
     // All IndexQueryAllFilters are compatible since they all search all fields
     true
-  }
-  
+
   /**
    * Returns the query string for native execution.
-   * 
-   * @return The raw query string to be passed to SplitIndex.parseQuery()
+   *
+   * @return
+   *   The raw query string to be passed to SplitIndex.parseQuery()
    */
   def getQueryString: String = queryString
-  
+
   /**
    * Checks if the query string contains special characters that need handling.
-   * 
-   * @return true if the query contains special Tantivy syntax
+   *
+   * @return
+   *   true if the query contains special Tantivy syntax
    */
   def hasSpecialSyntax: Boolean = {
     val specialChars = Set('(', ')', '"', '*', '?', ':')
-    queryString.exists(c => specialChars.contains(c)) || 
+    queryString.exists(c => specialChars.contains(c)) ||
     queryString.contains("AND") || queryString.contains("OR") || queryString.contains("NOT")
   }
-  
+
   /**
    * Provides metadata about this filter for optimization purposes.
-   * 
-   * @return Map containing filter metadata
+   *
+   * @return
+   *   Map containing filter metadata
    */
   def metadata: Map[String, Any] = Map(
-    "type" -> "IndexQueryAllFilter",
-    "queryString" -> queryString,
+    "type"             -> "IndexQueryAllFilter",
+    "queryString"      -> queryString,
     "hasSpecialSyntax" -> hasSpecialSyntax,
-    "queryLength" -> queryString.length,
-    "fieldCount" -> "all"
+    "queryLength"      -> queryString.length,
+    "fieldCount"       -> "all"
   )
 }

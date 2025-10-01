@@ -21,9 +21,7 @@ import com.tantivy4spark.storage.SplitCacheConfig
 import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 
-/**
- * Utility functions for configuration management.
- */
+/** Utility functions for configuration management. */
 object ConfigUtils {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
@@ -31,12 +29,15 @@ object ConfigUtils {
   /**
    * Create a SplitCacheConfig from configuration map.
    *
-   * This utility consolidates the duplicated cache configuration logic
-   * across partition readers, aggregate readers, and other components.
+   * This utility consolidates the duplicated cache configuration logic across partition readers, aggregate readers, and
+   * other components.
    *
-   * @param config Configuration map
-   * @param tablePathOpt Optional table path for generating unique cache names
-   * @return Configured SplitCacheConfig instance
+   * @param config
+   *   Configuration map
+   * @param tablePathOpt
+   *   Optional table path for generating unique cache names
+   * @return
+   *   Configured SplitCacheConfig instance
    */
   def createSplitCacheConfig(
     config: Map[String, String],
@@ -51,10 +52,9 @@ object ConfigUtils {
       Option(value).getOrElse(default)
     }
 
-    def getConfigOption(configKey: String): Option[String] = {
+    def getConfigOption(configKey: String): Option[String] =
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
       configMap.get(configKey).orElse(configMap.get(configKey.toLowerCase))
-    }
 
     SplitCacheConfig(
       cacheName = {
@@ -73,9 +73,9 @@ object ConfigUtils {
       },
       maxCacheSize = {
         val value = getConfig("spark.indextables.cache.maxSize", "200000000")
-        try {
+        try
           value.toLong
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.error(s"Invalid numeric value for spark.indextables.cache.maxSize: '$value'")
             throw e
@@ -83,9 +83,9 @@ object ConfigUtils {
       },
       maxConcurrentLoads = {
         val value = getConfig("spark.indextables.cache.maxConcurrentLoads", "8")
-        try {
+        try
           value.toInt
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.error(s"Invalid numeric value for spark.indextables.cache.maxConcurrentLoads: '$value'")
             throw e
@@ -119,14 +119,16 @@ object ConfigUtils {
    *
    * Wrapper method for backward compatibility - delegates to createSplitCacheConfig.
    *
-   * @param broadcastConfig Broadcast variable containing configuration map
-   * @param tablePathOpt Optional table path for generating unique cache names
-   * @return Configured SplitCacheConfig instance
+   * @param broadcastConfig
+   *   Broadcast variable containing configuration map
+   * @param tablePathOpt
+   *   Optional table path for generating unique cache names
+   * @return
+   *   Configured SplitCacheConfig instance
    */
   def createSplitCacheConfigFromBroadcast(
     broadcastConfig: Broadcast[Map[String, String]],
     tablePathOpt: Option[String] = None
-  ): SplitCacheConfig = {
+  ): SplitCacheConfig =
     createSplitCacheConfig(broadcastConfig.value, tablePathOpt)
-  }
 }

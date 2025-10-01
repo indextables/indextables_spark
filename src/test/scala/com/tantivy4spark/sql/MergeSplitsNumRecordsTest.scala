@@ -28,13 +28,13 @@ import java.nio.file.Files
 import scala.util.Try
 
 /**
- * Integration test to validate that merge operations correctly populate
- * the numRecords field in transaction log AddAction from tantivy4java metadata
+ * Integration test to validate that merge operations correctly populate the numRecords field in transaction log
+ * AddAction from tantivy4java metadata
  */
 class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: File = _
+  var tempDir: File       = _
 
   override def beforeEach(): Unit = {
     // Create temporary directory for this test
@@ -42,7 +42,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     tempDir.deleteOnExit()
 
     // Create Spark session
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("MergeSplitsNumRecordsTest")
       .master("local[2]")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -75,11 +76,13 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Array(
-      StructField("id", StringType, true),
-      StructField("content", StringType, true),
-      StructField("score", IntegerType, true)
-    ))
+    val schema = StructType(
+      Array(
+        StructField("id", StringType, true),
+        StructField("content", StringType, true),
+        StructField("score", IntegerType, true)
+      )
+    )
 
     // Write data in multiple separate operations to create multiple files
     // First batch: 2 documents
@@ -88,7 +91,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       Row("doc2", "second document content", 2)
     )
     val batch1RDD = spark.sparkContext.parallelize(batch1)
-    val batch1DF = spark.createDataFrame(batch1RDD, schema)
+    val batch1DF  = spark.createDataFrame(batch1RDD, schema)
 
     batch1DF.write
       .format("tantivy4spark")
@@ -101,7 +104,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       Row("doc4", "fourth document content", 4)
     )
     val batch2RDD = spark.sparkContext.parallelize(batch2)
-    val batch2DF = spark.createDataFrame(batch2RDD, schema)
+    val batch2DF  = spark.createDataFrame(batch2RDD, schema)
 
     batch2DF.write
       .format("tantivy4spark")
@@ -115,7 +118,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       Row("doc6", "sixth document content", 6)
     )
     val batch3RDD = spark.sparkContext.parallelize(batch3)
-    val batch3DF = spark.createDataFrame(batch3RDD, schema)
+    val batch3DF  = spark.createDataFrame(batch3RDD, schema)
 
     batch3DF.write
       .format("tantivy4spark")
@@ -129,7 +132,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       Row("doc8", "eighth document content", 8)
     )
     val batch4RDD = spark.sparkContext.parallelize(batch4)
-    val batch4DF = spark.createDataFrame(batch4RDD, schema)
+    val batch4DF  = spark.createDataFrame(batch4RDD, schema)
 
     batch4DF.write
       .format("tantivy4spark")
@@ -143,9 +146,9 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     recordCount shouldBe 8
 
     // Get transaction log to examine actions before merge
-    val hadoopPath = new org.apache.hadoop.fs.Path(tablePath)
-    val emptyOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
+    val hadoopPath            = new org.apache.hadoop.fs.Path(tablePath)
+    val emptyOptions          = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    val transactionLog        = TransactionLogFactory.create(hadoopPath, spark, emptyOptions)
     val addActionsBeforeMerge = transactionLog.listFiles()
 
     // Count AddActions before merge
@@ -170,8 +173,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       case scala.util.Failure(ex) if ex.getMessage.contains("Tantivy4java library not found") =>
         println("⚠️  Merge command skipped - tantivy4java native library not available in test environment")
         println("✅ Test logic validated: multiple files created successfully for merging")
-        // This is expected in test environments without native libraries
-        // The important thing is that we created multiple files and the command was structured correctly
+      // This is expected in test environments without native libraries
+      // The important thing is that we created multiple files and the command was structured correctly
       case scala.util.Failure(ex) =>
         println(s"❌ Merge command failed with unexpected exception: $ex")
         ex.printStackTrace()
@@ -204,7 +207,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     println(s"✅ Created ${addActionsBeforeMerge.length} separate files ready for merging")
 
     // Verify data integrity
-    val dataCheck = spark.read.format("tantivy4spark").load(tablePath)
+    val dataCheck         = spark.read.format("tantivy4spark").load(tablePath)
     val actualRecordCount = dataCheck.count()
 
     println(s"Actual record count: $actualRecordCount")
@@ -220,18 +223,20 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Array(
-      StructField("id", StringType, true),
-      StructField("content", StringType, true),
-      StructField("score", IntegerType, true)
-    ))
+    val schema = StructType(
+      Array(
+        StructField("id", StringType, true),
+        StructField("content", StringType, true),
+        StructField("score", IntegerType, true)
+      )
+    )
 
     val testDataRows = Seq(
       Row("doc1", "test content", 1)
     )
 
     val testDataRDD = spark.sparkContext.parallelize(testDataRows)
-    val testData = spark.createDataFrame(testDataRDD, schema)
+    val testData    = spark.createDataFrame(testDataRDD, schema)
 
     testData.write
       .format("tantivy4spark")
@@ -239,15 +244,13 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       .save(tablePath)
 
     // Get initial state
-    val hadoopPath2 = new org.apache.hadoop.fs.Path(tablePath)
-    val emptyOptions2 = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val transactionLog2 = TransactionLogFactory.create(hadoopPath2, spark, emptyOptions2)
+    val hadoopPath2       = new org.apache.hadoop.fs.Path(tablePath)
+    val emptyOptions2     = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    val transactionLog2   = TransactionLogFactory.create(hadoopPath2, spark, emptyOptions2)
     val initialAddActions = transactionLog2.listFiles()
 
     println(s"Initial AddActions: ${initialAddActions.length}")
-    initialAddActions.foreach { add =>
-      println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}")
-    }
+    initialAddActions.foreach(add => println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}"))
 
     // Execute merge (may result in no actual merge if only one split)
     println(s"Executing: MERGE SPLITS '$tablePath' TARGET SIZE 1048576")
@@ -262,7 +265,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
       case scala.util.Failure(ex) if ex.getMessage.contains("Tantivy4java library not found") =>
         println("⚠️  Merge command skipped - tantivy4java native library not available in test environment")
         println("✅ Test logic validated: single file scenario handled correctly")
-        // This is expected in test environments without native libraries
+      // This is expected in test environments without native libraries
       case scala.util.Failure(ex) =>
         println(s"❌ Merge command failed with unexpected exception: $ex")
         ex.printStackTrace()
@@ -273,17 +276,13 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val finalAddActions = transactionLog2.listFiles()
 
     println(s"Final AddActions: ${finalAddActions.length}")
-    finalAddActions.foreach { add =>
-      println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}")
-    }
+    finalAddActions.foreach(add => println(s"  Path: ${add.path}, NumRecords: ${add.numRecords}"))
 
     // In cases where metadata is available, numRecords should be populated
     // In cases where metadata is null, numRecords may be None, which is acceptable
     finalAddActions.foreach { add =>
       // If numRecords is defined, it should be a positive value
-      add.numRecords.foreach { count =>
-        count should be > 0L
-      }
+      add.numRecords.foreach(count => count should be > 0L)
     }
 
     println("✅ Null metadata handling validated")

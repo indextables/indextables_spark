@@ -24,35 +24,33 @@ import java.util.{OptionalLong, Map => JavaMap, HashMap => JavaHashMap, Optional
 import com.tantivy4spark.transaction.AddAction
 
 /**
- * Implementation of Spark's Statistics interface for Tantivy4Spark.
- * Provides table-level statistics including size in bytes, number of rows,
- * and column-level statistics where available.
+ * Implementation of Spark's Statistics interface for Tantivy4Spark. Provides table-level statistics including size in
+ * bytes, number of rows, and column-level statistics where available.
  */
 class Tantivy4SparkStatistics(
-    totalSizeInBytes: Option[Long],
-    totalNumRows: Option[Long],
-    columnStats: Map[String, ColumnStatistics] = Map.empty
-) extends Statistics {
+  totalSizeInBytes: Option[Long],
+  totalNumRows: Option[Long],
+  columnStats: Map[String, ColumnStatistics] = Map.empty)
+    extends Statistics {
 
-  override def sizeInBytes(): OptionalLong = {
+  override def sizeInBytes(): OptionalLong =
     totalSizeInBytes match {
       case Some(size) => OptionalLong.of(size)
-      case None => OptionalLong.empty()
+      case None       => OptionalLong.empty()
     }
-  }
 
-  override def numRows(): OptionalLong = {
+  override def numRows(): OptionalLong =
     totalNumRows match {
       case Some(rows) => OptionalLong.of(rows)
-      case None => OptionalLong.empty()
+      case None       => OptionalLong.empty()
     }
-  }
 
   override def columnStats(): JavaMap[NamedReference, ColumnStatistics] = {
     val javaMap = new JavaHashMap[NamedReference, ColumnStatistics]()
-    columnStats.foreach { case (columnName, stats) =>
-      val namedRef = org.apache.spark.sql.connector.expressions.Expressions.column(columnName)
-      javaMap.put(namedRef, stats)
+    columnStats.foreach {
+      case (columnName, stats) =>
+        val namedRef = org.apache.spark.sql.connector.expressions.Expressions.column(columnName)
+        javaMap.put(namedRef, stats)
     }
     javaMap
   }
@@ -60,48 +58,42 @@ class Tantivy4SparkStatistics(
 
 object Tantivy4SparkStatistics {
 
-  /**
-   * Simple column statistics implementation for basic min/max and null count information.
-   */
+  /** Simple column statistics implementation for basic min/max and null count information. */
   private class SimpleColumnStatistics(
-      nullCount: Option[Long],
-      distinctCount: Option[Long],
-      minValue: Option[Any] = None,
-      maxValue: Option[Any] = None
-  ) extends ColumnStatistics {
+    nullCount: Option[Long],
+    distinctCount: Option[Long],
+    minValue: Option[Any] = None,
+    maxValue: Option[Any] = None)
+      extends ColumnStatistics {
 
-    override def nullCount(): OptionalLong = {
+    override def nullCount(): OptionalLong =
       nullCount match {
         case Some(count) => OptionalLong.of(count)
-        case None => OptionalLong.empty()
+        case None        => OptionalLong.empty()
       }
-    }
 
-    override def distinctCount(): OptionalLong = {
+    override def distinctCount(): OptionalLong =
       distinctCount match {
         case Some(count) => OptionalLong.of(count)
-        case None => OptionalLong.empty()
+        case None        => OptionalLong.empty()
       }
-    }
 
-    override def min(): Optional[Object] = {
+    override def min(): Optional[Object] =
       minValue match {
         case Some(value) => Optional.of(value.asInstanceOf[Object])
-        case None => Optional.empty()
+        case None        => Optional.empty()
       }
-    }
 
-    override def max(): Optional[Object] = {
+    override def max(): Optional[Object] =
       maxValue match {
         case Some(value) => Optional.of(value.asInstanceOf[Object])
-        case None => Optional.empty()
+        case None        => Optional.empty()
       }
-    }
   }
 
   /**
-   * Creates statistics from a collection of AddAction entries from the transaction log.
-   * This aggregates information from all splits to provide table-level statistics.
+   * Creates statistics from a collection of AddAction entries from the transaction log. This aggregates information
+   * from all splits to provide table-level statistics.
    */
   def fromAddActions(addActions: Seq[AddAction]): Tantivy4SparkStatistics = {
     if (addActions.isEmpty) {
@@ -124,22 +116,17 @@ object Tantivy4SparkStatistics {
     )
   }
 
-  /**
-   * Helper function to safely convert various numeric types to Long.
-   */
-  private def convertToLong(value: Any): Long = {
+  /** Helper function to safely convert various numeric types to Long. */
+  private def convertToLong(value: Any): Long =
     value match {
-      case l: Long => l
-      case i: Int => i.toLong
+      case l: Long              => l
+      case i: Int               => i.toLong
       case i: java.lang.Integer => i.toLong
-      case l: java.lang.Long => l.longValue()
-      case other => other.toString.toLong
+      case l: java.lang.Long    => l.longValue()
+      case other                => other.toString.toLong
     }
-  }
 
-  /**
-   * Aggregates column statistics from AddAction min/max values.
-   */
+  /** Aggregates column statistics from AddAction min/max values. */
   private def aggregateColumnStatistics(addActions: Seq[AddAction], totalRows: Long): Map[String, ColumnStatistics] = {
     val columnStatsBuilder = scala.collection.mutable.Map[String, ColumnStatistics]()
 
@@ -162,7 +149,7 @@ object Tantivy4SparkStatistics {
           // We don't have null count or distinct count information in AddActions,
           // so we'll provide basic min/max statistics only
           val colStats = new SimpleColumnStatistics(
-            nullCount = None, // Not available from transaction log
+            nullCount = None,     // Not available from transaction log
             distinctCount = None, // Not available from transaction log
             minValue = Some(globalMin),
             maxValue = Some(globalMax)
@@ -172,25 +159,18 @@ object Tantivy4SparkStatistics {
         }
       } catch {
         case _: Exception =>
-          // Skip columns that can't be processed (e.g., incomparable types)
+        // Skip columns that can't be processed (e.g., incomparable types)
       }
     }
 
     columnStatsBuilder.toMap
   }
 
-  /**
-   * Creates statistics for an empty table.
-   */
-  def empty(): Tantivy4SparkStatistics = {
+  /** Creates statistics for an empty table. */
+  def empty(): Tantivy4SparkStatistics =
     new Tantivy4SparkStatistics(Some(0L), Some(0L))
-  }
 
-  /**
-   * Creates statistics with unknown values.
-   * Used when statistics cannot be computed reliably.
-   */
-  def unknown(): Tantivy4SparkStatistics = {
+  /** Creates statistics with unknown values. Used when statistics cannot be computed reliably. */
+  def unknown(): Tantivy4SparkStatistics =
     new Tantivy4SparkStatistics(None, None)
-  }
 }

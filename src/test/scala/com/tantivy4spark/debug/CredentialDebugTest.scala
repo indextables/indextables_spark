@@ -17,11 +17,11 @@ class CredentialDebugTest extends TestBase {
     spark.conf.set("spark.indextables.aws.secretKey", "test-secret-key")
     spark.conf.set("spark.indextables.s3.endpoint", "http://localhost:9090")
     spark.conf.set("spark.indextables.s3.pathStyleAccess", "true")
-    
+
     println(s"✅ Set Spark config values")
     println(s"   - accessKey: ${spark.conf.get("spark.indextables.aws.accessKey")}")
     println(s"   - endpoint: ${spark.conf.get("spark.indextables.s3.endpoint")}")
-    
+
     // Try different ways to read the pathStyleAccess config
     try {
       val pathStyleDirect = spark.conf.get("spark.indextables.s3.pathStyleAccess")
@@ -30,7 +30,7 @@ class CredentialDebugTest extends TestBase {
       case ex: Exception =>
         println(s"   - pathStyleAccess (direct): FAILED - ${ex.getMessage}")
     }
-    
+
     try {
       val pathStyleWithDefault = spark.conf.get("spark.indextables.s3.pathStyleAccess", "default-false")
       println(s"   - pathStyleAccess (with default): $pathStyleWithDefault")
@@ -38,24 +38,24 @@ class CredentialDebugTest extends TestBase {
       case ex: Exception =>
         println(s"   - pathStyleAccess (with default): FAILED - ${ex.getMessage}")
     }
-    
+
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     println(s"✅ Hadoop config before:")
     println(s"   - spark.indextables.aws.accessKey: ${hadoopConf.get("spark.indextables.aws.accessKey")}")
     println(s"   - spark.hadoop.fs.s3a.access.key: ${hadoopConf.get("spark.hadoop.fs.s3a.access.key")}")
-    
+
     // Test direct config creation
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
-    
+
     try {
       val provider = CloudStorageProviderFactory.createProvider(
-        "s3://test-bucket/test-path", 
-        options, 
+        "s3://test-bucket/test-path",
+        options,
         hadoopConf
       )
-      
+
       println(s"✅ Successfully created cloud storage provider: ${provider.getProviderType}")
-      
+
       // Test basic file operations to see if credentials work
       try {
         provider.exists("s3://test-bucket/nonexistent-file")
@@ -64,7 +64,7 @@ class CredentialDebugTest extends TestBase {
         case ex: Exception =>
           println(s"❌ Credentials issue detected: ${ex.getMessage}")
       }
-      
+
       provider.close()
     } catch {
       case ex: Exception =>

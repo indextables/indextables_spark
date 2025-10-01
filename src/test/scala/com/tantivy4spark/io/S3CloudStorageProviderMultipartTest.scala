@@ -39,19 +39,19 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
       // Test that the configuration is respected
       val smallContent = new Array[Byte](50 * 1024 * 1024) // 50MB - should use single-part
       // Fill with some data
-      for (i <- smallContent.indices) {
+      for (i <- smallContent.indices)
         smallContent(i) = (i % 256).toByte
-      }
 
       // This test mainly verifies that multipart configuration is properly integrated
       // without requiring actual S3 connectivity
       println(s"✅ S3CloudStorageProvider configured with multipart threshold: ${config.multipartUploadThreshold}")
       println(s"✅ Small file size: ${smallContent.length} bytes (${smallContent.length / (1024.0 * 1024)}MB)")
-      println(s"✅ Should use single-part upload: ${smallContent.length < config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)}")
+      println(
+        s"✅ Should use single-part upload: ${smallContent.length < config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)}"
+      )
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("S3CloudStorageProvider should support configurable multipart threshold") {
@@ -63,7 +63,7 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
       awsRegion = Some("us-east-1"),
       multipartUploadThreshold = Some(customThreshold),
       maxConcurrency = Some(8), // Higher concurrency
-      maxRetries = Some(5)       // More retries
+      maxRetries = Some(5)      // More retries
     )
 
     val provider = new S3CloudStorageProvider(config)
@@ -78,9 +78,8 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
       assert(config.maxConcurrency.contains(8))
       assert(config.maxRetries.contains(5))
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   ignore("S3OutputStream should use multipart upload for large content") {
@@ -96,7 +95,7 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
     assert(config.multipartUploadThreshold.contains(10L * 1024 * 1024))
 
     // Test that large content size would trigger multipart
-    val largeContentSize = 50L * 1024 * 1024 // 50MB
+    val largeContentSize   = 50L * 1024 * 1024 // 50MB
     val shouldUseMultipart = largeContentSize > config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)
 
     println(s"✅ Large content (${largeContentSize / (1024 * 1024)}MB) should use multipart: $shouldUseMultipart")
@@ -128,9 +127,10 @@ class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
       (5L * 1024 * 1024 * 1024, "5GB merged split")
     )
 
-    sizes.foreach { case (size, description) =>
-      println(s"✅ Size test: $size bytes ($description)")
-      assert(size > 0)
+    sizes.foreach {
+      case (size, description) =>
+        println(s"✅ Size test: $size bytes ($description)")
+        assert(size > 0)
     }
   }
 }

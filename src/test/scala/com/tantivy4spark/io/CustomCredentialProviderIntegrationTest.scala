@@ -26,8 +26,8 @@ import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 
 /**
- * Integration tests for custom AWS credential provider functionality
- * Tests the complete flow from configuration to S3CloudStorageProvider creation
+ * Integration tests for custom AWS credential provider functionality Tests the complete flow from configuration to
+ * S3CloudStorageProvider creation
  */
 class CustomCredentialProviderIntegrationTest extends TestBase {
 
@@ -48,9 +48,9 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("V1 provider integration should work end-to-end") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestV1CredentialProvider].getName,
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.s3.pathStyleAccess" -> "true",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.s3.pathStyleAccess"           -> "true",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()
@@ -80,8 +80,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("V2 provider integration should work end-to-end") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestV2CredentialProvider].getName,
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.aws.region" -> "us-west-2"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.aws.region"                   -> "us-west-2"
     )
 
     val hadoopConf = new Configuration()
@@ -106,8 +106,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("dual provider integration should work end-to-end") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestDualCredentialProvider].getName,
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.aws.region" -> "eu-west-1"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.aws.region"                   -> "eu-west-1"
     )
 
     val hadoopConf = new Configuration()
@@ -132,9 +132,9 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
     val options = Map(
       // Options should take precedence over Hadoop config
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestV1CredentialProvider].getName,
-      "spark.indextables.aws.accessKey" -> "OPTIONS_ACCESS",
-      "spark.indextables.aws.secretKey" -> "OPTIONS_SECRET",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.aws.accessKey"                -> "OPTIONS_ACCESS",
+      "spark.indextables.aws.secretKey"                -> "OPTIONS_SECRET",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()
@@ -165,10 +165,10 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("fallback to explicit credentials should work") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> "com.nonexistent.Provider",
-      "spark.indextables.aws.accessKey" -> "FALLBACK_ACCESS",
-      "spark.indextables.aws.secretKey" -> "FALLBACK_SECRET",
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.aws.accessKey"                -> "FALLBACK_ACCESS",
+      "spark.indextables.aws.secretKey"                -> "FALLBACK_SECRET",
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()
@@ -191,8 +191,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("fallback to default provider should work") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> "com.nonexistent.Provider",
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()
@@ -215,8 +215,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
   test("provider factory creation should work") {
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestV1CredentialProvider].getName,
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()
@@ -244,9 +244,9 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
 
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[TestDualCredentialProvider].getName,
-      "spark.indextables.s3.endpoint" -> "http://localhost:9090",
-      "spark.indextables.s3.pathStyleAccess" -> "true",
-      "spark.indextables.aws.region" -> "us-east-1"
+      "spark.indextables.s3.endpoint"                  -> "http://localhost:9090",
+      "spark.indextables.s3.pathStyleAccess"           -> "true",
+      "spark.indextables.aws.region"                   -> "us-east-1"
     )
 
     val hadoopConf = new Configuration()

@@ -12,25 +12,25 @@ import java.util.{Properties, UUID}
 import scala.util.Using
 
 /**
- * EXACT REPRODUCTION of failing test 647 from RealS3IntegrationTest.
- * This isolates the MERGE SPLITS test to debug the fast field bug.
- * Includes both local file and real S3 tests.
+ * EXACT REPRODUCTION of failing test 647 from RealS3IntegrationTest. This isolates the MERGE SPLITS test to debug the
+ * fast field bug. Includes both local file and real S3 tests.
  */
 class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Matchers {
 
-  var spark: SparkSession = _
-  var tempDir: File = _
+  var spark: SparkSession                      = _
+  var tempDir: File                            = _
   var awsCredentials: Option[(String, String)] = None
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val S3_BUCKET  = "test-tantivy4sparkbucket"
+  private val S3_REGION  = "us-east-2"
+  private val testRunId  = UUID.randomUUID().toString.substring(0, 8)
   private val s3TestPath = s"s3a://$S3_BUCKET/fast-field-repro-$testRunId"
 
   override def beforeAll(): Unit = {
     super.beforeAll()
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("FastFieldLocalReproTest")
       .master("local[2]")
       .config("spark.ui.enabled", "false")
@@ -53,16 +53,14 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     }
   }
 
-  private def loadAwsCredentials(): Option[(String, String)] = {
+  private def loadAwsCredentials(): Option[(String, String)] =
     try {
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (credFile.exists()) {
         val props = new Properties()
-        Using(new FileInputStream(credFile)) { fis =>
-          props.load(fis)
-        }
+        Using(new FileInputStream(credFile))(fis => props.load(fis))
 
         val accessKey = props.getProperty("aws_access_key_id")
         val secretKey = props.getProperty("aws_secret_access_key")
@@ -78,7 +76,6 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     } catch {
       case _: Exception => None
     }
-  }
 
   override def afterAll(): Unit = {
     if (spark != null) {
@@ -108,28 +105,33 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     println(s"📁 Table path: $tablePath")
 
     // EXACT SAME DATA AS TEST 647 (lines 653-662)
-    val data = spark.range(2000).select(
-      col("id"),
-      concat(
-        lit("This is a comprehensive content string for document "), col("id"),
-        lit(". It contains substantial text to ensure splits are large enough. "),
-        lit("Additional content to reach meaningful split sizes for merge operations. "),
-        lit("More text content to create realistic split file sizes.")
-      ).as("content"),
-      (col("id") % 50).cast("string").as("category")
-    )
+    val data = spark
+      .range(2000)
+      .select(
+        col("id"),
+        concat(
+          lit("This is a comprehensive content string for document "),
+          col("id"),
+          lit(". It contains substantial text to ensure splits are large enough. "),
+          lit("Additional content to reach meaningful split sizes for merge operations. "),
+          lit("More text content to create realistic split file sizes.")
+        ).as("content"),
+        (col("id") % 50).cast("string").as("category")
+      )
 
     println(s"✍️  Writing substantial test data for MERGE SPLITS validation...")
 
     // EXACT SAME OPTIONS AS TEST 647 (lines 666-668)
     val writeOptions = Map(
-      "spark.indextables.indexwriter.batchSize" -> "100"  // Force multiple splits
+      "spark.indextables.indexwriter.batchSize" -> "100" // Force multiple splits
     )
 
     println(s"")
     println(s"🔍 FIRST WRITE: mode=overwrite, filter: id < 1000")
     // EXACT SAME WRITES AS TEST 647 (lines 671-675)
-    data.filter(col("id") < 1000).write
+    data
+      .filter(col("id") < 1000)
+      .write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
@@ -140,7 +142,9 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
 
     println(s"🔍 SECOND WRITE: mode=append, filter: id >= 1000")
     // EXACT SAME SECOND WRITE AS TEST 647 (lines 677-681)
-    data.filter(col("id") >= 1000).write
+    data
+      .filter(col("id") >= 1000)
+      .write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
@@ -166,7 +170,8 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     println(s"🔧 Executing MERGE SPLITS operation...")
     import com.tantivy4spark.sql.Tantivy4SparkSqlParser
     val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
-    val mergeCommand = sqlParser.parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
+    val mergeCommand = sqlParser
+      .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[com.tantivy4spark.sql.MergeSplitsCommand]
     mergeCommand.run(spark)
 
@@ -197,7 +202,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     assume(awsCredentials.isDefined, "AWS credentials required for S3 test")
 
     val (accessKey, secretKey) = awsCredentials.get
-    val tablePath = s"$s3TestPath/merge-validation-test"
+    val tablePath              = s"$s3TestPath/merge-validation-test"
 
     println(s"")
     println(s"🔍 ========================================")
@@ -207,30 +212,35 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     println(s"📁 S3 table path: $tablePath")
 
     // EXACT SAME DATA AS TEST 647
-    val data = spark.range(2000).select(
-      col("id"),
-      concat(
-        lit("This is a comprehensive content string for document "), col("id"),
-        lit(". It contains substantial text to ensure splits are large enough. "),
-        lit("Additional content to reach meaningful split sizes for merge operations. "),
-        lit("More text content to create realistic split file sizes.")
-      ).as("content"),
-      (col("id") % 50).cast("string").as("category")
-    )
+    val data = spark
+      .range(2000)
+      .select(
+        col("id"),
+        concat(
+          lit("This is a comprehensive content string for document "),
+          col("id"),
+          lit(". It contains substantial text to ensure splits are large enough. "),
+          lit("Additional content to reach meaningful split sizes for merge operations. "),
+          lit("More text content to create realistic split file sizes.")
+        ).as("content"),
+        (col("id") % 50).cast("string").as("category")
+      )
 
     println(s"✍️  Writing substantial test data for MERGE SPLITS validation...")
 
     // EXACT SAME OPTIONS AS TEST 647 + AWS credentials
     val writeOptions = Map(
-      "spark.indextables.indexwriter.batchSize" -> "100",  // Force multiple splits
-      "spark.indextables.aws.accessKey" -> accessKey,
-      "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.indexwriter.batchSize" -> "100", // Force multiple splits
+      "spark.indextables.aws.accessKey"         -> accessKey,
+      "spark.indextables.aws.secretKey"         -> secretKey,
+      "spark.indextables.aws.region"            -> S3_REGION
     )
 
     println(s"")
     println(s"🔍 FIRST WRITE (S3): mode=overwrite, filter: id < 1000")
-    data.filter(col("id") < 1000).write
+    data
+      .filter(col("id") < 1000)
+      .write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
       .mode("overwrite")
@@ -240,7 +250,9 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     println(s"")
 
     println(s"🔍 SECOND WRITE (S3): mode=append, filter: id >= 1000")
-    data.filter(col("id") >= 1000).write
+    data
+      .filter(col("id") >= 1000)
+      .write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .options(writeOptions)
       .mode("append")
@@ -254,7 +266,7 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     val readOptions = Map(
       "spark.indextables.aws.accessKey" -> accessKey,
       "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"    -> S3_REGION
     )
 
     println(s"🔍 Pre-merge data verification...")
@@ -273,7 +285,8 @@ class FastFieldLocalReproTest extends AnyFunSuite with BeforeAndAfterAll with Ma
     println(s"🔧 Executing MERGE SPLITS operation on S3...")
     import com.tantivy4spark.sql.Tantivy4SparkSqlParser
     val sqlParser = new Tantivy4SparkSqlParser(spark.sessionState.sqlParser)
-    val mergeCommand = sqlParser.parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
+    val mergeCommand = sqlParser
+      .parsePlan(s"MERGE SPLITS '$tablePath' TARGET SIZE 2097152")
       .asInstanceOf[com.tantivy4spark.sql.MergeSplitsCommand]
     mergeCommand.run(spark)
 

@@ -46,11 +46,13 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     df.createOrReplaceTempView("direct_df_test")
 
     try {
-      val indexQueryResults = spark.sql("""
+      val indexQueryResults = spark
+        .sql("""
         SELECT id, title FROM direct_df_test
         WHERE title indexquery 'machine'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Results: ${indexQueryResults.length}")
       indexQueryResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}'"))
@@ -69,14 +71,18 @@ class DirectDataFrameIndexQueryTest extends TestBase {
     println("\n🔍 Direct DataFrame combined: SQL combined query")
 
     try {
-      val combinedResults = spark.sql("""
+      val combinedResults = spark
+        .sql("""
         SELECT id, title, category FROM direct_df_test
         WHERE title indexquery 'machine' AND category = 'tech'
         ORDER BY id
-      """).collect()
+      """)
+        .collect()
 
       println(s"Results: ${combinedResults.length}")
-      combinedResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+      combinedResults.foreach(row =>
+        println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'")
+      )
 
       if (combinedResults.length >= 2) {
         println("✅ Direct DataFrame combined query works!")

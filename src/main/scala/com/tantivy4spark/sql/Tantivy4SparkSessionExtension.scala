@@ -33,11 +33,8 @@ import org.apache.spark.sql.SparkSessionExtensions
  * }}}
  */
 class Tantivy4SparkSessionExtension extends (SparkSessionExtensions => Unit) {
-  
-  override def apply(extensions: SparkSessionExtensions): Unit = {
+
+  override def apply(extensions: SparkSessionExtensions): Unit =
     // Register our SQL parser for Tantivy4Spark commands
-    extensions.injectParser { (session, parser) =>
-      new Tantivy4SparkSqlParser(parser)
-    }
-  }
+    extensions.injectParser((session, parser) => new Tantivy4SparkSqlParser(parser))
 }

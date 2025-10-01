@@ -21,22 +21,22 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileSystem, Path, FileStatus}
 import org.slf4j.LoggerFactory
 import java.io.{InputStream, OutputStream}
-import scala.util.{Try}
+import scala.util.Try
 
 /**
- * Hadoop-based storage provider for local, HDFS, and other Hadoop-compatible filesystems.
- * Falls back to standard Hadoop APIs when cloud-specific optimizations aren't available.
+ * Hadoop-based storage provider for local, HDFS, and other Hadoop-compatible filesystems. Falls back to standard Hadoop
+ * APIs when cloud-specific optimizations aren't available.
  */
 class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorageProvider {
-  
+
   private val logger = LoggerFactory.getLogger(classOf[HadoopCloudStorageProvider])
-  
+
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
     val hadoopPath = new Path(path)
 
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
-      
+
       val statuses = fs.listStatus(hadoopPath)
       statuses.map(convertFileStatus).toSeq
     } catch {
@@ -48,10 +48,10 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         Seq.empty
     }
   }
-  
+
   override def exists(path: String): Boolean = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       fs.exists(hadoopPath)
@@ -61,10 +61,10 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         false
     }
   }
-  
+
   override def getFileInfo(path: String): Option[CloudFileInfo] = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       if (fs.exists(hadoopPath)) {
@@ -79,54 +79,56 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         None
     }
   }
-  
+
   override def readFile(path: String): Array[Byte] = {
     val hadoopPath = new Path(path)
-    
+
     try {
-      val fs = hadoopPath.getFileSystem(hadoopConf)
+      val fs    = hadoopPath.getFileSystem(hadoopConf)
       val input = fs.open(hadoopPath)
-      
+
       try {
         val fileStatus = fs.getFileStatus(hadoopPath)
-        val buffer = new Array[Byte](fileStatus.getLen.toInt)
+        val buffer     = new Array[Byte](fileStatus.getLen.toInt)
         input.readFully(buffer)
         buffer
-      } finally {
+      } finally
         input.close()
-      }
     } catch {
       case ex: Exception =>
         logger.error(s"Failed to read file: $path", ex)
         throw new RuntimeException(s"Failed to read file: ${ex.getMessage}", ex)
     }
   }
-  
-  override def readRange(path: String, offset: Long, length: Long): Array[Byte] = {
+
+  override def readRange(
+    path: String,
+    offset: Long,
+    length: Long
+  ): Array[Byte] = {
     val hadoopPath = new Path(path)
-    
+
     try {
-      val fs = hadoopPath.getFileSystem(hadoopConf)
+      val fs    = hadoopPath.getFileSystem(hadoopConf)
       val input = fs.open(hadoopPath)
-      
+
       try {
         input.seek(offset)
         val buffer = new Array[Byte](length.toInt)
         input.readFully(buffer)
         buffer
-      } finally {
+      } finally
         input.close()
-      }
     } catch {
       case ex: Exception =>
         logger.error(s"Failed to read range from file: $path, offset=$offset, length=$length", ex)
         throw new RuntimeException(s"Failed to read file range: ${ex.getMessage}", ex)
     }
   }
-  
+
   override def openInputStream(path: String): InputStream = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       fs.open(hadoopPath)
@@ -136,10 +138,10 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         throw new RuntimeException(s"Failed to open input stream: ${ex.getMessage}", ex)
     }
   }
-  
+
   override def createOutputStream(path: String): OutputStream = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       fs.create(hadoopPath, true) // overwrite=true
@@ -149,28 +151,33 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         throw new RuntimeException(s"Failed to create output stream: ${ex.getMessage}", ex)
     }
   }
-  
+
   override def writeFile(path: String, content: Array[Byte]): Unit = {
     val output = createOutputStream(path)
 
-    try {
+    try
       output.write(content)
-    } finally {
+    finally
       output.close()
-    }
   }
 
-  override def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long] = None): Unit = {
+  override def writeFileFromStream(
+    path: String,
+    inputStream: InputStream,
+    contentLength: Option[Long] = None
+  ): Unit = {
     val output = createOutputStream(path)
 
     try {
       logger.info(s"🔧 HADOOP STREAMING WRITE - Path: $path")
-      contentLength.foreach(length => logger.info(s"🔧 HADOOP STREAMING WRITE - Content length: ${length / (1024 * 1024)} MB"))
+      contentLength.foreach(length =>
+        logger.info(s"🔧 HADOOP STREAMING WRITE - Content length: ${length / (1024 * 1024)} MB")
+      )
 
       // Use a buffer to stream data efficiently without loading everything into memory
-      val buffer = new Array[Byte](64 * 1024) // 64KB buffer
+      val buffer            = new Array[Byte](64 * 1024) // 64KB buffer
       var totalBytesWritten = 0L
-      var bytesRead = 0
+      var bytesRead         = 0
 
       while ({ bytesRead = inputStream.read(buffer); bytesRead > 0 }) {
         output.write(buffer, 0, bytesRead)
@@ -178,14 +185,13 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
       }
 
       logger.info(s"✅ Hadoop streaming write completed: $path (${totalBytesWritten / (1024 * 1024)} MB)")
-    } finally {
+    } finally
       output.close()
-    }
   }
 
   override def deleteFile(path: String): Boolean = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       fs.delete(hadoopPath, false) // recursive=false
@@ -195,10 +201,10 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         false
     }
   }
-  
+
   override def createDirectory(path: String): Boolean = {
     val hadoopPath = new Path(path)
-    
+
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
       fs.mkdirs(hadoopPath)
@@ -208,44 +214,40 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
         false
     }
   }
-  
-  override def readFilesParallel(paths: Seq[String]): Map[String, Array[Byte]] = {
+
+  override def readFilesParallel(paths: Seq[String]): Map[String, Array[Byte]] =
     // For Hadoop, just read files sequentially as filesystem may not support high concurrency
-    paths.map { path =>
-      try {
-        path -> readFile(path)
-      } catch {
-        case ex: Exception =>
-          logger.error(s"Failed to read Hadoop file: $path", ex)
-          path -> Array.empty[Byte]
+    paths
+      .map { path =>
+        try
+          path -> readFile(path)
+        catch {
+          case ex: Exception =>
+            logger.error(s"Failed to read Hadoop file: $path", ex)
+            path -> Array.empty[Byte]
+        }
       }
-    }.toMap.filter(_._2.nonEmpty)
-  }
-  
-  override def existsParallel(paths: Seq[String]): Map[String, Boolean] = {
-    paths.map { path =>
-      path -> exists(path)
-    }.toMap
-  }
-  
+      .toMap
+      .filter(_._2.nonEmpty)
+
+  override def existsParallel(paths: Seq[String]): Map[String, Boolean] =
+    paths.map(path => path -> exists(path)).toMap
+
   override def getProviderType: String = "hadoop"
-  
-  override def normalizePathForTantivy(path: String): String = {
+
+  override def normalizePathForTantivy(path: String): String =
     // Hadoop provider doesn't need protocol conversion, return path as-is
     path
-  }
-  
-  override def close(): Unit = {
+
+  override def close(): Unit =
     // Hadoop FileSystem instances are cached and managed by Hadoop
     logger.debug("Closed Hadoop storage provider")
-  }
-  
-  private def convertFileStatus(status: FileStatus): CloudFileInfo = {
+
+  private def convertFileStatus(status: FileStatus): CloudFileInfo =
     CloudFileInfo(
       path = status.getPath.toString,
       size = status.getLen,
       modificationTime = status.getModificationTime,
       isDirectory = status.isDirectory
     )
-  }
 }

@@ -30,33 +30,30 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters._
 
 /**
- * Parallel operations enhancement for transaction log operations.
- * Provides optimized parallel reading, writing, and listing operations.
+ * Parallel operations enhancement for transaction log operations. Provides optimized parallel reading, writing, and
+ * listing operations.
  */
 class ParallelTransactionLogOperations(
-    transactionLogPath: Path,
-    cloudProvider: CloudStorageProvider,
-    spark: SparkSession
-) {
+  transactionLogPath: Path,
+  cloudProvider: CloudStorageProvider,
+  spark: SparkSession) {
 
   private val logger = LoggerFactory.getLogger(classOf[ParallelTransactionLogOperations])
 
   // Thread pools from centralized manager
-  private val fileListingPool = TransactionLogThreadPools.fileListingThreadPool
+  private val fileListingPool  = TransactionLogThreadPools.fileListingThreadPool
   private val parallelReadPool = TransactionLogThreadPools.parallelReadThreadPool
-  private val commitPool = TransactionLogThreadPools.commitThreadPool
+  private val commitPool       = TransactionLogThreadPools.commitThreadPool
 
   // Execution contexts (not implicit to avoid ambiguity)
-  private val fileListingEc: ExecutionContext = fileListingPool.executionContext
+  private val fileListingEc: ExecutionContext  = fileListingPool.executionContext
   private val parallelReadEc: ExecutionContext = parallelReadPool.executionContext
-  private val commitEc: ExecutionContext = commitPool.executionContext
+  private val commitEc: ExecutionContext       = commitPool.executionContext
 
-  /**
-   * List files in parallel with reconciliation between file system and uncommitted changes
-   */
+  /** List files in parallel with reconciliation between file system and uncommitted changes */
   def listFilesParallel(
-      startVersion: Option[Long] = None,
-      endVersion: Option[Long] = None
+    startVersion: Option[Long] = None,
+    endVersion: Option[Long] = None
   ): Future[FileListingResult] = {
 
     val fsListingFuture = Future {
@@ -74,27 +71,23 @@ class ParallelTransactionLogOperations(
     // Combine all listings
     implicit val ec: ExecutionContext = fileListingEc
     for {
-      fsFiles <- fsListingFuture
-      checkpoints <- checkpointListingFuture
+      fsFiles             <- fsListingFuture
+      checkpoints         <- checkpointListingFuture
       unbackfilledCommits <- unbackfilledCommitsFuture
-    } yield {
-      reconcileListings(fsFiles, checkpoints, unbackfilledCommits)
-    }
+    } yield reconcileListings(fsFiles, checkpoints, unbackfilledCommits)
   }
 
-  /**
-   * Read multiple versions in parallel
-   */
+  /** Read multiple versions in parallel */
   def readVersionsParallel(
-      versions: Seq[Long],
-      maxConcurrency: Int = 8
+    versions: Seq[Long],
+    maxConcurrency: Int = 8
   ): Map[Long, Seq[Action]] = {
 
     if (versions.isEmpty) {
       return Map.empty
     }
 
-    val results = new ConcurrentHashMap[Long, Seq[Action]]()
+    val results  = new ConcurrentHashMap[Long, Seq[Action]]()
     val promises = versions.map(v => v -> Promise[Seq[Action]]()).toMap
 
     // Process versions in batches to control concurrency
@@ -122,13 +115,11 @@ class ParallelTransactionLogOperations(
     results.asScala.toMap
   }
 
-  /**
-   * Write actions in parallel batches
-   */
+  /** Write actions in parallel batches */
   def writeBatchParallel(
-      version: Long,
-      actions: Seq[Action],
-      batchSize: Int = 1000
+    version: Long,
+    actions: Seq[Action],
+    batchSize: Int = 1000
   ): Future[Unit] = {
 
     if (actions.isEmpty) {
@@ -139,25 +130,24 @@ class ParallelTransactionLogOperations(
     val groupedActions = actions.groupBy(_.getClass.getSimpleName)
 
     // Prepare content for each group
-    val writeFutures = groupedActions.zipWithIndex.map { case ((actionType, group), index) =>
-      commitPool.submitSimple {
-        val versionFile = new Path(transactionLogPath, f"${version}_$index%03d.json")
-        val content = serializeActions(group)
-        cloudProvider.writeFile(versionFile.toString, content.getBytes("UTF-8"))
-        logger.debug(s"Written ${group.size} $actionType actions to version $version part $index")
-      }
+    val writeFutures = groupedActions.zipWithIndex.map {
+      case ((actionType, group), index) =>
+        commitPool.submitSimple {
+          val versionFile = new Path(transactionLogPath, f"${version}_$index%03d.json")
+          val content     = serializeActions(group)
+          cloudProvider.writeFile(versionFile.toString, content.getBytes("UTF-8"))
+          logger.debug(s"Written ${group.size} $actionType actions to version $version part $index")
+        }
     }
 
     // Combine all write futures
     Future.sequence(writeFutures)(collection.breakOut, commitEc).map(_ => ())(commitEc)
   }
 
-  /**
-   * Optimized state reconstruction with partitioned processing
-   */
+  /** Optimized state reconstruction with partitioned processing */
   def reconstructStateParallel(
-      versions: Seq[Long],
-      partitions: Int = 4
+    versions: Seq[Long],
+    partitions: Int = 4
   ): Seq[AddAction] = {
 
     // Read all versions in parallel but process them in order
@@ -201,9 +191,7 @@ class ParallelTransactionLogOperations(
     files.values.toSeq
   }
 
-  /**
-   * Parallel file existence check
-   */
+  /** Parallel file existence check */
   def checkFilesExistParallel(paths: Seq[String]): Map[String, Boolean] = {
     if (paths.isEmpty) {
       return Map.empty
@@ -211,31 +199,29 @@ class ParallelTransactionLogOperations(
 
     val results = new ConcurrentHashMap[String, Boolean]()
 
-    val futures = paths.grouped(10).map { batch =>
-      fileListingPool.submitSimple {
-        batch.foreach { path =>
-          results.put(path, cloudProvider.exists(path))
+    val futures = paths
+      .grouped(10)
+      .map { batch =>
+        fileListingPool.submitSimple {
+          batch.foreach(path => results.put(path, cloudProvider.exists(path)))
         }
       }
-    }.toSeq
+      .toSeq
 
     Try(scala.concurrent.Await.result(Future.sequence(futures)(collection.breakOut, fileListingEc), 30.seconds))
 
     results.asScala.toMap
   }
 
-  /**
-   * Parallel checkpoint creation with streaming
-   */
+  /** Parallel checkpoint creation with streaming */
   def createCheckpointParallel(
-      version: Long,
-      actions: Seq[Action],
-      partSize: Int = 10000
-  ): Future[CheckpointInfo] = {
-
+    version: Long,
+    actions: Seq[Action],
+    partSize: Int = 10000
+  ): Future[CheckpointInfo] =
     commitPool.submit(spark) {
       val checkpointPath = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
-      val parts = actions.grouped(partSize).toSeq
+      val parts          = actions.grouped(partSize).toSeq
 
       if (parts.length == 1) {
         // Single part - write directly
@@ -243,18 +229,19 @@ class ParallelTransactionLogOperations(
         cloudProvider.writeFile(checkpointPath.toString, content.getBytes("UTF-8"))
       } else {
         // Multi-part checkpoint for large tables
-        val partFutures = parts.zipWithIndex.map { case (part, index) =>
-          Future {
-            val partPath = new Path(transactionLogPath, f"$version%020d.checkpoint.part.$index%05d.json")
-            val content = serializeActions(part)
-            cloudProvider.writeFile(partPath.toString, content.getBytes("UTF-8"))
-          }(commitEc)
+        val partFutures = parts.zipWithIndex.map {
+          case (part, index) =>
+            Future {
+              val partPath = new Path(transactionLogPath, f"$version%020d.checkpoint.part.$index%05d.json")
+              val content  = serializeActions(part)
+              cloudProvider.writeFile(partPath.toString, content.getBytes("UTF-8"))
+            }(commitEc)
         }
 
         scala.concurrent.Await.result(Future.sequence(partFutures)(collection.breakOut, commitEc), 60.seconds)
 
         // Write manifest
-        val manifest = CheckpointManifest(version, parts.length, actions.length)
+        val manifest        = CheckpointManifest(version, parts.length, actions.length)
         val manifestContent = JsonUtil.mapper.writeValueAsString(manifest)
         cloudProvider.writeFile(checkpointPath.toString, manifestContent.getBytes("UTF-8"))
       }
@@ -267,56 +254,58 @@ class ParallelTransactionLogOperations(
         createdTime = System.currentTimeMillis()
       )
     }
-  }
 
   // Helper methods
 
   private def listFromFileSystem(
-      startVersion: Option[Long],
-      endVersion: Option[Long]
+    startVersion: Option[Long],
+    endVersion: Option[Long]
   ): Seq[TransactionFile] = {
     val prefix = transactionLogPath.toString
-    val files = cloudProvider.listFiles(prefix, recursive = false)
+    val files  = cloudProvider.listFiles(prefix, recursive = false)
     println(s"[DEBUG] CloudProvider listed ${files.size} files in $prefix: ${files.map(_.path).mkString(", ")}")
 
-    files.flatMap { file =>
-      parseTransactionFile(file.path) match {
-        case Some(tf) =>
-          val inRange = startVersion.map(tf.version >= _).getOrElse(true) &&
-                       endVersion.map(tf.version <= _).getOrElse(true)
-          if (inRange) Some(tf) else None
-        case None => None
+    files
+      .flatMap { file =>
+        parseTransactionFile(file.path) match {
+          case Some(tf) =>
+            val inRange = startVersion.map(tf.version >= _).getOrElse(true) &&
+              endVersion.map(tf.version <= _).getOrElse(true)
+            if (inRange) Some(tf) else None
+          case None => None
+        }
       }
-    }.sortBy(_.version)
+      .sortBy(_.version)
   }
 
   private def listCheckpoints(): Seq[CheckpointFile] = {
     val prefix = transactionLogPath.toString
-    val files = cloudProvider.listFiles(prefix, recursive = false)
+    val files  = cloudProvider.listFiles(prefix, recursive = false)
 
-    files.flatMap { file =>
-      if (file.path.contains(".checkpoint.")) {
-        parseCheckpointFile(file.path)
-      } else None
-    }.sortBy(_.version)
+    files
+      .flatMap { file =>
+        if (file.path.contains(".checkpoint.")) {
+          parseCheckpointFile(file.path)
+        } else None
+      }
+      .sortBy(_.version)
   }
 
-  private def listUnbackfilledCommits(): Seq[UnbackfilledCommit] = {
+  private def listUnbackfilledCommits(): Seq[UnbackfilledCommit] =
     // This would integrate with a commit coordinator if available
     // For now, return empty as we don't have unbackfilled commits
     Seq.empty
-  }
 
   private def reconcileListings(
-      fsFiles: Seq[TransactionFile],
-      checkpoints: Seq[CheckpointFile],
-      unbackfilledCommits: Seq[UnbackfilledCommit]
+    fsFiles: Seq[TransactionFile],
+    checkpoints: Seq[CheckpointFile],
+    unbackfilledCommits: Seq[UnbackfilledCommit]
   ): FileListingResult = {
 
     // Find gaps in version sequence
     val allVersions = (fsFiles.map(_.version) ++
-                       checkpoints.map(_.version) ++
-                       unbackfilledCommits.map(_.version)).distinct.sorted
+      checkpoints.map(_.version) ++
+      unbackfilledCommits.map(_.version)).distinct.sorted
 
     val gaps = findVersionGaps(allVersions)
 
@@ -332,7 +321,7 @@ class ParallelTransactionLogOperations(
   private def findVersionGaps(versions: Seq[Long]): Seq[VersionGap] = {
     if (versions.isEmpty) return Seq.empty
 
-    val gaps = ListBuffer[VersionGap]()
+    val gaps            = ListBuffer[VersionGap]()
     var expectedVersion = versions.head
 
     versions.foreach { version =>
@@ -346,7 +335,7 @@ class ParallelTransactionLogOperations(
   }
 
   private def readVersionDirect(version: Long): Seq[Action] = {
-    val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+    val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
     if (!cloudProvider.exists(versionFilePath)) {
@@ -359,38 +348,42 @@ class ParallelTransactionLogOperations(
     }.getOrElse(Seq.empty)
   }
 
-  private def parseActionsFromContent(content: String): Seq[Action] = {
-    content.split("\n").filter(_.nonEmpty).flatMap { line =>
-      Try {
-        val jsonNode = JsonUtil.mapper.readTree(line)
+  private def parseActionsFromContent(content: String): Seq[Action] =
+    content
+      .split("\n")
+      .filter(_.nonEmpty)
+      .flatMap { line =>
+        Try {
+          val jsonNode = JsonUtil.mapper.readTree(line)
 
-        if (jsonNode.has("metaData")) {
-          val metadataNode = jsonNode.get("metaData")
-          Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
-        } else if (jsonNode.has("add")) {
-          val addNode = jsonNode.get("add")
-          Some(JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction]))
-        } else if (jsonNode.has("remove")) {
-          val removeNode = jsonNode.get("remove")
-          Some(JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction]))
-        } else if (jsonNode.has("mergeskip")) {
-          val skipNode = jsonNode.get("mergeskip")
-          Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
-        } else {
-          None
-        }
-      }.toOption
-    }.flatten.toSeq
-  }
+          if (jsonNode.has("metaData")) {
+            val metadataNode = jsonNode.get("metaData")
+            Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
+          } else if (jsonNode.has("add")) {
+            val addNode = jsonNode.get("add")
+            Some(JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction]))
+          } else if (jsonNode.has("remove")) {
+            val removeNode = jsonNode.get("remove")
+            Some(JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction]))
+          } else if (jsonNode.has("mergeskip")) {
+            val skipNode = jsonNode.get("mergeskip")
+            Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
+          } else {
+            None
+          }
+        }.toOption
+      }
+      .flatten
+      .toSeq
 
   private def serializeActions(actions: Seq[Action]): String = {
     val content = new StringBuilder()
     actions.foreach { action =>
       val wrappedAction = action match {
         case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction => Map("add" -> add)
-        case remove: RemoveAction => Map("remove" -> remove)
-        case skip: SkipAction => Map("mergeskip" -> skip)
+        case add: AddAction           => Map("add" -> add)
+        case remove: RemoveAction     => Map("remove" -> remove)
+        case skip: SkipAction         => Map("mergeskip" -> skip)
       }
       content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
     }
@@ -421,7 +414,10 @@ class ParallelTransactionLogOperations(
 // Data structures
 
 case class TransactionFile(version: Long, path: String)
-case class CheckpointFile(version: Long, path: String, isMultiPart: Boolean)
+case class CheckpointFile(
+  version: Long,
+  path: String,
+  isMultiPart: Boolean)
 case class UnbackfilledCommit(version: Long, actions: Seq[Action])
 case class VersionGap(startVersion: Long, endVersion: Long)
 
@@ -430,11 +426,9 @@ case class FileListingResult(
   checkpoints: Seq[CheckpointFile],
   unbackfilledCommits: Seq[UnbackfilledCommit],
   gaps: Seq[VersionGap],
-  latestVersion: Long
-)
+  latestVersion: Long)
 
 case class CheckpointManifest(
   version: Long,
   numParts: Int,
-  totalActions: Long
-)
+  totalActions: Long)

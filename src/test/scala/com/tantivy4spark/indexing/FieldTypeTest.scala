@@ -24,18 +24,23 @@ class FieldTypeTest extends TestBase with Matchers {
 
   test("explicit text field configuration should work") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "machine learning algorithms"),
-        ("doc2", "deep learning networks")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "machine learning algorithms"),
+            ("doc2", "deep learning networks")
+          )
+        )
+        .toDF("id", "content")
 
       // Configure content field as text type explicitly
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
 
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 2
@@ -47,18 +52,23 @@ class FieldTypeTest extends TestBase with Matchers {
 
   test("explicit string field configuration should work") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "exact string"),
-        ("doc2", "another exact string")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "exact string"),
+            ("doc2", "another exact string")
+          )
+        )
+        .toDF("id", "content")
 
       // Configure content field as string type explicitly
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "string")
         .save(tablePath)
 
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 2

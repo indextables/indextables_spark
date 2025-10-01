@@ -15,11 +15,18 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownV2Filters, SupportsPushDownRequiredColumns, SupportsPushDownLimit, SupportsPushDownAggregates}
+import org.apache.spark.sql.connector.read.{
+  Scan,
+  ScanBuilder,
+  SupportsPushDownFilters,
+  SupportsPushDownV2Filters,
+  SupportsPushDownRequiredColumns,
+  SupportsPushDownLimit,
+  SupportsPushDownAggregates
+}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.sources.Filter
@@ -30,11 +37,11 @@ import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkScanBuilder(
-    sparkSession: SparkSession,
-    transactionLog: TransactionLog,
-    schema: StructType,
-    options: CaseInsensitiveStringMap,
-    config: Map[String, String]  // Direct config instead of broadcast
+  sparkSession: SparkSession,
+  transactionLog: TransactionLog,
+  schema: StructType,
+  options: CaseInsensitiveStringMap,
+  config: Map[String, String] // Direct config instead of broadcast
 ) extends ScanBuilder
     with SupportsPushDownFilters
     with SupportsPushDownV2Filters
@@ -47,21 +54,20 @@ class Tantivy4SparkScanBuilder(
   println(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
   logger.info(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
   // Filters that have been pushed down and will be applied by the data source
-  private var _pushedFilters = Array.empty[Filter]
-  private var requiredSchema = schema
+  private var _pushedFilters      = Array.empty[Filter]
+  private var requiredSchema      = schema
   private var _limit: Option[Int] = None
 
   // Aggregate pushdown state
   private var _pushedAggregation: Option[Aggregation] = None
-  private var _pushedGroupBy: Option[Array[String]] = None
+  private var _pushedGroupBy: Option[Array[String]]   = None
 
   // Generate instance key for this ScanBuilder to retrieve IndexQueries
   private val instanceKey = {
-    val tablePath = transactionLog.getTablePath().toString
+    val tablePath   = transactionLog.getTablePath().toString
     val executionId = Option(sparkSession.sparkContext.getLocalProperty("spark.sql.execution.id"))
     Tantivy4SparkScanBuilder.generateInstanceKey(tablePath, executionId)
   }
-
 
   override def build(): Scan = {
     println(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
@@ -80,23 +86,34 @@ class Tantivy4SparkScanBuilder(
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
-        logger.error(s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan")
+        logger.error(
+          s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
+        )
         extractedIndexQueryFilters.foreach(filter => logger.error(s"  - Extracted IndexQuery: $filter"))
 
         println(s"🔍 BUILD DEBUG: Creating Tantivy4SparkScan with ${_pushedFilters.length} pushed filters")
         _pushedFilters.foreach(filter => println(s"  - Creating scan with filter: $filter"))
-        new Tantivy4SparkScan(sparkSession, transactionLog, requiredSchema, _pushedFilters, options, _limit, config, extractedIndexQueryFilters)
+        new Tantivy4SparkScan(
+          sparkSession,
+          transactionLog,
+          requiredSchema,
+          _pushedFilters,
+          options,
+          _limit,
+          config,
+          extractedIndexQueryFilters
+        )
     }
   }
 
-  /**
-   * Create an aggregate scan for pushed aggregations.
-   */
-  private def createAggregateScan(aggregation: Aggregation): Scan = {
+  /** Create an aggregate scan for pushed aggregations. */
+  private def createAggregateScan(aggregation: Aggregation): Scan =
     _pushedGroupBy match {
       case Some(groupByColumns) =>
         // GROUP BY aggregation
-        logger.info(s"🔍 AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}")
+        logger.info(
+          s"🔍 AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
+        )
         createGroupByAggregateScan(aggregation, groupByColumns)
       case None =>
         // Simple aggregation without GROUP BY
@@ -111,11 +128,8 @@ class Tantivy4SparkScanBuilder(
           createSimpleAggregateScan(aggregation)
         }
     }
-  }
 
-  /**
-   * Create a GROUP BY aggregation scan.
-   */
+  /** Create a GROUP BY aggregation scan. */
   private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String]): Scan = {
     logger.info(s"🔍 GROUP BY SCAN: Creating GROUP BY scan for aggregation: $aggregation")
     logger.info(s"🔍 GROUP BY SCAN: GROUP BY columns: ${groupByColumns.mkString(", ")}")
@@ -135,24 +149,34 @@ class Tantivy4SparkScanBuilder(
     )
   }
 
-  /**
-   * Create a simple aggregation scan (no GROUP BY).
-   */
+  /** Create a simple aggregation scan (no GROUP BY). */
   private def createSimpleAggregateScan(aggregation: Aggregation): Scan = {
-    logger.info(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan for: ${aggregation.aggregateExpressions.mkString(", ")}")
+    logger.info(
+      s"🔍 AGGREGATE SCAN: Creating simple aggregation scan for: ${aggregation.aggregateExpressions.mkString(", ")}"
+    )
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    new Tantivy4SparkSimpleAggregateScan(sparkSession, transactionLog, schema, _pushedFilters, options, config, aggregation)
+    new Tantivy4SparkSimpleAggregateScan(
+      sparkSession,
+      transactionLog,
+      schema,
+      _pushedFilters,
+      options,
+      config,
+      aggregation
+    )
   }
 
-  /**
-   * Check if we can optimize COUNT queries using transaction log.
-   */
+  /** Check if we can optimize COUNT queries using transaction log. */
   private def canUseTransactionLogCount(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
-    println(s"🔍 SCAN BUILDER: canUseTransactionLogCount called with ${aggregation.aggregateExpressions.length} expressions")
-    aggregation.aggregateExpressions.foreach(expr => println(s"🔍 SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})"))
+    println(
+      s"🔍 SCAN BUILDER: canUseTransactionLogCount called with ${aggregation.aggregateExpressions.length} expressions"
+    )
+    aggregation.aggregateExpressions.foreach(expr =>
+      println(s"🔍 SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})")
+    )
     println(s"🔍 SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
     _pushedFilters.foreach(filter => println(s"🔍 SCAN BUILDER: Pushed filter: $filter"))
 
@@ -177,20 +201,17 @@ class Tantivy4SparkScanBuilder(
     result
   }
 
-  /**
-   * Create a specialized scan that returns count from transaction log.
-   */
-  private def createTransactionLogCountScan(aggregation: Aggregation): Scan = {
+  /** Create a specialized scan that returns count from transaction log. */
+  private def createTransactionLogCountScan(aggregation: Aggregation): Scan =
     new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, config)
-  }
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     println(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
     logger.error(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
-    filters.foreach(filter => {
+    filters.foreach { filter =>
       println(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
       logger.error(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
-    })
+    }
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
     // we only need to handle regular Spark filters here.
@@ -216,10 +237,10 @@ class Tantivy4SparkScanBuilder(
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
     println(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
     logger.info(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
-    predicates.foreach(predicate => {
+    predicates.foreach { predicate =>
       println(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
       logger.info(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
-    })
+    }
     predicates.foreach(predicate => logger.info(s"  - Input predicate: $predicate (${predicate.getClass.getSimpleName})"))
 
     // Convert predicates that we can handle and extract IndexQuery information
@@ -239,7 +260,7 @@ class Tantivy4SparkScanBuilder(
 
   override def pushedFilters(): Array[Filter] = _pushedFilters
 
-  override def pushedPredicates(): Array[Predicate] = Array.empty  // V2 interface method
+  override def pushedPredicates(): Array[Predicate] = Array.empty // V2 interface method
 
   override def pruneColumns(requiredSchema: StructType): Unit = {
     this.requiredSchema = requiredSchema
@@ -267,15 +288,13 @@ class Tantivy4SparkScanBuilder(
 
     // Check if this is a GROUP BY aggregation
     val groupByExpressions = aggregation.groupByExpressions()
-    val hasGroupBy = groupByExpressions != null && groupByExpressions.nonEmpty
+    val hasGroupBy         = groupByExpressions != null && groupByExpressions.nonEmpty
 
     println(s"🔍 GROUP BY CHECK: hasGroupBy = $hasGroupBy")
     if (hasGroupBy) {
       println(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
       logger.info(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
-      groupByExpressions.foreach { expr =>
-        logger.info(s"🔍 GROUP BY EXPRESSION: $expr")
-      }
+      groupByExpressions.foreach(expr => logger.info(s"🔍 GROUP BY EXPRESSION: $expr"))
 
       // Extract GROUP BY column names
       val groupByColumns = groupByExpressions.map(extractFieldNameFromExpression)
@@ -324,11 +343,9 @@ class Tantivy4SparkScanBuilder(
     true
   }
 
-
-  /**
-   * Extract field name from Spark expression for GROUP BY detection.
-   */
-  private def extractFieldNameFromExpression(expression: org.apache.spark.sql.connector.expressions.Expression): String = {
+  /** Extract field name from Spark expression for GROUP BY detection. */
+  private def extractFieldNameFromExpression(expression: org.apache.spark.sql.connector.expressions.Expression)
+    : String = {
     // Use toString and try to extract field name
     val exprStr = expression.toString
     println(s"🔍 FIELD EXTRACTION: Expression string: '$exprStr'")
@@ -364,22 +381,22 @@ class Tantivy4SparkScanBuilder(
     import org.apache.spark.sql.sources._
 
     filter match {
-      case EqualTo(attribute, _) => isFieldSuitableForExactMatching(attribute)
+      case EqualTo(attribute, _)       => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
-      case _: GreaterThan => false  // Range queries require fast fields - defer to Spark
-      case _: GreaterThanOrEqual => false  // Range queries require fast fields - defer to Spark
-      case _: LessThan => false  // Range queries require fast fields - defer to Spark
-      case _: LessThanOrEqual => false  // Range queries require fast fields - defer to Spark
-      case _: In => true
-      case _: IsNull => true
-      case _: IsNotNull => true
-      case And(left, right) => isSupportedFilter(left) && isSupportedFilter(right)
-      case Or(left, right) => isSupportedFilter(left) && isSupportedFilter(right)
-      case Not(child) => isSupportedFilter(child)  // NOT is supported only if child is supported
-      case _: StringStartsWith => false  // Tantivy does best-effort, Spark applies final filtering
-      case _: StringEndsWith => false   // Tantivy does best-effort, Spark applies final filtering
-      case _: StringContains => true
-      case _ => false
+      case _: GreaterThan              => false                    // Range queries require fast fields - defer to Spark
+      case _: GreaterThanOrEqual       => false                    // Range queries require fast fields - defer to Spark
+      case _: LessThan                 => false                    // Range queries require fast fields - defer to Spark
+      case _: LessThanOrEqual          => false                    // Range queries require fast fields - defer to Spark
+      case _: In                       => true
+      case _: IsNull                   => true
+      case _: IsNotNull                => true
+      case And(left, right)            => isSupportedFilter(left) && isSupportedFilter(right)
+      case Or(left, right)             => isSupportedFilter(left) && isSupportedFilter(right)
+      case Not(child)                  => isSupportedFilter(child) // NOT is supported only if child is supported
+      case _: StringStartsWith => false // Tantivy does best-effort, Spark applies final filtering
+      case _: StringEndsWith   => false // Tantivy does best-effort, Spark applies final filtering
+      case _: StringContains   => true
+      case _                   => false
     }
   }
 
@@ -389,18 +406,17 @@ class Tantivy4SparkScanBuilder(
     logger.info(s"🔍 isSupportedPredicate: Checking predicate $predicate")
 
     // TODO: Implement proper predicate type checking based on Spark's V2 Predicate types
-    true  // Accept all for now to see what comes through
+    true // Accept all for now to see what comes through
   }
 
   /**
-   * Check if a field is suitable for exact matching at the data source level.
-   * String fields (raw tokenizer) support exact matching.
-   * Text fields (default tokenizer) should be filtered by Spark for exact matches.
+   * Check if a field is suitable for exact matching at the data source level. String fields (raw tokenizer) support
+   * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
     // Check the field type configuration
     val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
-    val fieldType = config.get(fieldTypeKey)
+    val fieldType    = config.get(fieldTypeKey)
 
     fieldType match {
       case Some("string") =>
@@ -419,10 +435,9 @@ class Tantivy4SparkScanBuilder(
     }
   }
 
-
   /**
-   * Extract IndexQuery expressions directly using the companion object storage.
-   * This eliminates the need for global registry by using instance-scoped storage.
+   * Extract IndexQuery expressions directly using the companion object storage. This eliminates the need for global
+   * registry by using instance-scoped storage.
    */
   private def extractIndexQueriesFromCurrentPlan(): Array[Any] = {
     logger.error(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction using instance key: $instanceKey")
@@ -453,15 +468,14 @@ class Tantivy4SparkScanBuilder(
     Array.empty[Any]
   }
 
-  /**
-   * Check if the aggregation is supported for pushdown.
-   */
+  /** Check if the aggregation is supported for pushdown. */
   private def isAggregationSupported(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar, Sum, Avg, Min, Max}
 
     println(s"🔍 AGGREGATE VALIDATION: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
-    aggregation.aggregateExpressions.zipWithIndex.foreach { case (expr, index) =>
-      println(s"🔍 AGGREGATE VALIDATION: Expression $index: $expr (${expr.getClass.getSimpleName})")
+    aggregation.aggregateExpressions.zipWithIndex.foreach {
+      case (expr, index) =>
+        println(s"🔍 AGGREGATE VALIDATION: Expression $index: $expr (${expr.getClass.getSimpleName})")
     }
 
     val result = aggregation.aggregateExpressions.forall { expr =>
@@ -475,22 +489,22 @@ class Tantivy4SparkScanBuilder(
           logger.info(s"🔍 AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
           true
         case sum: Sum =>
-          val fieldName = getFieldName(sum.column)
+          val fieldName   = getFieldName(sum.column)
           val isSupported = isNumericFastField(fieldName)
           logger.info(s"🔍 AGGREGATE VALIDATION: SUM on field '$fieldName' supported: $isSupported")
           isSupported
         case avg: Avg =>
-          val fieldName = getFieldName(avg.column)
+          val fieldName   = getFieldName(avg.column)
           val isSupported = isNumericFastField(fieldName)
           logger.info(s"🔍 AGGREGATE VALIDATION: AVG on field '$fieldName' supported: $isSupported")
           isSupported
         case min: Min =>
-          val fieldName = getFieldName(min.column)
+          val fieldName   = getFieldName(min.column)
           val isSupported = isNumericFastField(fieldName)
           logger.info(s"🔍 AGGREGATE VALIDATION: MIN on field '$fieldName' supported: $isSupported")
           isSupported
         case max: Max =>
-          val fieldName = getFieldName(max.column)
+          val fieldName   = getFieldName(max.column)
           val isSupported = isNumericFastField(fieldName)
           logger.info(s"🔍 AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
           isSupported
@@ -506,9 +520,7 @@ class Tantivy4SparkScanBuilder(
     result
   }
 
-  /**
-   * Extract field name from an aggregate expression column.
-   */
+  /** Extract field name from an aggregate expression column. */
   private def getFieldName(column: org.apache.spark.sql.connector.expressions.Expression): String = {
     // Use existing extractFieldNameFromExpression method
     val fieldName = extractFieldNameFromExpression(column)
@@ -518,15 +530,15 @@ class Tantivy4SparkScanBuilder(
     fieldName
   }
 
-  /**
-   * Check if a field is numeric and marked as fast in the schema.
-   */
+  /** Check if a field is numeric and marked as fast in the schema. */
   private def isNumericFastField(fieldName: String): Boolean = {
     // Get actual fast fields from the schema/docMappingJson
     val fastFields = getActualFastFieldsFromSchema()
 
     if (!fastFields.contains(fieldName)) {
-      logger.info(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema, rejecting aggregate pushdown")
+      logger.info(
+        s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema, rejecting aggregate pushdown"
+      )
       return false
     }
 
@@ -544,21 +556,18 @@ class Tantivy4SparkScanBuilder(
     }
   }
 
-  /**
-   * Check if a DataType is numeric.
-   */
+  /** Check if a DataType is numeric. */
   private def isNumericType(dataType: org.apache.spark.sql.types.DataType): Boolean = {
     import org.apache.spark.sql.types._
     dataType match {
       case _: IntegerType | _: LongType | _: FloatType | _: DoubleType | _: DecimalType => true
-      case _ => false
+      case _                                                                            => false
     }
   }
 
-
   /**
-   * Check if current filters are compatible with aggregate pushdown.
-   * This validates fast field configuration and throws exceptions for validation failures.
+   * Check if current filters are compatible with aggregate pushdown. This validates fast field configuration and throws
+   * exceptions for validation failures.
    */
   private def areFiltersCompatibleWithAggregation(): Boolean = {
     // If there are no filters, aggregation is compatible
@@ -570,19 +579,19 @@ class Tantivy4SparkScanBuilder(
     _pushedFilters.foreach { filter =>
       val isFilterTypeSupported = filter match {
         // Supported filter types
-        case _: org.apache.spark.sql.sources.EqualTo => true
-        case _: org.apache.spark.sql.sources.GreaterThan => true
-        case _: org.apache.spark.sql.sources.LessThan => true
+        case _: org.apache.spark.sql.sources.EqualTo            => true
+        case _: org.apache.spark.sql.sources.GreaterThan        => true
+        case _: org.apache.spark.sql.sources.LessThan           => true
         case _: org.apache.spark.sql.sources.GreaterThanOrEqual => true
-        case _: org.apache.spark.sql.sources.LessThanOrEqual => true
-        case _: org.apache.spark.sql.sources.In => true
-        case _: org.apache.spark.sql.sources.IsNull => true
-        case _: org.apache.spark.sql.sources.IsNotNull => true
-        case _: org.apache.spark.sql.sources.And => true
-        case _: org.apache.spark.sql.sources.Or => true
-        case _: org.apache.spark.sql.sources.StringContains => true
-        case _: org.apache.spark.sql.sources.StringStartsWith => true
-        case _: org.apache.spark.sql.sources.StringEndsWith => true
+        case _: org.apache.spark.sql.sources.LessThanOrEqual    => true
+        case _: org.apache.spark.sql.sources.In                 => true
+        case _: org.apache.spark.sql.sources.IsNull             => true
+        case _: org.apache.spark.sql.sources.IsNotNull          => true
+        case _: org.apache.spark.sql.sources.And                => true
+        case _: org.apache.spark.sql.sources.Or                 => true
+        case _: org.apache.spark.sql.sources.StringContains     => true
+        case _: org.apache.spark.sql.sources.StringStartsWith   => true
+        case _: org.apache.spark.sql.sources.StringEndsWith     => true
 
         // Unsupported filter types that would break aggregation accuracy
         case filter if filter.getClass.getSimpleName.contains("RLike") =>
@@ -606,10 +615,8 @@ class Tantivy4SparkScanBuilder(
     true
   }
 
-  /**
-   * Get partition columns from the transaction log metadata.
-   */
-  private def getPartitionColumns(): Set[String] = {
+  /** Get partition columns from the transaction log metadata. */
+  private def getPartitionColumns(): Set[String] =
     try {
       val metadata = transactionLog.getMetadata()
       metadata.partitionColumns.toSet
@@ -618,13 +625,12 @@ class Tantivy4SparkScanBuilder(
         logger.warn(s"🔍 PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
         Set.empty
     }
-  }
 
   /**
-   * Get fast fields from the actual table schema/docMappingJson, not from configuration.
-   * This reads the transaction log to determine which fields are actually configured as fast.
+   * Get fast fields from the actual table schema/docMappingJson, not from configuration. This reads the transaction log
+   * to determine which fields are actually configured as fast.
    */
-  private def getActualFastFieldsFromSchema(): Set[String] = {
+  private def getActualFastFieldsFromSchema(): Set[String] =
     try {
       logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
 
@@ -643,7 +649,7 @@ class Tantivy4SparkScanBuilder(
         import scala.jdk.CollectionConverters._
 
         val mappingJson = existingDocMapping.get
-        val docMapping = JsonUtil.mapper.readTree(mappingJson)
+        val docMapping  = JsonUtil.mapper.readTree(mappingJson)
 
         if (docMapping.isArray) {
           val fastFields = docMapping.asScala.flatMap { fieldNode =>
@@ -669,7 +675,8 @@ class Tantivy4SparkScanBuilder(
       } else {
         logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
         // Fall back to configuration-based validation for new tables
-        val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
+        val fastFieldsStr = config
+          .get("spark.indextables.indexing.fastfields")
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -681,7 +688,8 @@ class Tantivy4SparkScanBuilder(
       case e: Exception =>
         logger.warn(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
         // Fall back to configuration-based validation
-        val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
+        val fastFieldsStr = config
+          .get("spark.indextables.indexing.fastfields")
           .getOrElse("")
         if (fastFieldsStr.nonEmpty) {
           fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
@@ -689,7 +697,6 @@ class Tantivy4SparkScanBuilder(
           Set.empty[String]
         }
     }
-  }
 
   private def validateFilterFieldsAreFast(filter: org.apache.spark.sql.sources.Filter): Boolean = {
     // Get actual fast fields from the schema/docMappingJson
@@ -721,7 +728,7 @@ class Tantivy4SparkScanBuilder(
     println(s"🔍 FILTER VALIDATION DEBUG: missingFastFields=$missingFastFields")
 
     if (missingFastFields.nonEmpty) {
-      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val columnList        = missingFastFields.mkString("'", "', '", "'")
       val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
 
       logger.info(s"🔍 FILTER FAST FIELD VALIDATION: Missing fast fields for filter: $columnList")
@@ -746,22 +753,20 @@ class Tantivy4SparkScanBuilder(
     true
   }
 
-  /**
-   * Extract field names from a Spark Filter.
-   */
-  private def extractFieldNamesFromFilter(filter: org.apache.spark.sql.sources.Filter): Set[String] = {
+  /** Extract field names from a Spark Filter. */
+  private def extractFieldNamesFromFilter(filter: org.apache.spark.sql.sources.Filter): Set[String] =
     filter match {
-      case f: org.apache.spark.sql.sources.EqualTo => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.GreaterThan => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.LessThan => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.EqualTo            => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.GreaterThan        => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.LessThan           => Set(f.attribute)
       case f: org.apache.spark.sql.sources.GreaterThanOrEqual => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.LessThanOrEqual => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.In => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.IsNull => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.IsNotNull => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.StringContains => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.StringStartsWith => Set(f.attribute)
-      case f: org.apache.spark.sql.sources.StringEndsWith => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.LessThanOrEqual    => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.In                 => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.IsNull             => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.IsNotNull          => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringContains     => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringStartsWith   => Set(f.attribute)
+      case f: org.apache.spark.sql.sources.StringEndsWith     => Set(f.attribute)
       case f: org.apache.spark.sql.sources.And =>
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
       case f: org.apache.spark.sql.sources.Or =>
@@ -770,11 +775,8 @@ class Tantivy4SparkScanBuilder(
         logger.warn(s"🔍 FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
         Set.empty[String]
     }
-  }
 
-  /**
-   * Check if GROUP BY columns are supported for pushdown.
-   */
+  /** Check if GROUP BY columns are supported for pushdown. */
   private def areGroupByColumnsSupported(groupByColumns: Array[String]): Boolean = {
     println(s"🔍 GROUP BY VALIDATION: Checking ${groupByColumns.length} columns: ${groupByColumns.mkString(", ")}")
     println(s"🔍 GROUP BY VALIDATION: Schema fields: ${schema.fields.map(_.name).mkString(", ")}")
@@ -797,7 +799,7 @@ class Tantivy4SparkScanBuilder(
           import org.apache.spark.sql.types._
           // ALL GROUP BY fields must be fast fields for tantivy4java TermsAggregation
           val fastFields = getActualFastFieldsFromSchema()
-          val isFast = fastFields.contains(columnName)
+          val isFast     = fastFields.contains(columnName)
 
           field.dataType match {
             case StringType =>
@@ -806,8 +808,12 @@ class Tantivy4SparkScanBuilder(
                 println(s"🔍 GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
                 true
               } else {
-                logger.info(s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY")
-                println(s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY")
+                logger.info(
+                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                )
+                println(
+                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                )
                 false
               }
             case IntegerType | LongType =>
@@ -816,7 +822,9 @@ class Tantivy4SparkScanBuilder(
                 println(s"🔍 GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
                 true
               } else {
-                logger.info(s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY")
+                logger.info(
+                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                )
                 println(s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY")
                 false
               }
@@ -826,7 +834,9 @@ class Tantivy4SparkScanBuilder(
                 println(s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY")
                 true
               } else {
-                logger.info(s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY")
+                logger.info(
+                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                )
                 println(s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY")
                 false
               }
@@ -840,9 +850,7 @@ class Tantivy4SparkScanBuilder(
     }
   }
 
-  /**
-   * Check if the current aggregation is compatible with GROUP BY.
-   */
+  /** Check if the current aggregation is compatible with GROUP BY. */
   private def isAggregationCompatibleWithGroupBy(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate._
     println(s"🔍 GROUP BY COMPATIBILITY: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
@@ -858,7 +866,7 @@ class Tantivy4SparkScanBuilder(
           true
         case sum: Sum =>
           val fieldName = getFieldName(sum.column)
-          val isFast = isNumericFastField(fieldName)
+          val isFast    = isNumericFastField(fieldName)
           if (isFast) {
             println(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) is compatible with GROUP BY (fast field)")
             true
@@ -869,7 +877,7 @@ class Tantivy4SparkScanBuilder(
           }
         case avg: Avg =>
           val fieldName = getFieldName(avg.column)
-          val isFast = isNumericFastField(fieldName)
+          val isFast    = isNumericFastField(fieldName)
           if (isFast) {
             println(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) is compatible with GROUP BY (fast field)")
             true
@@ -880,7 +888,7 @@ class Tantivy4SparkScanBuilder(
           }
         case min: Min =>
           val fieldName = getFieldName(min.column)
-          val isFast = isNumericFastField(fieldName)
+          val isFast    = isNumericFastField(fieldName)
           if (isFast) {
             println(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) is compatible with GROUP BY (fast field)")
             true
@@ -891,7 +899,7 @@ class Tantivy4SparkScanBuilder(
           }
         case max: Max =>
           val fieldName = getFieldName(max.column)
-          val isFast = isNumericFastField(fieldName)
+          val isFast    = isNumericFastField(fieldName)
           if (isFast) {
             println(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) is compatible with GROUP BY (fast field)")
             true
@@ -901,8 +909,12 @@ class Tantivy4SparkScanBuilder(
             false
           }
         case other =>
-          println(s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}")
-          logger.info(s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}")
+          println(
+            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+          )
+          logger.info(
+            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+          )
           false
       }
       println(s"🔍 GROUP BY COMPATIBILITY: Expression $expr compatible: $isCompatible")
@@ -912,49 +924,42 @@ class Tantivy4SparkScanBuilder(
     result
   }
 
-  /**
-   * Check if a filter is a partition filter.
-   */
+  /** Check if a filter is a partition filter. */
   private def isPartitionFilter(filter: org.apache.spark.sql.sources.Filter): Boolean = {
-    val partitionColumns = getPartitionColumns()
+    val partitionColumns  = getPartitionColumns()
     val referencedColumns = getFilterReferencedColumns(filter)
     referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)
   }
 
-  /**
-   * Get columns referenced by a filter.
-   */
+  /** Get columns referenced by a filter. */
   private def getFilterReferencedColumns(filter: org.apache.spark.sql.sources.Filter): Set[String] = {
     import org.apache.spark.sql.sources._
     filter match {
-      case EqualTo(attribute, _) => Set(attribute)
-      case EqualNullSafe(attribute, _) => Set(attribute)
-      case GreaterThan(attribute, _) => Set(attribute)
+      case EqualTo(attribute, _)            => Set(attribute)
+      case EqualNullSafe(attribute, _)      => Set(attribute)
+      case GreaterThan(attribute, _)        => Set(attribute)
       case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _) => Set(attribute)
-      case LessThanOrEqual(attribute, _) => Set(attribute)
-      case In(attribute, _) => Set(attribute)
-      case IsNull(attribute) => Set(attribute)
-      case IsNotNull(attribute) => Set(attribute)
-      case StringStartsWith(attribute, _) => Set(attribute)
-      case StringEndsWith(attribute, _) => Set(attribute)
-      case StringContains(attribute, _) => Set(attribute)
-      case And(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Or(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Not(child) => getFilterReferencedColumns(child)
-      case _ => Set.empty[String]
+      case LessThan(attribute, _)           => Set(attribute)
+      case LessThanOrEqual(attribute, _)    => Set(attribute)
+      case In(attribute, _)                 => Set(attribute)
+      case IsNull(attribute)                => Set(attribute)
+      case IsNotNull(attribute)             => Set(attribute)
+      case StringStartsWith(attribute, _)   => Set(attribute)
+      case StringEndsWith(attribute, _)     => Set(attribute)
+      case StringContains(attribute, _)     => Set(attribute)
+      case And(left, right)                 => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Or(left, right)                  => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Not(child)                       => getFilterReferencedColumns(child)
+      case _                                => Set.empty[String]
     }
   }
 
-  /**
-   * Validate GROUP BY columns and throw a descriptive exception if validation fails.
-   */
+  /** Validate GROUP BY columns and throw a descriptive exception if validation fails. */
   private def validateGroupByColumnsOrThrow(groupByColumns: Array[String]): Unit = {
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
     // Read actual fast fields from transaction log (docMappingJson), not from configuration
     val fastFields = getActualFastFieldsFromSchema()
-
 
     groupByColumns.foreach { columnName =>
       // Check if the column exists in the schema
@@ -973,7 +978,7 @@ class Tantivy4SparkScanBuilder(
     }
 
     if (missingFastFields.nonEmpty) {
-      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val columnList        = missingFastFields.mkString("'", "', '", "'")
       val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
 
       throw new IllegalArgumentException(
@@ -982,23 +987,24 @@ class Tantivy4SparkScanBuilder(
            |Missing fast fields for GROUP BY columns: $columnList
            |
            |To fix this issue, configure these columns as fast fields:
-           |  .option("spark.indexfiles.indexing.fastfields", "${ (fastFields ++ missingFastFields).toSeq.distinct.mkString(",") }")
+           |  .option("spark.indexfiles.indexing.fastfields", "${(fastFields ++ missingFastFields).toSeq.distinct
+            .mkString(",")}")
            |
            |Current fast fields: $currentFastFields
-           |Required fast fields: ${(fastFields ++ missingFastFields).toSeq.distinct.mkString("'", "', '", "'")}""".stripMargin
+           |Required fast fields: ${(fastFields ++ missingFastFields).toSeq.distinct
+            .mkString("'", "', '", "'")}""".stripMargin
       )
     }
   }
 
-  /**
-   * Validate aggregation compatibility with GROUP BY and throw a descriptive exception if validation fails.
-   */
+  /** Validate aggregation compatibility with GROUP BY and throw a descriptive exception if validation fails. */
   private def validateAggregationCompatibilityOrThrow(aggregation: Aggregation): Unit = {
     import org.apache.spark.sql.connector.expressions.aggregate._
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
     // Use broadcast config instead of options for merged configuration
-    val fastFieldsStr = config.get("spark.indextables.indexing.fastfields")
+    val fastFieldsStr = config
+      .get("spark.indextables.indexing.fastfields")
       .getOrElse("")
 
     val fastFields = if (fastFieldsStr.nonEmpty) {
@@ -1010,7 +1016,7 @@ class Tantivy4SparkScanBuilder(
     aggregation.aggregateExpressions.foreach { expr =>
       expr match {
         case _: Count | _: CountStar =>
-          // COUNT and COUNT(*) don't require specific fast fields
+        // COUNT and COUNT(*) don't require specific fast fields
         case sum: Sum =>
           val fieldName = getFieldName(sum.column)
           if (!isNumericFastField(fieldName)) {
@@ -1039,7 +1045,7 @@ class Tantivy4SparkScanBuilder(
     }
 
     if (missingFastFields.nonEmpty) {
-      val columnList = missingFastFields.mkString("'", "', '", "'")
+      val columnList        = missingFastFields.mkString("'", "', '", "'")
       val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
       val allRequiredFields = (fastFields ++ missingFastFields).toSeq.distinct
 
@@ -1059,9 +1065,8 @@ class Tantivy4SparkScanBuilder(
 }
 
 /**
- * Companion object for ScanBuilder to store IndexQuery information.
- * This provides a clean mechanism for V2IndexQueryExpressionRule to pass
- * IndexQuery expressions directly to the ScanBuilder without a global registry.
+ * Companion object for ScanBuilder to store IndexQuery information. This provides a clean mechanism for
+ * V2IndexQueryExpressionRule to pass IndexQuery expressions directly to the ScanBuilder without a global registry.
  */
 object Tantivy4SparkScanBuilder {
   import scala.collection.concurrent
@@ -1070,8 +1075,8 @@ object Tantivy4SparkScanBuilder {
   private val instanceIndexQueries = concurrent.TrieMap[String, scala.collection.mutable.Buffer[Any]]()
 
   /**
-   * Store IndexQuery expressions for a specific DataSource instance.
-   * The key should be unique per query execution to avoid conflicts.
+   * Store IndexQuery expressions for a specific DataSource instance. The key should be unique per query execution to
+   * avoid conflicts.
    */
   def storeIndexQueries(instanceKey: String, indexQueries: Seq[Any]): Unit = {
     val buffer = instanceIndexQueries.getOrElseUpdate(instanceKey, scala.collection.mutable.Buffer.empty)
@@ -1080,26 +1085,20 @@ object Tantivy4SparkScanBuilder {
     println(s"🔍 ScanBuilder: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey")
   }
 
-  /**
-   * Retrieve IndexQuery expressions for a specific DataSource instance.
-   */
+  /** Retrieve IndexQuery expressions for a specific DataSource instance. */
   def getIndexQueries(instanceKey: String): Seq[Any] = {
     val queries = instanceIndexQueries.getOrElse(instanceKey, scala.collection.mutable.Buffer.empty).toSeq
     println(s"🔍 ScanBuilder: Retrieved ${queries.length} IndexQuery expressions for instance $instanceKey")
     queries
   }
 
-  /**
-   * Clear IndexQuery expressions for a specific DataSource instance.
-   */
+  /** Clear IndexQuery expressions for a specific DataSource instance. */
   def clearIndexQueries(instanceKey: String): Unit = {
     instanceIndexQueries.remove(instanceKey)
     println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for instance $instanceKey")
   }
 
-  /**
-   * Generate a unique instance key for a DataSource relation.
-   */
+  /** Generate a unique instance key for a DataSource relation. */
   def generateInstanceKey(tablePath: String, executionId: Option[String]): String = {
     // Use a more deterministic key based only on table path to avoid timing issues
     val cleanPath = tablePath.replace('/', '_').replace('\\', '_')

@@ -80,9 +80,7 @@ class PartitionVsDataDateTest extends TestBase with Matchers {
       // Log all data for debugging
       println("=== All data without filters ===")
       val allData = df.collect()
-      allData.foreach { row =>
-        println(s"Row: ${row}")
-      }
+      allData.foreach(row => println(s"Row: $row"))
 
       // This should work if our fix is correct
       assert(partitionCount == 2, "Should find 2 records with partition_date = 2023-02-10")

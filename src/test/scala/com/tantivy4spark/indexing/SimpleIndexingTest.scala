@@ -24,15 +24,19 @@ class SimpleIndexingTest extends TestBase with Matchers {
 
   test("basic write and read should work") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "content one")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "content one")
+          )
+        )
+        .toDF("id", "content")
 
       // Write data using V2 provider
       data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read back using V2 provider
-      val df = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val df      = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = df.collect()
 
       results should have length 1

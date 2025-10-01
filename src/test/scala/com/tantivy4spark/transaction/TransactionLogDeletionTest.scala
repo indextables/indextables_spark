@@ -28,18 +28,20 @@ class TransactionLogDeletionTest extends TestBase {
 
   test("demonstrate actual file deletion behavior") {
     withTempPath { tempPath =>
-      val tempDir = new File(tempPath)
+      val tempDir   = new File(tempPath)
       val tablePath = new Path(tempDir.getCanonicalPath, "test_deletion_demo")
-      val schema = StructType(Seq(
-        StructField("id", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false)
+        )
+      )
 
       // Use very short retention to force deletion in tests
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
-          "spark.indextables.checkpoint.interval" -> "3", // Checkpoint every 3 transactions
-          "spark.indextables.logRetention.duration" -> "50", // 50ms retention (very short)
+          "spark.indextables.checkpoint.enabled"        -> "true",
+          "spark.indextables.checkpoint.interval"       -> "3",  // Checkpoint every 3 transactions
+          "spark.indextables.logRetention.duration"     -> "50", // 50ms retention (very short)
           "spark.indextables.transaction.cache.enabled" -> "false"
         ).asJava
       )
@@ -63,8 +65,8 @@ class TransactionLogDeletionTest extends TestBase {
         }
 
         // Check files before cleanup
-        val checkpointDir = new Path(tablePath, "_transaction_log")
-        val fs = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
+        val checkpointDir      = new Path(tablePath, "_transaction_log")
+        val fs                 = checkpointDir.getFileSystem(spark.sparkContext.hadoopConfiguration)
         val filesBeforeCleanup = fs.listStatus(checkpointDir).map(_.getPath.getName).sorted
 
         println("=== FILES BEFORE CLEANUP ===")
@@ -111,15 +113,16 @@ class TransactionLogDeletionTest extends TestBase {
 
         for (i <- 1 to 9) {
           val expectedFile = s"deletion_demo_file_$i.split"
-          assert(finalFiles.exists(_.path == expectedFile),
-            s"Missing file $expectedFile after deletion - data consistency failure!")
+          assert(
+            finalFiles.exists(_.path == expectedFile),
+            s"Missing file $expectedFile after deletion - data consistency failure!"
+          )
         }
 
         println("✅ File deletion test passed - data remains consistent despite cleanup!")
 
-      } finally {
+      } finally
         log.close()
-      }
     }
   }
 }

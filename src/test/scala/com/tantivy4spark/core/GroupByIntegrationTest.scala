@@ -25,13 +25,14 @@ import java.nio.file.Files
 import scala.util.Random
 
 /**
- * Integration test for GROUP BY functionality with actual Spark DataFrames.
- * This test demonstrates what we need to implement for complete GROUP BY support.
+ * Integration test for GROUP BY functionality with actual Spark DataFrames. This test demonstrates what we need to
+ * implement for complete GROUP BY support.
  */
 class GroupByIntegrationTest extends AnyFunSuite {
 
   test("GROUP BY with COUNT aggregation - basic test") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("GroupByIntegrationTest")
       .master("local[*]")
       .getOrCreate()
@@ -48,12 +49,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
         ("doc5", "category_c", "content about search", 50)
       ).toDF("id", "category", "content", "score")
 
-      val tempDir = Files.createTempDirectory("groupby-test").toFile
+      val tempDir   = Files.createTempDirectory("groupby-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with string field for category (should support GROUP BY)
-      testData.write.format("tantivy4spark")
-        .option("spark.indextables.indexing.typemap.category", "string")  // String fields support GROUP BY
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.indextables.indexing.typemap.category", "string") // String fields support GROUP BY
         .option("spark.indextables.indexing.fastfields", "category,score") // Both GROUP BY column and aggregation column must be fast
         .mode("overwrite")
         .save(tablePath)
@@ -75,9 +77,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val results = groupByResult.collect()
 
       println("🔍 GROUP BY TEST: Results:")
-      results.foreach { row =>
-        println(s"  ${row.getString(0)}: ${row.getLong(1)}")
-      }
+      results.foreach(row => println(s"  ${row.getString(0)}: ${row.getLong(1)}"))
 
       // Verify expected results
       val resultMap = results.map(row => row.getString(0) -> row.getLong(1)).toMap
@@ -92,13 +92,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("GROUP BY with SUM aggregation") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("GroupBySumTest")
       .master("local[*]")
       .getOrCreate()
@@ -115,13 +115,14 @@ class GroupByIntegrationTest extends AnyFunSuite {
         ("doc5", "team_c", 300)
       ).toDF("id", "team", "score")
 
-      val tempDir = Files.createTempDirectory("groupby-sum-test").toFile
+      val tempDir   = Files.createTempDirectory("groupby-sum-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data
-      testData.write.format("tantivy4spark")
-        .option("spark.indextables.indexing.typemap.team", "string")     // String field for GROUP BY
-        .option("spark.indextables.indexing.fastfields", "team,score")   // Both GROUP BY column and SUM column must be fast
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.indextables.indexing.typemap.team", "string") // String field for GROUP BY
+        .option("spark.indextables.indexing.fastfields", "team,score") // Both GROUP BY column and SUM column must be fast
         .mode("overwrite")
         .save(tablePath)
 
@@ -136,7 +137,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       groupBySumResult.explain(true)
 
       // Collect and verify results
-      val results = groupBySumResult.collect()
+      val results   = groupBySumResult.collect()
       val resultMap = results.map(row => row.getString(0) -> row.getLong(1)).toMap
 
       // Expected: team_a: 300, team_b: 400, team_c: 300
@@ -149,13 +150,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("Multi-dimensional GROUP BY with COUNT aggregation") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("MultiDimensionalGroupByTest")
       .master("local[*]")
       .getOrCreate()
@@ -173,11 +174,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         ("doc6", "north", "books", "q2", 75)
       ).toDF("id", "region", "category", "quarter", "sales")
 
-      val tempDir = Files.createTempDirectory("multi-groupby-test").toFile
+      val tempDir   = Files.createTempDirectory("multi-groupby-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with all GROUP BY columns as fast fields
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.region", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.typemap.quarter", "string")
@@ -207,9 +209,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // north/electronics/q1: 2, north/electronics/q2: 1, south/electronics/q1: 1, south/books/q1: 1, north/books/q2: 1
       assert(results.length == 5, s"Expected 5 groups, got ${results.length}")
 
-      val resultMap = results.map(row =>
-        (row.getString(0), row.getString(1), row.getString(2)) -> row.getLong(3)
-      ).toMap
+      val resultMap = results.map(row => (row.getString(0), row.getString(1), row.getString(2)) -> row.getLong(3)).toMap
 
       assert(resultMap(("north", "electronics", "q1")) == 2, s"north/electronics/q1 should have 2 docs")
       assert(resultMap(("north", "electronics", "q2")) == 1, s"north/electronics/q2 should have 1 doc")
@@ -222,13 +222,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("Multi-dimensional GROUP BY with SUM aggregation") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("MultiDimensionalGroupBySumTest")
       .master("local[*]")
       .getOrCreate()
@@ -245,11 +245,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         ("doc5", "team_b", "project_y", 250)
       ).toDF("id", "team", "project", "effort")
 
-      val tempDir = Files.createTempDirectory("multi-groupby-sum-test").toFile
+      val tempDir   = Files.createTempDirectory("multi-groupby-sum-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.team", "string")
         .option("spark.indextables.indexing.typemap.project", "string")
         .option("spark.indextables.indexing.fastfields", "team,project,effort")
@@ -267,7 +268,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       multiGroupBySumResult.explain(true)
 
       // Collect and verify results
-      val results = multiGroupBySumResult.collect()
+      val results   = multiGroupBySumResult.collect()
       val resultMap = results.map(row => (row.getString(0), row.getString(1)) -> row.getLong(2)).toMap
 
       // Expected: team_a/project_x: 300, team_a/project_y: 150, team_b/project_x: 300, team_b/project_y: 250
@@ -281,16 +282,16 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("GROUP BY pushdown detection - verify pushGroupBy() is called") {
-    val spark = SparkSession.builder()
+    val spark = SparkSession
+      .builder()
       .appName("GroupByPushdownDetectionTest")
       .master("local[*]")
-      .config("spark.sql.adaptive.enabled", "false")  // Disable AQE for predictable plans
+      .config("spark.sql.adaptive.enabled", "false") // Disable AQE for predictable plans
       .getOrCreate()
 
     try {
@@ -302,12 +303,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
         ("doc3", "status_inactive", 1)
       ).toDF("id", "status", "value")
 
-      val tempDir = Files.createTempDirectory("groupby-pushdown-test").toFile
+      val tempDir   = Files.createTempDirectory("groupby-pushdown-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
-      testData.write.format("tantivy4spark")
+      testData.write
+        .format("tantivy4spark")
         .option("spark.indextables.indexing.typemap.status", "string")
-        .option("spark.indextables.indexing.fastfields", "status,value")  // Add both status and value as fast fields
+        .option("spark.indextables.indexing.fastfields", "status,value") // Add both status and value as fast fields
         .mode("overwrite")
         .save(tablePath)
 
@@ -323,7 +325,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Check if our GROUP BY scan classes appear in the plan
       val hasTantivyGroupByScan = physicalPlan.contains("Tantivy4SparkGroupByAggregateScan") ||
-                                  physicalPlan.contains("GroupByAggregateScan")
+        physicalPlan.contains("GroupByAggregateScan")
 
       if (hasTantivyGroupByScan) {
         println("✅ GROUP BY pushdown detected in physical plan!")
@@ -335,21 +337,16 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Execute the query to see actual behavior
       val results = query.collect()
       println("🔍 Results from GROUP BY query:")
-      results.foreach { row =>
-        println(s"  ${row.getString(0)}: ${row.getLong(1)}")
-      }
+      results.foreach(row => println(s"  ${row.getString(0)}: ${row.getLong(1)}"))
 
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
-  /**
-   * Recursively delete a directory and all its contents.
-   */
+  /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
       file.listFiles().foreach(deleteRecursively)

@@ -25,8 +25,8 @@ import scala.concurrent.duration._
 /**
  * S3MultipartUploader tests using real AWS S3.
  *
- * IMPORTANT: The comprehensive multipart upload tests have been moved to RealS3MultipartUploaderTest
- * which tests against actual AWS S3 infrastructure for realistic behavior verification.
+ * IMPORTANT: The comprehensive multipart upload tests have been moved to RealS3MultipartUploaderTest which tests
+ * against actual AWS S3 infrastructure for realistic behavior verification.
  *
  * This class maintains configuration and utility tests that don't require actual S3 connectivity.
  */
@@ -80,8 +80,8 @@ class S3MultipartUploaderTest extends AnyFunSuite with TestBase {
   }
 
   test("multipart threshold logic should work correctly") {
-    val smallSize = 50L * 1024 * 1024  // 50MB
-    val largeSize = 150L * 1024 * 1024 // 150MB
+    val smallSize        = 50L * 1024 * 1024  // 50MB
+    val largeSize        = 150L * 1024 * 1024 // 150MB
     val defaultThreshold = 100L * 1024 * 1024 // 100MB
 
     assert(smallSize < defaultThreshold, "50MB should be below default threshold")
@@ -105,13 +105,13 @@ class S3MultipartUploaderTest extends AnyFunSuite with TestBase {
   }
 
   test("part size calculation should be accurate") {
-    val config = S3MultipartConfig(partSize = 32L * 1024 * 1024) // 32MB parts
-    val fileSize = 80L * 1024 * 1024 // 80MB file
+    val config   = S3MultipartConfig(partSize = 32L * 1024 * 1024) // 32MB parts
+    val fileSize = 80L * 1024 * 1024                               // 80MB file
 
     val expectedParts = math.ceil(fileSize.toDouble / config.partSize.toDouble).toInt
     assert(expectedParts == 3, s"80MB file with 32MB parts should require 3 parts, got: $expectedParts")
 
-    val largeFileSize = 300L * 1024 * 1024 // 300MB file
+    val largeFileSize      = 300L * 1024 * 1024 // 300MB file
     val largeExpectedParts = math.ceil(largeFileSize.toDouble / config.partSize.toDouble).toInt
     assert(largeExpectedParts == 10, s"300MB file with 32MB parts should require 10 parts, got: $largeExpectedParts")
 

@@ -19,9 +19,7 @@ package com.tantivy4spark.core
 
 import org.scalatest.funsuite.AnyFunSuite
 
-/**
- * Test to discover the correct methods in SupportsPushDownAggregates interface.
- */
+/** Test to discover the correct methods in SupportsPushDownAggregates interface. */
 class SupportsPushDownAggregatesTest extends AnyFunSuite {
 
   test("discover SupportsPushDownAggregates methods") {
@@ -33,7 +31,7 @@ class SupportsPushDownAggregatesTest extends AnyFunSuite {
       println(s"SupportsPushDownAggregates methods:")
       methods.foreach { method =>
         val paramTypes = method.getParameterTypes.map(_.getSimpleName).mkString(", ")
-        println(s"  - ${method.getName}(${paramTypes}): ${method.getReturnType.getSimpleName}")
+        println(s"  - ${method.getName}($paramTypes): ${method.getReturnType.getSimpleName}")
       }
     } catch {
       case e: Exception => println(s"❌ Error loading SupportsPushDownAggregates: ${e.getMessage}")

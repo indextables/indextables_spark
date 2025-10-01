@@ -165,7 +165,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       assert(allFiles.length == 2)
 
       val optimizedFile = allFiles.find(_.path == "optimized.split").get
-      val standardFile = allFiles.find(_.path == "standard.split").get
+      val standardFile  = allFiles.find(_.path == "standard.split").get
 
       // Verify optimized file has footer offset metadata
       assert(optimizedFile.footerStartOffset.contains(48000L))
@@ -205,33 +205,36 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
     // Test the reconstruction logic (simulating what happens in partition reader)
     if (addAction.hasFooterOffsets && addAction.footerStartOffset.isDefined) {
-      val reconstructedMetadata = try {
-        // This simulates the SplitMetadata reconstruction in Tantivy4SparkPartitions.scala
-        new com.tantivy4java.QuickwitSplit.SplitMetadata(
-          addAction.path,                               // splitId
-          "tantivy4spark-index", // indexUid (NEW - required)
-          0L, // partitionId (NEW - required)
-          "tantivy4spark-source", // sourceId (NEW - required)
-          "tantivy4spark-node", // nodeId (NEW - required)
-          addAction.numRecords.getOrElse(0L),          // numDocs
-          addAction.size,                              // uncompressedSizeBytes
-          null, null,                                  // timeRange
-          System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
-          "Mature", // maturity (NEW - required)
-          java.util.Collections.emptySet(),           // tags
-          // Footer offset optimization fields with type conversion
-          addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
-          addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
-          0L, 0,                                       // deleteOpstamp, numMergeOps
-          "doc-mapping-uid", // docMappingUid (NEW - required)
-          addAction.docMappingJson.getOrElse(""),      // docMappingJson (MOVED - for performance)
-          java.util.Collections.emptyList[String]()    // skippedSplits
-        )
-      } catch {
-        case ex: Exception =>
-          println(s"⚠️  Failed to reconstruct metadata: ${ex.getMessage}")
-          null
-      }
+      val reconstructedMetadata =
+        try
+          // This simulates the SplitMetadata reconstruction in Tantivy4SparkPartitions.scala
+          new com.tantivy4java.QuickwitSplit.SplitMetadata(
+            addAction.path,                     // splitId
+            "tantivy4spark-index",              // indexUid (NEW - required)
+            0L,                                 // partitionId (NEW - required)
+            "tantivy4spark-source",             // sourceId (NEW - required)
+            "tantivy4spark-node",               // nodeId (NEW - required)
+            addAction.numRecords.getOrElse(0L), // numDocs
+            addAction.size,                     // uncompressedSizeBytes
+            null,
+            null,                              // timeRange
+            System.currentTimeMillis() / 1000, // createTimestamp (NEW - required)
+            "Mature",                          // maturity (NEW - required)
+            java.util.Collections.emptySet(),  // tags
+            // Footer offset optimization fields with type conversion
+            addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
+            addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
+            0L,
+            0,                                        // deleteOpstamp, numMergeOps
+            "doc-mapping-uid",                        // docMappingUid (NEW - required)
+            addAction.docMappingJson.getOrElse(""),   // docMappingJson (MOVED - for performance)
+            java.util.Collections.emptyList[String]() // skippedSplits
+          )
+        catch {
+          case ex: Exception =>
+            println(s"⚠️  Failed to reconstruct metadata: ${ex.getMessage}")
+            null
+        }
 
       if (reconstructedMetadata != null) {
         // Verify the reconstructed metadata
@@ -253,10 +256,12 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     println("🧪 [TEST] Testing end-to-end footer offset optimization flow")
 
     withTempPath { tempDir =>
-      val schema = StructType(Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Array(
+          StructField("id", IntegerType, nullable = false),
+          StructField("content", StringType, nullable = false)
+        )
+      )
 
       val data = Seq(
         Row(1, "Footer optimization test document 1"),
@@ -273,16 +278,16 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       // Read transaction log to check for footer offset metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
-      val allFiles = transactionLog.listFiles()
+      val allFiles       = transactionLog.listFiles()
 
       println(s"🧪 [TEST] Found ${allFiles.length} files in transaction log")
-      
+
       allFiles.foreach { file =>
         println(s"📄 File: ${file.path}")
         println(s"   Size: ${file.size}")
         println(s"   Records: ${file.numRecords.getOrElse("unknown")}")
         println(s"   Has footer offsets: ${file.hasFooterOffsets}")
-        
+
         if (file.hasFooterOffsets) {
           println(s"   Footer start: ${file.footerStartOffset.getOrElse("none")}")
           println(s"   Footer end: ${file.footerEndOffset.getOrElse("none")}")
@@ -295,9 +300,9 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       }
 
       // Verify data can be read back correctly
-      val readDf = spark.read.format("tantivy4spark").load(tablePath)
+      val readDf  = spark.read.format("tantivy4spark").load(tablePath)
       val results = readDf.collect()
-      
+
       assert(results.length == 3)
       assert(results.map(_.getAs[String]("content")).contains("Footer optimization test document 1"))
       println("✅ Data read back correctly")
@@ -317,10 +322,12 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     println("🧪 [TEST] Testing end-to-end footer offset optimization flow with V2 DataSource")
 
     withTempPath { tempDir =>
-      val schema = StructType(Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Array(
+          StructField("id", IntegerType, nullable = false),
+          StructField("content", StringType, nullable = false)
+        )
+      )
 
       val data = Seq(
         Row(1, "V2 Footer optimization test document 1"),
@@ -337,16 +344,16 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       // Read transaction log to check for footer offset metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
-      val allFiles = transactionLog.listFiles()
+      val allFiles       = transactionLog.listFiles()
 
       println(s"🧪 [TEST] V2 DataSource found ${allFiles.length} files in transaction log")
-      
+
       allFiles.foreach { file =>
         println(s"📄 V2 File: ${file.path}")
         println(s"   Size: ${file.size}")
         println(s"   Records: ${file.numRecords.getOrElse("unknown")}")
         println(s"   Has footer offsets: ${file.hasFooterOffsets}")
-        
+
         if (file.hasFooterOffsets) {
           println(s"   Footer start: ${file.footerStartOffset.getOrElse("none")}")
           println(s"   Footer end: ${file.footerEndOffset.getOrElse("none")}")
@@ -359,9 +366,9 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       }
 
       // Verify data can be read back correctly using V2 DataSource
-      val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf  = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
-      
+
       assert(results.length == 3)
       assert(results.map(_.getAs[String]("content")).contains("V2 Footer optimization test document 1"))
       println("✅ V2 Data read back correctly")
@@ -381,11 +388,13 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     println("🧪 [TEST] Testing V2 DataSource IndexQuery with footer offset optimization")
 
     withTempPath { tempDir =>
-      val schema = StructType(Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("title", StringType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Array(
+          StructField("id", IntegerType, nullable = false),
+          StructField("title", StringType, nullable = false),
+          StructField("content", StringType, nullable = false)
+        )
+      )
 
       val data = Seq(
         Row(1, "Machine Learning", "Advanced machine learning algorithms and neural networks"),
@@ -402,7 +411,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       // Read back and perform IndexQuery operations
       val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
-      
+
       // Test basic read first
       val allResults = readDf.collect()
       assert(allResults.length == 3)
@@ -410,12 +419,10 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       // Check transaction log for footer offset metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
-      val allFiles = transactionLog.listFiles()
-      
+      val allFiles       = transactionLog.listFiles()
+
       println(s"🧪 [TEST] V2 IndexQuery test found ${allFiles.length} files with footer offset status:")
-      allFiles.foreach { file =>
-        println(s"   ${file.path}: hasFooterOffsets=${file.hasFooterOffsets}")
-      }
+      allFiles.foreach(file => println(s"   ${file.path}: hasFooterOffsets=${file.hasFooterOffsets}"))
 
       val hasOptimizedFiles = allFiles.exists(_.hasFooterOffsets)
       if (hasOptimizedFiles) {
@@ -430,10 +437,12 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
     println("🧪 [TEST] Testing V2 DataSource metadata persistence and reading")
 
     withTempPath { tempDir =>
-      val schema = StructType(Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("description", StringType, nullable = false)
-      ))
+      val schema = StructType(
+        Array(
+          StructField("id", IntegerType, nullable = false),
+          StructField("description", StringType, nullable = false)
+        )
+      )
 
       val data = Seq(
         Row(10, "V2 metadata persistence test record 1"),
@@ -452,23 +461,24 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 
       // Read transaction log and analyze metadata
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tablePath), spark)
-      val allFiles = transactionLog.listFiles()
+      val allFiles       = transactionLog.listFiles()
 
       println(s"🧪 [TEST] V2 Metadata analysis for ${allFiles.length} files:")
-      
+
       allFiles.foreach { file =>
         println(s"📄 V2 Metadata File: ${file.path}")
         println(s"   Records: ${file.numRecords.getOrElse("unknown")}")
         println(s"   Size: ${file.size} bytes")
-        
+
         if (file.hasFooterOffsets) {
           def safeLong(opt: Option[Any], fieldName: String): Long = opt match {
             case Some(value) => value.asInstanceOf[Number].longValue()
-            case None => throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
+            case None =>
+              throw new RuntimeException(s"Footer offset field $fieldName is None but hasFooterOffsets is true")
           }
-          
+
           val footerStart = safeLong(file.footerStartOffset, "footerStartOffset")
-          val footerEnd = safeLong(file.footerEndOffset, "footerEndOffset")
+          val footerEnd   = safeLong(file.footerEndOffset, "footerEndOffset")
           // Hotcache fields deprecated in v0.24.1 - no longer validated
 
           println(s"   🚀 V2 OPTIMIZED: Footer($footerStart-$footerEnd) Hotcache(deprecated)")
@@ -482,9 +492,9 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       }
 
       // Verify data integrity after read
-      val readDf = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
+      val readDf  = spark.read.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
-      
+
       assert(results.length == 5)
       assert(results.map(_.getAs[Int]("id")).contains(10))
       assert(results.map(_.getAs[String]("description")).exists(_.contains("V2 metadata persistence")))

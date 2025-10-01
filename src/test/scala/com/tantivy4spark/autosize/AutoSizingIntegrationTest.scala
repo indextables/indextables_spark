@@ -21,9 +21,7 @@ import com.tantivy4spark.TestBase
 import com.tantivy4spark.config.Tantivy4SparkSQLConf
 import java.nio.file.Files
 
-/**
- * Comprehensive integration tests for auto-sizing feature covering both V1 and V2 APIs.
- */
+/** Comprehensive integration tests for auto-sizing feature covering both V1 and V2 APIs. */
 class AutoSizingIntegrationTest extends TestBase {
 
   test("V1 API should perform auto-sizing with actual DataFrame counting") {
@@ -57,7 +55,8 @@ class AutoSizingIntegrationTest extends TestBase {
       assert(autoSizedRead.count() == 20000, "Auto-sized write should contain 20K records")
 
       // Check that splits were created (should be more than 1 for 20K records with 1M target)
-      val splitFiles = new java.io.File(tempPath).listFiles()
+      val splitFiles = new java.io.File(tempPath)
+        .listFiles()
         .filter(_.getName.endsWith(".split"))
 
       println(s"✅ V1 Auto-sizing created ${splitFiles.length} splits for 20K records with 1M target")
@@ -68,7 +67,7 @@ class AutoSizingIntegrationTest extends TestBase {
   test("V2 API should perform auto-sizing with explicit row count") {
     withTempPath { tempPath =>
       // Create test data and get accurate count
-      val testData = createLargeTestDataFrame(15000)
+      val testData       = createLargeTestDataFrame(15000)
       val actualRowCount = testData.count()
 
       // First write to establish historical baseline
@@ -78,7 +77,7 @@ class AutoSizingIntegrationTest extends TestBase {
         .save(tempPath)
 
       // Now test V2 auto-sizing with explicit row count
-      val autoSizeData = createLargeTestDataFrame(25000)
+      val autoSizeData     = createLargeTestDataFrame(25000)
       val explicitRowCount = autoSizeData.count()
 
       // V2 API auto-sizing with explicit row count
@@ -97,7 +96,8 @@ class AutoSizingIntegrationTest extends TestBase {
 
       assert(readBack.count() == 25000, "V2 auto-sized write should contain 25K records")
 
-      val splitFiles = new java.io.File(tempPath).listFiles()
+      val splitFiles = new java.io.File(tempPath)
+        .listFiles()
         .filter(_.getName.endsWith(".split"))
 
       println(s"✅ V2 Auto-sizing created ${splitFiles.length} splits for 25K records with 2M target")
@@ -354,7 +354,8 @@ class AutoSizingIntegrationTest extends TestBase {
       val readBack = spark.read.format("tantivy4spark").load(tempPath)
       assert(readBack.count() == 75000, "End-to-end auto-sizing should complete successfully")
 
-      val splitFiles = new java.io.File(tempPath).listFiles()
+      val splitFiles = new java.io.File(tempPath)
+        .listFiles()
         .filter(_.getName.endsWith(".split"))
 
       println(s"✅ End-to-end auto-sizing created ${splitFiles.length} splits for 75K records with 5M target")

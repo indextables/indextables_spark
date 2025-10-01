@@ -23,13 +23,11 @@ import org.apache.hadoop.conf.Configuration
 
 import java.net.URI
 
-/**
- * Comprehensive unit tests for CredentialProviderFactory
- */
+/** Comprehensive unit tests for CredentialProviderFactory */
 class CredentialProviderFactoryTest extends TestBase {
 
   private var hadoopConf: Configuration = _
-  private var testUri: URI = _
+  private var testUri: URI              = _
 
   override def beforeEach(): Unit = {
     hadoopConf = new Configuration()
@@ -38,10 +36,9 @@ class CredentialProviderFactoryTest extends TestBase {
     CredentialProviderFactory.clearCache()
   }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     // Clear cache after each test
     CredentialProviderFactory.clearCache()
-  }
 
   test("createV1Provider") {
     // Configure test credentials

@@ -28,15 +28,15 @@ import java.io.File
 import org.slf4j.LoggerFactory
 
 /**
- * Tests for temporary directory configuration in MERGE SPLITS operations.
- * Validates that custom temp directory paths are properly configured, validated, and used.
+ * Tests for temporary directory configuration in MERGE SPLITS operations. Validates that custom temp directory paths
+ * are properly configured, validated, and used.
  */
 class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsTempDirectoryTest])
 
-  var tempTablePath: String = _
-  var customTempDir: String = _
+  var tempTablePath: String          = _
+  var customTempDir: String          = _
   var transactionLog: TransactionLog = _
 
   override def beforeEach(): Unit = {
@@ -89,8 +89,10 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     // Verify merge succeeded
     transactionLog.invalidateCache()
     val finalFiles = transactionLog.listFiles()
-    assert(finalFiles.length <= initialFiles.length,
-      s"Merge should reduce or maintain file count: ${finalFiles.length} vs ${initialFiles.length}")
+    assert(
+      finalFiles.length <= initialFiles.length,
+      s"Merge should reduce or maintain file count: ${finalFiles.length} vs ${initialFiles.length}"
+    )
 
     // Verify data integrity
     val mergedData = spark.read
@@ -176,8 +178,10 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       tempDirectoryPath = Some(customTempDir)
     )
 
-    assert(configWithTempDir.tempDirectoryPath.contains(customTempDir),
-      "SerializableAwsConfig should store temp directory path")
+    assert(
+      configWithTempDir.tempDirectoryPath.contains(customTempDir),
+      "SerializableAwsConfig should store temp directory path"
+    )
 
     // Test without temp directory
     val configWithoutTempDir = SerializableAwsConfig(
@@ -189,8 +193,10 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       pathStyleAccess = true
     )
 
-    assert(configWithoutTempDir.tempDirectoryPath.isEmpty,
-      "SerializableAwsConfig should handle missing temp directory path")
+    assert(
+      configWithoutTempDir.tempDirectoryPath.isEmpty,
+      "SerializableAwsConfig should handle missing temp directory path"
+    )
 
     logger.info("✅ SerializableAwsConfig temp directory handling test completed")
   }
@@ -202,12 +208,16 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
 
     // Create minimal test data
-    val testData = spark.range(1, 11).select(
-      col("id"),
-      lit("test_content").as("content")
-    )
+    val testData = spark
+      .range(1, 11)
+      .select(
+        col("id"),
+        lit("test_content").as("content")
+      )
 
-    testData.coalesce(1).write
+    testData
+      .coalesce(1)
+      .write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
       .option("spark.indextables.indexWriter.batchSize", "5")
       .mode("overwrite")
@@ -237,10 +247,12 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
 
     // Create minimal test to trigger config extraction
-    val testData = spark.range(1, 6).select(
-      col("id"),
-      lit("env_test").as("content")
-    )
+    val testData = spark
+      .range(1, 6)
+      .select(
+        col("id"),
+        lit("env_test").as("content")
+      )
 
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
@@ -267,14 +279,18 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     // Create 4 separate writes to generate multiple files for merging
     (1 to 4).foreach { batch =>
       val startId = (batch - 1) * 100 + 1
-      val endId = batch * 100
+      val endId   = batch * 100
 
-      val batchData = spark.range(startId, endId + 1).select(
-        col("id"),
-        concat(lit(s"batch_${batch}_content_"), col("id")).as("content")
-      )
+      val batchData = spark
+        .range(startId, endId + 1)
+        .select(
+          col("id"),
+          concat(lit(s"batch_${batch}_content_"), col("id")).as("content")
+        )
 
-      batchData.coalesce(1).write
+      batchData
+        .coalesce(1)
+        .write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "25")
         .mode("append")

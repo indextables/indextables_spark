@@ -19,9 +19,7 @@ package com.tantivy4spark.core
 
 import org.scalatest.funsuite.AnyFunSuite
 
-/**
- * Test to discover the correct aggregate expression classes in Spark 3.5.
- */
+/** Test to discover the correct aggregate expression classes in Spark 3.5. */
 class AggregateExpressionTest extends AnyFunSuite {
 
   test("discover aggregate expression classes") {
@@ -55,7 +53,7 @@ class AggregateExpressionTest extends AnyFunSuite {
         println(s"  Methods: ${methods.mkString(", ")}")
       } catch {
         case _: ClassNotFoundException => println(s"❌ $className not found")
-        case e: Exception => println(s"❌ Error loading $className: ${e.getMessage}")
+        case e: Exception              => println(s"❌ Error loading $className: ${e.getMessage}")
       }
     }
 

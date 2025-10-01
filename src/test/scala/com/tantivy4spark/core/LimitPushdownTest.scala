@@ -26,12 +26,14 @@ class LimitPushdownTest extends TestBase {
   test("should support SQL LIMIT statement pushdown") {
     withTempPath { tempPath =>
       // Create test data with more records than typical limit
-      val data = spark.range(100).select(
-        col("id"),
-        (col("id") % 10).cast("string").as("category"),
-        (col("id") * 2).as("value")
-      )
-      
+      val data = spark
+        .range(100)
+        .select(
+          col("id"),
+          (col("id") % 10).cast("string").as("category"),
+          (col("id") * 2).as("value")
+        )
+
       // Write data
       data.write
         .format("tantivy4spark")
@@ -44,24 +46,26 @@ class LimitPushdownTest extends TestBase {
         .createOrReplaceTempView("test_table")
 
       // Test SQL LIMIT pushdown
-      val sqlResult = spark.sql("SELECT * FROM test_table LIMIT 5")
+      val sqlResult        = spark.sql("SELECT * FROM test_table LIMIT 5")
       val collectedResults = sqlResult.collect()
-      
+
       // Should return exactly 5 rows due to LIMIT pushdown
       collectedResults.length shouldBe 5
-      
+
       println(s"✅ SQL LIMIT 5 returned ${collectedResults.length} rows")
     }
   }
 
   test("should support DataFrame limit() method pushdown") {
     withTempPath { tempPath =>
-      val data = spark.range(50).select(
-        col("id"),
-        (col("id") % 5).cast("string").as("group"),
-        (col("id") + 100).as("score")
-      )
-      
+      val data = spark
+        .range(50)
+        .select(
+          col("id"),
+          (col("id") % 5).cast("string").as("group"),
+          (col("id") + 100).as("score")
+        )
+
       // Write data
       data.write
         .format("tantivy4spark")
@@ -71,23 +75,25 @@ class LimitPushdownTest extends TestBase {
       val df = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-        
+
       val limitedResult = df.limit(3).collect()
-      
+
       // Should return exactly 3 rows due to limit pushdown
       limitedResult.length shouldBe 3
-      
+
       println(s"✅ DataFrame limit(3) returned ${limitedResult.length} rows")
     }
   }
 
   test("should handle queries without limits using Int.MaxValue") {
     withTempPath { tempPath =>
-      val data = spark.range(10).select(
-        col("id"),
-        (col("id") * 3).as("triple")
-      )
-      
+      val data = spark
+        .range(10)
+        .select(
+          col("id"),
+          (col("id") * 3).as("triple")
+        )
+
       // Write data
       data.write
         .format("tantivy4spark")
@@ -98,22 +104,24 @@ class LimitPushdownTest extends TestBase {
         .format("tantivy4spark")
         .load(tempPath)
         .collect()
-      
+
       // Should return all 10 rows (no artificial limit)
       result.length shouldBe 10
-      
+
       println(s"✅ Query without limit returned ${result.length} rows (expected 10)")
     }
   }
 
   test("should push down limit with filters") {
     withTempPath { tempPath =>
-      val data = spark.range(30).select(
-        col("id"),
-        (col("id") % 3).cast("string").as("mod3"),
-        (col("id") * 10).as("times10")
-      )
-      
+      val data = spark
+        .range(30)
+        .select(
+          col("id"),
+          (col("id") % 3).cast("string").as("mod3"),
+          (col("id") * 10).as("times10")
+        )
+
       // Write data
       data.write
         .format("tantivy4spark")
@@ -131,15 +139,13 @@ class LimitPushdownTest extends TestBase {
         WHERE mod3 = '1' 
         LIMIT 2
       """)
-      
+
       val results = sqlResult.collect()
-      
+
       // Should return exactly 2 rows that match the filter
       results.length shouldBe 2
-      results.foreach { row =>
-        row.getString(row.fieldIndex("mod3")) shouldBe "1"
-      }
-      
+      results.foreach(row => row.getString(row.fieldIndex("mod3")) shouldBe "1")
+
       println(s"✅ SQL LIMIT 2 with filter returned ${results.length} rows")
     }
   }
@@ -157,22 +163,22 @@ class LimitPushdownTest extends TestBase {
       import org.apache.hadoop.fs.Path
       import org.apache.spark.sql.types.DataType
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
-      val metadata = transactionLog.getMetadata()
-      val schema = DataType.fromJson(metadata.schemaString).asInstanceOf[org.apache.spark.sql.types.StructType]
-      
+      val metadata       = transactionLog.getMetadata()
+      val schema         = DataType.fromJson(metadata.schemaString).asInstanceOf[org.apache.spark.sql.types.StructType]
+
       // Create options map
       import org.apache.spark.sql.util.CaseInsensitiveStringMap
       import scala.jdk.CollectionConverters._
       val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
-      
+
       // Test ScanBuilder limit pushdown methods
       val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
       val scanBuilder = new Tantivy4SparkScanBuilder(spark, transactionLog, schema, options, emptyBroadcastConfig.value)
-      
+
       // Push a limit - should return true indicating support
       val limitPushed = scanBuilder.pushLimit(10)
       limitPushed shouldBe true
-      
+
       println("✅ ScanBuilder limit pushdown methods work correctly")
     }
   }

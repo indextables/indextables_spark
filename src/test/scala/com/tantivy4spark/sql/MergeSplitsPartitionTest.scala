@@ -28,14 +28,14 @@ import java.io.File
 import org.slf4j.LoggerFactory
 
 /**
- * Tests for partition-aware merge functionality.
- * Validates that MERGE SPLITS never attempts to merge files from different partitions.
+ * Tests for partition-aware merge functionality. Validates that MERGE SPLITS never attempts to merge files from
+ * different partitions.
  */
 class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsPartitionTest])
 
-  var tempTablePath: String = _
+  var tempTablePath: String          = _
   var transactionLog: TransactionLog = _
 
   override def beforeEach(): Unit = {
@@ -77,41 +77,50 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     )
 
     // Write data for each partition separately to create multiple files per partition
-    testData.foreach { case (year, quarter, idRange) =>
-      logger.info(s"Creating data for partition year=$year, quarter=$quarter")
+    testData.foreach {
+      case (year, quarter, idRange) =>
+        logger.info(s"Creating data for partition year=$year, quarter=$quarter")
 
-      // Create 2 separate writes per partition to ensure multiple files
-      val midPoint = idRange.start + (idRange.end - idRange.start) / 2
+        // Create 2 separate writes per partition to ensure multiple files
+        val midPoint = idRange.start + (idRange.end - idRange.start) / 2
 
-      // First file for this partition
-      val data1 = spark.range(idRange.start, midPoint + 1).select(
-        col("id"),
-        lit(s"content_${year}_${quarter}_").as("content"),
-        lit(year).as("year"),
-        lit(quarter).as("quarter")
-      )
+        // First file for this partition
+        val data1 = spark
+          .range(idRange.start, midPoint + 1)
+          .select(
+            col("id"),
+            lit(s"content_${year}_${quarter}_").as("content"),
+            lit(year).as("year"),
+            lit(quarter).as("quarter")
+          )
 
-      data1.coalesce(1).write
-        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.indextables.indexWriter.batchSize", "25")
-        .partitionBy("year", "quarter")
-        .mode("append")
-        .save(tempTablePath)
+        data1
+          .coalesce(1)
+          .write
+          .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+          .option("spark.indextables.indexWriter.batchSize", "25")
+          .partitionBy("year", "quarter")
+          .mode("append")
+          .save(tempTablePath)
 
-      // Second file for this partition
-      val data2 = spark.range(midPoint + 1, idRange.end + 1).select(
-        col("id"),
-        lit(s"content_${year}_${quarter}_").as("content"),
-        lit(year).as("year"),
-        lit(quarter).as("quarter")
-      )
+        // Second file for this partition
+        val data2 = spark
+          .range(midPoint + 1, idRange.end + 1)
+          .select(
+            col("id"),
+            lit(s"content_${year}_${quarter}_").as("content"),
+            lit(year).as("year"),
+            lit(quarter).as("quarter")
+          )
 
-      data2.coalesce(1).write
-        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.indextables.indexWriter.batchSize", "25")
-        .partitionBy("year", "quarter")
-        .mode("append")
-        .save(tempTablePath)
+        data2
+          .coalesce(1)
+          .write
+          .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+          .option("spark.indextables.indexWriter.batchSize", "25")
+          .partitionBy("year", "quarter")
+          .mode("append")
+          .save(tempTablePath)
     }
 
     // Verify the initial state - should have multiple files across multiple partitions
@@ -121,17 +130,20 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     // Group files by partition to verify setup
     val filesByPartition = initialFiles.groupBy(_.partitionValues)
     logger.info(s"Files grouped by partition:")
-    filesByPartition.foreach { case (partitionValues, files) =>
-      logger.info(s"  Partition $partitionValues: ${files.length} files")
-      files.foreach { file =>
-        logger.info(s"    - ${file.path} (${file.size} bytes)")
-      }
+    filesByPartition.foreach {
+      case (partitionValues, files) =>
+        logger.info(s"  Partition $partitionValues: ${files.length} files")
+        files.foreach(file => logger.info(s"    - ${file.path} (${file.size} bytes)"))
     }
 
     // Ensure we have multiple partitions with multiple files each
     assert(filesByPartition.size >= 4, s"Should have at least 4 partitions, got ${filesByPartition.size}")
-    filesByPartition.foreach { case (partitionValues, files) =>
-      assert(files.length >= 2, s"Each partition should have at least 2 files for merging, partition $partitionValues has ${files.length}")
+    filesByPartition.foreach {
+      case (partitionValues, files) =>
+        assert(
+          files.length >= 2,
+          s"Each partition should have at least 2 files for merging, partition $partitionValues has ${files.length}"
+        )
     }
 
     // Execute MERGE SPLITS - this should merge files within each partition only
@@ -147,11 +159,10 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     // Verify files by partition after merge
     val finalFilesByPartition = finalFiles.groupBy(_.partitionValues)
     logger.info("Files after merge grouped by partition:")
-    finalFilesByPartition.foreach { case (partitionValues, files) =>
-      logger.info(s"  Partition $partitionValues: ${files.length} files")
-      files.foreach { file =>
-        logger.info(s"    - ${file.path} (${file.size} bytes)")
-      }
+    finalFilesByPartition.foreach {
+      case (partitionValues, files) =>
+        logger.info(s"  Partition $partitionValues: ${files.length} files")
+        files.foreach(file => logger.info(s"    - ${file.path} (${file.size} bytes)"))
     }
 
     // CRITICAL VALIDATION: All files should still belong to their correct partitions
@@ -160,21 +171,24 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
       // Verify partition path structure for partitioned files
       if (file.partitionValues.nonEmpty) {
-        val year = file.partitionValues.get("year")
+        val year    = file.partitionValues.get("year")
         val quarter = file.partitionValues.get("quarter")
 
         if (year.isDefined && quarter.isDefined) {
-          assert(partitionPath.contains(s"year=${year.get}"),
-            s"File path should contain year partition: $partitionPath")
-          assert(partitionPath.contains(s"quarter=${quarter.get}"),
-            s"File path should contain quarter partition: $partitionPath")
+          assert(partitionPath.contains(s"year=${year.get}"), s"File path should contain year partition: $partitionPath")
+          assert(
+            partitionPath.contains(s"quarter=${quarter.get}"),
+            s"File path should contain quarter partition: $partitionPath"
+          )
         }
       }
     }
 
     // Verify merge operation succeeded (fewer or equal files)
-    assert(finalFiles.length <= initialFiles.length,
-      s"Should have same or fewer files after merge: ${finalFiles.length} vs ${initialFiles.length}")
+    assert(
+      finalFiles.length <= initialFiles.length,
+      s"Should have same or fewer files after merge: ${finalFiles.length} vs ${initialFiles.length}"
+    )
 
     // Verify no cross-partition contamination by checking data integrity
     val finalData = spark.read
@@ -185,21 +199,23 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     assert(totalCount == 400, s"Should preserve all 400 records, got $totalCount")
 
     // Verify each partition still has the correct data
-    testData.foreach { case (year, quarter, idRange) =>
-      val partitionData = finalData.filter(
-        col("year") === year && col("quarter") === quarter
-      )
-      val partitionCount = partitionData.count()
-      val expectedCount = idRange.size
+    testData.foreach {
+      case (year, quarter, idRange) =>
+        val partitionData = finalData.filter(
+          col("year") === year && col("quarter") === quarter
+        )
+        val partitionCount = partitionData.count()
+        val expectedCount  = idRange.size
 
-      assert(partitionCount == expectedCount,
-        s"Partition year=$year quarter=$quarter should have $expectedCount records, got $partitionCount")
+        assert(
+          partitionCount == expectedCount,
+          s"Partition year=$year quarter=$quarter should have $expectedCount records, got $partitionCount"
+        )
 
-      // Verify ID ranges are correct
-      val actualIds = partitionData.select("id").collect().map(_.getLong(0)).sorted
-      val expectedIds = idRange.toArray
-      assert(actualIds.sameElements(expectedIds),
-        s"Partition year=$year quarter=$quarter has incorrect IDs")
+        // Verify ID ranges are correct
+        val actualIds   = partitionData.select("id").collect().map(_.getLong(0)).sorted
+        val expectedIds = idRange.toArray
+        assert(actualIds.sameElements(expectedIds), s"Partition year=$year quarter=$quarter has incorrect IDs")
     }
 
     logger.info("✅ Partition-aware merge validation passed")
@@ -275,7 +291,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Test 1: Valid case - all files from same partition
     logger.info("Test 1: Valid case - all files from same partition")
-    val validGroups = findMergeableGroupsMethod.invoke(executor, partition2023Q1, filesPartition1)
+    val validGroups = findMergeableGroupsMethod
+      .invoke(executor, partition2023Q1, filesPartition1)
       .asInstanceOf[Seq[MergeGroup]]
 
     assert(validGroups.nonEmpty, "Should create merge groups for same-partition files")
@@ -291,15 +308,20 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     }
 
     val cause = exception.getCause
-    assert(cause.isInstanceOf[IllegalStateException],
-      s"Should throw IllegalStateException, got: ${cause.getClass.getSimpleName}")
-    assert(cause.getMessage.contains("findMergeableGroups received files from wrong partitions"),
-      s"Should detect cross-partition files, got: ${cause.getMessage}")
+    assert(
+      cause.isInstanceOf[IllegalStateException],
+      s"Should throw IllegalStateException, got: ${cause.getClass.getSimpleName}"
+    )
+    assert(
+      cause.getMessage.contains("findMergeableGroups received files from wrong partitions"),
+      s"Should detect cross-partition files, got: ${cause.getMessage}"
+    )
     logger.info("✅ Cross-partition detection works correctly")
 
     // Test 3: Edge case - single file (should not create groups)
     logger.info("Test 3: Edge case - single file")
-    val singleFileGroups = findMergeableGroupsMethod.invoke(executor, partition2023Q2, filesPartition2)
+    val singleFileGroups = findMergeableGroupsMethod
+      .invoke(executor, partition2023Q2, filesPartition2)
       .asInstanceOf[Seq[MergeGroup]]
 
     assert(singleFileGroups.isEmpty, "Should not create groups for single file")
@@ -361,10 +383,14 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     }
 
     val cause = exception.getCause
-    assert(cause.isInstanceOf[IllegalStateException],
-      s"Should throw IllegalStateException, got: ${cause.getClass.getSimpleName}")
-    assert(cause.getMessage.contains("Cross-partition merge detected"),
-      s"Should detect cross-partition merge, got: ${cause.getMessage}")
+    assert(
+      cause.isInstanceOf[IllegalStateException],
+      s"Should throw IllegalStateException, got: ${cause.getClass.getSimpleName}"
+    )
+    assert(
+      cause.getMessage.contains("Cross-partition merge detected"),
+      s"Should detect cross-partition merge, got: ${cause.getMessage}"
+    )
 
     logger.info("✅ createMergedSplit partition validation works correctly")
   }
@@ -380,34 +406,40 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     )
 
     // Write data for each partition
-    testData.foreach { case (year, quarter, idRange) =>
-      val data = spark.range(idRange.start, idRange.end + 1).select(
-        col("id"),
-        lit(s"content_${year}_${quarter}").as("content"),
-        lit(year).as("year"),
-        lit(quarter).as("quarter")
-      )
+    testData.foreach {
+      case (year, quarter, idRange) =>
+        val data = spark
+          .range(idRange.start, idRange.end + 1)
+          .select(
+            col("id"),
+            lit(s"content_${year}_$quarter").as("content"),
+            lit(year).as("year"),
+            lit(quarter).as("quarter")
+          )
 
-      // Write multiple small batches to create multiple files per partition
-      val chunkSize = idRange.size / 2
-      idRange.grouped(chunkSize).foreach { chunk =>
-        val chunkData = data.filter(col("id").isin(chunk: _*))
-        chunkData.coalesce(1).write
-          .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-          .option("spark.indextables.indexWriter.batchSize", "20")
-          .partitionBy("year", "quarter")
-          .mode("append")
-          .save(tempTablePath)
-      }
+        // Write multiple small batches to create multiple files per partition
+        val chunkSize = idRange.size / 2
+        idRange.grouped(chunkSize).foreach { chunk =>
+          val chunkData = data.filter(col("id").isin(chunk: _*))
+          chunkData
+            .coalesce(1)
+            .write
+            .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+            .option("spark.indextables.indexWriter.batchSize", "20")
+            .partitionBy("year", "quarter")
+            .mode("append")
+            .save(tempTablePath)
+        }
     }
 
     // Get initial state
-    val initialFiles = transactionLog.listFiles()
+    val initialFiles            = transactionLog.listFiles()
     val initialFilesByPartition = initialFiles.groupBy(_.partitionValues)
 
     logger.info(s"Initial state: ${initialFiles.length} files across ${initialFilesByPartition.size} partitions")
-    initialFilesByPartition.foreach { case (partitionValues, files) =>
-      logger.info(s"  Partition $partitionValues: ${files.length} files")
+    initialFilesByPartition.foreach {
+      case (partitionValues, files) =>
+        logger.info(s"  Partition $partitionValues: ${files.length} files")
     }
 
     // Execute MERGE SPLITS with WHERE clause to target only 2023 Q1 partition
@@ -416,29 +448,34 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Refresh and check results
     transactionLog.invalidateCache()
-    val finalFiles = transactionLog.listFiles()
+    val finalFiles            = transactionLog.listFiles()
     val finalFilesByPartition = finalFiles.groupBy(_.partitionValues)
 
     logger.info(s"After targeted merge: ${finalFiles.length} files across ${finalFilesByPartition.size} partitions")
-    finalFilesByPartition.foreach { case (partitionValues, files) =>
-      logger.info(s"  Partition $partitionValues: ${files.length} files")
+    finalFilesByPartition.foreach {
+      case (partitionValues, files) =>
+        logger.info(s"  Partition $partitionValues: ${files.length} files")
     }
 
     // Verify that only the targeted partition was affected
-    val target2023Q1 = Map("year" -> "2023", "quarter" -> "Q1")
+    val target2023Q1       = Map("year" -> "2023", "quarter" -> "Q1")
     val initial2023Q1Files = initialFilesByPartition.getOrElse(target2023Q1, Seq.empty).length
-    val final2023Q1Files = finalFilesByPartition.getOrElse(target2023Q1, Seq.empty).length
+    val final2023Q1Files   = finalFilesByPartition.getOrElse(target2023Q1, Seq.empty).length
 
-    assert(final2023Q1Files <= initial2023Q1Files,
-      s"Target partition should have same or fewer files: $final2023Q1Files vs $initial2023Q1Files")
+    assert(
+      final2023Q1Files <= initial2023Q1Files,
+      s"Target partition should have same or fewer files: $final2023Q1Files vs $initial2023Q1Files"
+    )
 
     // Verify other partitions were not affected
     val otherPartitions = initialFilesByPartition.keys.filterNot(_ == target2023Q1)
     otherPartitions.foreach { partition =>
       val initialCount = initialFilesByPartition(partition).length
-      val finalCount = finalFilesByPartition.getOrElse(partition, Seq.empty).length
-      assert(finalCount == initialCount,
-        s"Non-target partition $partition should be unchanged: $finalCount vs $initialCount")
+      val finalCount   = finalFilesByPartition.getOrElse(partition, Seq.empty).length
+      assert(
+        finalCount == initialCount,
+        s"Non-target partition $partition should be unchanged: $finalCount vs $initialCount"
+      )
     }
 
     // Verify data integrity

@@ -25,17 +25,17 @@ import org.apache.spark.unsafe.types.UTF8String
 
 /**
  * Expression for the INDEXQUERY operator that represents a direct Tantivy query.
- * 
+ *
  * Usage: column_name indexquery 'query_string'
- * 
- * This expression is primarily designed for pushdown to the Tantivy data source.
- * When evaluated in Spark (fallback), it returns true for all rows since the 
- * actual filtering should happen at the data source level.
+ *
+ * This expression is primarily designed for pushdown to the Tantivy data source. When evaluated in Spark (fallback), it
+ * returns true for all rows since the actual filtering should happen at the data source level.
  */
 case class IndexQueryExpression(
-    left: Expression,   // Column reference
-    right: Expression   // Query string literal
-) extends BinaryExpression with Predicate {
+  left: Expression, // Column reference
+  right: Expression // Query string literal
+) extends BinaryExpression
+    with Predicate {
 
   override def dataType: DataType = BooleanType
 
@@ -44,70 +44,61 @@ case class IndexQueryExpression(
   // Mark as non-deterministic to prevent Spark from optimizing away the filter
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
-  
+
   override def prettyName: String = "indexquery"
-  
+
   override def sql: String = s"(${left.sql} indexquery ${right.sql})"
-  
+
   override def toString: String = s"($left indexquery $right)"
-  
+
   // For pushdown, we primarily care about the structure, not evaluation
-  override def nullSafeEval(leftValue: Any, rightValue: Any): Any = {
+  override def nullSafeEval(leftValue: Any, rightValue: Any): Any =
     // This should rarely be called since the expression should be pushed down
     // If called, return true as a safe fallback (filtering happens at source)
     true
-  }
-  
+
   // Override eval to handle cases where child expressions cannot be evaluated
-  override def eval(input: org.apache.spark.sql.catalyst.InternalRow): Any = {
+  override def eval(input: org.apache.spark.sql.catalyst.InternalRow): Any =
     // This should rarely be called since the expression should be pushed down
     // If called, return true as a safe fallback (filtering happens at source)
     true
-  }
-  
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
     // Code generation for the rare case this isn't pushed down
     // Return a literal true value
     ExprCode.forNonNullValue(JavaCode.literal("true", dataType))
-  }
-  
-  /**
-   * Extract the column name from the left expression.
-   */
+
+  /** Extract the column name from the left expression. */
   def getColumnName: Option[String] = left match {
-    case attr: AttributeReference => Some(attr.name)
+    case attr: AttributeReference       => Some(attr.name)
     case UnresolvedAttribute(nameParts) => Some(nameParts.mkString("."))
-    case _ => None
+    case _                              => None
   }
-  
-  /**
-   * Extract the query string from the right expression.
-   */
+
+  /** Extract the query string from the right expression. */
   def getQueryString: Option[String] = right match {
     case Literal(value: UTF8String, StringType) => Some(value.toString)
-    case Literal(value: String, StringType) => Some(value)
-    case _ => None
+    case Literal(value: String, StringType)     => Some(value)
+    case _                                      => None
   }
-  
-  /**
-   * Check if this expression can be converted to a pushdown filter.
-   */
-  def canPushDown: Boolean = {
+
+  /** Check if this expression can be converted to a pushdown filter. */
+  def canPushDown: Boolean =
     getColumnName.isDefined && getQueryString.isDefined
-  }
-  
+
   override def checkInputDataTypes(): TypeCheckResult = {
     val rightCheck = right.dataType match {
       case StringType => TypeCheckResult.TypeCheckSuccess
-      case _ => TypeCheckResult.TypeCheckFailure(
-        s"Right side of indexquery must be a string literal, got ${right.dataType}")
+      case _ =>
+        TypeCheckResult.TypeCheckFailure(s"Right side of indexquery must be a string literal, got ${right.dataType}")
     }
-    
+
     rightCheck
   }
-  
+
   override protected def withNewChildrenInternal(
-    newLeft: Expression, newRight: Expression): IndexQueryExpression = {
+    newLeft: Expression,
+    newRight: Expression
+  ): IndexQueryExpression =
     copy(left = newLeft, right = newRight)
-  }
 }

@@ -20,7 +20,7 @@ class SimpleIndexQueryTest extends TestBase {
     // Write with text fields for title (same as working tantivy4java test)
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.indextables.indexing.typemap.title", "text")    // tokenized search
+      .option("spark.indextables.indexing.typemap.title", "text")      // tokenized search
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
       .mode("overwrite")
       .save(testPath)
@@ -40,10 +40,12 @@ class SimpleIndexQueryTest extends TestBase {
 
     // Test basic IndexQuery - should find document 1 which contains "machine"
     println("\n🔍 IndexQuery for 'machine':")
-    val machineResults = spark.sql("""
+    val machineResults = spark
+      .sql("""
       SELECT id, title FROM simple_test
       WHERE title indexquery 'machine'
-    """).collect()
+    """)
+      .collect()
 
     println(s"Results: ${machineResults.length}")
     machineResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}'"))

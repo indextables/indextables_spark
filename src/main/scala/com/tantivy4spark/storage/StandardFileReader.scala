@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.storage
 
 import org.apache.hadoop.conf.Configuration
@@ -27,15 +26,15 @@ import com.tantivy4spark.io.CloudStorageProviderFactory
 import java.io.IOException
 
 class StandardFileReader(path: Path, conf: Configuration) extends StorageStrategy {
-  
+
   private val logger = LoggerFactory.getLogger(classOf[StandardFileReader])
   private val cloudProvider = CloudStorageProviderFactory.createProvider(
-    path.toString, 
+    path.toString,
     new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
     conf
   )
-  
-  private lazy val fileSize: Long = {
+
+  private lazy val fileSize: Long =
     try {
       val fileInfo = cloudProvider.getFileInfo(path.toString)
       fileInfo.map(_.size).getOrElse(0L)
@@ -43,15 +42,13 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
       case ex: Exception =>
         ErrorUtil.logAndThrow(logger, s"Failed to get file size for $path", ex)
     }
-  }
-
 
   override def readFile(): Array[Byte] = {
-    logger.info(s"Reading entire file $path (${fileSize} bytes)")
-    
-    try {
+    logger.info(s"Reading entire file $path ($fileSize bytes)")
+
+    try
       cloudProvider.readFile(path.toString)
-    } catch {
+    catch {
       case ex: Exception =>
         ErrorUtil.logAndThrow(logger, s"Failed to read file $path", ex)
     }
@@ -59,10 +56,10 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
 
   override def readRange(offset: Long, length: Long): Array[Byte] = {
     logger.debug(s"Reading range [$offset, ${offset + length}) from $path")
-    
-    try {
+
+    try
       cloudProvider.readRange(path.toString, offset, length)
-    } catch {
+    catch {
       case ex: Exception =>
         ErrorUtil.logAndThrow(logger, s"Failed to read range [$offset, ${offset + length}) from $path", ex)
     }
@@ -70,7 +67,7 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
 
   override def getFileSize(): Long = fileSize
 
-  override def close(): Unit = {
+  override def close(): Unit =
     try {
       cloudProvider.close()
       logger.debug(s"Closed cloud storage provider for $path")
@@ -78,5 +75,4 @@ class StandardFileReader(path: Path, conf: Configuration) extends StorageStrateg
       case ex: Exception =>
         logger.warn(s"Error closing cloud storage provider for $path", ex)
     }
-  }
 }

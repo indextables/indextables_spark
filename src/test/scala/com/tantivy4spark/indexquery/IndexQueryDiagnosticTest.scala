@@ -19,9 +19,7 @@ package com.tantivy4spark.indexquery
 
 import com.tantivy4spark.TestBase
 
-/**
- * Diagnostic test to identify why IndexQuery is returning 0 results
- */
+/** Diagnostic test to identify why IndexQuery is returning 0 results */
 class IndexQueryDiagnosticTest extends TestBase {
 
   test("Create test data and validate basic operations") {
@@ -75,7 +73,8 @@ class IndexQueryDiagnosticTest extends TestBase {
     // Test 3: IndexQuery syntax test (operator)
     println("=== Test 3: IndexQuery Operator Syntax Test ===")
     try {
-      val indexQueryResults = spark.sql("SELECT id, title FROM diagnostic_docs WHERE title indexquery 'machine'").collect()
+      val indexQueryResults =
+        spark.sql("SELECT id, title FROM diagnostic_docs WHERE title indexquery 'machine'").collect()
       println(s"IndexQuery operator results: ${indexQueryResults.length}")
       indexQueryResults.foreach(row => println(s"  - ${row.getInt(0)}: ${row.getString(1)}"))
     } catch {
@@ -87,7 +86,8 @@ class IndexQueryDiagnosticTest extends TestBase {
     // Test 4: IndexQuery function test
     println("=== Test 4: IndexQuery Function Syntax Test ===")
     try {
-      val functionResults = spark.sql("SELECT id, title FROM diagnostic_docs WHERE tantivy4spark_indexquery(title, 'machine')").collect()
+      val functionResults =
+        spark.sql("SELECT id, title FROM diagnostic_docs WHERE tantivy4spark_indexquery(title, 'machine')").collect()
       println(s"IndexQuery function results: ${functionResults.length}")
       functionResults.foreach(row => println(s"  - ${row.getInt(0)}: ${row.getString(1)}"))
     } catch {
@@ -98,11 +98,11 @@ class IndexQueryDiagnosticTest extends TestBase {
 
     // Test 4: Check if extensions are loaded
     println("=== Test 4: Extension Check ===")
-    try {
+    try
       spark.sql("SHOW FUNCTIONS").collect().filter(_.getString(0).contains("tantivy4spark")).foreach { row =>
         println(s"Found function: ${row.getString(0)}")
       }
-    } catch {
+    catch {
       case e: Exception =>
         println(s"Function check failed: ${e.getMessage}")
     }

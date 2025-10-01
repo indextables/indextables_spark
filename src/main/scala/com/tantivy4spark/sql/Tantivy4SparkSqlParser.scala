@@ -31,26 +31,26 @@ import org.apache.spark.sql.catalyst.parser.ParseErrorListener
 import org.slf4j.LoggerFactory
 
 /**
- * Custom SQL parser for Tantivy4Spark that extends the default Spark SQL parser
- * to support additional Tantivy4Spark-specific commands.
+ * Custom SQL parser for Tantivy4Spark that extends the default Spark SQL parser to support additional
+ * Tantivy4Spark-specific commands.
  *
  * Supported commands:
- * - FLUSH TANTIVY4SPARK SEARCHER CACHE
- * - MERGE SPLITS <path_or_table> [WHERE predicates] [TARGET SIZE <bytes>] [PRECOMMIT]
- * - INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE [FOR <path_or_table>]
- * 
+ *   - FLUSH TANTIVY4SPARK SEARCHER CACHE
+ *   - MERGE SPLITS <path_or_table> [WHERE predicates] [TARGET SIZE <bytes>] [PRECOMMIT]
+ *   - INVALIDATE TANTIVY4SPARK TRANSACTION LOG CACHE [FOR <path_or_table>]
+ *
  * Supported operators:
- * - indexquery: column indexquery 'query_string'
- * - indexqueryall: indexqueryall('query_string')
+ *   - indexquery: column indexquery 'query_string'
+ *   - indexqueryall: indexqueryall('query_string')
  */
 class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
   private val astBuilder = new Tantivy4SparkSqlAstBuilder()
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger     = LoggerFactory.getLogger(getClass)
 
   override def parsePlan(sqlText: String): LogicalPlan = {
     logger.debug(s"Parsing SQL: $sqlText")
-    try {
+    try
       parse(sqlText) { parser =>
         val result = astBuilder.visit(parser.singleStatement())
         logger.debug(s"AST Builder result: $result, type: ${if (result != null) result.getClass.getName else "null"}")
@@ -79,7 +79,7 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
             delegate.parsePlan(preprocessedSql)
         }
       }
-    } catch {
+    catch {
       case e: IllegalArgumentException =>
         // Re-throw business logic exceptions (these are intended to be thrown)
         throw e
@@ -98,20 +98,18 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
     }
   }
 
-  /**
-   * Parse SQL text using ANTLR (similar to Delta Lake's approach).
-   */
+  /** Parse SQL text using ANTLR (similar to Delta Lake's approach). */
   private def parse[T](command: String)(toResult: Tantivy4SparkSqlBaseParser => T): T = {
     val lexer = new Tantivy4SparkSqlBaseLexer(CharStreams.fromString(command))
     lexer.removeErrorListeners()
     lexer.addErrorListener(ParseErrorListener)
 
     val tokenStream = new CommonTokenStream(lexer)
-    val parser = new Tantivy4SparkSqlBaseParser(tokenStream)
+    val parser      = new Tantivy4SparkSqlBaseParser(tokenStream)
     parser.removeErrorListeners()
     parser.addErrorListener(ParseErrorListener)
 
-    try {
+    try
       try {
         // First, try parsing with potentially faster SLL mode
         parser.getInterpreter.setPredictionMode(PredictionMode.SLL)
@@ -126,7 +124,7 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
           parser.getInterpreter.setPredictionMode(PredictionMode.LL)
           toResult(parser)
       }
-    } catch {
+    catch {
       case e: ParseException if e.command.isDefined =>
         throw e
       case e: ParseException =>
@@ -137,14 +135,14 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
   override def parseExpression(sqlText: String): Expression = {
     // Check for indexquery operator pattern
     val indexQueryPattern = """(.+?)\s+indexquery\s+(.+)""".r
-    
+
     // Check for indexqueryall function pattern
     val indexQueryAllPattern = """indexqueryall\s*\(\s*(.+)\s*\)""".r
-    
+
     sqlText.trim match {
       case indexQueryPattern(leftExpr, rightExpr) =>
         try {
-          val left = delegate.parseExpression(leftExpr.trim)
+          val left  = delegate.parseExpression(leftExpr.trim)
           val right = delegate.parseExpression(rightExpr.trim)
           IndexQueryExpression(left, right)
         } catch {
@@ -152,7 +150,7 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
             // If parsing individual parts fails, delegate to default parser
             delegate.parseExpression(sqlText)
         }
-      
+
       case indexQueryAllPattern(queryExpr) =>
         try {
           val query = delegate.parseExpression(queryExpr.trim)
@@ -162,56 +160,49 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
             // If parsing query fails, delegate to default parser
             delegate.parseExpression(sqlText)
         }
-      
+
       case _ =>
         delegate.parseExpression(sqlText)
     }
   }
 
-  override def parseTableIdentifier(sqlText: String): TableIdentifier = {
+  override def parseTableIdentifier(sqlText: String): TableIdentifier =
     delegate.parseTableIdentifier(sqlText)
-  }
 
-  override def parseFunctionIdentifier(sqlText: String): FunctionIdentifier = {
+  override def parseFunctionIdentifier(sqlText: String): FunctionIdentifier =
     delegate.parseFunctionIdentifier(sqlText)
-  }
 
-  override def parseMultipartIdentifier(sqlText: String): Seq[String] = {
+  override def parseMultipartIdentifier(sqlText: String): Seq[String] =
     delegate.parseMultipartIdentifier(sqlText)
-  }
 
-  override def parseTableSchema(sqlText: String): StructType = {
+  override def parseTableSchema(sqlText: String): StructType =
     delegate.parseTableSchema(sqlText)
-  }
 
-  override def parseDataType(sqlText: String): DataType = {
+  override def parseDataType(sqlText: String): DataType =
     delegate.parseDataType(sqlText)
-  }
 
-  override def parseQuery(sqlText: String): LogicalPlan = {
-    try {
+  override def parseQuery(sqlText: String): LogicalPlan =
+    try
       parse(sqlText) { parser =>
         astBuilder.visit(parser.singleStatement()) match {
           case plan: LogicalPlan => plan
           case null =>
             val preprocessedSql = preprocessIndexQueryOperators(sqlText)
             delegate.parseQuery(preprocessedSql)
-          case _ => 
+          case _ =>
             val preprocessedSql = preprocessIndexQueryOperators(sqlText)
             delegate.parseQuery(preprocessedSql)
         }
       }
-    } catch {
+    catch {
       case _: Exception =>
         val preprocessedSql = preprocessIndexQueryOperators(sqlText)
         delegate.parseQuery(preprocessedSql)
     }
-  }
-  
+
   /**
-   * Preprocess SQL text to convert indexquery operators and indexqueryall functions
-   * to function calls that Spark can parse. This allows us to inject our custom
-   * expressions into the logical plan.
+   * Preprocess SQL text to convert indexquery operators and indexqueryall functions to function calls that Spark can
+   * parse. This allows us to inject our custom expressions into the logical plan.
    */
   private def preprocessIndexQueryOperators(sqlText: String): String = {
     logger.debug(s"Preprocessing SQL: $sqlText")
@@ -227,27 +218,36 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
     val indexQueryAllPattern = """(?<!tantivy4spark_)indexqueryall\s*\(\s*'([^']*)'\s*\)""".r
 
     // First handle _indexall special case
-    val afterIndexAll = indexAllQueryPattern.replaceAllIn(sqlText, m => {
-      val queryString = m.group(1)
-      logger.debug(s"Converting _indexall indexquery '$queryString' to function call")
-      s"tantivy4spark_indexqueryall('$queryString')"
-    })
+    val afterIndexAll = indexAllQueryPattern.replaceAllIn(
+      sqlText,
+      m => {
+        val queryString = m.group(1)
+        logger.debug(s"Converting _indexall indexquery '$queryString' to function call")
+        s"tantivy4spark_indexqueryall('$queryString')"
+      }
+    )
 
     // Then replace regular indexquery operators
-    val afterIndexQuery = indexQueryPattern.replaceAllIn(afterIndexAll, m => {
-      val columnName = m.group(1).replace("`", "") // Remove backticks for function call
-      val queryString = m.group(2)
-      logger.debug(s"Converting $columnName indexquery '$queryString' to function call")
-      s"tantivy4spark_indexquery('$columnName', '$queryString')"
-    })
+    val afterIndexQuery = indexQueryPattern.replaceAllIn(
+      afterIndexAll,
+      m => {
+        val columnName  = m.group(1).replace("`", "") // Remove backticks for function call
+        val queryString = m.group(2)
+        logger.debug(s"Converting $columnName indexquery '$queryString' to function call")
+        s"tantivy4spark_indexquery('$columnName', '$queryString')"
+      }
+    )
 
     // Finally replace remaining indexqueryall functions (but not ones we already converted)
     // The negative lookbehind (?<!tantivy4spark_) prevents double conversion
-    val result = indexQueryAllPattern.replaceAllIn(afterIndexQuery, m => {
-      val queryString = m.group(1)
-      logger.debug(s"Converting indexqueryall('$queryString') to function call")
-      s"tantivy4spark_indexqueryall('$queryString')"
-    })
+    val result = indexQueryAllPattern.replaceAllIn(
+      afterIndexQuery,
+      m => {
+        val queryString = m.group(1)
+        logger.debug(s"Converting indexqueryall('$queryString') to function call")
+        s"tantivy4spark_indexqueryall('$queryString')"
+      }
+    )
 
     if (result != sqlText) {
       logger.debug(s"Preprocessed SQL: $result")

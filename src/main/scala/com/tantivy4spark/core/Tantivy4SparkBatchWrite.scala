@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.core
 
 import org.apache.spark.sql.connector.write.{BatchWrite, DataWriterFactory, PhysicalWriteInfo, WriterCommitMessage}
@@ -26,26 +25,27 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.slf4j.LoggerFactory
 
 class Tantivy4SparkBatchWrite(
-    transactionLog: TransactionLog,
-    tablePath: Path,
-    writeInfo: LogicalWriteInfo,
-    options: CaseInsensitiveStringMap,
-    hadoopConf: org.apache.hadoop.conf.Configuration
-) extends BatchWrite with org.apache.spark.sql.connector.write.Write {
+  transactionLog: TransactionLog,
+  tablePath: Path,
+  writeInfo: LogicalWriteInfo,
+  options: CaseInsensitiveStringMap,
+  hadoopConf: org.apache.hadoop.conf.Configuration)
+    extends BatchWrite
+    with org.apache.spark.sql.connector.write.Write {
 
   private val logger = LoggerFactory.getLogger(classOf[Tantivy4SparkBatchWrite])
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
-    
+
     // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
     val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
-    
+
     // Copy all tantivy4spark options to hadoop config to ensure they reach executors
     import scala.jdk.CollectionConverters._
     val serializedOptions = scala.collection.mutable.Map[String, String]()
     options.entrySet().asScala.foreach { entry =>
-      val key = entry.getKey
+      val key   = entry.getKey
       val value = entry.getValue
       if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
         val normalizedKey = if (key.startsWith("spark.indextables.")) {
@@ -53,14 +53,17 @@ class Tantivy4SparkBatchWrite(
         } else key
         enrichedHadoopConf.set(normalizedKey, value)
         serializedOptions.put(normalizedKey, value)
-        logger.info(s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***" else value}")
+        logger.info(
+          s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***"
+            else value}"
+        )
       }
     }
-    
+
     // Serialize hadoop config properties to avoid Configuration serialization issues
     val serializedHadoopConfig = {
       val props = scala.collection.mutable.Map[String, String]()
-      val iter = enrichedHadoopConf.iterator()
+      val iter  = enrichedHadoopConf.iterator()
       while (iter.hasNext) {
         val entry = iter.next()
         if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
@@ -72,13 +75,13 @@ class Tantivy4SparkBatchWrite(
       }
       props.toMap
     }
-    
+
     new Tantivy4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
     logger.info(s"Committing ${messages.length} writer messages")
-    
+
     // Extract partition columns from write options (same fix as StandardWrite)
     val partitionColumns = Option(options.get("__partition_columns")) match {
       case Some(partitionColumnsJson) =>
@@ -103,7 +106,7 @@ class Tantivy4SparkBatchWrite(
 
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // Log how many empty partitions were filtered out
@@ -115,7 +118,7 @@ class Tantivy4SparkBatchWrite(
     // Add all files in a single transaction (like Delta Lake)
     val version = transactionLog.addFiles(addActions)
     logger.info(s"Added ${addActions.length} files in transaction version $version")
-    
+
     logger.info(s"Successfully committed ${addActions.length} files")
   }
 
@@ -125,7 +128,7 @@ class Tantivy4SparkBatchWrite(
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: Tantivy4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                               => Seq.empty[AddAction]
     }
 
     // In a real implementation, we would delete the physical files here

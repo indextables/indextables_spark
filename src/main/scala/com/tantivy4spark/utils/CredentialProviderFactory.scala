@@ -25,9 +25,8 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.util.{Try, Success, Failure}
 
 /**
- * Factory for creating and managing AWS credential providers using reflection.
- * This approach avoids compile-time dependencies on specific AWS SDK versions,
- * allowing the system to work with any AWS SDK v1 or v2 at runtime.
+ * Factory for creating and managing AWS credential providers using reflection. This approach avoids compile-time
+ * dependencies on specific AWS SDK versions, allowing the system to work with any AWS SDK v1 or v2 at runtime.
  */
 object CredentialProviderFactory {
 
@@ -39,24 +38,24 @@ object CredentialProviderFactory {
   // Configuration key for custom credential provider class
   val CREDENTIAL_PROVIDER_CLASS_KEY = "spark.indextables.aws.credentialsProviderClass"
 
-  /**
-   * Simple credential holder to avoid AWS SDK dependencies
-   */
+  /** Simple credential holder to avoid AWS SDK dependencies */
   case class BasicAWSCredentials(
     accessKey: String,
     secretKey: String,
-    sessionToken: Option[String] = None
-  ) {
+    sessionToken: Option[String] = None) {
     def hasSessionToken: Boolean = sessionToken.exists(_.trim.nonEmpty)
   }
 
-  /**
-   * Create a credential provider using reflection.
-   * Returns AnyRef to avoid AWS SDK dependencies.
-   */
-  def createCredentialProvider(providerClassName: String, uri: URI, hadoopConf: Configuration): AnyRef = {
-    require(providerClassName != null && providerClassName.trim.nonEmpty,
-      "Credential provider class name cannot be null or empty")
+  /** Create a credential provider using reflection. Returns AnyRef to avoid AWS SDK dependencies. */
+  def createCredentialProvider(
+    providerClassName: String,
+    uri: URI,
+    hadoopConf: Configuration
+  ): AnyRef = {
+    require(
+      providerClassName != null && providerClassName.trim.nonEmpty,
+      "Credential provider class name cannot be null or empty"
+    )
 
     val cacheKey = generateCacheKey(providerClassName, uri, hadoopConf)
 
@@ -70,7 +69,12 @@ object CredentialProviderFactory {
     }
   }
 
-  private def createNewProvider(providerClassName: String, uri: URI, hadoopConf: Configuration, cacheKey: String): AnyRef = {
+  private def createNewProvider(
+    providerClassName: String,
+    uri: URI,
+    hadoopConf: Configuration,
+    cacheKey: String
+  ): AnyRef =
     Try {
       logger.info(s"Creating custom credential provider: $providerClassName")
 
@@ -89,8 +93,9 @@ object CredentialProviderFactory {
       if (!isValidCredentialProvider(provider)) {
         throw new IllegalArgumentException(
           s"Class $providerClassName does not implement a supported AWS credential provider interface. " +
-          "Must implement com.amazonaws.auth.AWSCredentialsProvider (v1) or " +
-          "software.amazon.awssdk.auth.credentials.AwsCredentialsProvider (v2)")
+            "Must implement com.amazonaws.auth.AWSCredentialsProvider (v1) or " +
+            "software.amazon.awssdk.auth.credentials.AwsCredentialsProvider (v2)"
+        )
       }
 
       // Cache the provider for future use
@@ -104,10 +109,15 @@ object CredentialProviderFactory {
         logger.error(s"Credential provider class not found: $providerClassName", ex)
         throw new IllegalArgumentException(s"Credential provider class not found: $providerClassName", ex)
       case Failure(ex: NoSuchMethodException) =>
-        logger.error(s"Credential provider class $providerClassName does not have required constructor (URI, Configuration)", ex)
+        logger.error(
+          s"Credential provider class $providerClassName does not have required constructor (URI, Configuration)",
+          ex
+        )
         throw new IllegalArgumentException(
           s"Credential provider class $providerClassName must have constructor with signature: " +
-          s"public $providerClassName(java.net.URI, org.apache.hadoop.conf.Configuration)", ex)
+            s"public $providerClassName(java.net.URI, org.apache.hadoop.conf.Configuration)",
+          ex
+        )
       case Failure(ex: IllegalArgumentException) =>
         // Re-throw IllegalArgumentException directly (e.g., from interface validation)
         throw ex
@@ -115,12 +125,8 @@ object CredentialProviderFactory {
         logger.error(s"Failed to instantiate credential provider: $providerClassName", ex)
         throw new RuntimeException(s"Failed to create credential provider: ${ex.getMessage}", ex)
     }
-  }
 
-  /**
-   * Extract credentials from a provider using reflection.
-   * Works with both v1 and v2 AWS SDK credential providers.
-   */
+  /** Extract credentials from a provider using reflection. Works with both v1 and v2 AWS SDK credential providers. */
   def extractCredentialsViaReflection(provider: AnyRef): BasicAWSCredentials = {
     require(provider != null, "Credential provider cannot be null")
 
@@ -132,10 +138,10 @@ object CredentialProviderFactory {
       // Then try v2 SDK approach
       else if (isV2Provider(provider)) {
         extractV2Credentials(provider)
-      }
-      else {
+      } else {
         throw new IllegalArgumentException(
-          s"Provider does not implement a supported AWS credential provider interface: ${provider.getClass.getName}")
+          s"Provider does not implement a supported AWS credential provider interface: ${provider.getClass.getName}"
+        )
       }
     } match {
       case Success(credentials) => credentials
@@ -145,24 +151,16 @@ object CredentialProviderFactory {
     }
   }
 
-  /**
-   * Check if provider implements AWS SDK v1 AWSCredentialsProvider interface
-   */
-  def isV1Provider(provider: AnyRef): Boolean = {
+  /** Check if provider implements AWS SDK v1 AWSCredentialsProvider interface */
+  def isV1Provider(provider: AnyRef): Boolean =
     isAssignableFrom(provider.getClass, "com.amazonaws.auth.AWSCredentialsProvider")
-  }
 
-  /**
-   * Check if provider implements AWS SDK v2 AwsCredentialsProvider interface
-   */
-  def isV2Provider(provider: AnyRef): Boolean = {
+  /** Check if provider implements AWS SDK v2 AwsCredentialsProvider interface */
+  def isV2Provider(provider: AnyRef): Boolean =
     isAssignableFrom(provider.getClass, "software.amazon.awssdk.auth.credentials.AwsCredentialsProvider")
-  }
 
-  /**
-   * Check if a class implements/extends a given interface/class by name (using reflection)
-   */
-  private def isAssignableFrom(clazz: Class[_], interfaceName: String): Boolean = {
+  /** Check if a class implements/extends a given interface/class by name (using reflection) */
+  private def isAssignableFrom(clazz: Class[_], interfaceName: String): Boolean =
     Try {
       val interfaceClass = Class.forName(interfaceName)
       interfaceClass.isAssignableFrom(clazz)
@@ -172,24 +170,18 @@ object CredentialProviderFactory {
         logger.debug(s"Interface/class not found on classpath: $interfaceName")
         false
     }
-  }
 
-  /**
-   * Validate that the provider implements a supported credential provider interface
-   */
-  private def isValidCredentialProvider(provider: AnyRef): Boolean = {
+  /** Validate that the provider implements a supported credential provider interface */
+  private def isValidCredentialProvider(provider: AnyRef): Boolean =
     isV1Provider(provider) || isV2Provider(provider)
-  }
 
-  /**
-   * Extract credentials from AWS SDK v1 provider
-   */
+  /** Extract credentials from AWS SDK v1 provider */
   private def extractV1Credentials(provider: AnyRef): BasicAWSCredentials = {
     logger.debug(s"Extracting credentials from v1 provider: ${provider.getClass.getName}")
 
     // Call getCredentials() method
     val getCredentialsMethod = provider.getClass.getMethod("getCredentials")
-    val credentials = getCredentialsMethod.invoke(provider).asInstanceOf[AnyRef]
+    val credentials          = getCredentialsMethod.invoke(provider).asInstanceOf[AnyRef]
 
     if (credentials == null) {
       throw new RuntimeException("Credential provider returned null credentials")
@@ -197,7 +189,7 @@ object CredentialProviderFactory {
 
     // Extract access key and secret key
     val getAWSAccessKeyId = credentials.getClass.getMethod("getAWSAccessKeyId")
-    val getAWSSecretKey = credentials.getClass.getMethod("getAWSSecretKey")
+    val getAWSSecretKey   = credentials.getClass.getMethod("getAWSSecretKey")
 
     val accessKey = getAWSAccessKeyId.invoke(credentials).asInstanceOf[String]
     val secretKey = getAWSSecretKey.invoke(credentials).asInstanceOf[String]
@@ -218,27 +210,26 @@ object CredentialProviderFactory {
       throw new RuntimeException("Secret key is null or empty")
     }
 
-    logger.debug(s"Successfully extracted v1 credentials. Access key: ${accessKey.take(4)}..., Session token: ${if (sessionToken.isDefined) "present" else "not present"}")
+    logger.debug(s"Successfully extracted v1 credentials. Access key: ${accessKey
+        .take(4)}..., Session token: ${if (sessionToken.isDefined) "present" else "not present"}")
 
     BasicAWSCredentials(accessKey, secretKey, sessionToken)
   }
 
-  /**
-   * Extract credentials from AWS SDK v2 provider
-   */
+  /** Extract credentials from AWS SDK v2 provider */
   private def extractV2Credentials(provider: AnyRef): BasicAWSCredentials = {
     logger.debug(s"Extracting credentials from v2 provider: ${provider.getClass.getName}")
 
     // Call resolveCredentials() method
     val resolveCredentialsMethod = provider.getClass.getMethod("resolveCredentials")
-    val credentials = resolveCredentialsMethod.invoke(provider).asInstanceOf[AnyRef]
+    val credentials              = resolveCredentialsMethod.invoke(provider).asInstanceOf[AnyRef]
 
     if (credentials == null) {
       throw new RuntimeException("Credential provider returned null credentials")
     }
 
     // Extract access key and secret key
-    val accessKeyId = credentials.getClass.getMethod("accessKeyId")
+    val accessKeyId     = credentials.getClass.getMethod("accessKeyId")
     val secretAccessKey = credentials.getClass.getMethod("secretAccessKey")
 
     val accessKey = accessKeyId.invoke(credentials).asInstanceOf[String]
@@ -260,30 +251,28 @@ object CredentialProviderFactory {
       throw new RuntimeException("Secret key is null or empty")
     }
 
-    logger.debug(s"Successfully extracted v2 credentials. Access key: ${accessKey.take(4)}..., Session token: ${if (sessionToken.isDefined) "present" else "not present"}")
+    logger.debug(s"Successfully extracted v2 credentials. Access key: ${accessKey
+        .take(4)}..., Session token: ${if (sessionToken.isDefined) "present" else "not present"}")
 
     BasicAWSCredentials(accessKey, secretKey, sessionToken)
   }
 
-  /**
-   * Generate cache key for provider instances
-   */
-  private def generateCacheKey(providerClassName: String, uri: URI, hadoopConf: Configuration): String = {
+  /** Generate cache key for provider instances */
+  private def generateCacheKey(
+    providerClassName: String,
+    uri: URI,
+    hadoopConf: Configuration
+  ): String =
     // Simple cache key based on class name and URI
     // In production, you might want to include relevant hadoop config values
     s"$providerClassName:${uri.toString}"
-  }
 
-  /**
-   * Clear the provider cache (useful for testing)
-   */
+  /** Clear the provider cache (useful for testing) */
   def clearCache(): Unit = {
     logger.debug("Clearing credential provider cache")
     providerCache.clear()
   }
 
-  /**
-   * Get the size of the provider cache (useful for monitoring)
-   */
+  /** Get the size of the provider cache (useful for monitoring) */
   def getCacheSize: Int = providerCache.size()
 }

@@ -30,8 +30,8 @@ import java.net.URI
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicAWSCredentials}
 
 /**
- * Test credential provider that records the URI passed to its constructor
- * and uses real AWS credentials loaded from ~/.aws/credentials.
+ * Test credential provider that records the URI passed to its constructor and uses real AWS credentials loaded from
+ * ~/.aws/credentials.
  */
 class URICapturingCredentialProvider(uri: URI, conf: Configuration) extends AWSCredentialsProvider {
 
@@ -39,28 +39,24 @@ class URICapturingCredentialProvider(uri: URI, conf: Configuration) extends AWSC
   URICapturingCredentialProvider.lastConstructorURI = Option(uri)
   URICapturingCredentialProvider.lastConstructorConfig = Option(conf)
 
-
   // Load real AWS credentials from ~/.aws/credentials
   private val (accessKey, secretKey) = loadAwsCredentials()
 
-  override def getCredentials(): AWSCredentials = {
+  override def getCredentials(): AWSCredentials =
     new BasicAWSCredentials(accessKey, secretKey)
-  }
 
   override def refresh(): Unit = {
     // No-op for test implementation
   }
 
-  private def loadAwsCredentials(): (String, String) = {
+  private def loadAwsCredentials(): (String, String) =
     try {
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (credFile.exists()) {
         val props = new Properties()
-        Using(new FileInputStream(credFile)) { fis =>
-          props.load(fis)
-        }
+        Using(new FileInputStream(credFile))(fis => props.load(fis))
 
         val accessKey = props.getProperty("aws_access_key_id")
         val secretKey = props.getProperty("aws_secret_access_key")
@@ -77,12 +73,11 @@ class URICapturingCredentialProvider(uri: URI, conf: Configuration) extends AWSC
       case e: Exception =>
         throw new RuntimeException(s"Error loading AWS credentials: ${e.getMessage}", e)
     }
-  }
 }
 
 object URICapturingCredentialProvider {
   // Static variables to capture constructor parameters for verification
-  var lastConstructorURI: Option[URI] = None
+  var lastConstructorURI: Option[URI]              = None
   var lastConstructorConfig: Option[Configuration] = None
 
   def reset(): Unit = {
@@ -90,22 +85,22 @@ object URICapturingCredentialProvider {
     lastConstructorConfig = None
   }
 
-  def getLastURI: Option[URI] = lastConstructorURI
+  def getLastURI: Option[URI]              = lastConstructorURI
   def getLastConfig: Option[Configuration] = lastConstructorConfig
 }
 
 /**
- * Real S3 integration test that verifies custom credential providers work end-to-end
- * and that the correct URI is passed to the provider constructor.
+ * Real S3 integration test that verifies custom credential providers work end-to-end and that the correct URI is passed
+ * to the provider constructor.
  */
 class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
 
   // Generate unique test run ID to avoid conflicts
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/custom-provider-test-$testRunId"
 
   // AWS credentials loaded from ~/.aws/credentials
@@ -146,19 +141,15 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     super.afterAll()
   }
 
-  /**
-   * Load AWS credentials from ~/.aws/credentials file.
-   */
-  private def loadAwsCredentials(): Option[(String, String)] = {
+  /** Load AWS credentials from ~/.aws/credentials file. */
+  private def loadAwsCredentials(): Option[(String, String)] =
     try {
-      val home = System.getProperty("user.home")
+      val home     = System.getProperty("user.home")
       val credFile = new File(s"$home/.aws/credentials")
 
       if (credFile.exists()) {
         val props = new Properties()
-        Using(new FileInputStream(credFile)) { fis =>
-          props.load(fis)
-        }
+        Using(new FileInputStream(credFile))(fis => props.load(fis))
 
         val accessKey = props.getProperty("aws_access_key_id")
         val secretKey = props.getProperty("aws_secret_access_key")
@@ -178,11 +169,10 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
         println(s"⚠️  Error loading AWS credentials: ${e.getMessage}")
         None
     }
-  }
 
   /**
-   * Validate that a URI represents a table path and not a file path.
-   * Table paths should not end with file extensions or contain file-specific patterns.
+   * Validate that a URI represents a table path and not a file path. Table paths should not end with file extensions or
+   * contain file-specific patterns.
    */
   private def validateTablePath(uri: URI, testDescription: String): Unit = {
     val uriPath = uri.getPath
@@ -194,15 +184,15 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     uriPath should not endWith ".checkpoint"
     uriPath should not include "part-"
     uriPath should not include ".log"
-    uriPath should not include "000000"  // Common in split filenames
+    uriPath should not include "000000" // Common in split filenames
 
     // Additional file pattern checks
     val fileName = uriPath.split("/").last
     if (fileName.nonEmpty && !fileName.equals("_transaction_log")) {
       // If it's not a directory path and not _transaction_log, validate it's a table name
-      fileName should not include "."  // Table names shouldn't have extensions
+      fileName should not include "." // Table names shouldn't have extensions
       fileName should not startWith "part-"
-      fileName should not startWith "."  // Hidden files
+      fileName should not startWith "." // Hidden files
     }
 
     // Positive validation: ensure it looks like a valid table path
@@ -211,19 +201,16 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     println(s"✅ VALIDATED ($testDescription): URI '$uri' is a table path, not a file path")
   }
 
-  /**
-   * Clean up test data from S3.
-   */
-  private def cleanupTestData(): Unit = {
-    try {
+  /** Clean up test data from S3. */
+  private def cleanupTestData(): Unit =
+    try
       // For now, skip cleanup since we're testing direct S3 access via tantivy4java
       // Test data uses unique random paths to avoid conflicts
       println(s"ℹ️  Test data cleanup skipped (unique paths used): $testBasePath")
-    } catch {
+    catch {
       case e: Exception =>
         println(s"⚠️  Warning: Could not clean up test data: ${e.getMessage}")
     }
-  }
 
   test("Real S3: Custom credential provider receives correct URI and works end-to-end") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
@@ -231,19 +218,21 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     val tablePath = s"$testBasePath/custom-provider-uri-test"
 
     // Create test data
-    val data = spark.range(100).select(
-      col("id"),
-      concat(lit("Document "), col("id")).as("title"),
-      concat(lit("Content for document "), col("id")).as("content"),
-      (col("id") % 5).cast("string").as("category")
-    )
+    val data = spark
+      .range(100)
+      .select(
+        col("id"),
+        concat(lit("Document "), col("id")).as("title"),
+        concat(lit("Content for document "), col("id")).as("content"),
+        (col("id") % 5).cast("string").as("category")
+      )
 
     println(s"✍️  Writing ${data.count()} records to S3 using custom credential provider...")
 
     // Configure to use our custom credential provider
     val writeOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // Write to real S3 using custom credential provider
@@ -261,7 +250,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
 
     // The URI should be the normalized table path, not an individual split file path
     // Note: During read operations in executors, the scheme gets normalized from s3a:// to s3://
-    val capturedPath = capturedURI.get.toString
+    val capturedPath     = capturedURI.get.toString
     val expectedTableURI = new URI(tablePath.replace("s3a://", "s3://"))
     capturedURI.get shouldBe expectedTableURI
 
@@ -286,7 +275,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     val readOptions = Map(
       "spark.indextables.aws.accessKey" -> accessKey,
       "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"    -> S3_REGION
     )
 
     val result = spark.read
@@ -311,19 +300,21 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
 
     val s3aPath = s"$testBasePath/scheme-test-s3a"
-    val s3Path = s3aPath.replace("s3a://", "s3://")
+    val s3Path  = s3aPath.replace("s3a://", "s3://")
 
     // Create test data
-    val data = spark.range(50).select(
-      col("id"),
-      concat(lit("Scheme test document "), col("id")).as("title")
-    )
+    val data = spark
+      .range(50)
+      .select(
+        col("id"),
+        concat(lit("Scheme test document "), col("id")).as("title")
+      )
 
     println(s"✍️  Testing custom credential provider with different S3 schemes...")
 
     val writeOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // Write using s3a:// scheme
@@ -355,7 +346,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     val readOptions = Map(
       "spark.indextables.aws.accessKey" -> accessKey,
       "spark.indextables.aws.secretKey" -> secretKey,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"    -> S3_REGION
     )
 
     val result = spark.read
@@ -379,10 +370,12 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     val tablePath = s"$testBasePath/precedence-test"
 
     // Create test data
-    val data = spark.range(25).select(
-      col("id"),
-      concat(lit("Precedence test "), col("id")).as("content")
-    )
+    val data = spark
+      .range(25)
+      .select(
+        col("id"),
+        concat(lit("Precedence test "), col("id")).as("content")
+      )
 
     println(s"✍️  Testing configuration precedence with custom credential provider...")
 
@@ -390,7 +383,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // even if we have conflicting hadoop config values
     val writeOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     URICapturingCredentialProvider.reset()
@@ -413,7 +406,7 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Verify data was written successfully
     val readOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     val result = spark.read
@@ -435,16 +428,18 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     val tablePath = s"$testBasePath/caching-test"
 
     // Create test data
-    val data = spark.range(30).select(
-      col("id"),
-      concat(lit("Cache test "), col("id")).as("content")
-    )
+    val data = spark
+      .range(30)
+      .select(
+        col("id"),
+        concat(lit("Cache test "), col("id")).as("content")
+      )
 
     println(s"✍️  Testing custom credential provider caching...")
 
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // Record initial cache size (may not be 0 if other tests have run)
@@ -503,27 +498,33 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Configure to use our custom credential provider for merge operations
     val mergeOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // Create multiple small datasets to generate multiple split files for merging
-    val data1 = spark.range(20).select(
-      col("id"),
-      concat(lit("Merge test document "), col("id")).as("title"),
-      lit("batch1").as("batch")
-    )
+    val data1 = spark
+      .range(20)
+      .select(
+        col("id"),
+        concat(lit("Merge test document "), col("id")).as("title"),
+        lit("batch1").as("batch")
+      )
 
-    val data2 = spark.range(20, 40).select(
-      col("id"),
-      concat(lit("Merge test document "), col("id")).as("title"),
-      lit("batch2").as("batch")
-    )
+    val data2 = spark
+      .range(20, 40)
+      .select(
+        col("id"),
+        concat(lit("Merge test document "), col("id")).as("title"),
+        lit("batch2").as("batch")
+      )
 
-    val data3 = spark.range(40, 60).select(
-      col("id"),
-      concat(lit("Merge test document "), col("id")).as("title"),
-      lit("batch3").as("batch")
-    )
+    val data3 = spark
+      .range(40, 60)
+      .select(
+        col("id"),
+        concat(lit("Merge test document "), col("id")).as("title"),
+        lit("batch3").as("batch")
+      )
 
     // Write first batch
     println(s"📝 Writing batch 1...")
@@ -554,9 +555,9 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
     // Configure Spark session with custom credential provider for merge operations
     // Store original values to restore later
     val originalCredProviderClass = spark.conf.getOption("spark.indextables.aws.credentialsProviderClass")
-    val originalRegion = spark.conf.getOption("spark.indextables.aws.region")
-    val originalAccessKey = spark.conf.getOption("spark.indextables.aws.accessKey")
-    val originalSecretKey = spark.conf.getOption("spark.indextables.aws.secretKey")
+    val originalRegion            = spark.conf.getOption("spark.indextables.aws.region")
+    val originalAccessKey         = spark.conf.getOption("spark.indextables.aws.accessKey")
+    val originalSecretKey         = spark.conf.getOption("spark.indextables.aws.secretKey")
 
     try {
       // Set custom credential provider configuration in Spark session
@@ -596,26 +597,26 @@ class CustomCredentialProviderRealS3IntegrationTest extends RealS3TestBase {
       // Clean up: restore original Spark configuration
       originalCredProviderClass match {
         case Some(value) => spark.conf.set("spark.indextables.aws.credentialsProviderClass", value)
-        case None => spark.conf.unset("spark.indextables.aws.credentialsProviderClass")
+        case None        => spark.conf.unset("spark.indextables.aws.credentialsProviderClass")
       }
       originalRegion match {
         case Some(value) => spark.conf.set("spark.indextables.aws.region", value)
-        case None => spark.conf.unset("spark.indextables.aws.region")
+        case None        => spark.conf.unset("spark.indextables.aws.region")
       }
       originalAccessKey match {
         case Some(value) => spark.conf.set("spark.indextables.aws.accessKey", value)
-        case None => spark.conf.unset("spark.indextables.aws.accessKey")
+        case None        => spark.conf.unset("spark.indextables.aws.accessKey")
       }
       originalSecretKey match {
         case Some(value) => spark.conf.set("spark.indextables.aws.secretKey", value)
-        case None => spark.conf.unset("spark.indextables.aws.secretKey")
+        case None        => spark.conf.unset("spark.indextables.aws.secretKey")
       }
     }
 
     // Verify the data integrity after merge using the custom credential provider configuration
     val readOptions = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[URICapturingCredentialProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     val result = spark.read

@@ -20,19 +20,19 @@ package com.tantivy4spark.io
 import org.scalatest.funsuite.AnyFunSuite
 
 /**
- * Simple verification test for multipart upload functionality.
- * This test doesn't require actual S3 connectivity but verifies the implementation structure.
+ * Simple verification test for multipart upload functionality. This test doesn't require actual S3 connectivity but
+ * verifies the implementation structure.
  */
 class MultipartUploadVerificationTest extends AnyFunSuite {
 
   test("S3MultipartConfig should provide sensible defaults") {
     val config = S3MultipartConfig.default
 
-    assert(config.partSize == 64L * 1024 * 1024) // 64MB parts
+    assert(config.partSize == 64L * 1024 * 1024)            // 64MB parts
     assert(config.multipartThreshold == 100L * 1024 * 1024) // 100MB threshold
-    assert(config.maxConcurrency == 4) // 4 parallel uploads
-    assert(config.maxRetries == 3) // 3 retry attempts
-    assert(config.baseRetryDelay == 1000) // 1 second base delay
+    assert(config.maxConcurrency == 4)                      // 4 parallel uploads
+    assert(config.maxRetries == 3)                          // 3 retry attempts
+    assert(config.baseRetryDelay == 1000)                   // 1 second base delay
 
     println(s"✅ Default config - Part size: ${config.partSize / (1024 * 1024)}MB")
     println(s"✅ Default config - Threshold: ${config.multipartThreshold / (1024 * 1024)}MB")
@@ -42,11 +42,11 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
   test("forLargeMergedSplits config should be optimized for merge operations") {
     val config = S3MultipartConfig.forLargeMergedSplits
 
-    assert(config.partSize == 128L * 1024 * 1024) // 128MB parts for large merges
+    assert(config.partSize == 128L * 1024 * 1024)           // 128MB parts for large merges
     assert(config.multipartThreshold == 200L * 1024 * 1024) // 200MB threshold
-    assert(config.maxConcurrency == 6) // Higher concurrency
-    assert(config.maxRetries == 5) // More retries for critical operations
-    assert(config.uploadTimeout.toMinutes == 60) // Longer timeout
+    assert(config.maxConcurrency == 6)                      // Higher concurrency
+    assert(config.maxRetries == 5)                          // More retries for critical operations
+    assert(config.uploadTimeout.toMinutes == 60)            // Longer timeout
 
     println(s"✅ Merge config - Part size: ${config.partSize / (1024 * 1024)}MB")
     println(s"✅ Merge config - Threshold: ${config.multipartThreshold / (1024 * 1024)}MB")
@@ -64,7 +64,9 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
     assert(config.maxConcurrency.contains(8))
     assert(config.maxRetries.contains(5))
 
-    println(s"✅ CloudStorageConfig multipart threshold: ${config.multipartUploadThreshold.map(_ / (1024 * 1024)).getOrElse("default")}MB")
+    println(
+      s"✅ CloudStorageConfig multipart threshold: ${config.multipartUploadThreshold.map(_ / (1024 * 1024)).getOrElse("default")}MB"
+    )
     println(s"✅ CloudStorageConfig max concurrency: ${config.maxConcurrency.getOrElse("default")}")
   }
 
@@ -76,7 +78,7 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
       uploadId = Some("multipart-upload-123"),
       partCount = 5,
       totalSize = 320L * 1024 * 1024, // 320MB
-      uploadTimeMs = 30000, // 30 seconds
+      uploadTimeMs = 30000,           // 30 seconds
       strategy = "multipart"
     )
 
@@ -94,8 +96,8 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
   test("multipart upload should be enabled for files above threshold") {
     val threshold = 100L * 1024 * 1024 // 100MB
 
-    val smallFile = 50L * 1024 * 1024 // 50MB
-    val largeFile = 150L * 1024 * 1024 // 150MB
+    val smallFile   = 50L * 1024 * 1024       // 50MB
+    val largeFile   = 150L * 1024 * 1024      // 150MB
     val massiveFile = 5L * 1024 * 1024 * 1024 // 5GB
 
     assert(smallFile < threshold, "Small file should use single-part upload")
@@ -105,7 +107,8 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
     println(s"✅ File size validation:")
     println(s"  - ${smallFile / (1024 * 1024)}MB file: ${if (smallFile < threshold) "single-part" else "multipart"}")
     println(s"  - ${largeFile / (1024 * 1024)}MB file: ${if (largeFile >= threshold) "multipart" else "single-part"}")
-    println(s"  - ${massiveFile / (1024 * 1024 * 1024)}GB merged split: ${if (massiveFile >= threshold) "multipart" else "single-part"}")
+    println(s"  - ${massiveFile / (1024 * 1024 * 1024)}GB merged split: ${if (massiveFile >= threshold) "multipart"
+      else "single-part"}")
   }
 
   test("optimal part size calculation should respect AWS limits") {
@@ -114,13 +117,13 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
     // - Maximum 10,000 parts per upload
     // - Maximum 5TB per upload
 
-    val minPartSize = 5L * 1024 * 1024 // 5MB
-    val maxParts = 10000L
+    val minPartSize = 5L * 1024 * 1024               // 5MB
+    val maxParts    = 10000L
     val maxFileSize = 5L * 1024 * 1024 * 1024 * 1024 // 5TB
 
     // For a 5GB file with 64MB parts: 5120MB / 64MB = 80 parts (OK)
-    val file5GB = 5L * 1024 * 1024 * 1024
-    val parts64MB = 64L * 1024 * 1024
+    val file5GB         = 5L * 1024 * 1024 * 1024
+    val parts64MB       = 64L * 1024 * 1024
     val calculatedParts = (file5GB + parts64MB - 1) / parts64MB
 
     assert(calculatedParts < maxParts, "Part count should be within AWS limits")

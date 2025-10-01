@@ -25,13 +25,12 @@ import org.apache.spark.unsafe.types.UTF8String
 
 /**
  * Expression for the INDEXQUERYALL function that represents a Tantivy query across all fields.
- * 
+ *
  * Usage: indexqueryall('query_string')
- * 
- * This expression is designed for pushdown to the Tantivy data source to search across
- * all fields without requiring explicit column specification. When evaluated in Spark 
- * (fallback), it returns true for all rows since the actual filtering should happen 
- * at the data source level.
+ *
+ * This expression is designed for pushdown to the Tantivy data source to search across all fields without requiring
+ * explicit column specification. When evaluated in Spark (fallback), it returns true for all rows since the actual
+ * filtering should happen at the data source level.
  */
 case class IndexQueryAllExpression(child: Expression) extends UnaryExpression with Predicate {
 
@@ -42,60 +41,53 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
   // Mark as non-deterministic to prevent Spark from optimizing away the filter
   // This ensures the V2IndexQueryExpressionRule gets a chance to process it
   override lazy val deterministic: Boolean = false
-  
+
   override def prettyName: String = "indexqueryall"
-  
+
   override def sql: String = s"indexqueryall(${child.sql})"
-  
+
   override def toString: String = s"indexqueryall($child)"
-  
+
   // For pushdown, we primarily care about the structure, not evaluation
-  override def nullSafeEval(input: Any): Any = {
+  override def nullSafeEval(input: Any): Any =
     // This should rarely be called since the expression should be pushed down
     // If called, return true as a safe fallback (filtering happens at source)
     true
-  }
-  
+
   // Override eval to handle cases where child expressions cannot be evaluated
-  override def eval(input: org.apache.spark.sql.catalyst.InternalRow): Any = {
+  override def eval(input: org.apache.spark.sql.catalyst.InternalRow): Any =
     // This should rarely be called since the expression should be pushed down
     // If called, return true as a safe fallback (filtering happens at source)
     true
-  }
-  
-  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
+
+  override protected def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode =
     // Code generation for the rare case this isn't pushed down
     // Return a literal true value
     ExprCode.forNonNullValue(JavaCode.literal("true", dataType))
-  }
-  
-  /**
-   * Extract the query string from the child expression.
-   */
+
+  /** Extract the query string from the child expression. */
   def getQueryString: Option[String] = child match {
     case Literal(value: UTF8String, StringType) => Some(value.toString)
-    case Literal(value: String, StringType) => Some(value)
-    case _ => None
+    case Literal(value: String, StringType)     => Some(value)
+    case _                                      => None
   }
-  
-  /**
-   * Check if this expression can be converted to a pushdown filter.
-   */
-  def canPushDown: Boolean = {
+
+  /** Check if this expression can be converted to a pushdown filter. */
+  def canPushDown: Boolean =
     getQueryString.isDefined
-  }
-  
+
   override def checkInputDataTypes(): TypeCheckResult = {
     val childCheck = child.dataType match {
       case StringType => TypeCheckResult.TypeCheckSuccess
-      case _ => TypeCheckResult.TypeCheckFailure(
-        s"indexqueryall function requires a string literal argument, got ${child.dataType}")
+      case _ =>
+        TypeCheckResult.TypeCheckFailure(
+          s"indexqueryall function requires a string literal argument, got ${child.dataType}"
+        )
     }
-    
+
     childCheck
   }
-  
-  override protected def withNewChildInternal(newChild: Expression): IndexQueryAllExpression = {
+
+  override protected def withNewChildInternal(newChild: Expression): IndexQueryAllExpression =
     copy(child = newChild)
-  }
 }

@@ -215,7 +215,17 @@
                         <arg>-feature</arg>
                         <arg>-unchecked</arg>
                         <arg>-Xlint</arg>
+                        <arg>-Ywarn-unused:imports</arg>
+                        <arg>-Yrangepos</arg>
+                        <arg>-P:semanticdb:targetroot:${project.build.directory}/classes/META-INF/semanticdb</arg>
                     </args>
+                    <compilerPlugins>
+                        <compilerPlugin>
+                            <groupId>org.scalameta</groupId>
+                            <artifactId>semanticdb-scalac_2.12</artifactId>
+                            <version>4.8.15</version>
+                        </compilerPlugin>
+                    </compilerPlugins>
                 </configuration>
             </plugin>
 
@@ -298,6 +308,81 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Spotless code formatter with Scalafmt -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>2.43.0</version>
+                <configuration>
+                    <scala>
+                        <includes>
+                            <include>src/main/scala/**/*.scala</include>
+                            <include>src/test/scala/**/*.scala</include>
+                        </includes>
+                        <scalafmt>
+                            <version>3.7.17</version>
+                            <file>${project.basedir}/.scalafmt.conf</file>
+                        </scalafmt>
+                    </scala>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <phase>verify</phase>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Exec plugin to run Scalafix via coursier -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>scalafix</id>
+                        <phase>none</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>sh</executable>
+                            <arguments>
+                                <argument>-c</argument>
+                                <argument>
+                                    cs launch scalafix:0.11.1 --main scalafix.cli.Cli -- \
+                                    --config=${project.basedir}/.scalafix.conf \
+                                    --rules=OrganizeImports \
+                                    src/main/scala src/test/scala
+                                </argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>scalafix-check</id>
+                        <phase>none</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>sh</executable>
+                            <arguments>
+                                <argument>-c</argument>
+                                <argument>
+                                    cs launch scalafix:0.11.1 --main scalafix.cli.Cli -- \
+                                    --check \
+                                    --config=${project.basedir}/.scalafix.conf \
+                                    --rules=OrganizeImports \
+                                    src/main/scala src/test/scala
+                                </argument>
+                            </arguments>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

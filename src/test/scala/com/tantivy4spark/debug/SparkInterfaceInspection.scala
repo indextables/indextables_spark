@@ -7,7 +7,7 @@ object SparkInterfaceInspection {
   def main(args: Array[String]): Unit = {
     // Get all methods from SupportsPushDownAggregates interface
     val interfaceClass = classOf[SupportsPushDownAggregates]
-    val methods = interfaceClass.getMethods
+    val methods        = interfaceClass.getMethods
 
     println("=== SupportsPushDownAggregates Interface Methods ===")
     methods.foreach { method =>

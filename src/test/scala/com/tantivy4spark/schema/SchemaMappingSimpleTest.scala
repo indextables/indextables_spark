@@ -21,28 +21,30 @@ import com.tantivy4spark.TestBase
 import com.tantivy4spark.schema.SchemaMapping._
 import org.apache.spark.sql.types._
 
-/**
- * Simple tests for the schema mapping functionality that don't require tantivy4java mocking
- */
+/** Simple tests for the schema mapping functionality that don't require tantivy4java mocking */
 class SchemaMappingSimpleTest extends TestBase {
 
   test("SchemaMapping.Write should handle new dataset with valid schema") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = true),
-      StructField("salary", DoubleType, nullable = true),
-      StructField("active", BooleanType, nullable = false)
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = true),
+        StructField("salary", DoubleType, nullable = true),
+        StructField("active", BooleanType, nullable = false)
+      )
+    )
 
     val result = SchemaMapping.Write.handleNewDataset(sparkSchema)
     result should equal(sparkSchema)
   }
 
   test("SchemaMapping.Write should reject new dataset with unsupported types") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("metadata", MapType(StringType, StringType), nullable = true)
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("metadata", MapType(StringType, StringType), nullable = true)
+      )
+    )
 
     an[UnsupportedOperationException] should be thrownBy {
       SchemaMapping.Write.handleNewDataset(sparkSchema)
@@ -50,10 +52,12 @@ class SchemaMappingSimpleTest extends TestBase {
   }
 
   test("SchemaMapping.Write should reject new dataset with array types") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("tags", ArrayType(StringType), nullable = true)
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("tags", ArrayType(StringType), nullable = true)
+      )
+    )
 
     an[UnsupportedOperationException] should be thrownBy {
       SchemaMapping.Write.handleNewDataset(sparkSchema)
@@ -61,35 +65,43 @@ class SchemaMappingSimpleTest extends TestBase {
   }
 
   test("SchemaMapping.Write should handle existing dataset with matching schema") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = true)
-    ))
-    
-    val transactionLogSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("name", StringType, nullable = true)
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = true)
+      )
+    )
+
+    val transactionLogSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("name", StringType, nullable = true)
+      )
+    )
 
     val result = SchemaMapping.Write.handleExistingDataset(sparkSchema, transactionLogSchema)
     result should equal(transactionLogSchema)
   }
 
   test("SchemaMapping.Write should reject existing dataset with different field types") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", LongType, nullable = false), // Different type
-      StructField("name", StringType, nullable = true)
-    ))
-    
-    val transactionLogSchema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false), // Original type
-      StructField("name", StringType, nullable = true)
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", LongType, nullable = false), // Different type
+        StructField("name", StringType, nullable = true)
+      )
+    )
+
+    val transactionLogSchema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false), // Original type
+        StructField("name", StringType, nullable = true)
+      )
+    )
 
     val exception = the[SchemaConflictException] thrownBy {
       SchemaMapping.Write.handleExistingDataset(sparkSchema, transactionLogSchema)
     }
-    
+
     exception.message should include("Schema conflict detected")
     exception.message should include("Field 'id' type mismatch")
   }
@@ -104,7 +116,7 @@ class SchemaMappingSimpleTest extends TestBase {
     SchemaMapping.isSupportedSparkType(DateType) should be(true)
     SchemaMapping.isSupportedSparkType(TimestampType) should be(true)
     SchemaMapping.isSupportedSparkType(BinaryType) should be(true)
-    
+
     // Unsupported types
     SchemaMapping.isSupportedSparkType(ArrayType(StringType)) should be(false)
     SchemaMapping.isSupportedSparkType(MapType(StringType, StringType)) should be(false)
@@ -113,7 +125,7 @@ class SchemaMappingSimpleTest extends TestBase {
 
   test("SchemaMapping utility methods should convert Spark types to Tantivy field types") {
     import com.tantivy4java.FieldType
-    
+
     SchemaMapping.sparkTypeToTantivyFieldType(StringType) should be(FieldType.TEXT)
     SchemaMapping.sparkTypeToTantivyFieldType(IntegerType) should be(FieldType.INTEGER)
     SchemaMapping.sparkTypeToTantivyFieldType(LongType) should be(FieldType.INTEGER)
@@ -126,22 +138,26 @@ class SchemaMappingSimpleTest extends TestBase {
   }
 
   test("SchemaMapping should provide detailed error message for schema conflicts") {
-    val sparkSchema = StructType(Seq(
-      StructField("id", LongType, nullable = true),
-      StructField("name", IntegerType, nullable = false), // Type conflict
-      StructField("extra", StringType, nullable = true)   // Extra field
-    ))
-    
-    val transactionLogSchema = StructType(Seq(
-      StructField("id", LongType, nullable = false),      // Nullability conflict
-      StructField("name", StringType, nullable = false),  // Type conflict
-      StructField("missing", StringType, nullable = true) // Missing field in spark schema
-    ))
+    val sparkSchema = StructType(
+      Seq(
+        StructField("id", LongType, nullable = true),
+        StructField("name", IntegerType, nullable = false), // Type conflict
+        StructField("extra", StringType, nullable = true)   // Extra field
+      )
+    )
+
+    val transactionLogSchema = StructType(
+      Seq(
+        StructField("id", LongType, nullable = false),      // Nullability conflict
+        StructField("name", StringType, nullable = false),  // Type conflict
+        StructField("missing", StringType, nullable = true) // Missing field in spark schema
+      )
+    )
 
     val exception = the[SchemaConflictException] thrownBy {
       SchemaMapping.Write.handleExistingDataset(sparkSchema, transactionLogSchema)
     }
-    
+
     exception.message should include("Field 'id' nullability mismatch")
     exception.message should include("Field 'name' type mismatch")
     exception.message should include("Field 'extra' exists in first schema but not second")
@@ -150,22 +166,24 @@ class SchemaMappingSimpleTest extends TestBase {
 
   test("SchemaMapping should handle empty schemas") {
     val emptySparkSchema = StructType(Seq.empty)
-    val result = SchemaMapping.Write.handleNewDataset(emptySparkSchema)
+    val result           = SchemaMapping.Write.handleNewDataset(emptySparkSchema)
     result should equal(emptySparkSchema)
   }
 
   test("SchemaMapping should handle schema with all supported types") {
-    val allTypesSchema = StructType(Seq(
-      StructField("str", StringType, nullable = true),
-      StructField("int", IntegerType, nullable = false),
-      StructField("long", LongType, nullable = true),
-      StructField("double", DoubleType, nullable = false),
-      StructField("float", FloatType, nullable = true),
-      StructField("bool", BooleanType, nullable = false),
-      StructField("date", DateType, nullable = true),
-      StructField("timestamp", TimestampType, nullable = false),
-      StructField("binary", BinaryType, nullable = true)
-    ))
+    val allTypesSchema = StructType(
+      Seq(
+        StructField("str", StringType, nullable = true),
+        StructField("int", IntegerType, nullable = false),
+        StructField("long", LongType, nullable = true),
+        StructField("double", DoubleType, nullable = false),
+        StructField("float", FloatType, nullable = true),
+        StructField("bool", BooleanType, nullable = false),
+        StructField("date", DateType, nullable = true),
+        StructField("timestamp", TimestampType, nullable = false),
+        StructField("binary", BinaryType, nullable = true)
+      )
+    )
 
     val result = SchemaMapping.Write.handleNewDataset(allTypesSchema)
     result should equal(allTypesSchema)

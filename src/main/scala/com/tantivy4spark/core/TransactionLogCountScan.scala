@@ -28,42 +28,37 @@ import com.tantivy4spark.transaction.TransactionLog
 import org.slf4j.LoggerFactory
 
 /**
- * Specialized scan that returns count directly from transaction log for optimal performance.
- * This is used when we can optimize COUNT(*) queries without any non-partition filters.
+ * Specialized scan that returns count directly from transaction log for optimal performance. This is used when we can
+ * optimize COUNT(*) queries without any non-partition filters.
  */
 class TransactionLogCountScan(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  config: Map[String, String]  // Direct config instead of broadcast
+  config: Map[String, String] // Direct config instead of broadcast
 ) extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountScan])
 
-  override def readSchema(): StructType = {
+  override def readSchema(): StructType =
     // Return schema with a single count column
     StructType(Seq(StructField("count", LongType, nullable = false)))
-  }
 
-  override def toBatch: Batch = {
+  override def toBatch: Batch =
     new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, config)
-  }
 
-  override def description(): String = {
+  override def description(): String =
     s"TransactionLogCountScan(path=${transactionLog.getTablePath()})"
-  }
 }
 
-/**
- * Batch implementation for transaction log count.
- */
+/** Batch implementation for transaction log count. */
 class TransactionLogCountBatch(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  config: Map[String, String]  // Direct config instead of broadcast
+  config: Map[String, String] // Direct config instead of broadcast
 ) extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountBatch])
@@ -74,9 +69,7 @@ class TransactionLogCountBatch(
     Array(TransactionLogCountPartition(precomputedCount))
   }
 
-  /**
-   * Compute the count from transaction log on the driver side.
-   */
+  /** Compute the count from transaction log on the driver side. */
   private def computeCountFromTransactionLog(transactionLog: TransactionLog, pushedFilters: Array[Filter]): Long = {
     println(s"🔍 TRANSACTION LOG COUNT: Computing count from transaction log on driver")
     println(s"🔍 TRANSACTION LOG COUNT: Number of pushed filters: ${pushedFilters.length}")
@@ -104,15 +97,17 @@ class TransactionLogCountBatch(
       }
 
       val filteredCount = matchingFiles.map { file =>
-        file.numRecords.map { (count: Any) =>
-          // Handle any numeric type and convert to Long
-          count match {
-            case l: Long => l
-            case i: Int => i.toLong
-            case i: java.lang.Integer => i.toLong
-            case _ => count.toString.toLong
+        file.numRecords
+          .map { (count: Any) =>
+            // Handle any numeric type and convert to Long
+            count match {
+              case l: Long              => l
+              case i: Int               => i.toLong
+              case i: java.lang.Integer => i.toLong
+              case _                    => count.toString.toLong
+            }
           }
-        }.getOrElse(0L)
+          .getOrElse(0L)
       }.sum
 
       println(s"🔍 TRANSACTION LOG COUNT: Filtered count (${partitionFilters.length} partition filters): $filteredCount")
@@ -120,44 +115,38 @@ class TransactionLogCountBatch(
     }
   }
 
-  /**
-   * Check if a filter is a partition filter.
-   */
+  /** Check if a filter is a partition filter. */
   private def isPartitionFilter(filter: Filter, transactionLog: TransactionLog): Boolean = {
-    val partitionColumns = transactionLog.getPartitionColumns()
+    val partitionColumns  = transactionLog.getPartitionColumns()
     val referencedColumns = getFilterReferencedColumns(filter)
     referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)
   }
 
-  /**
-   * Get columns referenced by a filter.
-   */
+  /** Get columns referenced by a filter. */
   private def getFilterReferencedColumns(filter: Filter): Set[String] = {
     import org.apache.spark.sql.sources._
     filter match {
-      case EqualTo(attribute, _) => Set(attribute)
-      case EqualNullSafe(attribute, _) => Set(attribute)
-      case GreaterThan(attribute, _) => Set(attribute)
+      case EqualTo(attribute, _)            => Set(attribute)
+      case EqualNullSafe(attribute, _)      => Set(attribute)
+      case GreaterThan(attribute, _)        => Set(attribute)
       case GreaterThanOrEqual(attribute, _) => Set(attribute)
-      case LessThan(attribute, _) => Set(attribute)
-      case LessThanOrEqual(attribute, _) => Set(attribute)
-      case In(attribute, _) => Set(attribute)
-      case IsNull(attribute) => Set(attribute)
-      case IsNotNull(attribute) => Set(attribute)
-      case StringStartsWith(attribute, _) => Set(attribute)
-      case StringEndsWith(attribute, _) => Set(attribute)
-      case StringContains(attribute, _) => Set(attribute)
-      case And(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Or(left, right) => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
-      case Not(child) => getFilterReferencedColumns(child)
-      case _ => Set.empty[String]
+      case LessThan(attribute, _)           => Set(attribute)
+      case LessThanOrEqual(attribute, _)    => Set(attribute)
+      case In(attribute, _)                 => Set(attribute)
+      case IsNull(attribute)                => Set(attribute)
+      case IsNotNull(attribute)             => Set(attribute)
+      case StringStartsWith(attribute, _)   => Set(attribute)
+      case StringEndsWith(attribute, _)     => Set(attribute)
+      case StringContains(attribute, _)     => Set(attribute)
+      case And(left, right)                 => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Or(left, right)                  => getFilterReferencedColumns(left) ++ getFilterReferencedColumns(right)
+      case Not(child)                       => getFilterReferencedColumns(child)
+      case _                                => Set.empty[String]
     }
   }
 
-  /**
-   * Check if a file matches the given partition filters.
-   */
-  private def matchesPartitionFilters(file: com.tantivy4spark.transaction.AddAction, filters: Array[Filter]): Boolean = {
+  /** Check if a file matches the given partition filters. */
+  private def matchesPartitionFilters(file: com.tantivy4spark.transaction.AddAction, filters: Array[Filter]): Boolean =
     if (filters.isEmpty) {
       true
     } else {
@@ -167,11 +156,8 @@ class TransactionLogCountBatch(
       // Let's implement a simple match logic for now
       filters.forall(matchesFilter(file, _))
     }
-  }
 
-  /**
-   * Check if a file matches a single filter.
-   */
+  /** Check if a file matches a single filter. */
   private def matchesFilter(file: com.tantivy4spark.transaction.AddAction, filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
     filter match {
@@ -189,60 +175,52 @@ class TransactionLogCountBatch(
     }
   }
 
-  override def createReaderFactory(): PartitionReaderFactory = {
+  override def createReaderFactory(): PartitionReaderFactory =
     new TransactionLogCountReaderFactory(config)
-  }
 }
 
 /**
- * Input partition for transaction log count.
- * Instead of serializing the transaction log, we pre-compute the count on the driver.
+ * Input partition for transaction log count. Instead of serializing the transaction log, we pre-compute the count on
+ * the driver.
  */
 case class TransactionLogCountPartition(
-  precomputedCount: Long
-) extends InputPartition
+  precomputedCount: Long)
+    extends InputPartition
 
-/**
- * Reader factory for transaction log count.
- */
+/** Reader factory for transaction log count. */
 class TransactionLogCountReaderFactory(
-  config: Map[String, String]  // Direct config instead of broadcast
+  config: Map[String, String] // Direct config instead of broadcast
 ) extends PartitionReaderFactory {
 
-  override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
+  override def createReader(partition: InputPartition): PartitionReader[InternalRow] =
     partition match {
       case countPartition: TransactionLogCountPartition =>
         new TransactionLogCountPartitionReader(countPartition, config)
       case _ =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${partition.getClass}")
     }
-  }
 }
 
-/**
- * Partition reader that returns the precomputed count.
- */
+/** Partition reader that returns the precomputed count. */
 class TransactionLogCountPartitionReader(
   partition: TransactionLogCountPartition,
-  config: Map[String, String]  // Direct config instead of broadcast
+  config: Map[String, String] // Direct config instead of broadcast
 ) extends PartitionReader[InternalRow] {
 
-  private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountPartitionReader])
+  private val logger  = LoggerFactory.getLogger(classOf[TransactionLogCountPartitionReader])
   private var hasNext = true
 
-  override def next(): Boolean = {
+  override def next(): Boolean =
     if (hasNext) {
       hasNext = false
       true
     } else {
       false
     }
-  }
 
-  override def get(): InternalRow = {
+  override def get(): InternalRow =
     // Return a single row with the precomputed count
     InternalRow(partition.precomputedCount)
-  }
 
   override def close(): Unit = {
     // Nothing to close

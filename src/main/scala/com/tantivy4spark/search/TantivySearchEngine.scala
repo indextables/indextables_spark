@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.search
 
 import org.apache.spark.sql.types.StructType
@@ -27,99 +26,107 @@ import org.slf4j.LoggerFactory
 class TantivySearchEngine private (
   private val directInterface: TantivyDirectInterface,
   private val options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
-  private val hadoopConf: Configuration = new Configuration()
-) extends AutoCloseable {
+  private val hadoopConf: Configuration = new Configuration())
+    extends AutoCloseable {
   private val logger = LoggerFactory.getLogger(classOf[TantivySearchEngine])
-  
+
   // Primary constructor for creating new search engines
   def this(schema: StructType) = this(new TantivyDirectInterface(schema))
-  
+
   // Constructor with cloud storage support
-  def this(schema: StructType, options: CaseInsensitiveStringMap, hadoopConf: Configuration) =
-    this({
-      // Extract working directory from configuration hierarchy with auto-detection
-      val workingDirectory = Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
-        .orElse(Option(hadoopConf.get("spark.indextables.indexWriter.tempDirectoryPath")))
-        .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
+  def this(
+    schema: StructType,
+    options: CaseInsensitiveStringMap,
+    hadoopConf: Configuration
+  ) =
+    this(
+      {
+        // Extract working directory from configuration hierarchy with auto-detection
+        val workingDirectory = Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
+          .orElse(Option(hadoopConf.get("spark.indextables.indexWriter.tempDirectoryPath")))
+          .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultTempPath())
 
-      new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
-    }, options, hadoopConf)
+        new TantivyDirectInterface(schema, None, options, hadoopConf, None, workingDirectory)
+      },
+      options,
+      hadoopConf
+    )
 
-  def addDocument(row: InternalRow): Unit = {
+  def addDocument(row: InternalRow): Unit =
     directInterface.addDocument(row)
-  }
 
-  def addDocuments(rows: Iterator[InternalRow]): Unit = {
+  def addDocuments(rows: Iterator[InternalRow]): Unit =
     directInterface.addDocuments(rows)
-  }
 
-  def commit(): Unit = {
+  def commit(): Unit =
     directInterface.commit()
-  }
-  
-  def commitAndCreateSplit(outputPath: String, partitionId: Long, nodeId: String): (String, com.tantivy4java.QuickwitSplit.SplitMetadata) = {
+
+  def commitAndCreateSplit(
+    outputPath: String,
+    partitionId: Long,
+    nodeId: String
+  ): (String, com.tantivy4java.QuickwitSplit.SplitMetadata) = {
     // Use commitAndClose to follow write-only pattern for production
     directInterface.commitAndClose()
-    
+
     try {
       // Delay cleanup of temporary directory until after split creation
       directInterface.delayCleanupForSplit()
-      
+
       // Get temporary directory path from the direct interface
       val tempIndexPath = directInterface.getIndexPath()
-      
+
       // Use SplitManager to create split from the temporary index with cloud storage support
       import com.tantivy4spark.storage.SplitManager
       val metadata = SplitManager.createSplit(tempIndexPath, outputPath, partitionId, nodeId, options, hadoopConf)
-      
+
       // Return both the split file path and metadata with footer offsets
       (outputPath, metadata)
-      
-    } finally {
+
+    } finally
       // Force cleanup now that split creation is complete
       directInterface.forceCleanup()
-    }
   }
 
   // Search methods removed - use SplitSearchEngine for reading from splits
   // The write-only architecture means TantivySearchEngine only creates indexes,
   // not reads from them
 
-  override def close(): Unit = {
+  override def close(): Unit =
     directInterface.close()
-  }
 }
 
 object TantivySearchEngine {
   private val logger = LoggerFactory.getLogger(TantivySearchEngine.getClass)
-  
-  
+
   /**
-   * Extract SplitCacheConfig from active Spark session when available.
-   * Falls back to default config if no session is available.
+   * Extract SplitCacheConfig from active Spark session when available. Falls back to default config if no session is
+   * available.
    */
-  private def extractCacheConfigFromSparkSession(): com.tantivy4spark.storage.SplitCacheConfig = {
+  private def extractCacheConfigFromSparkSession(): com.tantivy4spark.storage.SplitCacheConfig =
     try {
       import org.apache.spark.sql.SparkSession
       val spark = SparkSession.getActiveSession
-      
+
       spark match {
         case Some(session) =>
-          val sparkConf = session.conf
+          val sparkConf  = session.conf
           val hadoopConf = session.sparkContext.hadoopConfiguration
-          
+
           // Helper function to get config with Hadoop fallback (same pattern as CloudStorageProviderFactory)
           def getConfigWithFallback(sparkKey: String): Option[String] = {
-            val sparkValue = sparkConf.getOption(sparkKey)
+            val sparkValue  = sparkConf.getOption(sparkKey)
             val hadoopValue = Option(hadoopConf.get(sparkKey))
-            val result = sparkValue.orElse(hadoopValue)
-            
+            val result      = sparkValue.orElse(hadoopValue)
+
             logger.info(s"🔍 Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
             result
           }
-          
-          logger.debug(s"🔍 Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})")
-          
+
+          logger.debug(
+            s"🔍 Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})"
+          )
+
           com.tantivy4spark.storage.SplitCacheConfig(
             cacheName = sparkConf.get("spark.indextables.cache.name", "tantivy4spark-cache"),
             maxCacheSize = sparkConf.get("spark.indextables.cache.maxSize", "200000000").toLong,
@@ -129,11 +136,12 @@ object TantivySearchEngine {
               .orElse(com.tantivy4spark.storage.SplitCacheConfig.getDefaultCachePath()),
             // AWS configuration with session token support - use Hadoop fallback for executor context
             awsAccessKey = getConfigWithFallback("spark.indextables.aws.accessKey"),
-            awsSecretKey = getConfigWithFallback("spark.indextables.aws.secretKey"), 
+            awsSecretKey = getConfigWithFallback("spark.indextables.aws.secretKey"),
             awsSessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken"),
             awsRegion = getConfigWithFallback("spark.indextables.aws.region"),
             awsEndpoint = getConfigWithFallback("spark.indextables.s3.endpoint"),
-            awsPathStyleAccess = getConfigWithFallback("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
+            awsPathStyleAccess =
+              getConfigWithFallback("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
             // Azure configuration
             azureAccountName = getConfigWithFallback("spark.indextables.azure.accountName"),
             azureAccountKey = getConfigWithFallback("spark.indextables.azure.accountKey"),
@@ -154,13 +162,8 @@ object TantivySearchEngine {
         logger.warn("Failed to extract cache config from Spark session, using defaults", ex)
         com.tantivy4spark.storage.SplitCacheConfig()
     }
-  }
-  
-  
-  /**
-   * Creates a TantivySearchEngine from a direct interface (for write operations).
-   */
-  def fromDirectInterface(directInterface: TantivyDirectInterface): TantivySearchEngine = {
+
+  /** Creates a TantivySearchEngine from a direct interface (for write operations). */
+  def fromDirectInterface(directInterface: TantivyDirectInterface): TantivySearchEngine =
     new TantivySearchEngine(directInterface)
-  }
 }

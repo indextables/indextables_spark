@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-
 package com.tantivy4spark.core
 
 import com.tantivy4spark.TestBase
@@ -33,13 +32,13 @@ class Tantivy4SparkIntegrationTest extends TestBase {
 
   test("should create table provider") {
     import scala.collection.JavaConverters._
-    
+
     val provider = new Tantivy4SparkTableProvider()
     provider.supportsExternalMetadata() shouldBe true
 
     withTempPath { tempPath =>
       val properties = Map("path" -> tempPath).asJava
-      
+
       // This would fail without actual transaction log data, but tests the structure
       intercept[RuntimeException] {
         provider.inferSchema(new org.apache.spark.sql.util.CaseInsensitiveStringMap(properties))
@@ -50,10 +49,10 @@ class Tantivy4SparkIntegrationTest extends TestBase {
   test("should write and read DataFrame using Tantivy4Spark format") {
     // This test checks that the write operation can be configured and executed
     // It may succeed if the native library is working, or fail with expected exceptions
-    
+
     withTempPath { tempPath =>
       val df = createTestDataFrame()
-      
+
       // Test that the write operation can be set up and executed
       // This may succeed if native library works, or fail with specific exceptions
       try {
@@ -61,11 +60,11 @@ class Tantivy4SparkIntegrationTest extends TestBase {
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
-        
+
         // If write succeeds, the data source is working correctly
         succeed
       } catch {
-        case _: RuntimeException => 
+        case _: RuntimeException =>
           // Expected if native library has issues
           succeed
         case _: UnsatisfiedLinkError =>
@@ -81,7 +80,7 @@ class Tantivy4SparkIntegrationTest extends TestBase {
   test("should handle configuration options") {
     withTempPath { tempPath =>
       val df = createTestDataFrame()
-      
+
       // Test that configuration is accepted and processed
       try {
         df.write
@@ -89,11 +88,11 @@ class Tantivy4SparkIntegrationTest extends TestBase {
           .mode(SaveMode.Overwrite)
           .option("spark.indextables.storage.force.standard", "true")
           .save(tempPath)
-        
+
         // If write succeeds, configuration was properly handled
         succeed
       } catch {
-        case _: RuntimeException | _: UnsatisfiedLinkError => 
+        case _: RuntimeException | _: UnsatisfiedLinkError =>
           // Expected if native library has issues
           succeed
         case e: Exception =>
@@ -106,22 +105,22 @@ class Tantivy4SparkIntegrationTest extends TestBase {
 
   test("should support different storage protocols") {
     val protocols = Seq("file://")
-    
+
     protocols.foreach { protocol =>
       withTempPath { tempPath =>
-        val path = s"${protocol}$tempPath"
-        
+        val path = s"$protocol$tempPath"
+
         // Should be able to handle different storage protocols
         try {
           createTestDataFrame().write
             .format("tantivy4spark")
             .mode(SaveMode.Overwrite)
             .save(path)
-          
+
           // If write succeeds, protocol handling is working
           succeed
         } catch {
-          case _: RuntimeException | _: UnsatisfiedLinkError => 
+          case _: RuntimeException | _: UnsatisfiedLinkError =>
             // Expected if native library has issues
             succeed
           case e: Exception =>
@@ -135,18 +134,18 @@ class Tantivy4SparkIntegrationTest extends TestBase {
   ignore("should handle large datasets efficiently") {
     withTempPath { tempPath =>
       val largeDf = createLargeTestDataFrame(100) // Smaller for test performance
-      
+
       // Should be able to process larger datasets
       try {
         largeDf.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
-        
+
         // If write succeeds, large dataset handling is working
         succeed
       } catch {
-        case _: RuntimeException | _: UnsatisfiedLinkError => 
+        case _: RuntimeException | _: UnsatisfiedLinkError =>
           // Expected if native library has issues
           succeed
         case e: Exception =>
@@ -160,18 +159,18 @@ class Tantivy4SparkIntegrationTest extends TestBase {
     // Test that the system can handle schema changes
     val schema1 = getTestSchema()
     val schema2 = schema1.add("department", "string", nullable = true)
-    
+
     schema1.fields should have length 6
     schema2.fields should have length 7
-    
+
     // The transaction log should be able to handle schema evolution
-    schema2.fieldNames should contain ("department")
+    schema2.fieldNames should contain("department")
   }
 
   test("should handle partitioned datasets") {
     withTempPath { tempPath =>
       val df = createTestDataFrame()
-      
+
       // Test partitioned write setup
       try {
         df.write
@@ -179,11 +178,11 @@ class Tantivy4SparkIntegrationTest extends TestBase {
           .mode(SaveMode.Overwrite)
           .partitionBy("role")
           .save(tempPath)
-        
+
         // If write succeeds, partitioning is working
         succeed
       } catch {
-        case _: RuntimeException | _: UnsatisfiedLinkError => 
+        case _: RuntimeException | _: UnsatisfiedLinkError =>
           // Expected if native library has issues
           succeed
         case e: Exception =>
@@ -196,18 +195,18 @@ class Tantivy4SparkIntegrationTest extends TestBase {
   test("should support append mode") {
     withTempPath { tempPath =>
       val df1 = createTestDataFrame()
-      
+
       // Test append mode setup
       try {
         df1.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
-        
+
         // If write succeeds, append mode setup is working
         succeed
       } catch {
-        case _: RuntimeException | _: UnsatisfiedLinkError => 
+        case _: RuntimeException | _: UnsatisfiedLinkError =>
           // Expected if native library has issues
           succeed
         case e: Exception =>

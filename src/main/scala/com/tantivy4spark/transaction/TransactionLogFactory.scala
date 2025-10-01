@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
 
 /**
- * Factory for creating transaction log instances.
- * Automatically selects optimized or standard implementation based on configuration.
+ * Factory for creating transaction log instances. Automatically selects optimized or standard implementation based on
+ * configuration.
  */
 object TransactionLogFactory {
 
@@ -34,28 +34,34 @@ object TransactionLogFactory {
   /**
    * Create a transaction log instance with automatic optimization selection.
    *
-   * @param tablePath The path to the table
-   * @param spark The Spark session
-   * @param options Configuration options
-   * @return A TransactionLog instance (optimized or standard)
+   * @param tablePath
+   *   The path to the table
+   * @param spark
+   *   The Spark session
+   * @param options
+   *   Configuration options
+   * @return
+   *   A TransactionLog instance (optimized or standard)
    */
   def create(
-      tablePath: Path,
-      spark: SparkSession,
-      options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    tablePath: Path,
+    spark: SparkSession,
+    options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
   ): TransactionLog = {
     println(s"[DEBUG FACTORY] create method called for path: $tablePath")
 
     // Check if optimization is explicitly disabled
-    val useOptimized = options.getBoolean("spark.indextables.transaction.optimized.enabled",
-                                          options.getBoolean("spark.indextables.transaction.optimized.enabled", true))
+    val useOptimized = options.getBoolean(
+      "spark.indextables.transaction.optimized.enabled",
+      options.getBoolean("spark.indextables.transaction.optimized.enabled", true)
+    )
 
     // Also check if caching is disabled - if so, use standard transaction log
     val cacheEnabled = options.getBoolean("spark.indextables.transaction.cache.enabled", true)
 
     // For very short cache expiration times (like in tests), use standard transaction log
     // since enhanced cache uses minute-based TTL which doesn't work well for sub-minute tests
-    val expirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
+    val expirationSeconds             = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 300L)
     val useStandardForShortExpiration = expirationSeconds > 0 && expirationSeconds < 60
 
     val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
@@ -70,44 +76,45 @@ object TransactionLogFactory {
       // Create standard TransactionLog for testing/compatibility
       logger.info(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
       println(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
-      new TransactionLog(tablePath, spark, new CaseInsensitiveStringMap(
-        (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
-      ))
+      new TransactionLog(
+        tablePath,
+        spark,
+        new CaseInsensitiveStringMap(
+          (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
+        )
+      )
     }
   }
 }
 
 /**
- * Adapter to make OptimizedTransactionLog compatible with existing TransactionLog interface.
- * This allows seamless integration without changing existing code.
+ * Adapter to make OptimizedTransactionLog compatible with existing TransactionLog interface. This allows seamless
+ * integration without changing existing code.
  */
 class TransactionLogAdapter(
   private val optimizedLog: OptimizedTransactionLog,
   spark: SparkSession,
-  options: CaseInsensitiveStringMap
-) extends TransactionLog(
-  optimizedLog.getTablePath(),
-  spark,
-  new CaseInsensitiveStringMap(
-    (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
-  )
-) {
+  options: CaseInsensitiveStringMap)
+    extends TransactionLog(
+      optimizedLog.getTablePath(),
+      spark,
+      new CaseInsensitiveStringMap(
+        (options.asCaseSensitiveMap().asScala + ("spark.indextables.transaction.allowDirectUsage" -> "true")).asJava
+      )
+    ) {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogAdapter])
 
   override def getTablePath(): Path = optimizedLog.getTablePath()
 
-  override def close(): Unit = {
+  override def close(): Unit =
     optimizedLog.close()
-  }
 
-  override def initialize(schema: org.apache.spark.sql.types.StructType): Unit = {
+  override def initialize(schema: org.apache.spark.sql.types.StructType): Unit =
     optimizedLog.initialize(schema)
-  }
 
-  override def initialize(schema: org.apache.spark.sql.types.StructType, partitionColumns: Seq[String]): Unit = {
+  override def initialize(schema: org.apache.spark.sql.types.StructType, partitionColumns: Seq[String]): Unit =
     optimizedLog.initialize(schema, partitionColumns)
-  }
 
   override def addFile(addAction: AddAction): Long = {
     val result = optimizedLog.addFiles(Seq(addAction))
@@ -131,29 +138,23 @@ class TransactionLogAdapter(
     result
   }
 
-  override def listFiles(): Seq[AddAction] = {
+  override def listFiles(): Seq[AddAction] =
     optimizedLog.listFiles()
-  }
 
-  override def getTotalRowCount(): Long = {
+  override def getTotalRowCount(): Long =
     optimizedLog.getTotalRowCount()
-  }
 
-  override def getPartitionColumns(): Seq[String] = {
+  override def getPartitionColumns(): Seq[String] =
     optimizedLog.getPartitionColumns()
-  }
 
-  override def isPartitioned(): Boolean = {
+  override def isPartitioned(): Boolean =
     optimizedLog.isPartitioned()
-  }
 
-  override def getMetadata(): MetadataAction = {
+  override def getMetadata(): MetadataAction =
     optimizedLog.getMetadata()
-  }
 
-  override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
+  override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long =
     optimizedLog.removeFile(path, deletionTimestamp)
-  }
 
   override def getCacheStats(): Option[CacheStats] = {
     // Convert EnhancedTransactionLogCache statistics to legacy CacheStats format
@@ -161,16 +162,16 @@ class TransactionLogAdapter(
 
     // Calculate aggregate statistics from all enhanced cache components
     val totalHits = enhancedStats.logCacheStats.hitCount() +
-                   enhancedStats.snapshotCacheStats.hitCount() +
-                   enhancedStats.fileListCacheStats.hitCount() +
-                   enhancedStats.metadataCacheStats.hitCount() +
-                   enhancedStats.versionCacheStats.hitCount()
+      enhancedStats.snapshotCacheStats.hitCount() +
+      enhancedStats.fileListCacheStats.hitCount() +
+      enhancedStats.metadataCacheStats.hitCount() +
+      enhancedStats.versionCacheStats.hitCount()
 
     val totalMisses = enhancedStats.logCacheStats.missCount() +
-                     enhancedStats.snapshotCacheStats.missCount() +
-                     enhancedStats.fileListCacheStats.missCount() +
-                     enhancedStats.metadataCacheStats.missCount() +
-                     enhancedStats.versionCacheStats.missCount()
+      enhancedStats.snapshotCacheStats.missCount() +
+      enhancedStats.fileListCacheStats.missCount() +
+      enhancedStats.metadataCacheStats.missCount() +
+      enhancedStats.versionCacheStats.missCount()
 
     val hitRate = if (totalHits + totalMisses > 0) totalHits.toDouble / (totalHits + totalMisses) else 0.0
 
@@ -180,13 +181,15 @@ class TransactionLogAdapter(
     // Read actual expiration setting from options
     val expirationSeconds = options.getLong("spark.indextables.transaction.cache.expirationSeconds", 5 * 60L) // 5 minutes default
 
-    Some(CacheStats(
-      hits = totalHits,
-      misses = totalMisses,
-      hitRate = hitRate,
-      versionsInCache = versionsInCache,
-      expirationSeconds = expirationSeconds
-    ))
+    Some(
+      CacheStats(
+        hits = totalHits,
+        misses = totalMisses,
+        hitRate = hitRate,
+        versionsInCache = versionsInCache,
+        expirationSeconds = expirationSeconds
+      )
+    )
   }
 
   override def invalidateCache(): Unit = {

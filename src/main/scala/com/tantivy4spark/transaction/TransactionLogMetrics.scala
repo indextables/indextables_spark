@@ -25,12 +25,12 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicLong, AtomicInteger}
 
 /**
- * Comprehensive metrics collection for transaction log operations.
- * Provides detailed performance monitoring and diagnostics.
+ * Comprehensive metrics collection for transaction log operations. Provides detailed performance monitoring and
+ * diagnostics.
  */
 object TransactionLogMetrics {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger         = LoggerFactory.getLogger(getClass)
   private val metricRegistry = new MetricRegistry()
 
   // Read performance metrics
@@ -41,9 +41,13 @@ object TransactionLogMetrics {
     metricRegistry.histogram("checkpoint.read.latency")
 
   val parallelReadSpeedup: Gauge[Double] =
-    metricRegistry.gauge("parallel.read.speedup", () => new Gauge[Double] {
-      def getValue: Double = calculateParallelSpeedup()
-    })
+    metricRegistry.gauge(
+      "parallel.read.speedup",
+      () =>
+        new Gauge[Double] {
+          def getValue: Double = calculateParallelSpeedup()
+        }
+    )
 
   // Write performance metrics
   val batchWriteLatency: Histogram =
@@ -57,18 +61,26 @@ object TransactionLogMetrics {
 
   // Cache effectiveness metrics
   val cacheHitRate: Gauge[Double] =
-    metricRegistry.gauge("cache.hit.rate", () => new Gauge[Double] {
-      def getValue: Double = calculateCacheHitRate()
-    })
+    metricRegistry.gauge(
+      "cache.hit.rate",
+      () =>
+        new Gauge[Double] {
+          def getValue: Double = calculateCacheHitRate()
+        }
+    )
 
   val cacheMissLatency: Histogram =
     metricRegistry.histogram("cache.miss.latency")
 
   // Thread pool utilization metrics
   val threadPoolUtilization: Gauge[Double] =
-    metricRegistry.gauge("thread.pool.utilization", () => new Gauge[Double] {
-      def getValue: Double = calculateThreadPoolUtilization()
-    })
+    metricRegistry.gauge(
+      "thread.pool.utilization",
+      () =>
+        new Gauge[Double] {
+          def getValue: Double = calculateThreadPoolUtilization()
+        }
+    )
 
   val queuedTasks: Counter =
     metricRegistry.counter("queued.tasks")
@@ -98,38 +110,44 @@ object TransactionLogMetrics {
 
   // Memory metrics
   val memoryUsage: Gauge[Long] =
-    metricRegistry.gauge("memory.usage", () => new Gauge[Long] {
-      def getValue: Long = Runtime.getRuntime.totalMemory() - Runtime.getRuntime.freeMemory()
-    })
+    metricRegistry.gauge(
+      "memory.usage",
+      () =>
+        new Gauge[Long] {
+          def getValue: Long = Runtime.getRuntime.totalMemory() - Runtime.getRuntime.freeMemory()
+        }
+    )
 
   val heapUtilization: Gauge[Double] =
-    metricRegistry.gauge("heap.utilization", () => new Gauge[Double] {
-      def getValue: Double = {
-        val runtime = Runtime.getRuntime
-        val used = runtime.totalMemory() - runtime.freeMemory()
-        val max = runtime.maxMemory()
-        (used.toDouble / max) * 100
-      }
-    })
+    metricRegistry.gauge(
+      "heap.utilization",
+      () =>
+        new Gauge[Double] {
+          def getValue: Double = {
+            val runtime = Runtime.getRuntime
+            val used    = runtime.totalMemory() - runtime.freeMemory()
+            val max     = runtime.maxMemory()
+            (used.toDouble / max) * 100
+          }
+        }
+    )
 
   // Error tracking
-  val readErrors: Counter = metricRegistry.counter("read.errors")
-  val writeErrors: Counter = metricRegistry.counter("write.errors")
+  val readErrors: Counter       = metricRegistry.counter("read.errors")
+  val writeErrors: Counter      = metricRegistry.counter("write.errors")
   val checkpointErrors: Counter = metricRegistry.counter("checkpoint.errors")
 
   // Performance tracking
   private val sequentialReadTimes = new AtomicLong(0)
-  private val parallelReadTimes = new AtomicLong(0)
+  private val parallelReadTimes   = new AtomicLong(0)
   private val sequentialReadCount = new AtomicInteger(0)
-  private val parallelReadCount = new AtomicInteger(0)
+  private val parallelReadCount   = new AtomicInteger(0)
 
   // Cache statistics tracking
-  private val cacheHits = new AtomicLong(0)
+  private val cacheHits   = new AtomicLong(0)
   private val cacheMisses = new AtomicLong(0)
 
-  /**
-   * Record a transaction log read operation
-   */
+  /** Record a transaction log read operation */
   def recordRead(latencyMs: Long, isParallel: Boolean = false): Unit = {
     transactionLogReadLatency.update(latencyMs)
 
@@ -142,82 +160,60 @@ object TransactionLogMetrics {
     }
   }
 
-  /**
-   * Record a checkpoint read operation
-   */
+  /** Record a checkpoint read operation */
   def recordCheckpointRead(latencyMs: Long): Unit = {
     checkpointReadLatency.update(latencyMs)
     checkpointsRead.inc()
   }
 
-  /**
-   * Record a batch write operation
-   */
+  /** Record a batch write operation */
   def recordBatchWrite(latencyMs: Long, actionCount: Int): Unit = {
     batchWriteLatency.update(latencyMs)
     actionsPerSecond.mark(actionCount)
   }
 
-  /**
-   * Record checkpoint creation
-   */
+  /** Record checkpoint creation */
   def recordCheckpointCreation(context: Timer.Context, size: Long): Unit = {
     context.stop()
     checkpointSize.update(size)
     checkpointsCreated.inc()
   }
 
-  /**
-   * Record cache hit/miss
-   */
-  def recordCacheHit(): Unit = {
+  /** Record cache hit/miss */
+  def recordCacheHit(): Unit =
     cacheHits.incrementAndGet()
-  }
 
   def recordCacheMiss(latencyMs: Long): Unit = {
     cacheMisses.incrementAndGet()
     cacheMissLatency.update(latencyMs)
   }
 
-  /**
-   * Record file listing operation
-   */
+  /** Record file listing operation */
   def recordFileListing(latencyMs: Long, fileCount: Int): Unit = {
     fileListingLatency.update(latencyMs)
     filesProcessedPerSecond.mark(fileCount)
     totalFilesListed.inc(fileCount)
   }
 
-  /**
-   * Record thread pool task queueing
-   */
-  def recordTaskQueued(): Unit = {
+  /** Record thread pool task queueing */
+  def recordTaskQueued(): Unit =
     queuedTasks.inc()
-  }
 
-  def recordTaskRejected(): Unit = {
+  def recordTaskRejected(): Unit =
     rejectedTasks.inc()
-  }
 
-  /**
-   * Record errors
-   */
-  def recordReadError(): Unit = {
+  /** Record errors */
+  def recordReadError(): Unit =
     readErrors.inc()
-  }
 
-  def recordWriteError(): Unit = {
+  def recordWriteError(): Unit =
     writeErrors.inc()
-  }
 
-  def recordCheckpointError(): Unit = {
+  def recordCheckpointError(): Unit =
     checkpointErrors.inc()
-  }
 
-  /**
-   * Get comprehensive metrics report
-   */
-  def getMetricsReport(): MetricsReport = {
+  /** Get comprehensive metrics report */
+  def getMetricsReport(): MetricsReport =
     MetricsReport(
       readMetrics = ReadMetrics(
         averageLatency = getHistogramMean(transactionLogReadLatency),
@@ -256,11 +252,8 @@ object TransactionLogMetrics {
         heapUtilization = heapUtilization.getValue
       )
     )
-  }
 
-  /**
-   * Print metrics summary to logs
-   */
+  /** Print metrics summary to logs */
   def logMetricsSummary(): Unit = {
     val report = getMetricsReport()
 
@@ -288,9 +281,7 @@ object TransactionLogMetrics {
     logger.info("=====================================")
   }
 
-  /**
-   * Reset all metrics
-   */
+  /** Reset all metrics */
   def reset(): Unit = {
     metricRegistry.removeMatching(MetricFilter.ALL)
     sequentialReadTimes.set(0)
@@ -317,23 +308,23 @@ object TransactionLogMetrics {
   }
 
   private def calculateCacheHitRate(): Double = {
-    val hits = cacheHits.get()
+    val hits   = cacheHits.get()
     val misses = cacheMisses.get()
-    val total = hits + misses
+    val total  = hits + misses
 
     if (total == 0) return 0.0
     hits.toDouble / total
   }
 
   private def calculateThreadPoolUtilization(): Double = {
-    val stats = TransactionLogThreadPools.getStatistics()
+    val stats       = TransactionLogThreadPools.getStatistics()
     val totalActive = stats.totalActiveThreads
     val totalMax = stats.checkpointPoolStats.maximumPoolSize +
-                   stats.commitPoolStats.maximumPoolSize +
-                   stats.asyncUpdatePoolStats.maximumPoolSize +
-                   stats.statsPoolStats.maximumPoolSize +
-                   stats.fileListingPoolStats.maximumPoolSize +
-                   stats.parallelReadPoolStats.maximumPoolSize
+      stats.commitPoolStats.maximumPoolSize +
+      stats.asyncUpdatePoolStats.maximumPoolSize +
+      stats.statsPoolStats.maximumPoolSize +
+      stats.fileListingPoolStats.maximumPoolSize +
+      stats.parallelReadPoolStats.maximumPoolSize
 
     if (totalMax == 0) return 0.0
     totalActive.toDouble / totalMax
@@ -363,47 +354,40 @@ case class MetricsReport(
   cacheMetrics: CacheMetrics,
   checkpointMetrics: CheckpointMetrics,
   threadPoolMetrics: ThreadPoolMetrics,
-  memoryMetrics: MemoryMetrics
-)
+  memoryMetrics: MemoryMetrics)
 
 case class ReadMetrics(
   averageLatency: Double,
   p99Latency: Double,
   parallelSpeedup: Double,
   totalReads: Long,
-  errorCount: Long
-)
+  errorCount: Long)
 
 case class WriteMetrics(
   averageLatency: Double,
   p99Latency: Double,
   actionsPerSecond: Double,
   totalWrites: Long,
-  errorCount: Long
-)
+  errorCount: Long)
 
 case class CacheMetrics(
   hitRate: Double,
   totalHits: Long,
   totalMisses: Long,
-  averageMissLatency: Double
-)
+  averageMissLatency: Double)
 
 case class CheckpointMetrics(
   totalCreated: Long,
   totalRead: Long,
   averageSize: Double,
   averageCreationTime: Double,
-  errorCount: Long
-)
+  errorCount: Long)
 
 case class ThreadPoolMetrics(
   utilization: Double,
   queuedTasks: Long,
-  rejectedTasks: Long
-)
+  rejectedTasks: Long)
 
 case class MemoryMetrics(
   currentUsage: Long,
-  heapUtilization: Double
-)
+  heapUtilization: Double)

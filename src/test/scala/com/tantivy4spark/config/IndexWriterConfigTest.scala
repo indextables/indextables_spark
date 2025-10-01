@@ -26,22 +26,24 @@ class IndexWriterConfigTest extends TestBase {
   test("should use default index writer configuration") {
     withTempPath { tempPath =>
       // Generate simple test data
-      val testData = spark.range(100).select(
-        col("id"),
-        concat(lit("Record"), col("id")).as("content")
-      )
-      
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("Record"), col("id")).as("content")
+        )
+
       // Write without any custom configuration - should use defaults (100MB heap, 2 threads)
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back to verify it worked
       val readData = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tempPath)
-      
+
       readData.count() shouldBe 100
     }
   }
@@ -50,26 +52,28 @@ class IndexWriterConfigTest extends TestBase {
     withTempPath { tempPath =>
       // Set custom index writer configuration via Spark session
       spark.conf.set("spark.indextables.indexWriter.heapSize", "200000000") // 200MB
-      spark.conf.set("spark.indextables.indexWriter.threads", "4") // 4 threads
-      
+      spark.conf.set("spark.indextables.indexWriter.threads", "4")          // 4 threads
+
       try {
         // Generate simple test data
-        val testData = spark.range(100).select(
-          col("id"),
-          concat(lit("Record"), col("id")).as("content")
-        )
-        
+        val testData = spark
+          .range(100)
+          .select(
+            col("id"),
+            concat(lit("Record"), col("id")).as("content")
+          )
+
         // Write with custom configuration
         testData.write
           .format("tantivy4spark")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
-        
+
         // Read back to verify it worked
         val readData = spark.read
           .format("tantivy4spark")
           .load(tempPath)
-        
+
         readData.count() shouldBe 100
       } finally {
         // Clean up configuration
@@ -82,24 +86,26 @@ class IndexWriterConfigTest extends TestBase {
   test("should use custom index writer configuration from DataFrame options") {
     withTempPath { tempPath =>
       // Generate simple test data
-      val testData = spark.range(100).select(
-        col("id"),
-        concat(lit("Record"), col("id")).as("content")
-      )
-      
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("Record"), col("id")).as("content")
+        )
+
       // Write with custom configuration via DataFrame options (highest precedence)
       testData.write
         .format("tantivy4spark")
         .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB
-        .option("spark.indextables.indexWriter.threads", "3") // 3 threads
+        .option("spark.indextables.indexWriter.threads", "3")          // 3 threads
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back to verify it worked
       val readData = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-      
+
       readData.count() shouldBe 100
     }
   }
@@ -108,28 +114,30 @@ class IndexWriterConfigTest extends TestBase {
     withTempPath { tempPath =>
       // Set Spark session configuration
       spark.conf.set("spark.indextables.indexWriter.heapSize", "200000000") // 200MB
-      spark.conf.set("spark.indextables.indexWriter.threads", "4") // 4 threads
-      
+      spark.conf.set("spark.indextables.indexWriter.threads", "4")          // 4 threads
+
       try {
         // Generate simple test data
-        val testData = spark.range(100).select(
-          col("id"),
-          concat(lit("Record"), col("id")).as("content")
-        )
-        
+        val testData = spark
+          .range(100)
+          .select(
+            col("id"),
+            concat(lit("Record"), col("id")).as("content")
+          )
+
         // DataFrame options should override Spark config
         testData.write
           .format("tantivy4spark")
           .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (overrides 200MB)
-          .option("spark.indextables.indexWriter.threads", "1") // 1 thread (overrides 4)
+          .option("spark.indextables.indexWriter.threads", "1")         // 1 thread (overrides 4)
           .mode(SaveMode.Overwrite)
           .save(tempPath)
-        
+
         // Read back to verify it worked
         val readData = spark.read
           .format("tantivy4spark")
           .load(tempPath)
-        
+
         readData.count() shouldBe 100
       } finally {
         // Clean up configuration
@@ -142,22 +150,24 @@ class IndexWriterConfigTest extends TestBase {
   test("should use batch writing by default") {
     withTempPath { tempPath =>
       // Generate test data that will require multiple batches (default batch size is 10,000)
-      val testData = spark.range(25000).select(
-        col("id"),
-        concat(lit("Record"), col("id")).as("content")
-      )
-      
+      val testData = spark
+        .range(25000)
+        .select(
+          col("id"),
+          concat(lit("Record"), col("id")).as("content")
+        )
+
       // Write with default batch settings
       testData.write
         .format("tantivy4spark")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back to verify all documents were written correctly
       val readData = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-      
+
       readData.count() shouldBe 25000
     }
   }
@@ -165,11 +175,13 @@ class IndexWriterConfigTest extends TestBase {
   test("should support custom batch size configuration") {
     withTempPath { tempPath =>
       // Generate test data
-      val testData = spark.range(1000).select(
-        col("id"),
-        concat(lit("Record"), col("id")).as("content")
-      )
-      
+      val testData = spark
+        .range(1000)
+        .select(
+          col("id"),
+          concat(lit("Record"), col("id")).as("content")
+        )
+
       // Write with custom batch size (smaller for testing)
       testData.write
         .format("tantivy4spark")
@@ -177,12 +189,12 @@ class IndexWriterConfigTest extends TestBase {
         .option("spark.indextables.indexWriter.useBatch", "true")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back to verify it worked
       val readData = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-      
+
       readData.count() shouldBe 1000
     }
   }
@@ -190,23 +202,25 @@ class IndexWriterConfigTest extends TestBase {
   test("should support disabling batch writing") {
     withTempPath { tempPath =>
       // Generate test data
-      val testData = spark.range(100).select(
-        col("id"),
-        concat(lit("Record"), col("id")).as("content")
-      )
-      
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("Record"), col("id")).as("content")
+        )
+
       // Write with batch writing disabled
       testData.write
         .format("tantivy4spark")
         .option("spark.indextables.indexWriter.useBatch", "false") // Disable batch writing
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back to verify it worked
       val readData = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-      
+
       readData.count() shouldBe 100
     }
   }

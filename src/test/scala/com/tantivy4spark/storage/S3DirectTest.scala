@@ -25,28 +25,28 @@ import scala.util.Using
 import org.scalatest.BeforeAndAfterAll
 
 /**
- * Direct test of S3 cloud storage provider using S3Mock.
- * Tests the cloud storage abstraction without going through DataFrame APIs.
+ * Direct test of S3 cloud storage provider using S3Mock. Tests the cloud storage abstraction without going through
+ * DataFrame APIs.
  */
 class S3DirectTest extends TestBase with BeforeAndAfterAll {
 
-  private val TEST_BUCKET = "test-tantivy-bucket"
-  private val ACCESS_KEY = "test-access-key" 
-  private val SECRET_KEY = "test-secret-key"
-  private var s3MockPort: Int = _
-  private var s3Mock: S3Mock = _
+  private val TEST_BUCKET                        = "test-tantivy-bucket"
+  private val ACCESS_KEY                         = "test-access-key"
+  private val SECRET_KEY                         = "test-secret-key"
+  private var s3MockPort: Int                    = _
+  private var s3Mock: S3Mock                     = _
   private var s3Provider: S3CloudStorageProvider = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    
+
     // Find available port
     s3MockPort = findAvailablePort()
-    
+
     // Start S3Mock server
     s3Mock = S3Mock(port = s3MockPort, dir = "/tmp/s3")
     s3Mock.start
-    
+
     // Create S3 provider with mock configuration
     val config = CloudStorageConfig(
       awsAccessKey = Some(ACCESS_KEY),
@@ -55,9 +55,9 @@ class S3DirectTest extends TestBase with BeforeAndAfterAll {
       awsRegion = Some("us-east-1"),
       awsPathStyleAccess = true
     )
-    
+
     s3Provider = new S3CloudStorageProvider(config)
-    
+
     println(s"✅ S3Mock server started on port $s3MockPort")
   }
 
@@ -71,84 +71,79 @@ class S3DirectTest extends TestBase with BeforeAndAfterAll {
     super.afterAll()
   }
 
-  private def findAvailablePort(): Int = {
-    Using.resource(new ServerSocket(0)) { socket =>
-      socket.getLocalPort
-    }
-  }
+  private def findAvailablePort(): Int =
+    Using.resource(new ServerSocket(0))(socket => socket.getLocalPort)
 
   test("should write and read files directly to S3") {
-    val testPath = s"s3://$TEST_BUCKET/test-file.txt"
+    val testPath    = s"s3://$TEST_BUCKET/test-file.txt"
     val testContent = "Hello from S3 cloud storage!"
-    
+
     // Create bucket first (S3Mock requires this)
     s3Provider.createDirectory(s"s3://$TEST_BUCKET/")
-    
+
     // Write file
     s3Provider.writeFile(testPath, testContent.getBytes("UTF-8"))
-    
+
     // Check existence
     s3Provider.exists(testPath) shouldBe true
-    
+
     // Read file
     val readContent = new String(s3Provider.readFile(testPath), "UTF-8")
     readContent shouldBe testContent
-    
+
     // Get file info
     val fileInfo = s3Provider.getFileInfo(testPath)
     fileInfo should not be empty
     fileInfo.get.size shouldBe testContent.length
-    
+
     println(s"✅ Successfully wrote and read file from S3: $testPath")
   }
-  
+
   test("should handle parallel file operations") {
     val numFiles = 10
-    val paths = (1 to numFiles).map { i =>
-      s"s3://$TEST_BUCKET/parallel/file-$i.txt"
-    }
-    
+    val paths    = (1 to numFiles).map(i => s"s3://$TEST_BUCKET/parallel/file-$i.txt")
+
     // Write files in parallel
-    paths.zipWithIndex.foreach { case (path, i) =>
-      val content = s"Content for file $i"
-      s3Provider.writeFile(path, content.getBytes("UTF-8"))
+    paths.zipWithIndex.foreach {
+      case (path, i) =>
+        val content = s"Content for file $i"
+        s3Provider.writeFile(path, content.getBytes("UTF-8"))
     }
-    
+
     // Read files in parallel
     val contents = s3Provider.readFilesParallel(paths)
     contents.size shouldBe numFiles
-    
+
     // Verify contents
-    paths.zipWithIndex.foreach { case (path, i) =>
-      val expectedContent = s"Content for file $i"
-      val actualContent = new String(contents(path), "UTF-8")
-      actualContent shouldBe expectedContent
+    paths.zipWithIndex.foreach {
+      case (path, i) =>
+        val expectedContent = s"Content for file $i"
+        val actualContent   = new String(contents(path), "UTF-8")
+        actualContent shouldBe expectedContent
     }
-    
+
     // Check existence in parallel
     val existsMap = s3Provider.existsParallel(paths)
     existsMap.values.forall(_ == true) shouldBe true
-    
+
     println(s"✅ Successfully handled $numFiles parallel file operations")
   }
-  
+
   test("should list files in S3 bucket") {
     val basePath = s"s3://$TEST_BUCKET/listing/"
-    
+
     // Create some test files
     (1 to 5).foreach { i =>
       val path = s"${basePath}file-$i.txt"
       s3Provider.writeFile(path, s"File $i content".getBytes("UTF-8"))
     }
-    
+
     // List files
     val files = s3Provider.listFiles(s"s3://$TEST_BUCKET/listing", recursive = true)
     files.size should be >= 5
-    
-    files.foreach { file =>
-      println(s"  Found file: ${file.path} (${file.size} bytes)")
-    }
-    
+
+    files.foreach(file => println(s"  Found file: ${file.path} (${file.size} bytes)"))
+
     println(s"✅ Successfully listed ${files.size} files in S3 bucket")
   }
 }

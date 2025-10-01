@@ -21,19 +21,21 @@ import com.tantivy4spark.TestBase
 import org.apache.spark.sql.functions._
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
-/**
- * Test to verify that COUNT aggregations with filters require fast field configuration.
- */
+/** Test to verify that COUNT aggregations with filters require fast field configuration. */
 class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
   test("COUNT aggregation without filters should work without fast field configuration") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        ("id1", "batch1", "content1"),
-        ("id2", "batch2", "content2"),
-        ("id3", "batch1", "content3")
-      )).toDF("id", "batch", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("id1", "batch1", "content1"),
+            ("id2", "batch2", "content2"),
+            ("id3", "batch1", "content3")
+          )
+        )
+        .toDF("id", "batch", "content")
 
       // Write data WITHOUT configuring batch as fast field
       data.write
@@ -56,11 +58,15 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
   test("COUNT aggregation with filter should require fast field configuration") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        ("id1", "batch1", "content1"),
-        ("id2", "batch2", "content2"),
-        ("id3", "batch1", "content3")
-      )).toDF("id", "batch", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("id1", "batch1", "content1"),
+            ("id2", "batch2", "content2"),
+            ("id3", "batch1", "content3")
+          )
+        )
+        .toDF("id", "batch", "content")
 
       // Write data WITHOUT configuring batch as fast field (explicitly exclude it from auto-fast-field)
       data.write
@@ -90,11 +96,15 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
   test("COUNT aggregation with filter should work WITH fast field configuration") {
     withTempPath { path =>
       // Create test data
-      val data = spark.createDataFrame(Seq(
-        ("id1", "batch1", "content1"),
-        ("id2", "batch2", "content2"),
-        ("id3", "batch1", "content3")
-      )).toDF("id", "batch", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("id1", "batch1", "content1"),
+            ("id2", "batch2", "content2"),
+            ("id3", "batch1", "content3")
+          )
+        )
+        .toDF("id", "batch", "content")
 
       // Write data WITH batch configured as fast field
       data.write
@@ -122,18 +132,22 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
   test("COUNT aggregation with multiple filter fields should validate all fast fields") {
     withTempPath { path =>
       // Create test data with multiple filterable fields
-      val data = spark.createDataFrame(Seq(
-        ("id1", "batch1", "type1", "content1"),
-        ("id2", "batch2", "type2", "content2"),
-        ("id3", "batch1", "type1", "content3"),
-        ("id4", "batch2", "type1", "content4")
-      )).toDF("id", "batch", "type", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("id1", "batch1", "type1", "content1"),
+            ("id2", "batch2", "type2", "content2"),
+            ("id3", "batch1", "type1", "content3"),
+            ("id4", "batch2", "type1", "content4")
+          )
+        )
+        .toDF("id", "batch", "type", "content")
 
       // Write data with only one fast field configured (explicitly exclude type from auto-fast-field)
       data.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-        .option("spark.indextables.indexing.fastfields", "batch")  // Only batch, not type
-        .option("spark.indextables.indexing.nonfastfields", "type")  // Explicitly exclude type
+        .option("spark.indextables.indexing.fastfields", "batch")   // Only batch, not type
+        .option("spark.indextables.indexing.nonfastfields", "type") // Explicitly exclude type
         .mode("overwrite")
         .save(path)
 

@@ -21,10 +21,10 @@ class ComplexIndexQueryDebugTest extends TestBase {
     // Same configuration as failing test
     testData.write
       .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
-      .option("spark.indextables.indexing.typemap.category", "string")  // exact matching
-      .option("spark.indextables.indexing.typemap.title", "text")       // tokenized search
-      .option("spark.indextables.indexing.typemap.author", "string")    // exact matching
-      .option("spark.indextables.indexing.typemap.tags", "text")        // tokenized search
+      .option("spark.indextables.indexing.typemap.category", "string") // exact matching
+      .option("spark.indextables.indexing.typemap.title", "text")      // tokenized search
+      .option("spark.indextables.indexing.typemap.author", "string")   // exact matching
+      .option("spark.indextables.indexing.typemap.tags", "text")       // tokenized search
       .mode("overwrite")
       .save(testPath)
 
@@ -43,37 +43,45 @@ class ComplexIndexQueryDebugTest extends TestBase {
 
     // Step 2: Test individual components
     println("\n🔍 Test IndexQuery only: title indexquery 'machine'")
-    val indexQueryOnly = spark.sql("""
+    val indexQueryOnly = spark
+      .sql("""
       SELECT id, title FROM debug_test
       WHERE title indexquery 'machine'
       ORDER BY id
-    """).collect()
+    """)
+      .collect()
     println(s"Results: ${indexQueryOnly.length}")
     indexQueryOnly.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}'"))
 
     println("\n🔍 Test regular filter only: category = 'tech'")
-    val regularFilterOnly = spark.sql("""
+    val regularFilterOnly = spark
+      .sql("""
       SELECT id, category FROM debug_test
       WHERE category = 'tech'
       ORDER BY id
-    """).collect()
+    """)
+      .collect()
     println(s"Results: ${regularFilterOnly.length}")
     regularFilterOnly.foreach(row => println(s"  ID=${row.getInt(0)}: category='${row.getString(1)}'"))
 
     // Step 3: Test combined query (the failing case)
     println("\n🔍 Test combined: title indexquery 'machine' AND category = 'tech'")
-    val combinedResults = spark.sql("""
+    val combinedResults = spark
+      .sql("""
       SELECT id, title, category FROM debug_test
       WHERE title indexquery 'machine' AND category = 'tech'
       ORDER BY id
-    """).collect()
+    """)
+      .collect()
     println(s"Results: ${combinedResults.length}")
-    combinedResults.foreach(row => println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'"))
+    combinedResults.foreach(row =>
+      println(s"  ID=${row.getInt(0)}: title='${row.getString(1)}', category='${row.getString(2)}'")
+    )
 
     // Analysis
     println("\n=== Analysis ===")
     val expectedIds = Set(1, 8)
-    val actualIds = combinedResults.map(_.getInt(0)).toSet
+    val actualIds   = combinedResults.map(_.getInt(0)).toSet
 
     if (actualIds == expectedIds) {
       println("✅ Combined query works correctly!")

@@ -23,67 +23,67 @@ import org.scalatest.BeforeAndAfterAll
 import com.tantivy4spark.TestBase
 import java.nio.file.Files
 
-/**
- * Debug test to isolate V2 write issues.
- */
+/** Debug test to isolate V2 write issues. */
 class V2WriteDebugTest extends AnyFunSuite with TestBase {
 
   test("Minimal V2 write test - no optimizations") {
     val tempPath = Files.createTempDirectory("v2_debug_").toFile.getAbsolutePath
-    
+
     // Create minimal test data
-    val df = spark.range(0, 100)
+    val df = spark
+      .range(0, 100)
       .selectExpr("id", "CONCAT('content_', CAST(id AS STRING)) as content")
-    
+
     // Write using V2 DataSource with optimizeWrite explicitly disabled
     println(s"DEBUG: Writing to path: $tempPath")
-    
+
     df.write
       .format("tantivy4spark")
       .mode("overwrite")
-      .option("optimizeWrite", "false")  // Explicitly disable optimization
+      .option("optimizeWrite", "false") // Explicitly disable optimization
       .save(tempPath)
-    
+
     println("DEBUG: Write completed successfully")
-    
+
     // Read back
     val readDf = spark.read
       .format("tantivy4spark")
       .load(tempPath)
-    
+
     println(s"DEBUG: Read count: ${readDf.count()}")
     assert(readDf.count() == 100, "Should read back all 100 rows")
   }
 
   test("Minimal V2 write test - with optimizations") {
     val tempPath = Files.createTempDirectory("v2_debug_opt_").toFile.getAbsolutePath
-    
-    // Create minimal test data  
-    val df = spark.range(0, 100)
+
+    // Create minimal test data
+    val df = spark
+      .range(0, 100)
       .selectExpr("id", "CONCAT('content_', CAST(id AS STRING)) as content")
-    
+
     // Write using V2 DataSource with optimizeWrite enabled
     println(s"DEBUG: Writing to path with optimization: $tempPath")
-    
+
     try {
       df.write
         .format("tantivy4spark")
         .mode("overwrite")
-        .option("optimizeWrite", "true")   // Explicitly enable optimization
-        .option("targetRecordsPerSplit", "50")  // Small target to trigger multiple partitions
-        .option("estimatedRowCount", "100")     // Pass row count estimate
+        .option("optimizeWrite", "true")       // Explicitly enable optimization
+        .option("targetRecordsPerSplit", "50") // Small target to trigger multiple partitions
+        .option("estimatedRowCount", "100")    // Pass row count estimate
         .save(tempPath)
-      
+
       println("DEBUG: Optimized write completed successfully")
-      
+
       // Read back
       val readDf = spark.read
         .format("tantivy4spark")
         .load(tempPath)
-      
+
       println(s"DEBUG: Read count: ${readDf.count()}")
       assert(readDf.count() == 100, "Should read back all 100 rows")
-      
+
     } catch {
       case e: Exception =>
         println(s"DEBUG: Optimized write failed with: ${e.getMessage}")

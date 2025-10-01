@@ -30,13 +30,14 @@ import scala.collection.JavaConverters._
 class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var spark: SparkSession = _
-  private var testDir: String = _
+  private var testDir: String     = _
 
   override def beforeAll(): Unit = {
     // Set log level to DEBUG for transaction log
     org.apache.log4j.Logger.getLogger("com.tantivy4spark.transaction").setLevel(org.apache.log4j.Level.DEBUG)
 
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("OptimizedTransactionLogTest")
       .master("local[*]")
       .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
@@ -44,38 +45,39 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
       .getOrCreate()
   }
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     testDir = Files.createTempDirectory("optimized_txn_log_test").toString
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     // Clean up test directory
     if (testDir != null) {
       import scala.reflect.io.Directory
       val directory = new Directory(new java.io.File(testDir))
       directory.deleteRecursively()
     }
-  }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     if (spark != null) {
       spark.stop()
     }
-  }
 
   test("OptimizedTransactionLog should initialize with schema") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.transaction.optimized.enabled" -> "true"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.transaction.optimized.enabled" -> "true"
+      ).asJava
+    )
 
     val tablePath = new Path(testDir, "test_table")
-    val txnLog = new OptimizedTransactionLog(tablePath, spark, options)
+    val txnLog    = new OptimizedTransactionLog(tablePath, spark, options)
 
     try {
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, false),
-        StructField("name", StringType, true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, false),
+          StructField("name", StringType, true)
+        )
+      )
 
       txnLog.initialize(schema)
 
@@ -83,24 +85,27 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
       val metadata = txnLog.getMetadata()
       assert(metadata != null)
       assert(metadata.schemaString == schema.json)
-    } finally {
+    } finally
       txnLog.close()
-    }
   }
 
   test("OptimizedTransactionLog should add and list files") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.transaction.optimized.enabled" -> "true"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.transaction.optimized.enabled" -> "true"
+      ).asJava
+    )
 
     val tablePath = new Path(testDir, "test_table")
-    val txnLog = new OptimizedTransactionLog(tablePath, spark, options)
+    val txnLog    = new OptimizedTransactionLog(tablePath, spark, options)
 
     try {
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, false),
-        StructField("content", StringType, true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, false),
+          StructField("content", StringType, true)
+        )
+      )
 
       txnLog.initialize(schema)
 
@@ -135,25 +140,28 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
       // Check row count
       val rowCount = txnLog.getTotalRowCount()
       assert(rowCount == 300L)
-    } finally {
+    } finally
       txnLog.close()
-    }
   }
 
   test("OptimizedTransactionLog should handle overwrite operations") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.transaction.optimized.enabled" -> "true",
-      "spark.indextables.parallel.read.enabled" -> "false"  // Disable parallel read to avoid caching issues
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.transaction.optimized.enabled" -> "true",
+        "spark.indextables.parallel.read.enabled"         -> "false" // Disable parallel read to avoid caching issues
+      ).asJava
+    )
 
     val tablePath = new Path(testDir, "test_table")
-    val txnLog = new OptimizedTransactionLog(tablePath, spark, options)
+    val txnLog    = new OptimizedTransactionLog(tablePath, spark, options)
 
     try {
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, false),
-        StructField("value", DoubleType, true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, false),
+          StructField("value", DoubleType, true)
+        )
+      )
 
       txnLog.initialize(schema)
 
@@ -219,26 +227,29 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
       // The calculation should be: initial 2 files removed, 1 file added = 1 file total
       assert(files.size == 1, s"Expected 1 file but got ${files.size}: ${files.map(_.path)}")
       assert(files.head.path == "file3.split")
-    } finally {
+    } finally
       txnLog.close()
-    }
   }
 
   test("TransactionLogFactory should create optimized log by default") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.transaction.optimized.enabled" -> "true"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.transaction.optimized.enabled" -> "true"
+      ).asJava
+    )
 
     val tablePath = new Path(testDir, "test_table")
-    val txnLog = TransactionLogFactory.create(tablePath, spark, options)
+    val txnLog    = TransactionLogFactory.create(tablePath, spark, options)
 
     try {
       // Should create TransactionLogAdapter wrapping OptimizedTransactionLog
       assert(txnLog.isInstanceOf[TransactionLogAdapter])
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, false)
+        )
+      )
 
       txnLog.initialize(schema)
 
@@ -256,25 +267,25 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
 
       val files = txnLog.listFiles()
       assert(files.size == 1)
-    } finally {
+    } finally
       txnLog.close()
-    }
   }
 
   test("TransactionLogFactory should create standard log when optimized is disabled") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.transaction.optimized.enabled" -> "false"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.transaction.optimized.enabled" -> "false"
+      ).asJava
+    )
 
     val tablePath = new Path(testDir, "test_table")
-    val txnLog = TransactionLogFactory.create(tablePath, spark, options)
+    val txnLog    = TransactionLogFactory.create(tablePath, spark, options)
 
     try {
       // Should create standard TransactionLog
       assert(txnLog.isInstanceOf[TransactionLog])
       assert(!txnLog.isInstanceOf[TransactionLogAdapter])
-    } finally {
+    } finally
       txnLog.close()
-    }
   }
 }

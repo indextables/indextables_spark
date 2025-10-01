@@ -24,14 +24,19 @@ class TokenizationTest extends TestBase with Matchers {
 
   test("string fields should use exact matching (default behavior)") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "machine learning"),
-        ("doc2", "deep learning"),
-        ("doc3", "machine")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "machine learning"),
+            ("doc2", "deep learning"),
+            ("doc3", "machine")
+          )
+        )
+        .toDF("id", "content")
 
       // Write with default string type (no explicit configuration)
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
@@ -51,14 +56,19 @@ class TokenizationTest extends TestBase with Matchers {
 
   test("text fields should support indexquery for tokenized matching") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "machine learning algorithms"),
-        ("doc2", "deep learning networks"),
-        ("doc3", "machine vision systems")
-      )).toDF("id", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "machine learning algorithms"),
+            ("doc2", "deep learning networks"),
+            ("doc3", "machine vision systems")
+          )
+        )
+        .toDF("id", "content")
 
       // Write with explicit text type
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.content", "text")
         .save(tablePath)
@@ -77,13 +87,18 @@ class TokenizationTest extends TestBase with Matchers {
 
   test("mixed field types should work together") {
     withTempPath { tablePath =>
-      val data = spark.createDataFrame(Seq(
-        ("doc1", "exact_title", "machine learning algorithms"),
-        ("doc2", "another_title", "deep learning networks")
-      )).toDF("id", "title", "content")
+      val data = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "exact_title", "machine learning algorithms"),
+            ("doc2", "another_title", "deep learning networks")
+          )
+        )
+        .toDF("id", "title", "content")
 
       // Configure title as string (exact) and content as text (tokenized)
-      data.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
+      data.write
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .option("spark.indextables.indexing.typemap.title", "string")
         .option("spark.indextables.indexing.typemap.content", "text")

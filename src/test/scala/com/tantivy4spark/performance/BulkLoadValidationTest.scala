@@ -23,38 +23,39 @@ import org.apache.spark.sql.functions._
 
 class BulkLoadValidationTest extends TestBase {
 
-  private def isNativeLibraryAvailable(): Boolean = {
+  private def isNativeLibraryAvailable(): Boolean =
     try {
       import com.tantivy4spark.search.TantivyNative
       TantivyNative.ensureLibraryLoaded()
     } catch {
       case _: Exception => false
     }
-  }
 
   ignore("should write 439,999 records using V2 provider and read them back") {
     assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping bulk load test")
-    
+
     withTempPath { tempPath =>
       // Generate test data
-      val testData = spark.range(439999).select(
-        col("id"),
-        concat(lit("User"), col("id")).as("name"),
-        (col("id") % 10).as("category")
-      )
-      
+      val testData = spark
+        .range(439999)
+        .select(
+          col("id"),
+          concat(lit("User"), col("id")).as("name"),
+          (col("id") % 10).as("category")
+        )
+
       // Write using V2 provider
       testData.write
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
-      
+
       // Read back using V2 provider
       val readData = spark.read
         .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tempPath)
         .limit(9999999)
-      
+
       // Validate count
       val actualCount = readData.count()
       actualCount shouldBe 439999
