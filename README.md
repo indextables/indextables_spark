@@ -11,27 +11,29 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 ## Table of Contents
 
 - [Features](#features)
+- [Architecture Overview](#architecture-overview)
 - [Installation](#installation)
   - [OSS Spark](#oss-spark)
   - [Databricks](#databricks)
-  - [Usage](#usage)
-    - [Field Indexing Configuration](#field-indexing-configuration-write-options)
-  - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
-    - [Auto-Sizing Configuration](#auto-sizing-configuration)
-    - [S3 Upload Configuration](#s3-upload-configuration)
-    - [Transaction Log Configuration](#transaction-log-configuration)
-    - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
-    - [AWS Configuration](#aws-configuration)
-    - [Split Cache Configuration](#split-cache-configuration)
-    - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
-      - [SQL Usage](#sql-usage)
-      - [Programmatic Usage](#programmatic-usage)
-    - [IndexQueryAll Operator](#indexqueryall-operator)
-      - [SQL Usage](#sql-usage-1)
-      - [Programmatic Usage](#programmatic-usage-1)
-    - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
-      - [SQL Syntax](#sql-syntax)
-      - [Scala/DataFrame API](#scaladataframe-api)
+- [Usage](#usage)
+- [Common Use Cases](#common-use-cases)
+  - [Log Analysis and Observability](#-log-analysis-and-observability)
+  - [Security Investigation and SIEM](#-security-investigation-and-siem)
+  - [Application Performance Monitoring](#-application-performance-monitoring-apm)
+  - [Full-Text Search in Documents](#-full-text-search-in-documents)
+  - [Business Intelligence and Analytics](#-business-intelligence-and-analytics)
+- [Migration Guide](#migration-guide)
+- [Best Practices](#best-practices)
+- [Configuration Options](#configuration-options-read-options-andor-spark-properties)
+  - [Field Indexing Configuration](#field-indexing-configuration)
+  - [Auto-Sizing Configuration](#auto-sizing-configuration)
+  - [S3 Upload Configuration](#s3-upload-configuration)
+  - [Transaction Log Configuration](#transaction-log-configuration)
+  - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
+  - [AWS Configuration](#aws-configuration)
+  - [Split Cache Configuration](#split-cache-configuration)
+  - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
+  - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
 - [File Format](#file-format)
   - [Split Files](#split-files)
   - [Transaction Log](#transaction-log)
@@ -43,8 +45,10 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 - [Roadmap](#roadmap)
   - [Planned Features](#planned-features)
 - [Known Issues and Solutions](#known-issues-and-solutions)
+- [FAQ](#-frequently-asked-questions-faq)
 - [License](#license)
 - [Support](#support)
+- [Acknowledgments](#-acknowledgments)
 
 ## Features
 
@@ -122,6 +126,12 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 
 5. **Upgrade Java (Databricks 15.4)**: Set environment variable `JNAME=zulu17-ca-amd64` to use Java 17
 
+6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider:
+
+```scala
+spark.conf.set("spark.indextables.aws.credentialsProviderClass",
+  "com.tantivy4spark.auth.unity.UnityCredentialProvider")
+```
 
 ### Usage
 
@@ -161,17 +171,6 @@ spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND scor
 // Cross-field search - any record containing the text "mytable"
 spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'mytable'")
 ```
-
-
-#### Field Indexing Configuration (Write options)
-
-| Configuration | Default | Description |
-|---------------|---------|-------------|
-| `spark.indextables.indexing.typemap.<field_name>` | `string` | Field indexing type: `string`, `text`, or `json` |
-| `spark.indextables.indexing.fastfields` | - | Comma-separated list of fields for fast access |
-| `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
-| `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
-| `spark.indextables.indexing.tokenizer.<field_name>` | - | Tokenizer type: `default`, `whitespace`, or `raw` |
 
 ---
 
@@ -306,12 +305,10 @@ parquetDF.write
   // Configure exact match fields (default)
   .option("spark.indextables.indexing.typemap.id", "string")
   .option("spark.indextables.indexing.typemap.status", "string")
-  // Enable fast fields for aggregations
-  .option("spark.indextables.indexing.fastfields", "timestamp,count,score")
   .save("s3://bucket/indextable-data")
 
 // Step 4: Optimize the splits for better performance
-spark.sql("MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 1G")
+spark.sql("MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 4G")
 ```
 
 ### 🔺 From Delta Lake to IndexTables
@@ -348,7 +345,6 @@ csvDF.union(jsonDF)
   .write
   .format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.indexing.typemap.comment", "text")
-  .option("spark.indextables.indexing.fastfields", "rating,timestamp")
   .save("s3://bucket/unified-indextable")
 ```
 
@@ -389,13 +385,13 @@ dateRanges.foreach { case (start, end) =>
 #### 🎯 **DO: Optimize Split Sizes**
 ```scala
 // Target 1-4GB splits for optimal performance
-spark.sql("MERGE SPLITS 's3://bucket/table' TARGET SIZE 2G")
+spark.sql("MERGE SPLITS 's3://bucket/table' TARGET SIZE 4G")
 
 // For time-series data, merge by partition
 spark.sql("""
   MERGE SPLITS 's3://bucket/table'
   WHERE date = '2024-01-01'
-  TARGET SIZE 1G
+  TARGET SIZE 4G
 """)
 ```
 
@@ -418,14 +414,6 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 // Allocate 50% to Spark heap, 50% to native memory
 spark.conf.set("spark.executor.memory", "8g")  // If total memory is 16GB
 spark.conf.set("spark.executor.memoryOverhead", "8g")
-```
-
-#### ⚡ **DO: Use Fast Fields for Aggregations**
-```scala
-// Configure frequently aggregated fields as fast fields
-df.write.format("io.indextables.provider.IndexTablesProvider")
-  .option("spark.indextables.indexing.fastfields", "timestamp,count,total,score")
-  .save(path)
 ```
 
 #### 📅 **DO: Partition Time-Series Data**
@@ -459,15 +447,6 @@ spark.conf.set("spark.executor.memory", "8g")
 spark.conf.set("spark.executor.memoryOverhead", "8g")
 ```
 
-#### 🚫 **DON'T: Index Everything**
-```scala
-// BAD: Indexing fields that don't need search
-.option("spark.indextables.indexing.typemap.internal_id", "text")  // Wasteful
-
-// GOOD: Only index searchable fields, store others
-.option("spark.indextables.indexing.storeonlyfields", "internal_id,system_field")
-```
-
 #### 🚫 **DON'T: Forget to Merge Splits**
 ```scala
 // BAD: Writing data without optimization
@@ -476,7 +455,7 @@ df.write.format("io.indextables.provider.IndexTablesProvider").save(path)
 
 // GOOD: Always merge after large ingestions
 df.write.format("io.indextables.provider.IndexTablesProvider").save(path)
-spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 2G")
+spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 4G")
 ```
 
 #### 🚫 **DON'T: Mix Field Types Incorrectly**
@@ -494,11 +473,6 @@ spark.sql(s"MERGE SPLITS '$path' TARGET SIZE 2G")
 > **⚡ Tip:** Pre-warm caches for better query performance
 > ```scala
 > spark.conf.set("spark.indextables.cache.prewarm.enabled", "true")
-> ```
-
-> **🎯 Tip:** Monitor split statistics regularly
-> ```scala
-> spark.sql("SELECT COUNT(*) as split_count, AVG(size) as avg_size FROM transaction_log")
 > ```
 
 > **💡 Tip:** Use IndexQuery for complex searches instead of multiple filters
@@ -539,6 +513,15 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.s3.endpoint` | - | S3 endpoint URL (alternative to aws.endpoint) |
 | `spark.indextables.s3.pathStyleAccess` | `false` | Use path-style access for S3 (required for some S3-compatible services) |
 
+#### Field Indexing Configuration
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.indexing.typemap.<field_name>` | `string` | Field indexing type: `string`, `text`, or `json` |
+| `spark.indextables.indexing.fastfields` | - | Comma-separated list of fields for fast access |
+| `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
+| `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
+| `spark.indextables.indexing.tokenizer.<field_name>` | - | Tokenizer type: `default`, `whitespace`, or `raw` |
 
 #### Auto-Sizing Configuration
 
@@ -621,7 +604,13 @@ df.write.format("com.tantivy4spark.core.Tantivy4SparkTableProvider").save("s3://
 Configure AWS credentials for S3 operations:
 
 ```scala
-// Standard AWS credentials
+// Recommended: Use custom credential provider (e.g., Unity Catalog)
+spark.conf.set("spark.indextables.aws.credentialsProviderClass",
+  "com.tantivy4spark.auth.unity.UnityCredentialProvider")
+
+df.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")
+
+// Alternative: Explicit AWS credentials
 spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")
 spark.conf.set("spark.indextables.aws.secretKey", "your-secret-key")
 spark.conf.set("spark.indextables.aws.region", "us-west-2")
@@ -635,9 +624,7 @@ spark.conf.set("spark.indextables.aws.region", "us-west-2")
 // Custom S3 endpoint (for S3-compatible services like MinIO, LocalStack)
 spark.conf.set("spark.indextables.aws.endpoint", "https://s3.custom-provider.com")
 
-df.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")
-
-// Alternative: Pass credentials via write options (automatically propagated to executors)
+// Pass credentials via write options (automatically propagated to executors)
 df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.aws.accessKey", "your-access-key")
   .option("spark.indextables.aws.secretKey", "your-secret-key")
