@@ -48,13 +48,13 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 
 ## Features
 
-- 🚀 **Embedded Search**: Runs directly within Spark executors without additional infrastructure
-- 💾 **AWS S3 Backend**: Persists and consumes search indexes from inexpensive object storage
-- ⚡ **Smart File Skipping**: Delta/Iceberg-like transaction log metadata to support efficient query pruning based on "where" predicates
-- 🔍 **Custom Query Operators**: "indexquery" SQL operand to provide access to the full Quickwit search syntax
-- 📊 **Extensive Predicate Acceleration**: Most where-clause components are automatically translated to search operations for fast retrieval
-- 🎯 **Fast Aggregates**: Accelerated count, sum, min, max, and average operators with and without aggregation
-- 🔐 **AWS Session Support**: Support for AWS credentials through instance profile, programmatic access, and custom credential providers
+- 🚀 **Embedded Search**: Runs directly within Spark executors with no additional infrastructure required
+- 💾 **S3 Storage**: Stores indexed data in cost-effective object storage (tested on AWS S3)
+- ⚡ **Smart File Skipping**: Delta/Iceberg-style transaction log with min/max statistics for efficient query pruning
+- 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
+- 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
+- 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
+- 🔐 **Flexible AWS Authentication**: Supports instance profiles, programmatic credentials, and custom credential providers
 
 ---
 
@@ -94,30 +94,33 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 
 ## Installation
 ### OSS Spark
- 1. Install the proper [platform JAR](https://provide.mavencentral.link) file for IndexTables in your boot classpath for your Spark executors and driver
- 2. Enable custom SQL extensions by setting the appropriate Spark property (`spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`)
- 3. Configure your driver and worker memory to use only 1/2 of the regular memory amount for Spark (the search system runs mostly in native heap)
- 4. Assure that your Spark instance is using at least Java 11.
+
+1. **Install the JAR**: Add the platform-specific [IndexTables JAR](https://provide.mavencentral.link) to the boot classpath for both executors and driver
+2. **Enable SQL extensions**: Set `spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`
+3. **Configure memory**: Allocate 50% for Spark heap and 50% for native memory overhead (IndexTables runs primarily in native heap)
+4. **Java version**: Requires Java 11 or higher
 
 ### Databricks
- On Databricks, you will want to:
-  1) Install the appropriate platform-specific JAR files to your workspace root (ex: /Workspace/Users/me/indextables_x86_64_0.0.1.jar)
-  2) Create a startup script in your workspace called "add_indextables_to_classpath.sh" with the following text (to add to classpath)
+
+Follow these steps to install IndexTables on Databricks:
+
+1. **Upload JAR**: Install the platform-specific JAR to your workspace (e.g., `/Workspace/Users/me/indextables_x86_64_0.0.1.jar`)
+2. **Create startup script**: Add a script named `add_indextables_to_classpath.sh` to copy the JAR to the Databricks jars directory:
 
 ```
 #!/bin/bash
 cp /Workspace/Users/me/indextables_x86_64_0.0.1.jar /databricks/jars
 ```
 
-  3) Add the startup script to your server startup configuration
-  4) Add the following Spark properties to your server config: 
+3. **Configure startup script**: Add the script to your cluster's startup configuration
+4. **Set Spark properties**: Add these configurations to your cluster settings:
 
 ```
-spark.executor.memory=27016m  # This is the setting for an r6id.2xlarge server, set to 1/2 of the default
+spark.executor.memory=27016m  # Example for r6id.2xlarge: 50% of default memory
 spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 ```
 
-  5) Add the following environment variable if on DBX 15.4 to upgrade Java to 17 (JNAME=zulu17-ca-amd64)
+5. **Upgrade Java (Databricks 15.4)**: Set environment variable `JNAME=zulu17-ca-amd64` to use Java 17
 
 
 ### Usage
@@ -129,7 +132,7 @@ val spark = SparkSession.builder()
   .appName("IndexTables Example")
   .getOrCreate()
 
-// Write data - see sections below about heap sizing, temporary space, etc...
+// Write data (configure memory and storage settings per Best Practices section)
 df.write
   .format("io.indextables.provider.IndexTablesProvider")
   .mode("append")
@@ -138,8 +141,8 @@ df.write
   .option("spark.indextables.indexing.typemap.message", "text")
   .save("s3://bucket/path/table")
 
-// Merge index segments to a 4GB target size
-// for maximum performance and scaling -- THIS IS CRITICAL, bigger is better...
+// Merge index segments for optimal performance
+// Larger splits (1-4GB) improve query performance and reduce overhead
 spark.sql("MERGE SPLITS 's3://bucket/path/table' TARGET SIZE 4G")
 
 // Read data with optimized caching
@@ -985,12 +988,10 @@ src/test/scala/         # Comprehensive test suite (205+ tests passing)
 
 ### Optimization Features
 
-1. **Split Cache Locality**: The system automatically tracks which hosts have cached which splits and uses Spark's `preferredLocations` API to schedule tasks on those hosts, reducing network I/O and improving query performance.
-
-2. **Intelligent Task Scheduling**: When reading data, Spark preferentially schedules tasks on hosts that have already cached the required split files, leading to:
-   - Faster query execution due to local cache hits
-   - Reduced network bandwidth usage
-   - Better cluster resource utilization
+**Cache Locality Tracking**: IndexTables automatically tracks which executors have cached splits and uses Spark's `preferredLocations` API to schedule tasks on those hosts. This optimization provides:
+- Faster query execution through local cache hits
+- Reduced network bandwidth usage
+- Better cluster resource utilization
 
 ## Roadmap
 
@@ -1002,6 +1003,10 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Catalog support**: Support for Hive catalogs
 - **Schema migration**: Support for updating schemas and indexing schemes
 - **Re-indexing support**: Support for changing indexing types of fields from plain strings to full-text search
+- **Index creation syntax**: SQL DDL commands for creating and managing indexes (e.g., `CREATE INDEX`, `DROP INDEX`, `ALTER INDEX`) with declarative field type and tokenizer configuration
+- **Advanced optimized writes**: Enhanced write-time optimizations including intelligent bucketing, adaptive compression, and dynamic split sizing based on workload patterns
+- **Auto-merge capabilities**: Automatic background merge operations triggered by configurable policies (split count, size thresholds, time-based schedules)
+- **Auto-purging**: Automatic cleanup of old splits, transaction logs, and checkpoints based on retention policies and time-to-live (TTL) settings
 - **Prewarming enhancements**: Better support for pre-warming caches on new clusters
 - **Memory auto-tuning**: Better support for automatically tuning native heaps for indexing, merging, and queries
 - **Enhanced windowing functions**: Improved support for time-based windowing and tumbling window aggregations
