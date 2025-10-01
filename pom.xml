@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.tantivy4spark</groupId>
-    <artifactId>tantivy4spark</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <groupId>io.indextables</groupId>
+    <artifactId>indextables_spark</artifactId>
+    <version>0.3_spark_3.3.3_x86_64-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>Tantivy4Spark</name>
@@ -135,9 +135,9 @@
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
         <dependency>
-            <groupId>com.tantivy4java</groupId>
+            <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.24.1</version>
+            <version>0.24.1_x86_64</version>
         </dependency>
 
         <!-- Logging -->

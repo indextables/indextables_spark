@@ -66,17 +66,17 @@ class DateTimeTypeConversionTest extends TestBase with Matchers {
       testData.show(false)
       testData.printSchema()
       
-      // Write data to tantivy4spark format
+      // Write data to tantivy4spark format using V2 API for consistency
       println("💾 Writing data with date/timestamp fields...")
       testData.write
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
-      
-      // Read data back
+
+      // Read data back using V2 API
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("com.tantivy4spark.core.Tantivy4SparkTableProvider")
         .load(tempPath)
       
       println("📊 Read back data:")

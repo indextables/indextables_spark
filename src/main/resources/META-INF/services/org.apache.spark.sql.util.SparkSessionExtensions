@@ -1,1 +1,1 @@
-com.tantivy4spark.extensions.Tantivy4SparkExtensions
+io.indextables.extensions.IndexTablesSparkExtensions
