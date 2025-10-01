@@ -188,6 +188,22 @@
             <version>0.2.6</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- AWS SDK v1 for Unity Catalog credential provider (optional, provided scope) -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-core</artifactId>
+            <version>1.12.565</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Databricks SDK for Unity Catalog integration (optional, provided scope) -->
+        <dependency>
+            <groupId>com.databricks</groupId>
+            <artifactId>databricks-sdk-java</artifactId>
+            <version>0.65.0</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
     <build>
