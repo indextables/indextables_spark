@@ -6,11 +6,41 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.3_spark_3.3.3_x86_64-SNAPSHOT</version>
+    <version>0.3.0_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>Tantivy4Spark</name>
     <description>Fast search file format for Apache Spark using Tantivy search engine</description>
+    <url>https://github.com/indextables/indextables_spark</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>indextables_spark</id>
+            <name>IndexTables Spark Contributors</name>
+            <url>https://github.com/indextables/indextables_spark</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/indextables/indextables_spark.git</connection>
+        <developerConnection>scm:git:ssh://github.com:indextables/indextables_spark.git</developerConnection>
+        <url>https://github.com/indextables/indextables_spark/tree/main</url>
+    </scm>
+
+    <distributionManagement>
+        <repository>
+            <id>central</id>
+            <url>https://central.sonatype.com/api/v1/publisher</url>
+        </repository>
+    </distributionManagement>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
@@ -135,9 +165,10 @@
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
         <dependency>
-            <groupId>com.tantivy4java</groupId>
+            <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.24.1_x86_64</version>
+            <version>0.24.1</version>
+            <classifier>${platform.classifier}</classifier>
         </dependency>
 
         <!-- Logging -->
@@ -394,6 +425,53 @@
                 </executions>
             </plugin>
 
+            <!-- JAR plugin for main artifact (temporary, will be shaded) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                        </manifest>
+                    </archive>
+                    <!-- Skip installing the non-platform-specific jar -->
+                    <skipIfEmpty>false</skipIfEmpty>
+                </configuration>
+            </plugin>
+
+            <!-- Skip installing the main (non-shaded) artifact -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-install-plugin</artifactId>
+                <version>3.1.1</version>
+                <configuration>
+                    <skip>false</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-install</id>
+                        <phase>none</phase>
+                    </execution>
+                    <execution>
+                        <id>install-shaded</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>install-file</goal>
+                        </goals>
+                        <configuration>
+                            <file>${project.build.directory}/${project.artifactId}-${project.version}-${platform.classifier}-shaded.jar</file>
+                            <groupId>${project.groupId}</groupId>
+                            <artifactId>${project.artifactId}</artifactId>
+                            <version>${project.version}</version>
+                            <packaging>jar</packaging>
+                            <classifier>${platform.classifier}-shaded</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Assembly plugin for fat JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -403,6 +481,8 @@
                     <descriptorRefs>
                         <descriptorRef>jar-with-dependencies</descriptorRef>
                     </descriptorRefs>
+                    <finalName>${project.artifactId}-${project.version}-${platform.classifier}</finalName>
+                    <appendAssemblyId>true</appendAssemblyId>
                 </configuration>
                 <executions>
                     <execution>
@@ -429,7 +509,7 @@
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>com.tantivy4java:tantivy4java</include>
+                                    <include>io.indextables:tantivy4java</include>
                                     <include>software.amazon.awssdk:*</include>
                                     <!-- <include>com.fasterxml.jackson.core:*</include>
                                     <include>com.fasterxml.jackson.module:*</include> -->
@@ -474,12 +554,178 @@
                                     </excludes>
                                 </filter>
                             </filters>
+                            <!-- Create shaded jar with platform-specific classifier -->
                             <shadedArtifactAttached>true</shadedArtifactAttached>
-                            <shadedClassifierName>shaded</shadedClassifierName>
+                            <shadedClassifierName>${platform.classifier}-shaded</shadedClassifierName>
+                            <!-- Replace main artifact with shaded version -->
+                            <createDependencyReducedPom>true</createDependencyReducedPom>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
+
+    <!-- Platform detection profiles - auto-activate based on OS -->
+    <profiles>
+        <!-- macOS ARM64 (Apple Silicon) -->
+        <profile>
+            <id>platform-darwin-aarch64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>aarch64</arch>
+                </os>
+                <property>
+                    <name>!platform.classifier</name>
+                </property>
+            </activation>
+            <properties>
+                <platform.classifier>darwin-aarch64</platform.classifier>
+            </properties>
+        </profile>
+
+        <!-- macOS x86_64 (Intel) -->
+        <profile>
+            <id>platform-darwin-x86_64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>x86_64</arch>
+                </os>
+                <property>
+                    <name>!platform.classifier</name>
+                </property>
+            </activation>
+            <properties>
+                <platform.classifier>darwin-x86_64</platform.classifier>
+            </properties>
+        </profile>
+
+        <!-- Linux x86_64 -->
+        <profile>
+            <id>platform-linux-x86_64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>linux</name>
+                    <arch>amd64</arch>
+                </os>
+                <property>
+                    <name>!platform.classifier</name>
+                </property>
+            </activation>
+            <properties>
+                <platform.classifier>linux-x86_64</platform.classifier>
+            </properties>
+        </profile>
+
+        <!-- Linux ARM64 -->
+        <profile>
+            <id>platform-linux-aarch64</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>linux</name>
+                    <arch>aarch64</arch>
+                </os>
+                <property>
+                    <name>!platform.classifier</name>
+                </property>
+            </activation>
+            <properties>
+                <platform.classifier>linux-aarch64</platform.classifier>
+            </properties>
+        </profile>
+
+        <!-- Windows x86_64 -->
+        <profile>
+            <id>platform-windows-x86_64</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                    <arch>amd64</arch>
+                </os>
+                <property>
+                    <name>!platform.classifier</name>
+                </property>
+            </activation>
+            <properties>
+                <platform.classifier>windows-x86_64</platform.classifier>
+            </properties>
+        </profile>
+
+        <!-- Maven Central release profile - activate with -Prelease -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <!-- Generate source JAR -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Generate Scaladoc JAR -->
+                    <plugin>
+                        <groupId>net.alchim31.maven</groupId>
+                        <artifactId>scala-maven-plugin</artifactId>
+                        <version>4.8.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-scaladocs</id>
+                                <goals>
+                                    <goal>doc-jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- GPG signing -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                                <configuration>
+                                    <!-- Prevent gpg from using pinentry programs -->
+                                    <gpgArguments>
+                                        <arg>--pinentry-mode</arg>
+                                        <arg>loopback</arg>
+                                    </gpgArguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Central Publishing Plugin -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.4.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <tokenAuth>true</tokenAuth>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
