@@ -222,8 +222,7 @@ WHERE event_type IN ('login', 'auth_attempt', 'access')
 -- Identify potential brute force attempts
 SELECT ip_address,
        date, hour, minute,
-       COUNT(*) as attempts,
-       collect_set(user) as targeted_users
+       COUNT(*) as attempts
 FROM security_logs
 WHERE event_type = 'login'
   AND outcome = 'failed'
