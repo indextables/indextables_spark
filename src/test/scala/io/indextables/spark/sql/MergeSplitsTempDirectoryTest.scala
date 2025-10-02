@@ -164,10 +164,10 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     logger.info("✅ System default temp directory test completed successfully")
   }
 
-  test("SerializableAwsConfig should correctly handle temp directory path") {
-    logger.info("Testing SerializableAwsConfig temp directory handling")
+  test("SerializableAwsConfig should correctly handle temp directory path and merge config") {
+    logger.info("Testing SerializableAwsConfig temp directory and merge config handling")
 
-    // Test with temp directory
+    // Test with temp directory and custom heap size
     val configWithTempDir = SerializableAwsConfig(
       accessKey = "test-key",
       secretKey = "test-secret",
@@ -175,30 +175,53 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       region = "us-east-1",
       endpoint = None,
       pathStyleAccess = false,
-      tempDirectoryPath = Some(customTempDir)
+      tempDirectoryPath = Some(customTempDir),
+      credentialsProviderClass = None,
+      heapSize = java.lang.Long.valueOf(50000000L), // 50MB
+      debugEnabled = true
     )
 
     assert(
       configWithTempDir.tempDirectoryPath.contains(customTempDir),
       "SerializableAwsConfig should store temp directory path"
     )
+    assert(
+      configWithTempDir.heapSize == 50000000L,
+      "SerializableAwsConfig should store heap size"
+    )
+    assert(
+      configWithTempDir.debugEnabled,
+      "SerializableAwsConfig should store debug enabled flag"
+    )
 
-    // Test without temp directory
+    // Test without temp directory (using defaults)
     val configWithoutTempDir = SerializableAwsConfig(
       accessKey = "test-key",
       secretKey = "test-secret",
       sessionToken = None,
       region = "us-west-2",
       endpoint = None,
-      pathStyleAccess = true
+      pathStyleAccess = true,
+      tempDirectoryPath = None,
+      credentialsProviderClass = None,
+      heapSize = null, // Default
+      debugEnabled = false // Default
     )
 
     assert(
       configWithoutTempDir.tempDirectoryPath.isEmpty,
       "SerializableAwsConfig should handle missing temp directory path"
     )
+    assert(
+      configWithoutTempDir.heapSize == null,
+      "SerializableAwsConfig should handle null heap size (default)"
+    )
+    assert(
+      !configWithoutTempDir.debugEnabled,
+      "SerializableAwsConfig should default debug enabled to false"
+    )
 
-    logger.info("✅ SerializableAwsConfig temp directory handling test completed")
+    logger.info("✅ SerializableAwsConfig temp directory and merge config handling test completed")
   }
 
   test("Temp directory validation should log appropriate messages") {
@@ -238,6 +261,50 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
     assert(data.count() == 10, "Merge should succeed with valid temp directory")
 
     logger.info("✅ Temp directory validation test completed")
+  }
+
+  test("MERGE SPLITS result should include tempDirectoryPath and heapSize") {
+    logger.info("Testing that merge result DataFrame includes temp directory and heap size")
+
+    // Set custom configuration
+    val customHeapSize = 30000000L // 30MB
+    spark.conf.set("spark.indextables.merge.tempDirectoryPath", customTempDir)
+    spark.conf.set("spark.indextables.merge.heapSize", customHeapSize.toString)
+
+    // Create test data
+    createTestDataForMerging()
+
+    // Execute MERGE SPLITS with custom config
+    logger.info(s"Executing MERGE SPLITS with heapSize=$customHeapSize and tempDir=$customTempDir")
+    val result = spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE ${50 * 1024 * 1024}")
+
+    // Verify result DataFrame has the expected columns
+    val columns = result.columns
+    assert(columns.contains("table_path"), "Result should contain table_path column")
+    assert(columns.contains("metrics"), "Result should contain metrics column")
+    assert(columns.contains("temp_directory_path"), "Result should contain temp_directory_path column")
+    assert(columns.contains("heap_size_bytes"), "Result should contain heap_size_bytes column")
+
+    // Get the result row
+    val rows = result.collect()
+    assert(rows.length == 1, "Should return exactly one result row")
+
+    val row = rows(0)
+    val tablePath = row.getString(row.fieldIndex("table_path"))
+    val metrics = row.getString(row.fieldIndex("metrics"))
+    val tempDirPath = row.getString(row.fieldIndex("temp_directory_path"))
+    val heapSizeBytes = if (row.isNullAt(row.fieldIndex("heap_size_bytes"))) null else row.getLong(row.fieldIndex("heap_size_bytes"))
+
+    logger.info(s"Result - table_path: $tablePath")
+    logger.info(s"Result - metrics: $metrics")
+    logger.info(s"Result - temp_directory_path: $tempDirPath")
+    logger.info(s"Result - heap_size_bytes: $heapSizeBytes")
+
+    // Verify the values match what we configured
+    assert(tempDirPath == customTempDir, s"temp_directory_path should be $customTempDir, got $tempDirPath")
+    assert(heapSizeBytes == customHeapSize, s"heap_size_bytes should be $customHeapSize, got $heapSizeBytes")
+
+    logger.info("✅ Merge result DataFrame contains correct temp directory and heap size")
   }
 
   test("Configuration extraction should handle environment variables and system properties") {

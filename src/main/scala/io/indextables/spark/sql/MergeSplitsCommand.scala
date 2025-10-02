@@ -66,7 +66,9 @@ abstract class MergeSplitsCommandBase extends RunnableCommand {
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),
-    AttributeReference("metrics", StringType)()
+    AttributeReference("metrics", StringType)(),
+    AttributeReference("temp_directory_path", StringType)(),
+    AttributeReference("heap_size_bytes", LongType)()
   )
 
   /** Default target size for merged splits (5GB in bytes) */
@@ -105,7 +107,7 @@ case class MergeSplitsCommand(
     // Handle pre-commit merge early (before any table path resolution)
     if (preCommitMerge) {
       logger.info("PRE-COMMIT MERGE: Executing pre-commit merge functionality")
-      return Seq(Row("PRE-COMMIT MERGE", "PRE-COMMIT MERGE: Functionality pending implementation"))
+      return Seq(Row("PRE-COMMIT MERGE", "PRE-COMMIT MERGE: Functionality pending implementation", null, null))
     }
 
     // Resolve table path from child logical plan
@@ -121,7 +123,7 @@ case class MergeSplitsCommand(
             case _ => "unknown"
           }
           logger.info(s"Table or path not found: $pathStr")
-          return Seq(Row(pathStr, "No splits merged - table or path does not exist"))
+          return Seq(Row(pathStr, "No splits merged - table or path does not exist", null, null))
       }
 
     // Create transaction log
@@ -140,14 +142,14 @@ case class MergeSplitsCommand(
 
       if (!hasMetadata) {
         logger.info(s"No transaction log found at: $tablePath")
-        return Seq(Row(tablePath.toString, "No splits merged - not a valid IndexTables4Spark table"))
+        return Seq(Row(tablePath.toString, "No splits merged - not a valid IndexTables4Spark table", null, null))
       }
 
       // Validate table has files
       val files = transactionLog.listFiles()
       if (files.isEmpty) {
         logger.info(s"No files found in table: $tablePath")
-        return Seq(Row(tablePath.toString, "No splits to merge - table is empty"))
+        return Seq(Row(tablePath.toString, "No splits to merge - table is empty", null, null))
       }
 
       new MergeSplitsExecutor(
@@ -205,6 +207,17 @@ object MergeSplitsCommand {
     val plan = UnresolvedDeltaPathOrIdentifier(path, tableIdentifier, "MERGE SPLITS")
     MergeSplitsCommand(plan, userPartitionPredicates, targetSize, maxGroups, preCommitMerge)
   }
+
+  /**
+   * Detect if /local_disk0 is available and writable for high-performance local storage.
+   * Follows the same pattern as SplitManager.scala for consistency.
+   *
+   * @return true if /local_disk0 exists, is a directory, and is writable; false otherwise
+   */
+  def isLocalDisk0Available(): Boolean = {
+    val localDisk0 = new java.io.File("/local_disk0")
+    localDisk0.exists() && localDisk0.isDirectory && localDisk0.canWrite()
+  }
 }
 
 /** Serializable wrapper for AWS configuration that can be broadcast across executors. */
@@ -216,7 +229,9 @@ case class SerializableAwsConfig(
   endpoint: Option[String],
   pathStyleAccess: Boolean,
   tempDirectoryPath: Option[String] = None,
-  credentialsProviderClass: Option[String] = None // Custom credential provider class name
+  credentialsProviderClass: Option[String] = None, // Custom credential provider class name
+  heapSize: java.lang.Long = null,                 // Heap size for merge operations (null for default 15MB)
+  debugEnabled: Boolean = false                    // Enable debug logging in merge operations
 ) extends Serializable {
 
   /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
@@ -383,12 +398,17 @@ class MergeSplitsExecutor(
         .map(_.toLowerCase == "true")
         .getOrElse(false)
 
-      // Extract temporary directory configuration for merge operations with auto-detection
+      // Extract temporary directory configuration for merge operations with fallback chain:
+      // 1. Explicit config, 2. /local_disk0 if available, 3. null (system default)
       val tempDirectoryPath = getConfigWithFallback("spark.indextables.merge.tempDirectoryPath")
-        .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultTempPath())
+        .orElse(if (MergeSplitsCommand.isLocalDisk0Available()) Some("/local_disk0/tantivy4spark-temp") else None)
 
       // Extract custom credential provider class name
       val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
+
+      // Extract merge operation configuration
+      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize").map(_.toLong).map(java.lang.Long.valueOf).orNull
+      val debugEnabled = getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
 
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey
@@ -433,13 +453,14 @@ class MergeSplitsExecutor(
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
         tempDirectoryPath,       // Custom temp directory path for merge operations
-        credentialsProviderClass // Custom credential provider class name
+        credentialsProviderClass, // Custom credential provider class name
+        heapSize,                // Heap size for merge operations
+        debugEnabled             // Debug logging for merge operations
       )
     } catch {
       case ex: Exception =>
-        logger.warn("Failed to extract AWS config from Spark session, using empty config", ex)
-        // Return empty config that will use default AWS credential chain
-        SerializableAwsConfig("", "", None, "us-east-1", None, false, None, None)
+        logger.error("Failed to extract AWS config from Spark session", ex)
+        throw new RuntimeException("Failed to extract AWS config for merge operation", ex)
     }
 
   /**
@@ -605,9 +626,19 @@ class MergeSplitsExecutor(
       throw new IllegalStateException(s"Internal error: Found ${singleFileGroups.length} single-file merge groups")
     }
 
+    // Extract AWS configuration early so it's available for all code paths
+    val awsConfig = extractAwsConfig()
+
     if (limitedMergeGroups.isEmpty) {
       logger.info("No splits require merging")
-      return Seq(Row(tablePath.toString, "No splits merged - all splits are already optimal size"))
+      return Seq(
+        Row(
+          tablePath.toString,
+          "No splits merged - all splits are already optimal size",
+          awsConfig.tempDirectoryPath.getOrElse(null),
+          if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
+        )
+      )
     }
 
     // Execute merges in parallel across Spark executors
@@ -615,7 +646,6 @@ class MergeSplitsExecutor(
     logger.info(s"Distributing ${limitedMergeGroups.length} merge operations across Spark executors")
 
     // Broadcast AWS configuration to executors
-    val awsConfig          = extractAwsConfig()
     val broadcastAwsConfig = sparkSession.sparkContext.broadcast(awsConfig)
     val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
 
@@ -894,7 +924,9 @@ class MergeSplitsExecutor(
       Row(
         tablePath.toString,
         s"Merged $totalMergedFiles files into $totalMergeGroups splits. " +
-          s"Original size: $totalOriginalSize bytes, new size: $totalMergedSize bytes"
+          s"Original size: $totalOriginalSize bytes, new size: $totalMergedSize bytes",
+        awsConfig.tempDirectoryPath.getOrElse(null),
+        if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
       )
     )
   }
@@ -920,7 +952,7 @@ class MergeSplitsExecutor(
 
     logger.warn("PRE-COMMIT MERGE: Implementation pending - this is a placeholder")
 
-    Seq(Row(tablePath.toString, "PRE-COMMIT MERGE: Functionality pending implementation"))
+    Seq(Row(tablePath.toString, "PRE-COMMIT MERGE: Functionality pending implementation", null, null))
   }
 
   /**
@@ -1344,7 +1376,7 @@ class MergeSplitsExecutor(
       }
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
-    // Create merge configuration with broadcast AWS credentials
+    // Create merge configuration with broadcast AWS credentials and temp directory
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid",                        // indexUid
       "tantivy4spark",                           // sourceId
@@ -1352,7 +1384,10 @@ class MergeSplitsExecutor(
       docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
+      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
+      awsConfig.heapSize,                        // heapSizeBytes
+      awsConfig.debugEnabled                     // debugEnabled
     )
 
     // Perform the actual merge using tantivy4java with retry logic for streaming errors and timeouts
@@ -1536,7 +1571,7 @@ class MergeSplitsExecutor(
         else docMappingJson}"
     )
 
-    // Create merge configuration with AWS credentials
+    // Create merge configuration with AWS credentials and temp directory
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid",                        // indexUid
       "tantivy4spark",                           // sourceId
@@ -1544,7 +1579,10 @@ class MergeSplitsExecutor(
       docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePath.toString) // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
+      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
+      awsConfig.heapSize,                        // heapSizeBytes
+      awsConfig.debugEnabled                     // debugEnabled
     )
 
     // Perform the actual merge using direct/in-process merge
@@ -1903,7 +1941,7 @@ object MergeSplitsExecutor {
       }
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
-    // Create merge configuration with broadcast AWS credentials
+    // Create merge configuration with broadcast AWS credentials and temp directory
     val mergeConfig = new QuickwitSplit.MergeConfig(
       "merged-index-uid",                        // indexUid
       "tantivy4spark",                           // sourceId
@@ -1911,7 +1949,10 @@ object MergeSplitsExecutor {
       docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
+      awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
+      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
+      awsConfig.heapSize,                        // heapSizeBytes
+      awsConfig.debugEnabled                     // debugEnabled
     )
 
     // Perform the actual merge using direct/in-process merge
