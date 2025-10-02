@@ -1013,6 +1013,8 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Enhanced windowing functions**: Improved support for time-based windowing and tumbling window aggregations
 - **VARIANT Data types**: Support for JSON fields
 - **Arrays and embedded structures**: Support for complex column types
+- **S3 Mock Test Improvementss**: Remove requirement for "real" S3 access for many test cases
+- **Test independence**:  "mvn test" can't run without large available memory (using run_tests_individually.sh method)
 
 
 ## Known Issues and Solutions
