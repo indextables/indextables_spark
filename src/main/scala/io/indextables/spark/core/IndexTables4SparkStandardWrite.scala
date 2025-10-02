@@ -22,11 +22,8 @@ import org.apache.spark.sql.connector.write.{
   DataWriterFactory,
   PhysicalWriteInfo,
   Write,
-  WriterCommitMessage,
-  RequiresDistributionAndOrdering
+  WriterCommitMessage
 }
-import org.apache.spark.sql.connector.distributions.{Distribution, Distributions, ClusteredDistribution}
-import org.apache.spark.sql.connector.expressions.{Expressions, SortOrder, LogicalExpressions}
 import io.indextables.spark.transaction.{TransactionLog, AddAction}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.connector.write.LogicalWriteInfo
@@ -46,7 +43,6 @@ class IndexTables4SparkStandardWrite(
   isOverwrite: Boolean = false // Track whether this is an overwrite operation
 ) extends Write
     with BatchWrite
-    with RequiresDistributionAndOrdering
     with Serializable {
 
   @transient private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkStandardWrite])
@@ -351,35 +347,4 @@ class IndexTables4SparkStandardWrite(
       // Don't fail the write for other types of errors
     }
 
-  /**
-   * RequiresDistributionAndOrdering implementation for partitioned tables. This ensures Spark partitions data by
-   * partition columns before writing.
-   */
-  override def requiredDistribution(): Distribution =
-    if (partitionColumns.nonEmpty) {
-      // For partitioned tables, cluster by partition columns using the correct constructor
-      val clusteredColumns = partitionColumns.toArray
-      logger.info(s"Standard write: requiring clustering by partition columns: ${partitionColumns.mkString(", ")}")
-      Distributions.clustered(clusteredColumns.map(Expressions.identity))
-    } else {
-      // No partitioning required for non-partitioned tables
-      logger.info("Standard write: no partition columns, using unspecified distribution")
-      Distributions.unspecified()
-    }
-
-  override def requiredOrdering(): Array[SortOrder] =
-    // No specific ordering required
-    Array.empty
-
-  override def requiredNumPartitions(): Int =
-    if (partitionColumns.nonEmpty) {
-      // For partitioned tables, let Spark determine the number of partitions based on data distribution
-      // Return 0 to let Spark automatically determine the partition count
-      logger.info("Standard write: letting Spark auto-determine partition count for partitioned table")
-      0
-    } else {
-      // For non-partitioned tables, use default Spark behavior
-      logger.info("Standard write: using default partition count for non-partitioned table")
-      0
-    }
 }
