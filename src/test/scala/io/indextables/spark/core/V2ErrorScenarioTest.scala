@@ -303,4 +303,65 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
       }
     }
   }
+
+  test("should fail job when split reading fails rather than returning partial results") {
+    withTempPath { path =>
+      // Create valid data and write it
+      val data = spark.range(3).select(
+        concat(lit("doc"), col("id").cast("string")).as("id"),
+        concat(lit("content"), col("id").cast("string")).as("content"),
+        (col("id") * 100 + 100).cast("int").as("score")
+      )
+
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(path)
+
+      // Verify data is written correctly
+      val validRead = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+      validRead.count() shouldBe 3
+
+      // Now corrupt the split file to simulate a reading failure
+      val splitFiles = new File(path).listFiles().filter(_.getName.endsWith(".split"))
+      splitFiles.length should be > 0
+
+      val splitFile = splitFiles(0)
+      println(s"Corrupting split file: ${splitFile.getAbsolutePath}")
+
+      // Corrupt the split by truncating it (simulates corrupted/incomplete file)
+      val writer = new FileWriter(splitFile, false)
+      writer.write("CORRUPTED DATA")
+      writer.close()
+
+      // Attempt to read the corrupted table - should fail rather than return partial results
+      val exception = intercept[Exception] {
+        val corruptedRead = spark.read
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .load(path)
+
+        // Try to collect the data - this should fail
+        corruptedRead.collect()
+      }
+
+      // Verify that the exception indicates a reading failure
+      val message = exception.getMessage
+      println(s"Exception message: $message")
+
+      // Should contain error message about failed read
+      // The exact message depends on where the failure occurs (could be RuntimeException, IOException, etc.)
+      message should (
+        include("Failed to read") or
+          include("Failed to initialize") or
+          include("Failed to read partition") or
+          include("Failed to read Tantivy index") or
+          include("Error reading") or
+          include("Cannot read")
+      )
+
+      println("✅ Job correctly failed when split reading encountered error")
+    }
+  }
 }

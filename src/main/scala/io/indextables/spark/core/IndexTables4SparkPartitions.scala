@@ -475,11 +475,8 @@ class IndexTables4SparkPartitionReader(
     } catch {
       case ex: Exception =>
         logger.error(s"Error in next() for ${addAction.path}", ex)
-        // Ensure resultIterator is set to avoid repeated failures
-        if (resultIterator == null) {
-          resultIterator = Iterator.empty
-        }
-        false
+        // Re-throw the exception to ensure the task fails rather than silently skipping data
+        throw new RuntimeException(s"Failed to read partition for ${addAction.path}: ${ex.getMessage}", ex)
     }
 
   override def get(): InternalRow =
