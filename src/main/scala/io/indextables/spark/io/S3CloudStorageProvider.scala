@@ -488,6 +488,51 @@ class S3CloudStorageProvider(
     }
   }
 
+  override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean = {
+    val (bucket, originalKey) = parseS3Path(path)
+
+    // Apply uniform path flattening for S3Mock compatibility
+    val key           = flattenPathForS3Mock(originalKey)
+    val contentLength = content.length.toLong
+
+    try {
+      logger.info(s"🔒 S3 CONDITIONAL WRITE - Path: $path")
+      logger.info(s"🔒 S3 CONDITIONAL WRITE - Bucket: '$bucket', Key: '$key' (original: '$originalKey')")
+      logger.info(s"🔒 S3 CONDITIONAL WRITE - Content length: ${formatBytes(contentLength)}")
+      logger.info(s"🔒 S3 CONDITIONAL WRITE - Using If-None-Match: * for atomic write protection")
+
+      // Ensure bucket exists first
+      ensureBucketExists(bucket)
+
+      // Use S3 Conditional Writes (available in AWS SDK 2.21.0+)
+      // If-None-Match: * tells S3 to only write if the object doesn't exist
+      // S3 returns 412 Precondition Failed if object already exists
+      val request = PutObjectRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .contentLength(contentLength)
+        .ifNoneMatch("*") // ✅ S3 Conditional Writes: Only write if object doesn't exist
+        .build()
+
+      val requestBody = RequestBody.fromBytes(content)
+      s3Client.putObject(request, requestBody)
+
+      logger.info(s"✅ Successfully wrote S3 file (conditional): s3://$bucket/$key")
+      true // File was written successfully
+
+    } catch {
+      case ex: software.amazon.awssdk.services.s3.model.S3Exception if ex.statusCode() == 412 =>
+        // 412 Precondition Failed means the file already exists
+        logger.warn(s"⚠️  Conditional write failed - file already exists: s3://$bucket/$key")
+        false // File already exists, write was NOT performed
+
+      case ex: Exception =>
+        logger.error(s"❌ Failed conditional write to S3: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Failed conditional write to S3: ${ex.getMessage}", ex)
+    }
+  }
+
   /** Ensure bucket exists before writing files */
   private def ensureBucketExists(bucket: String): Unit =
     try {

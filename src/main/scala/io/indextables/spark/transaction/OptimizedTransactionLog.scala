@@ -674,7 +674,19 @@ class OptimizedTransactionLog(
     }
 
     logger.debug(s" Writing version $version to $versionFilePath with ${actions.size} actions")
-    cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
+
+    // CRITICAL: Use conditional write to prevent overwriting transaction log files
+    // Transaction log files are immutable and should never be overwritten
+    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, content.toString.getBytes("UTF-8"))
+
+    if (!writeSucceeded) {
+      throw new IllegalStateException(
+        s"Failed to write transaction log version $version - file already exists at $versionFilePath. " +
+        "This indicates a concurrent write conflict or version counter synchronization issue. " +
+        "Transaction log files are immutable and must never be overwritten to ensure data integrity."
+      )
+    }
+
     logger.debug(s" Successfully wrote version $version")
     // Add a small delay to ensure file system consistency for local file systems
     // This helps with race conditions where listFiles() is called immediately after writeFile()

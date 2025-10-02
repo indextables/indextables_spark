@@ -50,7 +50,7 @@
         <scala.compat.version>2.12</scala.compat.version>
         <spark.version>3.5.3</spark.version>
         <hadoop.version>3.3.4</hadoop.version>
-        <aws.sdk.version>2.20.26</aws.sdk.version>
+        <aws.sdk.version>2.34.8</aws.sdk.version>
         <scalatest.version>3.2.15</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
         <antlr.version>4.9.3</antlr.version>

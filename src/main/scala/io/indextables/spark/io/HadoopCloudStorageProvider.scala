@@ -161,6 +161,43 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
       output.close()
   }
 
+  override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean = {
+    val hadoopPath = new Path(path)
+
+    try {
+      val fs = hadoopPath.getFileSystem(hadoopConf)
+
+      // Check if file already exists
+      if (fs.exists(hadoopPath)) {
+        logger.warn(s"⚠️  Conditional write failed - file already exists: $path")
+        return false // File already exists
+      }
+
+      // File doesn't exist, create it atomically with overwrite=false
+      logger.info(s"🔒 HADOOP CONDITIONAL WRITE - Path: $path")
+      logger.info(s"🔒 HADOOP CONDITIONAL WRITE - Will only write if file does not exist")
+
+      val output = fs.create(hadoopPath, false) // overwrite=false ensures atomic create
+      try
+        output.write(content)
+      finally
+        output.close()
+
+      logger.info(s"✅ Successfully wrote file (conditional): $path")
+      true // File was written successfully
+
+    } catch {
+      case _: org.apache.hadoop.fs.FileAlreadyExistsException =>
+        // Race condition: file was created between exists check and create
+        logger.warn(s"⚠️  Conditional write failed - file created by concurrent writer: $path")
+        false
+
+      case ex: Exception =>
+        logger.error(s"❌ Failed conditional write: $path", ex)
+        throw new RuntimeException(s"Failed conditional write: ${ex.getMessage}", ex)
+    }
+  }
+
   override def writeFileFromStream(
     path: String,
     inputStream: InputStream,

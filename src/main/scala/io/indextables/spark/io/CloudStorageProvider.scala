@@ -58,6 +58,17 @@ trait CloudStorageProvider extends Closeable {
   /** Write content to a file */
   def writeFile(path: String, content: Array[Byte]): Unit
 
+  /**
+   * Write content to a file ONLY if it does not already exist (conditional write).
+   * This is critical for transaction log integrity - prevents accidental overwrites.
+   *
+   * @param path The file path
+   * @param content The content to write
+   * @return true if file was written, false if file already exists
+   * @throws RuntimeException if write fails for reasons other than file already existing
+   */
+  def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean
+
   /** Write content to a file from an input stream (memory-efficient for large files) */
   def writeFileFromStream(
     path: String,
@@ -219,8 +230,16 @@ object CloudStorageProviderFactory {
               val value        = sparkConf.get(key, defaultValue)
               if (value != defaultValue) {
                 enriched.set(key, value)
-                logger.debug(s"Copied string Spark config to Hadoop conf: $key = $value")
-                logger.info(s"✅ Copied string Spark config to Hadoop conf: $key = $value")
+                // Mask sensitive credentials in logs
+                val maskedValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("sessiontoken")) {
+                  "***"
+                } else if (key.toLowerCase.contains("accesskey")) {
+                  value.take(4) + "..."
+                } else {
+                  value
+                }
+                logger.debug(s"Copied string Spark config to Hadoop conf: $key = $maskedValue")
+                logger.info(s"✅ Copied string Spark config to Hadoop conf: $key = $maskedValue")
               } else {
                 // Configuration doesn't exist - this is normal for optional configs like sessionToken
                 logger.debug(s"🔧 Spark config key $key not set (optional)")
