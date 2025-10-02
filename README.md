@@ -65,6 +65,8 @@ spark.sql("""
 df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 ```
 
+> **⚠️ NOTE ON "LIMITS"**: Currently, our integration with the underlying Quickwit search libraries pulls documents in small chunks from S3, which impacts document retrieval performance and increases S3 API usage. We plan to work with the Quickwit team, or fork that part of the implementation, to more efficiently pull and cache large numbers of documents.  For most search applications, a low limit is acceptable since interactive searchers only look at the first few documents. However, we plan to address this for future non-human uses.
+
 ---
 
 ## Table of Contents
