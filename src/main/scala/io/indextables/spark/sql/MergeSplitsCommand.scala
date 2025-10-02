@@ -287,7 +287,7 @@ case class SerializableAwsConfig(
   }
 
   /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error".
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed out".
    * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
    */
   private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
@@ -303,16 +303,17 @@ case class SerializableAwsConfig(
         }
         return operation()
       } catch {
-        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("streaming error") =>
+        case e: RuntimeException if e.getMessage != null &&
+            (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
           lastException = e
-          logger.warn(s"Caught streaming error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
+          logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
           if (attempt == maxAttempts) {
             logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
             throw e
           }
           attempt += 1
         case e: Exception =>
-          // Non-streaming errors are not retried
+          // Non-retryable errors are propagated immediately
           throw e
       }
     }
@@ -330,7 +331,7 @@ case class SerializableAwsConfig(
     outputSplitPath: String,
     mergeConfig: QuickwitSplit.MergeConfig
   ): SerializableSplitMetadata = {
-    // Direct merging using QuickwitSplit.mergeSplits with retry logic for streaming errors
+    // Direct merging using QuickwitSplit.mergeSplits with retry logic for streaming errors and timeouts
     val metadata = retryOnStreamingError(
       () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
       s"execute merge ${inputSplitPaths.size()} splits to $outputSplitPath"
@@ -1354,7 +1355,7 @@ class MergeSplitsExecutor(
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
     )
 
-    // Perform the actual merge using tantivy4java with retry logic for streaming errors
+    // Perform the actual merge using tantivy4java with retry logic for streaming errors and timeouts
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
     val metadata = retryOnStreamingError(
       () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
@@ -1415,7 +1416,7 @@ class MergeSplitsExecutor(
   }
 
   /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error".
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed out".
    * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
    */
   private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
@@ -1430,16 +1431,17 @@ class MergeSplitsExecutor(
         }
         return operation()
       } catch {
-        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("streaming error") =>
+        case e: RuntimeException if e.getMessage != null &&
+            (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
           lastException = e
-          logger.warn(s"Caught streaming error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
+          logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
           if (attempt == maxAttempts) {
             logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
             throw e
           }
           attempt += 1
         case e: Exception =>
-          // Non-streaming errors are not retried
+          // Non-retryable errors are propagated immediately
           throw e
       }
     }
