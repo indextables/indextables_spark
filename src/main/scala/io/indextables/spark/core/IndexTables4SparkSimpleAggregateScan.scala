@@ -21,7 +21,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.{Scan, Batch, InputPartition}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{StructType, StructField, LongType, DoubleType}
+import org.apache.spark.sql.types.{StructType, StructField, LongType, DoubleType, IntegerType, FloatType, DataType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.broadcast.Broadcast
 import io.indextables.spark.transaction.TransactionLog
@@ -101,20 +101,25 @@ class IndexTables4SparkSimpleAggregateScan(
           case _: CountStar =>
             (s"count(*)", LongType)
           case sum: Sum =>
-            // For Sum, infer data type from the column
-            val columnDataType = getColumnDataType(sum.column)
-            (s"sum", columnDataType)
+            // For partial aggregations, return type must match Spark's accumulator type
+            val fieldType = getInputFieldType(sum, schema)
+            val sumType = fieldType match {
+              case IntegerType | LongType => LongType
+              case FloatType | DoubleType => DoubleType
+              case _ => DoubleType
+            }
+            (s"sum", sumType)
           case _: Avg =>
-            // For Avg, result is typically Double
+            // tantivy4java AverageResult.getAverage() returns double
             (s"avg", DoubleType)
           case min: Min =>
-            // For Min, data type matches the column
-            val columnDataType = getColumnDataType(min.column)
-            (s"min", columnDataType)
+            // MIN returns the same type as the input field
+            val fieldType = getInputFieldType(min, schema)
+            (s"min", fieldType)
           case max: Max =>
-            // For Max, data type matches the column
-            val columnDataType = getColumnDataType(max.column)
-            (s"max", columnDataType)
+            // MAX returns the same type as the input field
+            val fieldType = getInputFieldType(max, schema)
+            (s"max", fieldType)
           case other =>
             logger.warn(s"Unknown aggregation type: ${other.getClass.getSimpleName}")
             (s"agg_$index", LongType)
@@ -125,6 +130,33 @@ class IndexTables4SparkSimpleAggregateScan(
     val resultSchema = StructType(aggregationFields)
     logger.info(s"🔍 SIMPLE AGGREGATE SCHEMA: Created schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
     resultSchema
+  }
+
+  /** Get the input field type for an aggregation expression. */
+  private def getInputFieldType(
+    aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc,
+    schema: StructType): DataType = {
+
+    // Get the column reference from the aggregation
+    val column = aggExpr.children().headOption.getOrElse {
+      logger.warn(s"No children found for aggregation expression, defaulting to LongType")
+      return LongType
+    }
+
+    // Extract field name (FieldReference is private, so check by class name)
+    val fieldName = if (column.getClass.getSimpleName == "FieldReference") {
+      column.toString
+    } else {
+      extractFieldNameFromExpression(column)
+    }
+
+    // Look up field type in schema
+    schema.fields.find(_.name == fieldName) match {
+      case Some(field) => field.dataType
+      case None =>
+        logger.warn(s"Could not find field '$fieldName' in schema, defaulting to LongType")
+        LongType
+    }
   }
 
   /** Get the data type of a column from an expression. */
@@ -466,20 +498,40 @@ class IndexTables4SparkSimpleAggregateReader(
 
             case sum: Sum =>
               val fieldName = getFieldName(sum.column)
+              val fieldType = getFieldType(fieldName)
               logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName' with filters"
+                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName' (type: $fieldType) with filters"
               )
               val sumAgg = new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"sum_agg", sumAgg)
 
               if (result.hasAggregations()) {
                 val sumResult = result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
-                val sumValue  = if (sumResult != null) sumResult.getSum.toLong else 0L
+                val sumValue = if (sumResult != null) {
+                  // Return appropriate type based on field type
+                  fieldType match {
+                    case IntegerType | LongType => sumResult.getSum.toLong
+                    case FloatType | DoubleType => sumResult.getSum.toDouble
+                    case _ =>
+                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
+                      sumResult.getSum.toDouble
+                  }
+                } else {
+                  fieldType match {
+                    case IntegerType | LongType => 0L
+                    case FloatType | DoubleType => 0.0
+                    case _ => 0L
+                  }
+                }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
                 aggregationResults += sumValue
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
-                aggregationResults += 0L
+                aggregationResults += (fieldType match {
+                  case IntegerType | LongType => 0L
+                  case FloatType | DoubleType => 0.0
+                  case _ => 0L
+                })
               }
 
             case avg: Avg =>
@@ -494,38 +546,78 @@ class IndexTables4SparkSimpleAggregateReader(
 
             case min: Min =>
               val fieldName = getFieldName(min.column)
+              val fieldType = getFieldType(fieldName)
               logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName' with filters"
+                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName' (type: $fieldType) with filters"
               )
               val minAgg = new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"min_agg", minAgg)
 
               if (result.hasAggregations()) {
                 val minResult = result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
-                val minValue  = if (minResult != null) minResult.getMin.toLong else 0L
+                val minValue = if (minResult != null) {
+                  // Return appropriate type based on field type
+                  fieldType match {
+                    case IntegerType | LongType => minResult.getMin.toLong
+                    case FloatType | DoubleType => minResult.getMin.toDouble
+                    case _ =>
+                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
+                      minResult.getMin.toDouble
+                  }
+                } else {
+                  fieldType match {
+                    case IntegerType | LongType => 0L
+                    case FloatType | DoubleType => 0.0
+                    case _ => 0L
+                  }
+                }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
                 aggregationResults += minValue
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
-                aggregationResults += 0L
+                aggregationResults += (fieldType match {
+                  case IntegerType | LongType => 0L
+                  case FloatType | DoubleType => 0.0
+                  case _ => 0L
+                })
               }
 
             case max: Max =>
               val fieldName = getFieldName(max.column)
+              val fieldType = getFieldType(fieldName)
               logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName' with filters"
+                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName' (type: $fieldType) with filters"
               )
               val maxAgg = new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
               val result = searcher.search(splitQuery, 0, s"max_agg", maxAgg)
 
               if (result.hasAggregations()) {
                 val maxResult = result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
-                val maxValue  = if (maxResult != null) maxResult.getMax.toLong else 0L
+                val maxValue = if (maxResult != null) {
+                  // Return appropriate type based on field type
+                  fieldType match {
+                    case IntegerType | LongType => maxResult.getMax.toLong
+                    case FloatType | DoubleType => maxResult.getMax.toDouble
+                    case _ =>
+                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
+                      maxResult.getMax.toDouble
+                  }
+                } else {
+                  fieldType match {
+                    case IntegerType | LongType => 0L
+                    case FloatType | DoubleType => 0.0
+                    case _ => 0L
+                  }
+                }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
                 aggregationResults += maxValue
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
-                aggregationResults += 0L
+                aggregationResults += (fieldType match {
+                  case IntegerType | LongType => 0L
+                  case FloatType | DoubleType => 0.0
+                  case _ => 0L
+                })
               }
 
             case other =>
@@ -605,6 +697,16 @@ class IndexTables4SparkSimpleAggregateReader(
       addAction.docMappingJson.orNull,          // docMappingJson - REAL VALUE from AddAction
       java.util.Collections.emptyList[String]() // skippedSplits
     )
+  }
+
+  /** Get the Spark DataType for a field from the schema */
+  private def getFieldType(fieldName: String): DataType = {
+    partition.schema.fields.find(_.name == fieldName) match {
+      case Some(field) => field.dataType
+      case None =>
+        logger.warn(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
+        LongType
+    }
   }
 
   /** Extract field name from column expression for aggregations */

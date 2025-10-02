@@ -287,6 +287,41 @@ case class SerializableAwsConfig(
   }
 
   /**
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error".
+   * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
+   */
+  private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
+    val logger = LoggerFactory.getLogger(this.getClass)
+    val maxAttempts = 3
+    var attempt = 1
+    var lastException: RuntimeException = null
+
+    while (attempt <= maxAttempts) {
+      try {
+        if (attempt > 1) {
+          logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
+        }
+        return operation()
+      } catch {
+        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("streaming error") =>
+          lastException = e
+          logger.warn(s"Caught streaming error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
+          if (attempt == maxAttempts) {
+            logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
+            throw e
+          }
+          attempt += 1
+        case e: Exception =>
+          // Non-streaming errors are not retried
+          throw e
+      }
+    }
+
+    // This should never be reached, but for completeness
+    throw lastException
+  }
+
+  /**
    * Execute merge operation using direct/in-process merge. Returns the result as SerializableSplitMetadata for
    * consistency.
    */
@@ -295,8 +330,11 @@ case class SerializableAwsConfig(
     outputSplitPath: String,
     mergeConfig: QuickwitSplit.MergeConfig
   ): SerializableSplitMetadata = {
-    // Direct merging using QuickwitSplit.mergeSplits
-    val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+    // Direct merging using QuickwitSplit.mergeSplits with retry logic for streaming errors
+    val metadata = retryOnStreamingError(
+      () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
+      s"execute merge ${inputSplitPaths.size()} splits to $outputSplitPath"
+    )
     SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
   }
 }
@@ -1316,9 +1354,12 @@ class MergeSplitsExecutor(
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr) // AWS configuration for S3 access
     )
 
-    // Perform the actual merge using tantivy4java - NO FALLBACKS, NO SIMULATIONS
+    // Perform the actual merge using tantivy4java with retry logic for streaming errors
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    val metadata = QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig)
+    val metadata = retryOnStreamingError(
+      () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
+      s"merge splits ${inputSplitPaths.size()} files to $outputSplitPath"
+    )
 
     logger.info(s"[EXECUTOR] Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
     logger.debug(s"[EXECUTOR] Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
@@ -1371,6 +1412,40 @@ class MergeSplitsExecutor(
         // Return empty config that will use default AWS credential chain
         new QuickwitSplit.AwsConfig("", "", null, "us-east-1", null, false)
     }
+  }
+
+  /**
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error".
+   * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
+   */
+  private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
+    val maxAttempts = 3
+    var attempt = 1
+    var lastException: RuntimeException = null
+
+    while (attempt <= maxAttempts) {
+      try {
+        if (attempt > 1) {
+          logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
+        }
+        return operation()
+      } catch {
+        case e: RuntimeException if e.getMessage != null && e.getMessage.contains("streaming error") =>
+          lastException = e
+          logger.warn(s"Caught streaming error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
+          if (attempt == maxAttempts) {
+            logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
+            throw e
+          }
+          attempt += 1
+        case e: Exception =>
+          // Non-streaming errors are not retried
+          throw e
+      }
+    }
+
+    // This should never be reached, but for completeness
+    throw lastException
   }
 
   /**
