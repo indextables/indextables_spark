@@ -378,7 +378,7 @@ class IndexTables4SparkOptimizedWrite(
             key.replace("spark.indextables.", "spark.indextables.")
           } else key
           logger.info(
-            s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***"
+            s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("token") || key.toLowerCase.contains("password")) "***"
               else value}"
           )
         }

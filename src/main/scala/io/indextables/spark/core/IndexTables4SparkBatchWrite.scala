@@ -54,7 +54,7 @@ class IndexTables4SparkBatchWrite(
         enrichedHadoopConf.set(normalizedKey, value)
         serializedOptions.put(normalizedKey, value)
         logger.info(
-          s"Copied DataFrame option to Hadoop config: $key = ${if (key.contains("secretKey") || key.contains("sessionToken")) "***"
+          s"Copied DataFrame option to Hadoop config: $key = ${if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("token") || key.toLowerCase.contains("password")) "***"
             else value}"
         )
       }
