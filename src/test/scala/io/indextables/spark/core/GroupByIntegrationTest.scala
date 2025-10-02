@@ -461,6 +461,348 @@ class GroupByIntegrationTest extends AnyFunSuite {
       spark.stop()
   }
 
+  test("GROUP BY with Integer key") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupByIntegerKeyTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with integer grouping key
+      val testData = Seq(
+        ("doc1", 1, 100),
+        ("doc2", 1, 200),
+        ("doc3", 2, 150),
+        ("doc4", 2, 250),
+        ("doc5", 3, 300)
+      ).toDF("id", "priority", "score")
+
+      val tempDir   = Files.createTempDirectory("groupby-int-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with integer GROUP BY key
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "priority,score")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Perform GROUP BY on integer field with COUNT and SUM
+      val groupByResult = df.groupBy("priority").agg(
+        count("*").as("total_count"),
+        sum("score").as("total_score")
+      )
+
+      val results   = groupByResult.collect()
+      val resultMap = results.map(row => row.getInt(0) -> (row.getLong(1), row.getLong(2))).toMap
+
+      // Expected: priority 1: count=2, sum=300; priority 2: count=2, sum=400; priority 3: count=1, sum=300
+      assert(resultMap(1) == (2L, 300L), s"priority 1 should have count=2, sum=300, got ${resultMap(1)}")
+      assert(resultMap(2) == (2L, 400L), s"priority 2 should have count=2, sum=400, got ${resultMap(2)}")
+      assert(resultMap(3) == (1L, 300L), s"priority 3 should have count=1, sum=300, got ${resultMap(3)}")
+
+      println(s"✅ GROUP BY Integer key test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
+  test("GROUP BY with Long key") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupByLongKeyTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with long grouping key (using large numbers)
+      val testData = Seq(
+        ("doc1", 1000000000L, 100),
+        ("doc2", 1000000000L, 200),
+        ("doc3", 2000000000L, 150),
+        ("doc4", 2000000000L, 250),
+        ("doc5", 3000000000L, 300)
+      ).toDF("id", "timestamp_bucket", "value")
+
+      val tempDir   = Files.createTempDirectory("groupby-long-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with long GROUP BY key
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "timestamp_bucket,value")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Perform GROUP BY on long field with COUNT and SUM
+      val groupByResult = df.groupBy("timestamp_bucket").agg(
+        count("*").as("total_count"),
+        sum("value").as("total_value")
+      )
+
+      val results   = groupByResult.collect()
+      val resultMap = results.map(row => row.getLong(0) -> (row.getLong(1), row.getLong(2))).toMap
+
+      // Expected: 1000000000L: count=2, sum=300; 2000000000L: count=2, sum=400; 3000000000L: count=1, sum=300
+      assert(resultMap(1000000000L) == (2L, 300L), s"bucket 1000000000 should have count=2, sum=300")
+      assert(resultMap(2000000000L) == (2L, 400L), s"bucket 2000000000 should have count=2, sum=400")
+      assert(resultMap(3000000000L) == (1L, 300L), s"bucket 3000000000 should have count=1, sum=300")
+
+      println(s"✅ GROUP BY Long key test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
+  test("GROUP BY with Float key") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupByFloatKeyTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with float grouping key
+      val testData = Seq(
+        ("doc1", 1.5f, 100),
+        ("doc2", 1.5f, 200),
+        ("doc3", 2.5f, 150),
+        ("doc4", 2.5f, 250),
+        ("doc5", 3.5f, 300)
+      ).toDF("id", "rating", "sales")
+
+      val tempDir   = Files.createTempDirectory("groupby-float-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with float GROUP BY key
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "rating,sales")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Perform GROUP BY on float field with COUNT and SUM
+      val groupByResult = df.groupBy("rating").agg(
+        count("*").as("total_count"),
+        sum("sales").as("total_sales")
+      )
+
+      val results   = groupByResult.collect()
+      val resultMap = results.map(row => row.getFloat(0) -> (row.getLong(1), row.getLong(2))).toMap
+
+      // Expected: 1.5f: count=2, sum=300; 2.5f: count=2, sum=400; 3.5f: count=1, sum=300
+      assert(resultMap(1.5f) == (2L, 300L), s"rating 1.5 should have count=2, sum=300, got ${resultMap(1.5f)}")
+      assert(resultMap(2.5f) == (2L, 400L), s"rating 2.5 should have count=2, sum=400, got ${resultMap(2.5f)}")
+      assert(resultMap(3.5f) == (1L, 300L), s"rating 3.5 should have count=1, sum=300, got ${resultMap(3.5f)}")
+
+      println(s"✅ GROUP BY Float key test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
+  test("GROUP BY with Double key") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupByDoubleKeyTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with double grouping key
+      val testData = Seq(
+        ("doc1", 1.123456789, 100),
+        ("doc2", 1.123456789, 200),
+        ("doc3", 2.987654321, 150),
+        ("doc4", 2.987654321, 250),
+        ("doc5", 3.555555555, 300)
+      ).toDF("id", "latitude", "population")
+
+      val tempDir   = Files.createTempDirectory("groupby-double-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with double GROUP BY key
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "latitude,population")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Perform GROUP BY on double field with COUNT and SUM
+      val groupByResult = df.groupBy("latitude").agg(
+        count("*").as("total_count"),
+        sum("population").as("total_population")
+      )
+
+      val results   = groupByResult.collect()
+      val resultMap = results.map(row => row.getDouble(0) -> (row.getLong(1), row.getLong(2))).toMap
+
+      // Expected: 1.123456789: count=2, sum=300; 2.987654321: count=2, sum=400; 3.555555555: count=1, sum=300
+      assert(resultMap(1.123456789) == (2L, 300L), s"latitude 1.123456789 should have count=2, sum=300")
+      assert(resultMap(2.987654321) == (2L, 400L), s"latitude 2.987654321 should have count=2, sum=400")
+      assert(resultMap(3.555555555) == (1L, 300L), s"latitude 3.555555555 should have count=1, sum=300")
+
+      println(s"✅ GROUP BY Double key test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
+  test("Multi-dimensional GROUP BY with 6 mixed-type keys and multiple aggregations") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupBy6DimensionMixedTypesTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with 6 grouping dimensions of different types
+      // Columns: region (String), priority (Int), timestamp_bucket (Long), latitude (Double), rating (Float), category (String), value (Int)
+      val testData = Seq(
+        ("north", 1, 1000000000L, 40.7128, 4.5f, "electronics", 100),
+        ("north", 1, 1000000000L, 40.7128, 4.5f, "electronics", 150),
+        ("north", 1, 1000000000L, 40.7128, 4.5f, "electronics", 200),
+        ("north", 2, 2000000000L, 34.0522, 3.5f, "books", 300),
+        ("north", 2, 2000000000L, 34.0522, 3.5f, "books", 350),
+        ("south", 1, 1000000000L, 40.7128, 4.5f, "electronics", 400),
+        ("south", 3, 3000000000L, 51.5074, 5.0f, "clothing", 500),
+        ("south", 3, 3000000000L, 51.5074, 5.0f, "clothing", 550),
+        ("south", 3, 3000000000L, 51.5074, 5.0f, "clothing", 600)
+      ).toDF("region", "priority", "timestamp_bucket", "latitude", "rating", "category", "value")
+
+      val tempDir   = Files.createTempDirectory("groupby-6d-mixed-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with all 6 GROUP BY columns as fast fields
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.region", "string")
+        .option("spark.indextables.indexing.typemap.category", "string")
+        .option("spark.indextables.indexing.fastfields", "region,priority,timestamp_bucket,latitude,rating,category,value")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Perform 6-dimensional GROUP BY with multiple aggregation functions
+      println("🔍 6-DIMENSIONAL GROUP BY TEST: Executing 6-dimensional GROUP BY with MIN, MAX, AVG, SUM, COUNT...")
+      val multiGroupByResult = df
+        .groupBy("region", "priority", "timestamp_bucket", "latitude", "rating", "category")
+        .agg(
+          count("*").as("total_count"),
+          sum("value").as("total_sum"),
+          avg("value").as("avg_value"),
+          min("value").as("min_value"),
+          max("value").as("max_value")
+        )
+
+      // Show the execution plan
+      println("🔍 6-DIMENSIONAL GROUP BY TEST: Execution plan:")
+      multiGroupByResult.explain(true)
+
+      // Collect results
+      val results = multiGroupByResult.collect()
+
+      println("🔍 6-DIMENSIONAL GROUP BY TEST: Results:")
+      results.foreach { row =>
+        println(
+          s"  ${row.getString(0)}/${row.getInt(1)}/${row.getLong(2)}/${row.getDouble(3)}/${row.getFloat(4)}/${row.getString(5)}: " +
+            s"count=${row.getLong(6)}, sum=${row.getLong(7)}, avg=${row.getDouble(8)}, min=${row.getInt(9)}, max=${row.getInt(10)}"
+        )
+      }
+
+      // Verify expected results - should have 4 unique 6-tuple combinations
+      assert(results.length == 4, s"Expected 4 groups, got ${results.length}")
+
+      val resultMap = results.map { row =>
+        (
+          row.getString(0),  // region
+          row.getInt(1),     // priority
+          row.getLong(2),    // timestamp_bucket
+          row.getDouble(3),  // latitude
+          row.getFloat(4),   // rating
+          row.getString(5)   // category
+        ) -> (
+          row.getLong(6),    // count
+          row.getLong(7),    // sum
+          row.getDouble(8),  // avg
+          row.getInt(9),     // min
+          row.getInt(10)     // max
+        )
+      }.toMap
+
+      // Group 1: north/1/1000000000/40.7128/4.5/electronics - 3 docs: 100, 150, 200
+      val group1 = resultMap(("north", 1, 1000000000L, 40.7128, 4.5f, "electronics"))
+      assert(group1._1 == 3, s"Group 1 count should be 3, got ${group1._1}")
+      assert(group1._2 == 450, s"Group 1 sum should be 450, got ${group1._2}")
+      assert(Math.abs(group1._3 - 150.0) < 0.01, s"Group 1 avg should be 150.0, got ${group1._3}")
+      assert(group1._4 == 100, s"Group 1 min should be 100, got ${group1._4}")
+      assert(group1._5 == 200, s"Group 1 max should be 200, got ${group1._5}")
+
+      // Group 2: north/2/2000000000/34.0522/3.5/books - 2 docs: 300, 350
+      val group2 = resultMap(("north", 2, 2000000000L, 34.0522, 3.5f, "books"))
+      assert(group2._1 == 2, s"Group 2 count should be 2, got ${group2._1}")
+      assert(group2._2 == 650, s"Group 2 sum should be 650, got ${group2._2}")
+      assert(Math.abs(group2._3 - 325.0) < 0.01, s"Group 2 avg should be 325.0, got ${group2._3}")
+      assert(group2._4 == 300, s"Group 2 min should be 300, got ${group2._4}")
+      assert(group2._5 == 350, s"Group 2 max should be 350, got ${group2._5}")
+
+      // Group 3: south/1/1000000000/40.7128/4.5/electronics - 1 doc: 400
+      val group3 = resultMap(("south", 1, 1000000000L, 40.7128, 4.5f, "electronics"))
+      assert(group3._1 == 1, s"Group 3 count should be 1, got ${group3._1}")
+      assert(group3._2 == 400, s"Group 3 sum should be 400, got ${group3._2}")
+      assert(Math.abs(group3._3 - 400.0) < 0.01, s"Group 3 avg should be 400.0, got ${group3._3}")
+      assert(group3._4 == 400, s"Group 3 min should be 400, got ${group3._4}")
+      assert(group3._5 == 400, s"Group 3 max should be 400, got ${group3._5}")
+
+      // Group 4: south/3/3000000000/51.5074/5.0/clothing - 3 docs: 500, 550, 600
+      val group4 = resultMap(("south", 3, 3000000000L, 51.5074, 5.0f, "clothing"))
+      assert(group4._1 == 3, s"Group 4 count should be 3, got ${group4._1}")
+      assert(group4._2 == 1650, s"Group 4 sum should be 1650, got ${group4._2}")
+      assert(Math.abs(group4._3 - 550.0) < 0.01, s"Group 4 avg should be 550.0, got ${group4._3}")
+      assert(group4._4 == 500, s"Group 4 min should be 500, got ${group4._4}")
+      assert(group4._5 == 600, s"Group 4 max should be 600, got ${group4._5}")
+
+      println(s"✅ 6-DIMENSIONAL GROUP BY with mixed types test: All assertions passed!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
   /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {

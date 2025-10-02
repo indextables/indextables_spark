@@ -771,4 +771,223 @@ class SimpleAggregatePushdownTest extends TestBase {
       println(s"✅ Exclusion verification: Documents from 'otherhost.com' and 'thirdhost.com' were correctly excluded!")
     }
   }
+
+  test("Simple aggregations with Integer field should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.Row
+
+      // Create test data with integer field
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("priority", IntegerType, nullable = false),
+          StructField("value", IntegerType, nullable = false)
+        )
+      )
+
+      val rows = Seq(
+        Row("doc1", 1, 100),
+        Row("doc2", 2, 200),
+        Row("doc3", 1, 150),
+        Row("doc4", 3, 300),
+        Row("doc5", 2, 250)
+      )
+
+      val testData = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+
+      // Write test data
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "priority,value")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read and aggregate
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
+
+      val result = df.agg(
+        count("*").as("total_count"),
+        sum("value").as("total_sum"),
+        avg("value").as("avg_value"),
+        min("value").as("min_value"),
+        max("value").as("max_value")
+      ).collect()
+
+      val row = result(0)
+      row.getLong(0) shouldBe 5L        // count
+      row.getLong(1) shouldBe 1000L     // sum: 100+200+150+300+250
+      row.getDouble(2) shouldBe 200.0   // avg: 1000/5
+      row.getInt(3) shouldBe 100        // min
+      row.getInt(4) shouldBe 300        // max
+
+      println(s"✅ Integer field aggregation test passed!")
+    }
+  }
+
+  test("Simple aggregations with Long field should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.Row
+
+      // Create test data with long field (using large numbers)
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("timestamp", LongType, nullable = false),
+          StructField("bytes_transferred", LongType, nullable = false)
+        )
+      )
+
+      val rows = Seq(
+        Row("doc1", 1000000000L, 1000000L),
+        Row("doc2", 2000000000L, 2000000L),
+        Row("doc3", 3000000000L, 3000000L),
+        Row("doc4", 4000000000L, 4000000L),
+        Row("doc5", 5000000000L, 5000000L)
+      )
+
+      val testData = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+
+      // Write test data
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "timestamp,bytes_transferred")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read and aggregate
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
+
+      val result = df.agg(
+        count("*").as("total_count"),
+        sum("bytes_transferred").as("total_bytes"),
+        avg("bytes_transferred").as("avg_bytes"),
+        min("bytes_transferred").as("min_bytes"),
+        max("bytes_transferred").as("max_bytes")
+      ).collect()
+
+      val row = result(0)
+      row.getLong(0) shouldBe 5L          // count
+      row.getLong(1) shouldBe 15000000L   // sum: 1M+2M+3M+4M+5M
+      row.getDouble(2) shouldBe 3000000.0 // avg: 15M/5
+      row.getLong(3) shouldBe 1000000L    // min
+      row.getLong(4) shouldBe 5000000L    // max
+
+      println(s"✅ Long field aggregation test passed!")
+    }
+  }
+
+  test("Simple aggregations with Float field should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.Row
+
+      // Create test data with float field
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("temperature", FloatType, nullable = false)
+        )
+      )
+
+      val rows = Seq(
+        Row("doc1", 20.5f),
+        Row("doc2", 21.5f),
+        Row("doc3", 22.5f),
+        Row("doc4", 23.5f),
+        Row("doc5", 24.5f)
+      )
+
+      val testData = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+
+      // Write test data
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "temperature")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read and aggregate
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
+
+      val result = df.agg(
+        count("*").as("total_count"),
+        sum("temperature").as("total_temp"),
+        avg("temperature").as("avg_temp"),
+        min("temperature").as("min_temp"),
+        max("temperature").as("max_temp")
+      ).collect()
+
+      val row = result(0)
+      row.getLong(0) shouldBe 5L                       // count
+      Math.abs(row.getDouble(1) - 112.5) < 0.01 shouldBe true  // sum: 20.5+21.5+22.5+23.5+24.5
+      Math.abs(row.getDouble(2) - 22.5) < 0.01 shouldBe true   // avg: 112.5/5
+      Math.abs(row.getFloat(3) - 20.5f) < 0.01 shouldBe true   // min
+      Math.abs(row.getFloat(4) - 24.5f) < 0.01 shouldBe true   // max
+
+      println(s"✅ Float field aggregation test passed!")
+    }
+  }
+
+  test("Simple aggregations with Double field should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.Row
+
+      // Create test data with double field
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("latitude", DoubleType, nullable = false),
+          StructField("measurement", DoubleType, nullable = false)
+        )
+      )
+
+      val rows = Seq(
+        Row("doc1", 1.123456789, 10.5),
+        Row("doc2", 2.987654321, 20.5),
+        Row("doc3", 3.555555555, 30.5),
+        Row("doc4", 4.111111111, 40.5),
+        Row("doc5", 5.999999999, 50.5)
+      )
+
+      val testData = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+
+      // Write test data
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "latitude,measurement")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read and aggregate
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
+
+      val result = df.agg(
+        count("*").as("total_count"),
+        sum("measurement").as("total_measurement"),
+        avg("measurement").as("avg_measurement"),
+        min("measurement").as("min_measurement"),
+        max("measurement").as("max_measurement")
+      ).collect()
+
+      val row = result(0)
+      row.getLong(0) shouldBe 5L                              // count
+      Math.abs(row.getDouble(1) - 152.5) < 0.0001 shouldBe true  // sum: 10.5+20.5+30.5+40.5+50.5
+      Math.abs(row.getDouble(2) - 30.5) < 0.0001 shouldBe true   // avg: 152.5/5
+      Math.abs(row.getDouble(3) - 10.5) < 0.0001 shouldBe true   // min
+      Math.abs(row.getDouble(4) - 50.5) < 0.0001 shouldBe true   // max
+
+      println(s"✅ Double field aggregation test passed!")
+    }
+  }
 }

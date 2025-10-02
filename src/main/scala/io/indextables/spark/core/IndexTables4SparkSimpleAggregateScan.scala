@@ -568,7 +568,11 @@ class IndexTables4SparkSimpleAggregateReader(
                     case LongType =>
                       val longVal: Long = Math.round(minResult.getMin)
                       java.lang.Long.valueOf(longVal)
-                    case FloatType | DoubleType => minResult.getMin
+                    case FloatType =>
+                      val floatVal: Float = minResult.getMin.toFloat
+                      java.lang.Float.valueOf(floatVal)
+                    case DoubleType =>
+                      minResult.getMin
                     case _ =>
                       logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
                       minResult.getMin
@@ -577,7 +581,8 @@ class IndexTables4SparkSimpleAggregateReader(
                   fieldType match {
                     case IntegerType => java.lang.Integer.valueOf(0)
                     case LongType => java.lang.Long.valueOf(0L)
-                    case FloatType | DoubleType => 0.0
+                    case FloatType => java.lang.Float.valueOf(0.0f)
+                    case DoubleType => 0.0
                     case _ => java.lang.Long.valueOf(0L)
                   }
                 }
@@ -588,7 +593,8 @@ class IndexTables4SparkSimpleAggregateReader(
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType => java.lang.Long.valueOf(0L)
-                  case FloatType | DoubleType => 0.0
+                  case FloatType => java.lang.Float.valueOf(0.0f)
+                  case DoubleType => 0.0
                   case _ => java.lang.Long.valueOf(0L)
                 })
               }
@@ -613,7 +619,11 @@ class IndexTables4SparkSimpleAggregateReader(
                     case LongType =>
                       val longVal: Long = Math.round(maxResult.getMax)
                       java.lang.Long.valueOf(longVal)
-                    case FloatType | DoubleType => maxResult.getMax
+                    case FloatType =>
+                      val floatVal: Float = maxResult.getMax.toFloat
+                      java.lang.Float.valueOf(floatVal)
+                    case DoubleType =>
+                      maxResult.getMax
                     case _ =>
                       logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
                       maxResult.getMax
@@ -622,7 +632,8 @@ class IndexTables4SparkSimpleAggregateReader(
                   fieldType match {
                     case IntegerType => java.lang.Integer.valueOf(0)
                     case LongType => java.lang.Long.valueOf(0L)
-                    case FloatType | DoubleType => 0.0
+                    case FloatType => java.lang.Float.valueOf(0.0f)
+                    case DoubleType => 0.0
                     case _ => java.lang.Long.valueOf(0L)
                   }
                 }
@@ -633,7 +644,8 @@ class IndexTables4SparkSimpleAggregateReader(
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType => java.lang.Long.valueOf(0L)
-                  case FloatType | DoubleType => 0.0
+                  case FloatType => java.lang.Float.valueOf(0.0f)
+                  case DoubleType => 0.0
                   case _ => java.lang.Long.valueOf(0L)
                 })
               }

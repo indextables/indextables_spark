@@ -92,13 +92,17 @@ class IndexTables4SparkGroupByAggregateScan(
     logger.info(s"🔍 GROUP BY SCHEMA: Creating schema for GROUP BY on columns: ${groupByColumns.mkString(", ")}")
 
     // Start with GROUP BY columns
+    logger.info(s"🔍 GROUP BY SCHEMA: Looking up field types from schema with ${schema.fields.length} fields: ${schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
+
     val groupByFields = groupByColumns.map { columnName =>
       // Find the column type from the original schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>
+          logger.info(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}")
           StructField(columnName, field.dataType, field.nullable)
         case None =>
           // Fallback to string type
+          logger.error(s"🔍 GROUP BY SCHEMA: Field '$columnName' NOT FOUND in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
           StructField(columnName, StringType, nullable = true)
       }
     }
@@ -381,11 +385,7 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   // We need the schema from the scan to properly convert bucket keys
-  // For now, we'll extract it from the transaction log via the split
-  private lazy val fieldSchema: StructType =
-    // In a real implementation, this would come from the scan's schema
-    // For now, create a simple schema inference from column names
-    StructType(partition.groupByColumns.map(col => StructField(col, StringType, nullable = true)))
+  private lazy val fieldSchema: StructType = partition.schema
 
   override def next(): Boolean = {
     if (!isInitialized) {
@@ -635,7 +635,11 @@ class IndexTables4SparkGroupByAggregateReader(
               .map { multiBucket =>
                 try {
                   val fieldValues   = multiBucket.getFieldValues()
-                  val groupByValues = fieldValues.map(value => convertStringValueToSpark(value, StringType))
+                  val groupByValues = fieldValues.zipWithIndex.map { case (value, idx) =>
+                    val fieldName = groupByColumns(idx)
+                    val fieldType = getFieldType(fieldName)
+                    convertStringValueToSpark(value, fieldType)
+                  }
                   val aggregationValues =
                     calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
 
@@ -836,6 +840,22 @@ class IndexTables4SparkGroupByAggregateReader(
             logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Long: ${e.getMessage}")
             0L
         }
+      case Some(org.apache.spark.sql.types.FloatType) =>
+        try
+          keyAsString.toFloat
+        catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Float: ${e.getMessage}")
+            0.0f
+        }
+      case Some(org.apache.spark.sql.types.DoubleType) =>
+        try
+          keyAsString.toDouble
+        catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Double: ${e.getMessage}")
+            0.0
+        }
       case _ =>
         // Default to string
         UTF8String.fromString(keyAsString)
@@ -904,6 +924,22 @@ class IndexTables4SparkGroupByAggregateReader(
           case e: NumberFormatException =>
             logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Long: ${e.getMessage}")
             0L
+        }
+      case FloatType =>
+        try
+          value.toFloat
+        catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Float: ${e.getMessage}")
+            0.0f
+        }
+      case DoubleType =>
+        try
+          value.toDouble
+        catch {
+          case e: NumberFormatException =>
+            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Double: ${e.getMessage}")
+            0.0
         }
       case _ => UTF8String.fromString(value)
     }
