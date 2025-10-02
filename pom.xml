@@ -228,12 +228,11 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Databricks SDK for Unity Catalog integration (optional, provided scope) -->
+        <!-- Databricks SDK for Unity Catalog integration (included and shaded) -->
         <dependency>
             <groupId>com.databricks</groupId>
             <artifactId>databricks-sdk-java</artifactId>
             <version>0.65.0</version>
-            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -516,34 +515,15 @@
                                     <include>com.thoughtworks.paranamer:paranamer</include>
                                     <include>org.reactivestreams:reactive-streams</include>
                                     <include>software.amazon.eventstream:eventstream</include>
+                                    <include>com.databricks:databricks-sdk-java</include>
                                 </includes>
                             </artifactSet>
-                            <!-- <relocations>
+                            <relocations>
                                 <relocation>
-                                    <pattern>com.tantivy4java</pattern>
-                                    <shadedPattern>tantivy4spark.com.tantivy4java</shadedPattern>
+                                    <pattern>com.databricks</pattern>
+                                    <shadedPattern>shaded.indextables.com.databricks</shadedPattern>
                                 </relocation>
-                                <relocation>
-                                    <pattern>software.amazon.awssdk</pattern>
-                                    <shadedPattern>tantivy4spark.software.amazon.awssdk</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>com.fasterxml.jackson</pattern>
-                                    <shadedPattern>tantivy4spark.com.fasterxml.jackson</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>com.thoughtworks.paranamer</pattern>
-                                    <shadedPattern>tantivy4spark.com.thoughtworks.paranamer</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.reactivestreams</pattern>
-                                    <shadedPattern>tantivy4spark.org.reactivestreams</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>software.amazon.eventstream</pattern>
-                                    <shadedPattern>tantivy4spark.software.amazon.eventstream</shadedPattern>
-                                </relocation>
-                            </relocations> -->
+                            </relocations>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
