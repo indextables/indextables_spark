@@ -40,16 +40,22 @@ df = spark.read \
 
 # SQL queries including full Spark SQL syntax
 # plus Quickwit filters via "indexquery" operand
+#
+# Note: LIMITS are important for interactive use cases,
+#  as scanning tables is very fast but retrieving lots of 
+#  rows can take time, AND interactive users typically
+#  only look at a few rows before pivoting
+#
 df.createOrReplaceTempView("my_table")
 spark.sql("""
     SELECT * FROM my_table
     WHERE category = 'technology'
       AND message indexquery 'critical AND infrastructure'
-    LIMIT 10
+    LIMIT 100
 """).show()
 
 # Cross-field search - any record containing the term "mytable"
-# in ANY field
+# in ANY field.  Using default limit (5000)
 spark.sql("""
     SELECT * FROM my_table
     WHERE _indexall indexquery 'mytable'
