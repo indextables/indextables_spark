@@ -516,7 +516,7 @@ class IndexTables4SparkSimpleAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => sumResult.getSum
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
                       sumResult.getSum
                   }
                 } else {
@@ -530,7 +530,7 @@ class IndexTables4SparkSimpleAggregateReader(
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
                 aggregationResults += sumValue
               } else {
-                logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
                   case IntegerType | LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
@@ -570,7 +570,7 @@ class IndexTables4SparkSimpleAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => minResult.getMin
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
                       minResult.getMin
                   }
                 } else {
@@ -584,7 +584,7 @@ class IndexTables4SparkSimpleAggregateReader(
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
                 aggregationResults += minValue
               } else {
-                logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType => java.lang.Long.valueOf(0L)
@@ -615,7 +615,7 @@ class IndexTables4SparkSimpleAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => maxResult.getMax
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
                       maxResult.getMax
                   }
                 } else {
@@ -629,7 +629,7 @@ class IndexTables4SparkSimpleAggregateReader(
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
                 aggregationResults += maxValue
               } else {
-                logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType => java.lang.Long.valueOf(0L)
@@ -678,7 +678,7 @@ class IndexTables4SparkSimpleAggregateReader(
           if (splitMetadata != null && splitMetadata.hasFooterOffsets()) {
             (splitMetadata.getFooterStartOffset(), splitMetadata.getFooterEndOffset())
           } else {
-            logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No footer offsets available for split: ${partition.split.path}")
+            logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No footer offsets available for split: ${partition.split.path}")
             (0L, 1024L) // Minimal fallback
           }
         } catch {
@@ -722,7 +722,7 @@ class IndexTables4SparkSimpleAggregateReader(
     partition.schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
-        logger.warn(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
+        logger.debug(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
         LongType
     }
   }

@@ -153,14 +153,14 @@ class EnhancedTransactionLogCache(
     Option(fileListCache.getIfPresent(key)) match {
       case Some(files) =>
         logger.debug(s"File list cache hit for $tablePath")
-        println(s"[DEBUG] Cache hit for checksum $checksum, returning ${files.size} files: ${files.map(_.path).mkString(", ")}")
+        logger.debug(s" Cache hit for checksum $checksum, returning ${files.size} files: ${files.map(_.path).mkString(", ")}")
         files
       case None =>
         logger.debug(s"File list cache miss for $tablePath")
-        println(s"[DEBUG] Cache miss for checksum $checksum, computing...")
+        logger.debug(s" Cache miss for checksum $checksum, computing...")
         val files = compute
         fileListCache.put(key, files)
-        println(s"[DEBUG] Computed and cached ${files.size} files: ${files.map(_.path).mkString(", ")}")
+        logger.debug(s" Computed and cached ${files.size} files: ${files.map(_.path).mkString(", ")}")
         files
     }
   }

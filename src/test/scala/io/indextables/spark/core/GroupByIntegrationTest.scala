@@ -346,6 +346,121 @@ class GroupByIntegrationTest extends AnyFunSuite {
       spark.stop()
   }
 
+  test("GROUP BY with COUNT and SUM using exact match filter") {
+    val spark = SparkSession
+      .builder()
+      .appName("GroupByExactMatchFilterTest")
+      .master("local[*]")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Create test data with referrer field for filtering and status field for grouping
+      val testData = Seq(
+        ("doc1", "myhost.com", "status_ok", 100),
+        ("doc2", "myhost.com", "status_ok", 200),
+        ("doc3", "myhost.com", "status_error", 150),
+        ("doc4", "otherhost.com", "status_ok", 300),
+        ("doc5", "otherhost.com", "status_error", 250),
+        ("doc6", "myhost.com", "status_ok", 50),
+        ("doc7", "thirdhost.com", "status_ok", 400)
+      ).toDF("id", "referrer", "status", "response_time")
+
+      val tempDir   = Files.createTempDirectory("groupby-filter-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      // Write data with string fields for exact matching and fast fields for aggregation
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.indextables.indexing.typemap.referrer", "string")  // String for exact match
+        .option("spark.indextables.indexing.typemap.status", "string")    // String for GROUP BY
+        .option("spark.indextables.indexing.fastfields", "referrer,status,response_time") // All fields as fast
+        .mode("overwrite")
+        .save(tablePath)
+
+      println(s"✅ GROUP BY with filter test: Data written to $tablePath")
+
+      // Read back the data
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+
+      // Apply exact match filter and perform GROUP BY with COUNT and SUM
+      println("🔍 GROUP BY FILTER TEST: Executing filtered GROUP BY query with COUNT and SUM...")
+      val filteredGroupByResult = df
+        .filter($"referrer" === "myhost.com")
+        .groupBy("status")
+        .agg(
+          count("*").as("total_count"),
+          sum("response_time").as("total_response_time")
+        )
+
+      // Show execution plan to verify pushdown
+      println("🔍 GROUP BY FILTER TEST: Execution plan:")
+      filteredGroupByResult.explain(true)
+
+      // Collect results
+      val results = filteredGroupByResult.collect()
+
+      println("🔍 GROUP BY FILTER TEST: Results after filtering for referrer='myhost.com':")
+      results.foreach { row =>
+        println(s"  ${row.getString(0)}: count=${row.getLong(1)}, sum=${row.getLong(2)}")
+      }
+
+      // Verify expected results
+      val resultMap = results.map(row => row.getString(0) -> (row.getLong(1), row.getLong(2))).toMap
+
+      // Expected results for referrer='myhost.com':
+      // - status_ok: 3 docs (doc1, doc2, doc6) with sum=350 (100+200+50)
+      // - status_error: 1 doc (doc3) with sum=150
+      assert(resultMap.contains("status_ok"), "Should have status_ok group")
+      assert(resultMap.contains("status_error"), "Should have status_error group")
+
+      val (okCount, okSum)       = resultMap("status_ok")
+      val (errorCount, errorSum) = resultMap("status_error")
+
+      assert(okCount == 3, s"status_ok should have 3 docs, got $okCount")
+      assert(okSum == 350, s"status_ok should have sum 350, got $okSum")
+      assert(errorCount == 1, s"status_error should have 1 doc, got $errorCount")
+      assert(errorSum == 150, s"status_error should have sum 150, got $errorSum")
+
+      println(s"✅ GROUP BY with filter test: All assertions passed!")
+
+      // Additional verification: ensure we didn't include docs from other referrers
+      val totalDocsProcessed = okCount + errorCount
+      assert(totalDocsProcessed == 4, s"Should process exactly 4 docs from myhost.com, got $totalDocsProcessed")
+
+      val totalSumProcessed = okSum + errorSum
+      assert(totalSumProcessed == 500, s"Total sum should be 500, got $totalSumProcessed")
+
+      println(s"✅ Filter verification: Only docs from 'myhost.com' were aggregated!")
+
+      // Verify that results do NOT include documents from other referrers
+      // If other referrers were included, we'd see higher counts/sums:
+      // - otherhost.com has 2 docs: doc4 (status_ok, 300) and doc5 (status_error, 250)
+      // - thirdhost.com has 1 doc: doc7 (status_ok, 400)
+      // Total if all docs included: status_ok would have 5 docs with sum=1050, status_error would have 2 docs with sum=400
+
+      assert(
+        okCount == 3 && okSum == 350,
+        s"status_ok should have count=3, sum=350 (myhost.com only), but got count=$okCount, sum=$okSum. " +
+          s"If otherhost.com was included, count would be 4 with sum=650. If thirdhost.com was included, count would be 4 with sum=750."
+      )
+
+      assert(
+        errorCount == 1 && errorSum == 150,
+        s"status_error should have count=1, sum=150 (myhost.com only), but got count=$errorCount, sum=$errorSum. " +
+          s"If otherhost.com was included, count would be 2 with sum=400."
+      )
+
+      println(s"✅ Exclusion verification: Documents from 'otherhost.com' and 'thirdhost.com' were correctly excluded!")
+
+      // Clean up
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
   /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {

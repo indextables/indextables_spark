@@ -1320,13 +1320,13 @@ class MergeSplitsExecutor(
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
     // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
-    logger.warn(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
+    logger.debug(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
     mergeGroup.files.zipWithIndex.foreach {
       case (file, idx) =>
         file.docMappingJson match {
           case Some(json) =>
-            logger.warn(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
-            logger.warn(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
+            logger.debug(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
+            logger.debug(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
           case None =>
             logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
         }
@@ -1878,13 +1878,13 @@ object MergeSplitsExecutor {
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
     // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
-    logger.warn(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
+    logger.debug(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
     mergeGroup.files.zipWithIndex.foreach {
       case (file, idx) =>
         file.docMappingJson match {
           case Some(json) =>
-            logger.warn(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
-            logger.warn(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
+            logger.debug(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
+            logger.debug(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
           case None =>
             logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
         }

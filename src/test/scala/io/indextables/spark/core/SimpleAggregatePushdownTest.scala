@@ -698,4 +698,77 @@ class SimpleAggregatePushdownTest extends TestBase {
         case None        => spark.conf.unset("spark.sql.adaptive.enabled")
       }
   }
+
+  test("Simple aggregations with exact match filter should work") {
+    assume(isNativeLibraryAvailable(), "Native Tantivy library not available - skipping integration test")
+
+    withTempPath { tempPath =>
+      import org.apache.spark.sql.types._
+      import org.apache.spark.sql.Row
+
+      // Create test data with referrer field for filtering (similar to GROUP BY test)
+      val schema = StructType(
+        Seq(
+          StructField("id", StringType, nullable = false),
+          StructField("referrer", StringType, nullable = false),
+          StructField("status", StringType, nullable = false),
+          StructField("response_time", IntegerType, nullable = false)
+        )
+      )
+
+      val rows = Seq(
+        Row("doc1", "myhost.com", "status_ok", 100),
+        Row("doc2", "myhost.com", "status_ok", 200),
+        Row("doc3", "myhost.com", "status_error", 150),
+        Row("doc4", "otherhost.com", "status_ok", 300),
+        Row("doc5", "otherhost.com", "status_error", 250),
+        Row("doc6", "myhost.com", "status_ok", 50),
+        Row("doc7", "thirdhost.com", "status_ok", 400)
+      )
+
+      val testData = spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+
+      // Write test data with string fields and fast fields
+      testData.write
+        .format("tantivy4spark")
+        .option("spark.indextables.indexing.typemap.referrer", "string")
+        .option("spark.indextables.indexing.typemap.status", "string")
+        .option("spark.indextables.indexing.fastfields", "referrer,status,response_time")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read data and perform aggregations with exact match filter
+      val df = spark.read.format("tantivy4spark").load(tempPath)
+
+      // Filter for exact match: referrer === 'myhost.com'
+      // Should include only 4 docs: doc1, doc2, doc3, doc6
+      val result = df
+        .filter(col("referrer") === "myhost.com")
+        .agg(
+          count(lit(1)).as("filtered_count"),
+          sum("response_time").as("filtered_sum")
+        )
+        .collect()
+
+      val row           = result(0)
+      val filteredCount = row.getLong(0)
+      val filteredSum   = row.getLong(1)
+
+      // Verify only myhost.com docs were aggregated
+      filteredCount shouldBe 4L // doc1, doc2, doc3, doc6
+      filteredSum shouldBe 500L // 100 + 200 + 150 + 50 = 500
+
+      // Verify that other hosts were excluded
+      // If otherhost.com was included: count=6, sum=1000 (adding 300+250)
+      // If thirdhost.com was included: count=5, sum=900 (adding 400)
+      assert(
+        filteredCount == 4L && filteredSum == 500L,
+        s"Should have count=4, sum=500 (myhost.com only), but got count=$filteredCount, sum=$filteredSum. " +
+          s"If otherhost.com was included, count would be 6 with sum=1000. If thirdhost.com was included, count would be 5 with sum=900."
+      )
+
+      println(s"✅ Simple aggregations with exact match filter test passed: count=$filteredCount, sum=$filteredSum")
+      println(s"✅ Exclusion verification: Documents from 'otherhost.com' and 'thirdhost.com' were correctly excluded!")
+    }
+  }
 }

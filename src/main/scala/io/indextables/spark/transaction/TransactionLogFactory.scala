@@ -48,7 +48,7 @@ object TransactionLogFactory {
     spark: SparkSession,
     options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
   ): TransactionLog = {
-    println(s"[DEBUG FACTORY] create method called for path: $tablePath")
+    logger.debug(s" create method called for path: $tablePath")
 
     // Check if optimization is explicitly disabled
     val useOptimized = options.getBoolean(
@@ -66,7 +66,7 @@ object TransactionLogFactory {
 
     val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
 
-    println(s"[DEBUG FACTORY] Creating transaction log for $tablePath (shouldUseOptimized: $shouldUseOptimized)")
+    logger.debug(s" Creating transaction log for $tablePath (shouldUseOptimized: $shouldUseOptimized)")
     logger.info(s"Creating transaction log for $tablePath (useOptimized: $useOptimized, cacheEnabled: $cacheEnabled, expirationSeconds: $expirationSeconds, useStandardForShortExpiration: $useStandardForShortExpiration, shouldUseOptimized: $shouldUseOptimized)")
 
     if (shouldUseOptimized) {
@@ -75,7 +75,7 @@ object TransactionLogFactory {
     } else {
       // Create standard TransactionLog for testing/compatibility
       logger.info(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
-      println(s"[DEBUG FACTORY] Creating standard TransactionLog for $tablePath")
+      logger.debug(s" Creating standard TransactionLog for $tablePath")
       new TransactionLog(
         tablePath,
         spark,
@@ -131,7 +131,7 @@ class TransactionLogAdapter(
   }
 
   override def overwriteFiles(addActions: Seq[AddAction]): Long = {
-    println(s"[DEBUG ADAPTER] overwriteFiles called with ${addActions.size} actions")
+    logger.debug(s" overwriteFiles called with ${addActions.size} actions")
     val result = optimizedLog.overwriteFiles(addActions)
     // Invalidate adapter's cache after overwrite operation
     super.invalidateCache()
@@ -193,7 +193,7 @@ class TransactionLogAdapter(
   }
 
   override def invalidateCache(): Unit = {
-    println(s"[DEBUG ADAPTER] invalidateCache called")
+    logger.debug(s" invalidateCache called")
     // Invalidate both the optimized log cache and the parent TransactionLog cache
     optimizedLog.invalidateCache(getTablePath().toString)
     super.invalidateCache()

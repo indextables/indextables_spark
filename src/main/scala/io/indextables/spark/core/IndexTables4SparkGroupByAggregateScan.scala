@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
 import io.indextables.tantivy4java.aggregation.TermsResult
+import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import scala.jdk.CollectionConverters._
 
 /**
@@ -432,8 +433,8 @@ class IndexTables4SparkGroupByAggregateReader(
 
     try {
       // Create cache configuration from broadcast config
-      val cacheConfig  = createCacheConfig()
-      val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      val splitCacheConfig = createCacheConfig()
+      val cacheManager     = SplitCacheManager.getInstance(splitCacheConfig.toJavaCacheConfig())
 
       logger.info(s"🔍 GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
 
@@ -450,9 +451,20 @@ class IndexTables4SparkGroupByAggregateReader(
 
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
-      val searcher      = cacheManager.createSplitSearcher(splitPath, splitMetadata)
 
-      logger.info(s"🔍 GROUP BY EXECUTION: Searcher created successfully")
+      // Create SplitSearchEngine for filter conversion (uses caching internally)
+      val splitSearchEngine =
+        io.indextables.spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
+          partition.schema,
+          splitPath,
+          splitMetadata,
+          splitCacheConfig
+        )
+
+      logger.info(s"🔍 GROUP BY EXECUTION: SplitSearchEngine created successfully")
+
+      // Get the searcher from the engine
+      val searcher = cacheManager.createSplitSearcher(splitPath, splitMetadata)
 
       // Support both single and multi-column GROUP BY
       if (partition.groupByColumns.length >= 1) {
@@ -528,13 +540,49 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
 
               case other =>
-                logger.warn(s"🔍 GROUP BY EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+                logger.debug(s"🔍 GROUP BY EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
             }
         }
 
-        // Execute aggregation query with sub-aggregations
-        val query = new SplitMatchAllQuery()
-        logger.info(s"🔍 GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations")
+        // Convert pushed filters to query
+        val query = if (partition.pushedFilters.nonEmpty) {
+          logger.info(s"🔍 GROUP BY EXECUTION: Converting ${partition.pushedFilters.length} pushed filters to query")
+
+          // Get the split field names for schema validation
+          val splitFieldNames = try {
+            import scala.collection.JavaConverters._
+            val schema = splitSearchEngine.getSchema()
+            if (schema != null) {
+              Some(schema.getFieldNames().asScala.toSet)
+            } else {
+              logger.debug(s"🔍 GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
+              None
+            }
+          } catch {
+            case e: Exception =>
+              logger.debug(s"🔍 GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
+              None
+          }
+
+          // Create options from broadcast config
+          import scala.jdk.CollectionConverters._
+          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
+
+          // Convert filters to query with schema validation
+          val convertedQuery = FiltersToQueryConverter.convertToSplitQuery(
+            partition.pushedFilters,
+            splitSearchEngine,
+            splitFieldNames,
+            Some(optionsFromBroadcast)
+          )
+          logger.info(s"🔍 GROUP BY EXECUTION: Converted filters to query: ${convertedQuery.getClass.getSimpleName}")
+          convertedQuery
+        } else {
+          logger.info(s"🔍 GROUP BY EXECUTION: No filters, using match-all query")
+          new SplitMatchAllQuery()
+        }
+
+        logger.info(s"🔍 GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
 
         val result = searcher.search(query, 0, "group_by_terms", termsAgg)
 
@@ -555,7 +603,7 @@ class IndexTables4SparkGroupByAggregateReader(
           // Try the standard name first, then fallback
           var aggregationResult = result.getAggregation("agg_0")
           if (aggregationResult == null) {
-            logger.warn(s"🔍 GROUP BY EXECUTION: No aggregation result found for 'agg_0', trying 'group_by_terms'")
+            logger.debug(s"🔍 GROUP BY EXECUTION: No aggregation result found for 'agg_0', trying 'group_by_terms'")
             aggregationResult = result.getAggregation("group_by_terms")
           }
 
@@ -647,12 +695,12 @@ class IndexTables4SparkGroupByAggregateReader(
           }
 
         } else {
-          logger.warn(s"🔍 GROUP BY EXECUTION: No aggregation results returned")
+          logger.debug(s"🔍 GROUP BY EXECUTION: No aggregation results returned")
           Array.empty[InternalRow]
         }
 
       } else {
-        logger.warn(s"🔍 GROUP BY EXECUTION: Multi-column GROUP BY not yet implemented: ${partition.groupByColumns.mkString(", ")}")
+        logger.debug(s"🔍 GROUP BY EXECUTION: Multi-column GROUP BY not yet implemented: ${partition.groupByColumns.mkString(", ")}")
         Array.empty[InternalRow]
       }
 
@@ -664,7 +712,7 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Create cache configuration from broadcast config */
-  private def createCacheConfig(): SplitCacheManager.CacheConfig = {
+  private def createCacheConfig(): io.indextables.spark.storage.SplitCacheConfig = {
     // Use the centralized utility for consistent configuration
     val cacheConfig = io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
       partition.config,
@@ -673,8 +721,8 @@ class IndexTables4SparkGroupByAggregateReader(
 
     logger.info(s"🔍 GROUP BY EXECUTION: Created cache config with AWS credentials - accessKey=${cacheConfig.awsAccessKey.map(k => s"${k.take(4)}***").getOrElse("None")}")
 
-    // Convert SplitCacheConfig to SplitCacheManager.CacheConfig using built-in method
-    cacheConfig.toJavaCacheConfig()
+    // Return SplitCacheConfig directly (for SplitSearchEngine)
+    cacheConfig
   }
 
   /** Create SplitMetadata from the existing split information. */
@@ -696,7 +744,7 @@ class IndexTables4SparkGroupByAggregateReader(
           if (splitMetadata != null && splitMetadata.hasFooterOffsets()) {
             (splitMetadata.getFooterStartOffset(), splitMetadata.getFooterEndOffset())
           } else {
-            logger.warn(s"🔍 GROUP BY EXECUTION: No footer offsets available for split: ${partition.split.path}")
+            logger.debug(s"🔍 GROUP BY EXECUTION: No footer offsets available for split: ${partition.split.path}")
             (0L, 1024L) // Minimal fallback
           }
         } catch {
@@ -823,11 +871,11 @@ class IndexTables4SparkGroupByAggregateReader(
 
           case _: Sum | _: Avg | _: Min | _: Max =>
             // These should now be handled by separate metric aggregations
-            logger.warn(s"🔍 GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately")
             bucket.getDocCount.toLong // Fallback
 
           case other =>
-            logger.warn(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
             0L
         }
       }
@@ -866,7 +914,7 @@ class IndexTables4SparkGroupByAggregateReader(
     partition.schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
-        logger.warn(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
+        logger.debug(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
         LongType
     }
   }
@@ -946,7 +994,7 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
                   java.lang.Long.valueOf(0L)
                 }
               } catch {
@@ -983,7 +1031,7 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
                   java.lang.Double.valueOf(0.0)
                 }
               } catch {
@@ -1012,7 +1060,7 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
                   java.lang.Double.valueOf(0.0)
                 }
               } catch {
@@ -1022,7 +1070,7 @@ class IndexTables4SparkGroupByAggregateReader(
               }
 
             case other =>
-              logger.warn(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
+              logger.debug(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
               0L
           }
         }
@@ -1067,11 +1115,11 @@ class IndexTables4SparkGroupByAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => sumResult.getSum.toDouble
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
                       sumResult.getSum.toDouble
                   }
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
@@ -1105,11 +1153,11 @@ class IndexTables4SparkGroupByAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => minResult.getMin.toDouble
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
                       minResult.getMin.toDouble
                   }
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
@@ -1135,11 +1183,11 @@ class IndexTables4SparkGroupByAggregateReader(
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => maxResult.getMax.toDouble
                     case _ =>
-                      logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
+                      logger.debug(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
                       maxResult.getMax.toDouble
                   }
                 } else {
-                  logger.warn(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
@@ -1149,7 +1197,7 @@ class IndexTables4SparkGroupByAggregateReader(
               }
 
             case other =>
-              logger.warn(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
+              logger.debug(s"🔍 GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
               0L
           }
         }

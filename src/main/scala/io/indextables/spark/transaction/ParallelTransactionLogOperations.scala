@@ -173,15 +173,15 @@ class ParallelTransactionLogOperations(
     sortedVersions.foreach { version =>
       val actions = versionToActions.get(version)
       if (actions != null) {
-        println(s"[DEBUG] Processing version $version with ${actions.size} actions")
+        logger.debug(s" Processing version $version with ${actions.size} actions")
         actions.foreach { action =>
           action match {
             case add: AddAction =>
               files(add.path) = add
-              println(s"[DEBUG]   Added: ${add.path}")
+              logger.debug(s"   Added: ${add.path}")
             case remove: RemoveAction =>
               val removed = files.remove(remove.path)
-              println(s"[DEBUG]   Removed: ${remove.path}, was present: ${removed.isDefined}")
+              logger.debug(s"   Removed: ${remove.path}, was present: ${removed.isDefined}")
             case _ => // Ignore other actions
           }
         }
@@ -263,7 +263,7 @@ class ParallelTransactionLogOperations(
   ): Seq[TransactionFile] = {
     val prefix = transactionLogPath.toString
     val files  = cloudProvider.listFiles(prefix, recursive = false)
-    println(s"[DEBUG] CloudProvider listed ${files.size} files in $prefix: ${files.map(_.path).mkString(", ")}")
+    logger.debug(s" CloudProvider listed ${files.size} files in $prefix: ${files.map(_.path).mkString(", ")}")
 
     files
       .flatMap { file =>

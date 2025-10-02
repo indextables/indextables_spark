@@ -66,20 +66,20 @@ object TantivyDirectInterface {
     val currentNonFastFields = tantivyOptions.getNonFastFields
 
     // DEBUG: WHERE IS THE CONFIGURATION COMING FROM?
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: currentFastFields = ${currentFastFields.mkString(", ")}")
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: currentNonFastFields = ${currentNonFastFields.mkString(", ")}")
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: currentFastFields = ${currentFastFields.mkString(", ")}")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: currentNonFastFields = ${currentNonFastFields.mkString(", ")}")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}")
     logger.warn(
       s"🔍 AUTO-FAST-FIELD DEBUG: ALL options keys = ${options.entrySet().asScala.map(_.getKey).mkString(", ")}"
     )
 
     // If fast fields are already configured, return original options
     if (currentFastFields.nonEmpty) {
-      logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: Fast fields already configured, skipping auto-configuration")
+      logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: Fast fields already configured, skipping auto-configuration")
       return options
     }
 
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: No fast fields configured, checking schema for eligible fields...")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: No fast fields configured, checking schema for eligible fields...")
 
     // Find all fields that should be fast by default
     val defaultFastFields = sparkSchema.fields
@@ -108,8 +108,8 @@ object TantivyDirectInterface {
     // Remove any fields explicitly configured as non-fast
     val finalFastFields = defaultFastFields -- currentNonFastFields
 
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: defaultFastFields = ${defaultFastFields.mkString(", ")}")
-    logger.warn(s"🔍 AUTO-FAST-FIELD DEBUG: finalFastFields = ${finalFastFields.mkString(", ")}")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: defaultFastFields = ${defaultFastFields.mkString(", ")}")
+    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: finalFastFields = ${finalFastFields.mkString(", ")}")
 
     if (finalFastFields.nonEmpty) {
       logger.info(s"🔧 AUTO-FAST-FIELD: No fast fields configured, automatically making fields fast by default: ${finalFastFields.mkString(", ")}")
@@ -134,7 +134,7 @@ object TantivyDirectInterface {
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap
   ): (io.indextables.tantivy4java.core.Schema, SchemaBuilder) =
     schemaCreationLock.synchronized {
-      logger.warn(s"🔍 CREATE SCHEMA CALLED: Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
+      logger.debug(s"🔍 CREATE SCHEMA CALLED: Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})")
       logger.debug(
         s"Creating schema with ${sparkSchema.fields.length} fields (thread: ${Thread.currentThread().getName})"
       )
@@ -148,21 +148,21 @@ object TantivyDirectInterface {
       // DEBUG: Verify what's in the options map after auto-configuration
       import scala.jdk.CollectionConverters._
       val autoConfiguredMap = autoConfiguredOptions.asCaseSensitiveMap().asScala.toMap
-      logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: Keys in autoConfiguredOptions: ${autoConfiguredMap.keys.mkString(", ")}")
-      logger.warn(s"🔍 AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}")
+      logger.debug(s"🔍 AUTO-CONFIG MAP DEBUG: Keys in autoConfiguredOptions: ${autoConfiguredMap.keys.mkString(", ")}")
+      logger.debug(s"🔍 AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}")
 
       val finalTantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(autoConfiguredOptions)
 
       // DEBUG: Verify what getFastFields returns
       val retrievedFastFields = finalTantivyOptions.getFastFields
-      logger.warn(s"🔍 FINAL OPTIONS DEBUG: getFastFields() returned: ${retrievedFastFields.mkString(", ")}")
+      logger.debug(s"🔍 FINAL OPTIONS DEBUG: getFastFields() returned: ${retrievedFastFields.mkString(", ")}")
 
       sparkSchema.fields.foreach { field =>
         val fieldName      = field.name
         val fieldType      = field.dataType
         val indexingConfig = finalTantivyOptions.getFieldIndexingConfig(fieldName)
 
-        logger.warn(s"🔍 FIELD CONFIG DEBUG: Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
+        logger.debug(s"🔍 FIELD CONFIG DEBUG: Adding field: $fieldName of type: $fieldType with config: $indexingConfig")
 
         // Validate conflicting configurations
         if (indexingConfig.isStoreOnly && indexingConfig.isIndexOnly) {
@@ -174,7 +174,7 @@ object TantivyDirectInterface {
         val indexed = !indexingConfig.isStoreOnly
         val fast    = indexingConfig.isFast
 
-        logger.warn(s"🔍 BUILDER CALL DEBUG: Field $fieldName: stored=$stored, indexed=$indexed, fast=$fast")
+        logger.debug(s"🔍 BUILDER CALL DEBUG: Field $fieldName: stored=$stored, indexed=$indexed, fast=$fast")
 
         fieldType match {
           case org.apache.spark.sql.types.StringType =>
@@ -185,7 +185,7 @@ object TantivyDirectInterface {
             // after the "keyword" type bug was fixed in the schema conversion logic
             fieldTypeOverride match {
               case "string" =>
-                logger.warn(s"🔍 CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
+                logger.debug(s"🔍 CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
                 builder.addStringField(fieldName, stored, indexed, fast)
               case "text" =>
                 val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
@@ -199,7 +199,7 @@ object TantivyDirectInterface {
                 )
             }
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
-            logger.warn(s"🔍 CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
+            logger.debug(s"🔍 CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
             builder.addIntegerField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
             builder.addFloatField(fieldName, stored, indexed, fast)
@@ -219,7 +219,7 @@ object TantivyDirectInterface {
       }
 
       val tantivySchema = builder.build()
-      logger.warn(s"🔍 CREATE SCHEMA COMPLETED: Built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
+      logger.debug(s"🔍 CREATE SCHEMA COMPLETED: Built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
       logger.info(s"Successfully built schema with ${sparkSchema.fields.length} fields using new indexing configuration")
 
       (tantivySchema, builder)
@@ -244,10 +244,10 @@ class TantivyDirectInterface(
 
   // Validate indexing configuration against existing table if provided
   if (existingDocMappingJson.isDefined) {
-    logger.warn(s"🔍 VALIDATION DEBUG: Running indexing configuration validation")
+    logger.debug(s"🔍 VALIDATION DEBUG: Running indexing configuration validation")
     validateIndexingConfiguration(existingDocMappingJson.get)
   } else {
-    logger.warn(s"🔍 VALIDATION DEBUG: Skipping validation - no existing doc mapping provided")
+    logger.debug(s"🔍 VALIDATION DEBUG: Skipping validation - no existing doc mapping provided")
   }
 
   // Keep schemaBuilder alive for the lifetime of this interface

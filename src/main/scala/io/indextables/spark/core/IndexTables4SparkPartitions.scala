@@ -190,31 +190,31 @@ class IndexTables4SparkPartitionReader(
   private var initialized                           = false
 
   private def createCacheConfig(): SplitCacheConfig = {
-    logger.error(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
+    logger.debug(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
 
     // Access the broadcast configuration in executor
     val broadcasted = config
 
     // Debug: Log broadcast configuration received in executor
-    logger.error(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
+    logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
     broadcasted.foreach {
       case (k, v) =>
         val safeValue = Option(v).getOrElse("null")
-        logger.error(s"🔍 Broadcast config: $k -> $safeValue")
+        logger.debug(s"🔍 Broadcast config: $k -> $safeValue")
     }
 
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
       val value     = broadcasted.getOrElse(configKey, default)
       val safeValue = Option(value).getOrElse(default)
-      logger.error(s"🔍 PartitionReader broadcast config for $configKey: ${Option(safeValue).getOrElse("null")}")
+      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: ${Option(safeValue).getOrElse("null")}")
       safeValue
     }
 
     def getBroadcastConfigOption(configKey: String): Option[String] = {
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
       val value = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
-      logger.info(s"🔍 PartitionReader broadcast config for $configKey: ${value.getOrElse("None")}")
+      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: ${value.getOrElse("None")}")
       value
     }
 
@@ -308,11 +308,11 @@ class IndexTables4SparkPartitionReader(
         }
 
         // Create cache configuration from Spark options
-        logger.error(s"🔍 ABOUT TO CALL createCacheConfig()...")
-        logger.info(s"🔍 Creating cache configuration for split read...")
+        logger.debug(s"🔍 ABOUT TO CALL createCacheConfig()...")
+        logger.debug(s"🔍 Creating cache configuration for split read...")
         val cacheConfig = createCacheConfig()
-        logger.error(s"🔍 createCacheConfig() COMPLETED SUCCESSFULLY")
-        logger.info(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
+        logger.debug(s"🔍 createCacheConfig() COMPLETED SUCCESSFULLY")
+        logger.debug(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
 
         // Create split search engine using footer offset optimization when available
         // Use raw filesystem path for tantivy4java compatibility
@@ -350,13 +350,13 @@ class IndexTables4SparkPartitionReader(
           case None => 0L
         }
 
-        logger.warn(
+        logger.debug(
           s"🔍 RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined)
               s"PRESENT (${addAction.docMappingJson.get.length} chars)"
             else "MISSING/NULL"}"
         )
         if (addAction.docMappingJson.isDefined) {
-          logger.warn(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get
+          logger.debug(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get
               .take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
         }
 
@@ -805,12 +805,12 @@ class IndexTables4SparkDataWriter(
           tagSet.asScala.toSet
         }
         val originalDocMapping = Option(splitMetadata.getDocMappingJson())
-        logger.warn(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined)
+        logger.debug(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined)
             s"PRESENT (${originalDocMapping.get.length} chars)"
           else "MISSING/NULL"}")
 
         val docMapping = if (originalDocMapping.isDefined) {
-          logger.warn(s"🔍 docMappingJson FULL CONTENT: ${originalDocMapping.get}")
+          logger.debug(s"🔍 docMappingJson FULL CONTENT: ${originalDocMapping.get}")
           originalDocMapping
         } else {
           // WORKAROUND: If tantivy4java didn't provide docMappingJson, create a minimal schema mapping

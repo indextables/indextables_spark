@@ -184,9 +184,9 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     // DEBUG: Log what we're checking
     import org.slf4j.LoggerFactory
     val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkOptions])
-    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fieldName=$fieldName")
-    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
-    logger.warn(s"🔍 getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
+    logger.debug(s"🔍 getFieldIndexingConfig DEBUG: fieldName=$fieldName")
+    logger.debug(s"🔍 getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
+    logger.debug(s"🔍 getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
 
     FieldIndexingConfig(
       fieldType = fieldTypeMapping.get(fieldName),

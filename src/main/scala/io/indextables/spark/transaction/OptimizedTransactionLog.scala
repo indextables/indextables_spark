@@ -166,7 +166,7 @@ class OptimizedTransactionLog(
 
     // Use atomic version generation to prevent race conditions
     val version = getNextVersion()
-    println(s"[DEBUG] Assigning version $version for addFiles with ${addActions.size} actions")
+    logger.debug(s" Assigning version $version for addFiles with ${addActions.size} actions")
 
     // Use parallel write for large batches
     if (addActions.size > 100 && parallelReadEnabled) {
@@ -193,7 +193,7 @@ class OptimizedTransactionLog(
   def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long = {
     // Use atomic version generation to prevent race conditions
     val version = getNextVersion()
-    println(s"[DEBUG] Assigning version $version for removeFile '$path'")
+    logger.debug(s" Assigning version $version for removeFile '$path'")
 
     val removeAction = RemoveAction(
       path = path,
@@ -212,7 +212,7 @@ class OptimizedTransactionLog(
     // Clear current snapshot to force recomputation
     currentSnapshot.set(None)
 
-    println(s"[DEBUG] Removed file '$path' at version $version")
+    logger.debug(s" Removed file '$path' at version $version")
     version
   }
 
@@ -222,12 +222,12 @@ class OptimizedTransactionLog(
    *      adds in the same transaction
    */
   def overwriteFiles(addActions: Seq[AddAction]): Long = {
-    println(s"[DEBUG OVERWRITE] Starting overwrite operation with ${addActions.size} files")
+    logger.debug(s" Starting overwrite operation with ${addActions.size} files")
     logger.info(s"Starting overwrite operation with ${addActions.size} files")
 
     // Get existing files using optimized listing
     val existingFiles = listFilesOptimized()
-    println(s"[DEBUG OVERWRITE] Found ${existingFiles.size} existing files to remove: ${existingFiles.map(_.path).mkString(", ")}")
+    logger.debug(s" Found ${existingFiles.size} existing files to remove: ${existingFiles.map(_.path).mkString(", ")}")
     val removeActions = existingFiles.map { file =>
       RemoveAction(
         path = file.path,
@@ -241,10 +241,10 @@ class OptimizedTransactionLog(
 
     // Use atomic version generation to prevent race conditions (same as addFiles)
     val version = getNextVersion()
-    println(s"[DEBUG OVERWRITE] Using atomic version assignment: $version")
+    logger.debug(s" Using atomic version assignment: $version")
     // Write removes first, then adds - this ensures proper overwrite semantics
     val allActions: Seq[Action] = removeActions ++ addActions
-    println(s"[DEBUG OVERWRITE] Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
+    logger.debug(s" Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
 
     // Use parallel write for large batches
     if (allActions.size > 100 && parallelReadEnabled) {
@@ -277,35 +277,35 @@ class OptimizedTransactionLog(
     val versions      = getVersions()
     val latestVersion = versions.sorted.lastOption.getOrElse(-1L)
     val checksum      = computeCurrentChecksumWithVersions(versions)
-    println(s"[DEBUG] Computed checksum: $checksum, latest version: $latestVersion")
+    logger.debug(s" Computed checksum: $checksum, latest version: $latestVersion")
 
     val cached = enhancedCache.getOrComputeFileList(
       tablePath.toString,
       checksum, {
-        println(s"[DEBUG] Cache miss, computing file list for checksum: $checksum")
+        logger.debug(s" Cache miss, computing file list for checksum: $checksum")
         logger.info(s"Computing file list using optimized operations for checksum: $checksum")
 
         // Try to get from current snapshot first, but verify it's up to date with latest version
         currentSnapshot.get() match {
           case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
-            println(s"[DEBUG] Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
+            logger.debug(s" Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
             snapshot.files
 
           case Some(snapshot) =>
-            println(s"[DEBUG] Snapshot is stale (version ${snapshot.version} < $latestVersion), rebuilding")
+            logger.debug(s" Snapshot is stale (version ${snapshot.version} < $latestVersion), rebuilding")
             // Clear stale snapshot
             currentSnapshot.set(None)
             reconstructStateStandard(versions)
 
           case None =>
             // Always use standard reconstruction with consistent versions to avoid caching issues
-            println(s"[DEBUG] No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
+            logger.debug(s" No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
             reconstructStateStandard(versions)
         }
       }
     )
 
-    println(s"[DEBUG] Returning ${cached.size} files from listFilesOptimized")
+    logger.debug(s" Returning ${cached.size} files from listFilesOptimized")
     cached
   }
 
@@ -356,7 +356,7 @@ class OptimizedTransactionLog(
   private def getLatestVersion(): Long = {
     val versions = getVersions()
     val latest   = versions.sorted.lastOption.getOrElse(-1L)
-    println(s"[DEBUG] getLatestVersion: found versions ${versions.sorted.mkString(", ")}, latest = $latest")
+    logger.debug(s" getLatestVersion: found versions ${versions.sorted.mkString(", ")}, latest = $latest")
 
     // Update version counter if we found a higher version
     versionCounter.updateAndGet(current => math.max(current, latest))
@@ -375,9 +375,9 @@ class OptimizedTransactionLog(
 
   private def getVersions(): Seq[Long] = {
     val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
-    println(s"[DEBUG] getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}")
+    logger.debug(s" getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}")
     val versions = files.flatMap(file => parseVersionFromPath(file.path)).distinct
-    println(s"[DEBUG] getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
+    logger.debug(s" getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
     versions
   }
 
@@ -401,18 +401,18 @@ class OptimizedTransactionLog(
     val versionFilePath = versionFile.toString
 
     if (!cloudProvider.exists(versionFilePath)) {
-      println(s"[DEBUG] Version file $versionFilePath does not exist")
+      logger.debug(s" Version file $versionFilePath does not exist")
       return Seq.empty
     }
 
     Try {
       val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-      println(s"[DEBUG] Read version $version content: '${content.take(100)}...' (${content.length} chars)")
+      logger.debug(s" Read version $version content: '${content.take(100)}...' (${content.length} chars)")
       val actions = parseActionsFromContent(content)
-      println(s"[DEBUG] Parsed ${actions.size} actions from version $version")
+      logger.debug(s" Parsed ${actions.size} actions from version $version")
       actions
     }.getOrElse {
-      println(s"[DEBUG] Failed to read/parse version $version")
+      logger.debug(s" Failed to read/parse version $version")
       Seq.empty
     }
   }
@@ -465,16 +465,16 @@ class OptimizedTransactionLog(
       content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
     }
 
-    println(s"[DEBUG] Writing version $version to $versionFilePath with ${actions.size} actions")
+    logger.debug(s" Writing version $version to $versionFilePath with ${actions.size} actions")
     cloudProvider.writeFile(versionFilePath, content.toString.getBytes("UTF-8"))
-    println(s"[DEBUG] Successfully wrote version $version")
+    logger.debug(s" Successfully wrote version $version")
     // Add a small delay to ensure file system consistency for local file systems
     // This helps with race conditions where listFiles() is called immediately after writeFile()
     Thread.sleep(10) // 10ms should be sufficient for local file system consistency
 
     // Write-through cache management: proactively update caches with new data
     enhancedCache.putVersionActions(tablePath.toString, version, actions)
-    println(s"[DEBUG] Cached version actions for ${tablePath.toString} version $version")
+    logger.debug(s" Cached version actions for ${tablePath.toString} version $version")
 
     // Update file list cache if we have AddActions
     val addActions = actions.collect { case add: AddAction => add }
@@ -490,13 +490,13 @@ class OptimizedTransactionLog(
       // Create a checksum for the current file list state
       val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
       enhancedCache.putFileList(tablePath.toString, fileListChecksum, currentFiles)
-      println(s"[DEBUG] Updated file list cache for ${tablePath.toString} with checksum $fileListChecksum")
+      logger.debug(s" Updated file list cache for ${tablePath.toString} with checksum $fileListChecksum")
     }
 
     // Update metadata cache if we have MetadataAction
     actions.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
       enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
-      println(s"[DEBUG] Cached metadata for ${tablePath.toString}")
+      logger.debug(s" Cached metadata for ${tablePath.toString}")
     }
 
     // Create checkpoint if needed
@@ -546,15 +546,12 @@ class OptimizedTransactionLog(
   private def reconstructStateStandard(versions: Seq[Long]): Seq[AddAction] = {
     val files = scala.collection.mutable.HashMap[String, AddAction]()
 
-    println(s"[DEBUG] Reconstructing state from versions: ${versions.sorted}")
+    logger.debug(s" Reconstructing state from versions: ${versions.sorted}")
     logger.info(s"Reconstructing state from versions: ${versions.sorted}")
 
     for (version <- versions.sorted) {
       val actions = readVersionOptimized(version)
-      println(
-        s"[DEBUG] Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
-      )
-      logger.info(
+      logger.debug(
         s"Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
       )
       actions.foreach { action =>
@@ -571,7 +568,7 @@ class OptimizedTransactionLog(
       }
     }
 
-    println(s"[DEBUG] Final state has ${files.size} files: ${files.keys.mkString(", ")}")
+    logger.debug(s" Final state has ${files.size} files: ${files.keys.mkString(", ")}")
     logger.info(s"Final state has ${files.size} files: ${files.keys.mkString(", ")}")
     files.values.toSeq
   }
@@ -606,7 +603,7 @@ class OptimizedTransactionLog(
     val metadata = getMetadata()
     val snapshot = Snapshot(version, files, metadata)
     currentSnapshot.set(Some(snapshot))
-    println(s"[DEBUG] Updated snapshot to version $version with ${files.size} files")
+    logger.debug(s" Updated snapshot to version $version with ${files.size} files")
   }
 
   private def computeCurrentChecksum(): String =

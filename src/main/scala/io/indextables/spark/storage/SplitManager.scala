@@ -129,8 +129,8 @@ object SplitManager {
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
         val docMappingJson = metadata.getDocMappingJson()
-        logger.warn(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
-        logger.warn(s"🔍 SPLIT CREATED: $docMappingJson")
+        logger.debug(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
+        logger.debug(s"🔍 SPLIT CREATED: $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
           logger.error(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {

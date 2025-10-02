@@ -622,7 +622,7 @@ class IndexTables4SparkScanBuilder(
       metadata.partitionColumns.toSet
     } catch {
       case e: Exception =>
-        logger.warn(s"🔍 PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
+        logger.debug(s"🔍 PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
         Set.empty
     }
 
@@ -669,7 +669,7 @@ class IndexTables4SparkScanBuilder(
           logger.info(s"🔍 SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
           fastFields
         } else {
-          logger.warn("🔍 SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
+          logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
           Set.empty[String]
         }
       } else {
@@ -686,7 +686,7 @@ class IndexTables4SparkScanBuilder(
       }
     } catch {
       case e: Exception =>
-        logger.warn(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
+        logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
         // Fall back to configuration-based validation
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -772,7 +772,7 @@ class IndexTables4SparkScanBuilder(
       case f: org.apache.spark.sql.sources.Or =>
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
       case other =>
-        logger.warn(s"🔍 FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
+        logger.debug(s"🔍 FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
         Set.empty[String]
     }
 

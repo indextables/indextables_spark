@@ -84,7 +84,7 @@ class IndexTables4SparkWriteBuilder(
         }
     }
 
-    logger.warn(s"🔍 WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled, options = ${tantivyOptions.optimizeWrite}")
+    logger.debug(s"🔍 WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled, options = ${tantivyOptions.optimizeWrite}")
 
     if (optimizeWriteEnabled) {
       logger.info("Using IndexTables4SparkOptimizedWrite with RequiresDistributionAndOrdering")

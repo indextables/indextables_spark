@@ -722,7 +722,7 @@ class IndexTables4SparkDataSource extends DataSourceRegister with RelationProvid
       val optimalPartitions = Math.max(1, Math.ceil(totalRecords.toDouble / targetRecords.toDouble).toInt)
       val currentPartitions = data.rdd.getNumPartitions
 
-      logger.warn(s"🔍 V1 OPTIMIZED WRITE: totalRecords=$totalRecords, targetRecords=$targetRecords, optimalPartitions=$optimalPartitions, currentPartitions=$currentPartitions")
+      logger.debug(s"🔍 V1 OPTIMIZED WRITE: totalRecords=$totalRecords, targetRecords=$targetRecords, optimalPartitions=$optimalPartitions, currentPartitions=$currentPartitions")
 
       if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
         logger.info(
