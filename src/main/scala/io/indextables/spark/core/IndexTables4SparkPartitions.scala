@@ -195,26 +195,39 @@ class IndexTables4SparkPartitionReader(
     // Access the broadcast configuration in executor
     val broadcasted = config
 
+    // Helper function to mask sensitive credential fields
+    def maskSensitiveValue(key: String, value: String): String = {
+      val lowerKey = key.toLowerCase
+      if (lowerKey.contains("sessiontoken") || lowerKey.contains("secretkey") || lowerKey.contains("accountkey")) {
+        "***REDACTED***"
+      } else {
+        value
+      }
+    }
+
     // Debug: Log broadcast configuration received in executor
     logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
     broadcasted.foreach {
       case (k, v) =>
         val safeValue = Option(v).getOrElse("null")
-        logger.debug(s"🔍 Broadcast config: $k -> $safeValue")
+        val maskedValue = maskSensitiveValue(k, safeValue)
+        logger.debug(s"🔍 Broadcast config: $k -> $maskedValue")
     }
 
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
       val value     = broadcasted.getOrElse(configKey, default)
       val safeValue = Option(value).getOrElse(default)
-      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: ${Option(safeValue).getOrElse("null")}")
+      val maskedValue = maskSensitiveValue(configKey, Option(safeValue).getOrElse("null"))
+      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
       safeValue
     }
 
     def getBroadcastConfigOption(configKey: String): Option[String] = {
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
       val value = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
-      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: ${value.getOrElse("None")}")
+      val maskedValue = value.map(v => maskSensitiveValue(configKey, v)).getOrElse("None")
+      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
       value
     }
 
