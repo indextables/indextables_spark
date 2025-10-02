@@ -597,8 +597,8 @@ class IndexTables4SparkDataWriter(
     else None
 
   // Debug: log partition columns being used
-  logger.warn(
-    s"🔍 DATAWRITER INIT: partition $partitionId, partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}"
+  logger.info(
+    s"DataWriter initialized for partition $partitionId with partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}"
   )
 
   override def write(record: InternalRow): Unit =
@@ -612,18 +612,6 @@ class IndexTables4SparkDataWriter(
       // Partitioned write - extract partition values and route to appropriate writer
       val partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
       val partitionKey    = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
-
-      // Debug: log record details for the problematic partition
-      val idValue = if (writeSchema.fieldNames.contains("id")) {
-        try {
-          val idIndex = writeSchema.fieldIndex("id")
-          if (!record.isNullAt(idIndex)) record.getUTF8String(idIndex).toString else "null"
-        } catch {
-          case _: Exception => "unknown"
-        }
-      } else "no-id"
-
-      logger.warn(s"🔍 WRITE DEBUG: partition $partitionId writing record to partition '$partitionKey' with id=$idValue, values=$partitionValues")
 
       // Get or create writer for this partition value combination
       val (engine, stats, count) = partitionWriters.getOrElseUpdate(
