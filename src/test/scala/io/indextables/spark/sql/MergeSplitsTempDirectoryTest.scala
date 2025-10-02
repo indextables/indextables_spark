@@ -290,12 +290,13 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     val row = rows(0)
     val tablePath = row.getString(row.fieldIndex("table_path"))
-    val metrics = row.getString(row.fieldIndex("metrics"))
+    val metricsRow = row.getAs[org.apache.spark.sql.Row](row.fieldIndex("metrics"))
+    val metricsStatus = metricsRow.getString(0) // status field at index 0
     val tempDirPath = row.getString(row.fieldIndex("temp_directory_path"))
     val heapSizeBytes = if (row.isNullAt(row.fieldIndex("heap_size_bytes"))) null else row.getLong(row.fieldIndex("heap_size_bytes"))
 
     logger.info(s"Result - table_path: $tablePath")
-    logger.info(s"Result - metrics: $metrics")
+    logger.info(s"Result - metrics.status: $metricsStatus")
     logger.info(s"Result - temp_directory_path: $tempDirPath")
     logger.info(s"Result - heap_size_bytes: $heapSizeBytes")
 

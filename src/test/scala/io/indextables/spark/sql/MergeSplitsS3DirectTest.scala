@@ -147,11 +147,13 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
 
     // Should handle gracefully - either path doesn't exist or no valid table
     assert(result.nonEmpty, "Should return result")
-    val message = result.head.getString(1)
+    val metrics = result.head.getAs[org.apache.spark.sql.Row](1)
+    val message = metrics.getString(5) // message is at index 5 in the metrics struct
+    val messageLower = message.toLowerCase
     assert(
-      message.contains("does not exist") ||
-        message.contains("not a valid") ||
-        message.contains("No splits"),
+      messageLower.contains("does not exist") ||
+        messageLower.contains("not a valid") ||
+        messageLower.contains("no splits"),
       s"Should indicate path doesn't exist or no valid table, got: $message"
     )
 
@@ -176,9 +178,11 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
       val result = command.run(spark)
       assert(result.nonEmpty, s"Should return result for $path")
 
-      val message = result.head.getString(1)
+      val metrics = result.head.getAs[org.apache.spark.sql.Row](1)
+      val message = metrics.getString(5) // message is at index 5 in the metrics struct
+      val messageLower = message.toLowerCase
       assert(
-        message.contains("does not exist") || message.contains("not a valid"),
+        messageLower.contains("does not exist") || messageLower.contains("not a valid"),
         s"Path $path should be recognized as non-existent"
       )
 
