@@ -179,8 +179,8 @@ class IndexTables4SparkPartitionReader(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
 
-  // Calculate effective limit: use pushed limit or fall back to default 5000
-  private val effectiveLimit: Int = limit.getOrElse(5000)
+  // Calculate effective limit: use pushed limit or fall back to default 250
+  private val effectiveLimit: Int = limit.getOrElse(250)
 
   // Resolve relative path from AddAction against table path
   private val filePath = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
