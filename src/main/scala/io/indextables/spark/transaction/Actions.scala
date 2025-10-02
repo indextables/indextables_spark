@@ -107,6 +107,25 @@ case class SkipAction(
   skipCount: Int = 1               // Number of times this file has been skipped
 ) extends Action
 
+/**
+ * Protocol action that defines the minimum reader and writer versions required to access the table.
+ * This follows Delta Lake's protocol versioning approach to ensure backwards compatibility.
+ *
+ * Readers and writers MUST check protocol version before performing any operations.
+ * Clients MUST silently ignore unknown fields and actions.
+ *
+ * @param minReaderVersion Minimum version required to read the table
+ * @param minWriterVersion Minimum version required to write to the table
+ * @param readerFeatures Optional set of reader feature names (for version 3+)
+ * @param writerFeatures Optional set of writer feature names (for version 3+)
+ */
+case class ProtocolAction(
+  minReaderVersion: Int,
+  minWriterVersion: Int,
+  readerFeatures: Option[Set[String]] = None,
+  writerFeatures: Option[Set[String]] = None
+) extends Action
+
 case class FileStats(
   numRecords: Long,
   minValues: Map[String, String],

@@ -310,6 +310,7 @@ class MemoryOptimizedOperations(
 
   private def wrapAction(action: Action): Map[String, Any] =
     action match {
+      case protocol: ProtocolAction => Map("protocol" -> protocol)
       case metadata: MetadataAction => Map("metaData" -> metadata)
       case add: AddAction           => Map("add" -> add)
       case remove: RemoveAction     => Map("remove" -> remove)

@@ -40,6 +40,8 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
   private var cachedFilesList: Option[Seq[AddAction]] = None
   private val metadataCache                           = new AtomicLong(0L) // timestamp when metadata was cached
   private var cachedMetadata: Option[MetadataAction]  = None
+  private val protocolCache                           = new AtomicLong(0L) // timestamp when protocol was cached
+  private var cachedProtocol: Option[ProtocolAction]  = None
 
   // Statistics
   private val hitCount  = new AtomicLong(0)
@@ -148,6 +150,37 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
       logger.debug(s"Cached metadata: ${metadata.id}")
     }
 
+  /** Get cached protocol or None if not cached/expired */
+  def getCachedProtocol(): Option[ProtocolAction] = {
+    val currentTime = System.currentTimeMillis()
+    val lastUpdate  = protocolCache.get()
+
+    if (currentTime - lastUpdate > expirationMillis || cachedProtocol.isEmpty) {
+      missCount.incrementAndGet()
+      None
+    } else {
+      hitCount.incrementAndGet()
+      cachedProtocol
+    }
+  }
+
+  /** Cache protocol */
+  def cacheProtocol(protocol: ProtocolAction): Unit =
+    synchronized {
+      cachedProtocol = Some(protocol)
+      protocolCache.set(System.currentTimeMillis())
+      logger.debug(s"Cached protocol: ${protocol.minReaderVersion}/${protocol.minWriterVersion}")
+    }
+
+  /** Invalidate protocol cache only (useful when protocol is upgraded) */
+  def invalidateProtocol(): Unit = {
+    synchronized {
+      cachedProtocol = None
+      protocolCache.set(0)
+    }
+    logger.debug("Invalidated protocol cache")
+  }
+
   /** Invalidate all caches (useful after write operations) */
   def invalidateAll(): Unit = {
     versionCache.clear()
@@ -155,9 +188,11 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
       cachedVersionsList = None
       cachedFilesList = None
       cachedMetadata = None
+      cachedProtocol = None
       versionsListCache.set(0)
       filesCache.set(0)
       metadataCache.set(0)
+      protocolCache.set(0)
     }
     logger.debug("Invalidated all caches")
   }
@@ -168,9 +203,11 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
       cachedVersionsList = None
       cachedFilesList = None
       cachedMetadata = None
+      cachedProtocol = None
       versionsListCache.set(0)
       filesCache.set(0)
       metadataCache.set(0)
+      protocolCache.set(0)
     }
     logger.debug("Invalidated version-dependent caches")
   }

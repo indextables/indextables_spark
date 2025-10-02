@@ -153,6 +153,24 @@ class TransactionLogAdapter(
   override def getMetadata(): MetadataAction =
     optimizedLog.getMetadata()
 
+  override def getLastCheckpointVersion(): Option[Long] =
+    optimizedLog.getLastCheckpointVersion()
+
+  override def getProtocol(): ProtocolAction =
+    optimizedLog.getProtocol()
+
+  override def assertTableReadable(): Unit =
+    optimizedLog.assertTableReadable()
+
+  override def assertTableWritable(): Unit =
+    optimizedLog.assertTableWritable()
+
+  override def upgradeProtocol(newMinReaderVersion: Int, newMinWriterVersion: Int): Unit =
+    optimizedLog.upgradeProtocol(newMinReaderVersion, newMinWriterVersion)
+
+  override def prewarmCache(): Unit =
+    optimizedLog.prewarmCache()
+
   override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long =
     optimizedLog.removeFile(path, deletionTimestamp)
 

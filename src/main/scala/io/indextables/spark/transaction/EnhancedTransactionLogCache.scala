@@ -86,6 +86,14 @@ class EnhancedTransactionLogCache(
     .recordStats()
     .build[MetadataCacheKey, MetadataAction]()
 
+  // Protocol cache (similar to metadata cache)
+  private val protocolCache: Cache[MetadataCacheKey, ProtocolAction] = CacheBuilder
+    .newBuilder()
+    .expireAfterAccess(metadataCacheTTLMinutes, TimeUnit.MINUTES)
+    .maximumSize(metadataCacheSize)
+    .recordStats()
+    .build[MetadataCacheKey, ProtocolAction]()
+
   // Version-specific action cache
   private val versionCache: Cache[LogCacheKey, Seq[Action]] = CacheBuilder
     .newBuilder()
@@ -183,6 +191,24 @@ class EnhancedTransactionLogCache(
     }
   }
 
+  /** Get or compute protocol */
+  def getOrComputeProtocol(
+    tablePath: String,
+    compute: => ProtocolAction
+  ): ProtocolAction = {
+    val key = MetadataCacheKey(tablePath)
+    Option(protocolCache.getIfPresent(key)) match {
+      case Some(protocol) =>
+        logger.debug(s"Protocol cache hit for $tablePath")
+        protocol
+      case None =>
+        logger.debug(s"Protocol cache miss for $tablePath")
+        val protocol = compute
+        protocolCache.put(key, protocol)
+        protocol
+    }
+  }
+
   /** Get or compute version actions */
   def getOrComputeVersionActions(
     tablePath: String,
@@ -253,6 +279,20 @@ class EnhancedTransactionLogCache(
     logger.debug(s"Cached metadata for $tablePath")
   }
 
+  /** Directly cache protocol (write-through) */
+  def putProtocol(tablePath: String, protocol: ProtocolAction): Unit = {
+    val key = MetadataCacheKey(tablePath)
+    protocolCache.put(key, protocol)
+    logger.debug(s"Cached protocol for $tablePath")
+  }
+
+  /** Invalidate protocol cache for a specific table */
+  def invalidateProtocol(tablePath: String): Unit = {
+    val key = MetadataCacheKey(tablePath)
+    protocolCache.invalidate(key)
+    logger.debug(s"Invalidated protocol cache for $tablePath")
+  }
+
   /** Invalidate all caches for a specific table */
   def invalidateTable(tablePath: String): Unit = {
     logger.info(s"Invalidating all caches for table $tablePath")
@@ -263,6 +303,7 @@ class EnhancedTransactionLogCache(
     invalidateByPredicate(fileListCache, (key: FileListCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(versionCache, (key: LogCacheKey) => key.tablePath == tablePath)
     metadataCache.invalidate(MetadataCacheKey(tablePath))
+    protocolCache.invalidate(MetadataCacheKey(tablePath))
     checkpointCache.invalidate(tablePath)
 
     // Clear lazy values for this table
@@ -277,6 +318,7 @@ class EnhancedTransactionLogCache(
     invalidateByPredicate(fileListCache, (key: FileListCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(snapshotCache, (key: SnapshotCacheKey) => key.tablePath == tablePath)
     metadataCache.invalidate(MetadataCacheKey(tablePath))
+    protocolCache.invalidate(MetadataCacheKey(tablePath))
   }
 
   /** Invalidate specific versions */
@@ -303,6 +345,7 @@ class EnhancedTransactionLogCache(
       metadataCacheStats = metadataCache.stats(),
       versionCacheStats = versionCache.stats(),
       checkpointCacheStats = checkpointCache.stats(),
+      protocolCacheStats = protocolCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -313,6 +356,7 @@ class EnhancedTransactionLogCache(
     snapshotCache.invalidateAll()
     fileListCache.invalidateAll()
     metadataCache.invalidateAll()
+    protocolCache.invalidateAll()
     versionCache.invalidateAll()
     checkpointCache.invalidateAll()
     lazyValueCache.clear()
@@ -324,6 +368,7 @@ class EnhancedTransactionLogCache(
     snapshotCache.cleanUp()
     fileListCache.cleanUp()
     metadataCache.cleanUp()
+    protocolCache.cleanUp()
     versionCache.cleanUp()
     checkpointCache.cleanUp()
   }
@@ -381,6 +426,7 @@ case class CacheStatistics(
   metadataCacheStats: GuavaCacheStats,
   versionCacheStats: GuavaCacheStats,
   checkpointCacheStats: GuavaCacheStats,
+  protocolCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -389,7 +435,8 @@ case class CacheStatistics(
       fileListCacheStats,
       metadataCacheStats,
       versionCacheStats,
-      checkpointCacheStats
+      checkpointCacheStats,
+      protocolCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -406,6 +453,7 @@ case class CacheStatistics(
       fileListCacheStats,
       metadataCacheStats,
       versionCacheStats,
-      checkpointCacheStats
+      checkpointCacheStats,
+      protocolCacheStats
     ).map(_.evictionCount()).sum
 }

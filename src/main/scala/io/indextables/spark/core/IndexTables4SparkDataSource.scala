@@ -1482,6 +1482,9 @@ class IndexTables4SparkTable(
   private val tablePath      = new Path(path)
   private val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
+  // Aggressively populate cache on table initialization for faster first reads
+  transactionLog.prewarmCache()
+
   override def name(): String = s"tantivy4spark.`$path`"
 
   override def schema(): StructType =

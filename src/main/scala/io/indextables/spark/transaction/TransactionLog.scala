@@ -102,7 +102,8 @@ class TransactionLog(
         logger.info(s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}")
       }
 
-      // Write initial metadata file
+      // Write protocol and metadata in version 0
+      val protocolAction = ProtocolVersion.defaultProtocol()
       val metadataAction = MetadataAction(
         id = java.util.UUID.randomUUID().toString,
         name = None,
@@ -114,7 +115,8 @@ class TransactionLog(
         createdTime = Some(System.currentTimeMillis())
       )
 
-      writeAction(0, metadataAction)
+      writeActions(0, Seq(protocolAction, metadataAction))
+      logger.info(s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}")
     }
 
   def addFile(addAction: AddAction): Long = {
@@ -132,6 +134,10 @@ class TransactionLog(
     if (addActions.isEmpty) {
       return getLatestVersion()
     }
+
+    // Check protocol before writing
+    initializeProtocolIfNeeded()
+    assertTableWritable()
 
     val version = getNextVersion()
     writeActions(version, addActions)
@@ -170,7 +176,10 @@ class TransactionLog(
     version
   }
 
-  def listFiles(): Seq[AddAction] =
+  def listFiles(): Seq[AddAction] = {
+    // Check protocol before reading
+    assertTableReadable()
+
     // Check cache first
     cache.flatMap(_.getCachedFiles()) match {
       case Some(cachedFiles) =>
@@ -249,6 +258,7 @@ class TransactionLog(
         logger.debug(s"Computed and cached files list: ${result.length} files")
         result
     }
+  }
 
   /** Get the total row count across all active files. */
   def getTotalRowCount(): Long =
@@ -334,6 +344,7 @@ class TransactionLog(
     actions.foreach { action =>
       // Wrap actions in the appropriate delta log format
       val wrappedAction = action match {
+        case protocol: ProtocolAction => Map("protocol" -> protocol)
         case metadata: MetadataAction => Map("metaData" -> metadata)
         case add: AddAction           => Map("add" -> add)
         case remove: RemoveAction     => Map("remove" -> remove)
@@ -375,6 +386,7 @@ class TransactionLog(
   /** Get all current actions up to the specified version for checkpoint creation. */
   private def getAllCurrentActions(upToVersion: Long): Seq[Action] = {
     val allActions                             = ListBuffer[Action]()
+    var latestProtocol: Option[ProtocolAction] = None
     var latestMetadata: Option[MetadataAction] = None
     val activeFiles                            = ListBuffer[AddAction]()
 
@@ -384,6 +396,8 @@ class TransactionLog(
     for (version <- versions.sorted) {
       val actions = readVersion(version)
       actions.foreach {
+        case protocol: ProtocolAction =>
+          latestProtocol = Some(protocol)
         case metadata: MetadataAction =>
           latestMetadata = Some(metadata)
         case add: AddAction =>
@@ -392,10 +406,15 @@ class TransactionLog(
           activeFiles += add
         case remove: RemoveAction =>
           activeFiles --= activeFiles.filter(_.path == remove.path)
+        case _: SkipAction =>
+          // Skip actions are transient and not included in checkpoints
       }
     }
 
-    // Add metadata first
+    // Add protocol first (if present)
+    latestProtocol.foreach(allActions += _)
+
+    // Add metadata second
     latestMetadata.foreach(allActions += _)
 
     // Add all active files
@@ -424,7 +443,24 @@ class TransactionLog(
         logger.debug("Using cached metadata")
         cachedMetadata
       case None =>
-        // Compute from transaction log
+        // Try to get metadata from checkpoint first to avoid reading all versions
+        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+          case Some(checkpointActions) =>
+            // Metadata should be in checkpoint (second action after protocol)
+            checkpointActions.collectFirst { case metadata: MetadataAction => metadata } match {
+              case Some(metadata) =>
+                cache.foreach(_.cacheMetadata(metadata))
+                logger.debug(s"Found metadata in checkpoint: ${metadata.id}")
+                return metadata
+              case None =>
+                // No metadata in checkpoint, fall through to version scanning
+                logger.debug("No metadata found in checkpoint, scanning versions")
+            }
+          case None =>
+            logger.debug("No checkpoint available for metadata lookup")
+        }
+
+        // Fallback: scan versions in reverse chronological order
         val latestVersion = getLatestVersion()
 
         // Look for metadata in reverse chronological order
@@ -442,6 +478,202 @@ class TransactionLog(
 
         throw new RuntimeException("No metadata found in transaction log")
     }
+
+  /** Get the current protocol action from the transaction log. */
+  def getProtocol(): ProtocolAction =
+    // Check cache first
+    cache.flatMap(_.getCachedProtocol()) match {
+      case Some(cachedProtocol) =>
+        logger.debug("Using cached protocol")
+        cachedProtocol
+      case None =>
+        // Try to get protocol from checkpoint first to avoid reading all versions
+        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+          case Some(checkpointActions) =>
+            // Protocol should be first action in checkpoint
+            checkpointActions.collectFirst { case protocol: ProtocolAction => protocol } match {
+              case Some(protocol) =>
+                cache.foreach(_.cacheProtocol(protocol))
+                logger.debug(s"Found protocol in checkpoint: ${protocol.minReaderVersion}/${protocol.minWriterVersion}")
+                return protocol
+              case None =>
+                // No protocol in checkpoint, fall through to version scanning
+                logger.debug("No protocol found in checkpoint, scanning versions")
+            }
+          case None =>
+            logger.debug("No checkpoint available for protocol lookup")
+        }
+
+        // Fallback: scan versions in reverse chronological order
+        val latestVersion = getLatestVersion()
+
+        // Look for protocol in reverse chronological order
+        for (version <- latestVersion to 0L by -1) {
+          val actions = readVersion(version)
+          actions.collectFirst { case protocol: ProtocolAction => protocol } match {
+            case Some(protocol) =>
+              // Cache the result
+              cache.foreach(_.cacheProtocol(protocol))
+              logger.debug(s"Computed and cached protocol: ${protocol.minReaderVersion}/${protocol.minWriterVersion}")
+              return protocol
+            case None => // Continue searching
+          }
+        }
+
+        // No protocol found - default to version 1 for legacy tables
+        logger.warn(s"No protocol action found in transaction log at $tablePath, defaulting to version 1 (legacy table)")
+        val legacyProtocol = ProtocolVersion.legacyProtocol()
+        cache.foreach(_.cacheProtocol(legacyProtocol))
+        legacyProtocol
+    }
+
+  /**
+   * Check if the current client can read this table based on protocol version.
+   * Throws ProtocolVersionException if the table requires a newer reader version.
+   */
+  def assertTableReadable(): Unit = {
+    val checkEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_CHECK_ENABLED, true)
+    if (!checkEnabled) {
+      logger.warn("Protocol version checking is disabled - skipping reader version check")
+      return
+    }
+
+    val protocol = getProtocol()
+
+    if (protocol.minReaderVersion > ProtocolVersion.CURRENT_READER_VERSION) {
+      throw new ProtocolVersionException(
+        s"""Table at $tablePath requires a newer version of IndexTables4Spark to read.
+           |
+           |This table requires:
+           |  minReaderVersion = ${protocol.minReaderVersion}
+           |  minWriterVersion = ${protocol.minWriterVersion}
+           |
+           |Your current version supports:
+           |  readerVersion = ${ProtocolVersion.CURRENT_READER_VERSION}
+           |  writerVersion = ${ProtocolVersion.CURRENT_WRITER_VERSION}
+           |
+           |Please upgrade IndexTables4Spark to a newer version.
+           |""".stripMargin
+      )
+    }
+
+    // Check for unsupported reader features (for version 3+)
+    protocol.readerFeatures.foreach { features =>
+      val unsupportedFeatures = features -- ProtocolVersion.SUPPORTED_READER_FEATURES
+      if (unsupportedFeatures.nonEmpty) {
+        throw new ProtocolVersionException(
+          s"""Table at $tablePath requires unsupported reader features: ${unsupportedFeatures.mkString(", ")}
+             |
+             |Supported features: ${ProtocolVersion.SUPPORTED_READER_FEATURES.mkString(", ")}
+             |
+             |Please upgrade IndexTables4Spark to a version that supports these features.
+             |""".stripMargin
+        )
+      }
+    }
+
+    logger.debug(s"Protocol read check passed: table requires ${protocol.minReaderVersion}, current reader ${ProtocolVersion.CURRENT_READER_VERSION}")
+  }
+
+  /**
+   * Check if the current client can write to this table based on protocol version.
+   * Throws ProtocolVersionException if the table requires a newer writer version.
+   */
+  def assertTableWritable(): Unit = {
+    val checkEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_CHECK_ENABLED, true)
+    if (!checkEnabled) {
+      logger.warn("Protocol version checking is disabled - skipping writer version check")
+      return
+    }
+
+    val protocol = getProtocol()
+
+    if (protocol.minWriterVersion > ProtocolVersion.CURRENT_WRITER_VERSION) {
+      throw new ProtocolVersionException(
+        s"""Table at $tablePath requires a newer version of IndexTables4Spark to write.
+           |
+           |This table requires:
+           |  minReaderVersion = ${protocol.minReaderVersion}
+           |  minWriterVersion = ${protocol.minWriterVersion}
+           |
+           |Your current version supports:
+           |  readerVersion = ${ProtocolVersion.CURRENT_READER_VERSION}
+           |  writerVersion = ${ProtocolVersion.CURRENT_WRITER_VERSION}
+           |
+           |Please upgrade IndexTables4Spark to a newer version.
+           |""".stripMargin
+      )
+    }
+
+    // Check for unsupported writer features (for version 3+)
+    protocol.writerFeatures.foreach { features =>
+      val unsupportedFeatures = features -- ProtocolVersion.SUPPORTED_WRITER_FEATURES
+      if (unsupportedFeatures.nonEmpty) {
+        throw new ProtocolVersionException(
+          s"""Table at $tablePath requires unsupported writer features: ${unsupportedFeatures.mkString(", ")}
+             |
+             |Supported features: ${ProtocolVersion.SUPPORTED_WRITER_FEATURES.mkString(", ")}
+             |
+             |Please upgrade IndexTables4Spark to a version that supports these features.
+             |""".stripMargin
+        )
+      }
+    }
+
+    logger.debug(s"Protocol write check passed: table requires ${protocol.minWriterVersion}, current writer ${ProtocolVersion.CURRENT_WRITER_VERSION}")
+  }
+
+  /**
+   * Upgrade the table protocol to a new version. This is only allowed to increase version numbers.
+   * Auto-upgrade can be controlled via spark.indextables.protocol.autoUpgrade configuration.
+   */
+  def upgradeProtocol(newMinReaderVersion: Int, newMinWriterVersion: Int): Unit = {
+    val autoUpgradeEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_AUTO_UPGRADE, true)
+    if (!autoUpgradeEnabled) {
+      logger.warn("Protocol auto-upgrade is disabled - skipping upgrade")
+      return
+    }
+
+    val currentProtocol = getProtocol()
+
+    // Only upgrade if necessary
+    if (newMinReaderVersion > currentProtocol.minReaderVersion ||
+        newMinWriterVersion > currentProtocol.minWriterVersion) {
+
+      val updatedProtocol = ProtocolAction(
+        minReaderVersion = math.max(newMinReaderVersion, currentProtocol.minReaderVersion),
+        minWriterVersion = math.max(newMinWriterVersion, currentProtocol.minWriterVersion)
+      )
+
+      val version = getNextVersion()
+      writeAction(version, updatedProtocol)
+
+      // Invalidate protocol cache
+      cache.foreach(_.invalidateProtocol())
+
+      logger.info(s"Upgraded protocol from ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion} " +
+        s"to ${updatedProtocol.minReaderVersion}/${updatedProtocol.minWriterVersion}")
+    } else {
+      logger.debug(s"Protocol upgrade not needed: current ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion}, " +
+        s"requested $newMinReaderVersion/$newMinWriterVersion")
+    }
+  }
+
+  /**
+   * Initialize protocol for legacy tables that don't have a protocol action.
+   * This is called automatically on first write to a legacy table.
+   */
+  private def initializeProtocolIfNeeded(): Unit = {
+    val actions = getVersions().flatMap(readVersion)
+    val hasProtocol = actions.exists(_.isInstanceOf[ProtocolAction])
+
+    if (!hasProtocol) {
+      logger.info(s"Initializing protocol for legacy table at $tablePath")
+      val version = getNextVersion()
+      writeAction(version, ProtocolVersion.defaultProtocol())
+      cache.foreach(_.invalidateProtocol())
+    }
+  }
 
   def readVersion(version: Long): Seq[Action] =
     // Check cache first
@@ -465,7 +697,10 @@ class TransactionLog(
           lines.map { line =>
             val jsonNode = JsonUtil.mapper.readTree(line)
 
-            if (jsonNode.has("metaData")) {
+            if (jsonNode.has("protocol")) {
+              val protocolNode = jsonNode.get("protocol")
+              JsonUtil.mapper.readValue(protocolNode.toString, classOf[ProtocolAction])
+            } else if (jsonNode.has("metaData")) {
               val metadataNode = jsonNode.get("metaData")
               JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
             } else if (jsonNode.has("add")) {
@@ -562,6 +797,15 @@ class TransactionLog(
   /** Get the current checkpoint version for debugging. */
   def getLastCheckpointVersion(): Option[Long] =
     checkpoint.flatMap(_.getLastCheckpointVersion())
+
+  /**
+   * Prewarm the transaction log cache for faster subsequent reads.
+   * Default implementation is a no-op; optimized implementations may override.
+   */
+  def prewarmCache(): Unit = {
+    // Default no-op implementation for standard TransactionLog
+    // OptimizedTransactionLog overrides this with aggressive cache population
+  }
 
   /**
    * Record a skipped file in the transaction log with timestamp and reason. This allows tracking of files that couldn't

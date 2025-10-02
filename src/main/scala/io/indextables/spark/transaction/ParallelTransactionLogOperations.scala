@@ -380,6 +380,7 @@ class ParallelTransactionLogOperations(
     val content = new StringBuilder()
     actions.foreach { action =>
       val wrappedAction = action match {
+        case protocol: ProtocolAction => Map("protocol" -> protocol)
         case metadata: MetadataAction => Map("metaData" -> metadata)
         case add: AddAction           => Map("add" -> add)
         case remove: RemoveAction     => Map("remove" -> remove)
