@@ -291,7 +291,9 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
     assert(result.nonEmpty, "Should return result")
     assert(result.head.getString(0) == "PRE-COMMIT MERGE", "Should indicate pre-commit merge in first column")
-    assert(result.head.getString(1).contains("PRE-COMMIT MERGE"), "Should indicate pre-commit merge mode")
+    val metricsRow = result.head.getStruct(1)
+    assert(metricsRow.getString(0) == "pending", "Status should be 'pending'")
+    assert(metricsRow.getString(5).contains("Functionality pending implementation"), "Should indicate functionality pending")
   }
 
   test("MERGE SPLITS should handle S3 paths correctly") {
@@ -314,10 +316,16 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
       // When executed against non-existent S3 bucket, should handle gracefully
       val result = s3Command.run(spark)
       assert(result.nonEmpty, "Should return result for non-existent S3 path")
+      val metricsRow = result.head.getStruct(1)
+      val status = metricsRow.getString(0)
+      val message = metricsRow.getString(5)
       assert(
-        result.head.getString(1).contains("does not exist") ||
-          result.head.getString(1).contains("No splits"),
-        "Should indicate path doesn't exist or no splits to merge"
+        status == "error" || status == "no_action",
+        "Status should indicate error or no action"
+      )
+      assert(
+        message != null && (message.contains("does not exist") || message.contains("empty") || message.toLowerCase.contains("not a valid")),
+        "Message should indicate path doesn't exist or table issue"
       )
     } catch {
       case _: org.apache.hadoop.fs.UnsupportedFileSystemException =>

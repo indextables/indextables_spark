@@ -66,7 +66,14 @@ abstract class MergeSplitsCommandBase extends RunnableCommand {
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),
-    AttributeReference("metrics", StringType)(),
+    AttributeReference("metrics", StructType(Seq(
+      StructField("status", StringType, nullable = false),
+      StructField("merged_files", LongType, nullable = true),
+      StructField("merge_groups", LongType, nullable = true),
+      StructField("original_size_bytes", LongType, nullable = true),
+      StructField("merged_size_bytes", LongType, nullable = true),
+      StructField("message", StringType, nullable = true)
+    )))(),
     AttributeReference("temp_directory_path", StringType)(),
     AttributeReference("heap_size_bytes", LongType)()
   )
@@ -107,7 +114,7 @@ case class MergeSplitsCommand(
     // Handle pre-commit merge early (before any table path resolution)
     if (preCommitMerge) {
       logger.info("PRE-COMMIT MERGE: Executing pre-commit merge functionality")
-      return Seq(Row("PRE-COMMIT MERGE", "PRE-COMMIT MERGE: Functionality pending implementation", null, null))
+      return Seq(Row("PRE-COMMIT MERGE", Row("pending", null, null, null, null, "Functionality pending implementation"), null, null))
     }
 
     // Resolve table path from child logical plan
@@ -123,7 +130,7 @@ case class MergeSplitsCommand(
             case _ => "unknown"
           }
           logger.info(s"Table or path not found: $pathStr")
-          return Seq(Row(pathStr, "No splits merged - table or path does not exist", null, null))
+          return Seq(Row(pathStr, Row("error", null, null, null, null, "Table or path does not exist"), null, null))
       }
 
     // Create transaction log
@@ -142,14 +149,14 @@ case class MergeSplitsCommand(
 
       if (!hasMetadata) {
         logger.info(s"No transaction log found at: $tablePath")
-        return Seq(Row(tablePath.toString, "No splits merged - not a valid IndexTables4Spark table", null, null))
+        return Seq(Row(tablePath.toString, Row("error", null, null, null, null, "Not a valid IndexTables4Spark table"), null, null))
       }
 
       // Validate table has files
       val files = transactionLog.listFiles()
       if (files.isEmpty) {
         logger.info(s"No files found in table: $tablePath")
-        return Seq(Row(tablePath.toString, "No splits to merge - table is empty", null, null))
+        return Seq(Row(tablePath.toString, Row("no_action", null, null, null, null, "Table is empty"), null, null))
       }
 
       new MergeSplitsExecutor(
@@ -229,9 +236,9 @@ case class SerializableAwsConfig(
   endpoint: Option[String],
   pathStyleAccess: Boolean,
   tempDirectoryPath: Option[String] = None,
-  credentialsProviderClass: Option[String] = None, // Custom credential provider class name
-  heapSize: java.lang.Long = null,                 // Heap size for merge operations (null for default 15MB)
-  debugEnabled: Boolean = false                    // Enable debug logging in merge operations
+  credentialsProviderClass: Option[String] = None,        // Custom credential provider class name
+  heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
+  debugEnabled: Boolean = false                           // Enable debug logging in merge operations
 ) extends Serializable {
 
   /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
@@ -406,8 +413,11 @@ class MergeSplitsExecutor(
       // Extract custom credential provider class name
       val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
 
-      // Extract merge operation configuration
-      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize").map(_.toLong).map(java.lang.Long.valueOf).orNull
+      // Extract merge operation configuration (default heap size: 1GB)
+      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
+        .map(_.toLong)
+        .map(java.lang.Long.valueOf)
+        .getOrElse(java.lang.Long.valueOf(1073741824L)) // 1GB default
       val debugEnabled = getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
 
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
@@ -634,7 +644,7 @@ class MergeSplitsExecutor(
       return Seq(
         Row(
           tablePath.toString,
-          "No splits merged - all splits are already optimal size",
+          Row("no_action", null, null, null, null, "All splits are already optimal size"),
           awsConfig.tempDirectoryPath.getOrElse(null),
           if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
         )
@@ -923,8 +933,7 @@ class MergeSplitsExecutor(
     Seq(
       Row(
         tablePath.toString,
-        s"Merged $totalMergedFiles files into $totalMergeGroups splits. " +
-          s"Original size: $totalOriginalSize bytes, new size: $totalMergedSize bytes",
+        Row("success", totalMergedFiles.asInstanceOf[Long], totalMergeGroups.asInstanceOf[Long], totalOriginalSize, totalMergedSize, null),
         awsConfig.tempDirectoryPath.getOrElse(null),
         if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
       )
@@ -952,7 +961,7 @@ class MergeSplitsExecutor(
 
     logger.warn("PRE-COMMIT MERGE: Implementation pending - this is a placeholder")
 
-    Seq(Row(tablePath.toString, "PRE-COMMIT MERGE: Functionality pending implementation", null, null))
+    Seq(Row(tablePath.toString, Row("pending", null, null, null, null, "Functionality pending implementation"), null, null))
   }
 
   /**

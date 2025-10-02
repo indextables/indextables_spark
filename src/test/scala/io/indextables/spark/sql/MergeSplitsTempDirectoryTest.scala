@@ -203,9 +203,8 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       endpoint = None,
       pathStyleAccess = true,
       tempDirectoryPath = None,
-      credentialsProviderClass = None,
-      heapSize = null, // Default
-      debugEnabled = false // Default
+      credentialsProviderClass = None
+      // heapSize and debugEnabled use defaults (1GB and false)
     )
 
     assert(
@@ -213,8 +212,8 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
       "SerializableAwsConfig should handle missing temp directory path"
     )
     assert(
-      configWithoutTempDir.heapSize == null,
-      "SerializableAwsConfig should handle null heap size (default)"
+      configWithoutTempDir.heapSize == 1073741824L,
+      s"SerializableAwsConfig should default heap size to 1GB (1073741824), got ${configWithoutTempDir.heapSize}"
     )
     assert(
       !configWithoutTempDir.debugEnabled,

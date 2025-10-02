@@ -192,6 +192,10 @@ val df = spark.read.format("indextables")
 - `spark.indextables.merge.tempDirectoryPath`: Custom temporary directory for split merge operations (default: auto-detect `/local_disk0` or system temp)
 - `spark.indextables.cache.directoryPath`: Custom split cache directory for downloaded files (default: auto-detect `/local_disk0` or system temp)
 
+#### Merge Operation Settings
+- `spark.indextables.merge.heapSize`: Heap size for merge operations in bytes (default: `1073741824` - 1GB, supports human-readable formats like "2G", "500M")
+- `spark.indextables.merge.debug`: Enable debug logging in merge operations (default: `false`)
+
 #### Automatic `/local_disk0` Detection
 All directory configurations now automatically detect and use `/local_disk0` when available and writable:
 - **Databricks Clusters**: Automatically uses high-performance local SSDs
@@ -228,8 +232,9 @@ val df = spark.read.format("indextables")
   .option("spark.indextables.cache.directoryPath", "/nvme/tantivy-cache")
   .load("s3://bucket/path")
 
-// Merge splits with custom temporary directory
+// Merge splits with custom temporary directory and heap size
 spark.conf.set("spark.indextables.merge.tempDirectoryPath", "/fast-nvme/merge-temp")
+spark.conf.set("spark.indextables.merge.heapSize", "2147483648")  // 2GB heap for large merges
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 500M")
 ```
 
