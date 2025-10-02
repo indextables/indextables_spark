@@ -462,10 +462,16 @@ class TantivyDirectInterface(
           // Use custom working directory if specified
           val workDir = new File(customWorkDir)
           if (!workDir.exists()) {
-            logger.warn(
-              s"Custom working directory does not exist: $customWorkDir - falling back to system temp directory"
-            )
-            Files.createTempDirectory("tantivy4spark_idx_")
+            // Attempt to create the directory
+            if (workDir.mkdirs()) {
+              logger.info(s"Created custom working directory: $customWorkDir")
+              Files.createTempDirectory(workDir.toPath, "tantivy4spark_idx_")
+            } else {
+              logger.warn(
+                s"Failed to create custom working directory: $customWorkDir - falling back to system temp directory"
+              )
+              Files.createTempDirectory("tantivy4spark_idx_")
+            }
           } else if (!workDir.isDirectory()) {
             logger.warn(s"Custom working directory path is not a directory: $customWorkDir - falling back to system temp directory")
             Files.createTempDirectory("tantivy4spark_idx_")
