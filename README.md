@@ -10,6 +10,57 @@ Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tanti
 
 To contact the original author and maintainer of this repository, [Scott Schenkein](https://www.linkedin.com/in/schenksj/), please open a GitHub issue or connect on LinkedIn.
 
+### Usage Example
+
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+
+spark = SparkSession.builder \
+    .appName("IndexTables Example") \
+    .getOrCreate()
+
+# Write data (Make message eligible for full-text search
+#  by declaring it as a "text" type)
+(df.write
+    .format("io.indextables.provider.IndexTablesProvider")
+    .mode("append")
+    .option("spark.indextables.indexing.typemap.message", "text")
+    .save("s3://bucket/path/table")
+
+# Merge index segments for optimal performance
+# Larger splits (1+GB) improve query performance and reduce overhead
+spark.sql("MERGE SPLITS 's3://bucket/path/table' TARGET SIZE 4G")
+
+# Read data
+df = spark.read \
+    .format("io.indextables.provider.IndexTablesProvider") \
+    .load("s3://bucket/path/table")
+
+
+# SQL queries including full Spark SQL syntax
+# plus Quickwit filters via "indexquery" operand
+df.createOrReplaceTempView("my_table")
+spark.sql("""
+    SELECT * FROM my_table
+    WHERE category = 'technology'
+      AND message indexquery 'critical AND infrastructure'
+    LIMIT 10
+""").show()
+
+# Cross-field search - any record containing the term "mytable"
+# in ANY field
+spark.sql("""
+    SELECT * FROM my_table
+    WHERE _indexall indexquery 'mytable'
+""").show()
+
+# Query with programmatic filters
+df.filter((col("name").contains("John")) & (col("age") > 25)).show()
+```
+
+---
+
 ## Table of Contents
 
 - [Features](#features)
@@ -17,7 +68,6 @@ To contact the original author and maintainer of this repository, [Scott Schenke
 - [Installation](#installation)
   - [OSS Spark](#oss-spark)
   - [Databricks](#databricks)
-- [Usage](#usage)
 - [Common Use Cases](#common-use-cases)
   - [Log Analysis and Observability](#-log-analysis-and-observability)
   - [Security Investigation and SIEM](#-security-investigation-and-siem)
@@ -135,45 +185,6 @@ spark.conf.set("spark.indextables.aws.credentialsProviderClass",
   "io.indextables.spark.auth.unity.UnityCredentialProvider")
 ```
 
-### Usage
-
-```scala
-import org.apache.spark.sql.SparkSession
-
-val spark = SparkSession.builder()
-  .appName("IndexTables Example")
-  .getOrCreate()
-
-// Write data (configure memory and storage settings per Best Practices section)
-df.write
-  .format("io.indextables.provider.IndexTablesProvider")
-  .mode("append")
-  // Index the field "message" for full-text search instead
-  // of the default exact matching
-  .option("spark.indextables.indexing.typemap.message", "text")
-  .save("s3://bucket/path/table")
-
-// Merge index segments for optimal performance
-// Larger splits (1-4GB) improve query performance and reduce overhead
-spark.sql("MERGE SPLITS 's3://bucket/path/table' TARGET SIZE 4G")
-
-// Read data with optimized caching
-val df = spark.read
-  .format("io.indextables.provider.IndexTablesProvider")
-  .load("s3://bucket/path/table")
-
-// Query with filters (automatically converted to Tantivy queries)
-df.filter($"name".contains("John") && $"age" > 25).show()
-
-// SQL queries including full Spark SQL syntax plus Quickwit filters via "indexquery" operand
-df.createOrReplaceTempView("my_table")
-spark.sql("SELECT * FROM my_table WHERE category = 'technology' and message indexquery 'critical AND infrastructure' LIMIT 10")
-spark.sql("SELECT * FROM my_table WHERE status IN ('active', 'pending') AND score > 85")
-
-// Cross-field search - any record containing the text "mytable"
-spark.sql("SELECT * FROM my_table WHERE _indexall indexquery 'mytable'")
-```
-
 ---
 
 ## Common Use Cases
@@ -216,8 +227,8 @@ SELECT ip_address,
 FROM security_logs
 WHERE event_type = 'login'
   AND outcome = 'failed'
+  AND event_date BETWEEN '2025-01-01' and '2025-02-01'
 GROUP BY ip_address, date, hour, minute
-ORDER BY date DESC, hour DESC, minute DESC;
 ```
 
 ### 📈 Application Performance Monitoring (APM)
@@ -228,6 +239,7 @@ FROM api_logs
 WHERE response_time > 1000  -- Response time > 1 second
   AND endpoint indexquery 'GET OR POST'
   AND (response_body indexquery 'timeout' OR status_code >= 500)
+  AND event_date BETWEEN '2025-01-01' and '2025-02-01'
 ORDER BY response_time DESC
 LIMIT 50;
 
@@ -235,8 +247,7 @@ LIMIT 50;
 SELECT service_name,
        endpoint,
        COUNT(*) as error_count,
-       AVG(response_time) as avg_response_time,
-       percentile_approx(response_time, 0.95) as p95_response_time
+       AVG(response_time) as avg_response_time
 FROM api_logs
 WHERE trace_id IS NOT NULL
   AND _indexall indexquery 'error OR exception OR failed'
@@ -374,7 +385,7 @@ val dateRanges = Seq(
 dateRanges.foreach { case (start, end) =>
   migrateTimeRange(start, end)
   // Optimize after each batch
-  spark.sql(s"MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 2G")
+  spark.sql(s"MERGE SPLITS 's3://bucket/indextable-data' TARGET SIZE 4G")
 }
 ```
 
@@ -1104,5 +1115,16 @@ This project is licensed under the Apache License 2.0 - see the LICENSE file for
 - SQL Pushdown: See `SqlPushdownTest.scala` for detailed examples of predicate and limit pushdown verification
 
 ## 🙏 Acknowledgments
+
+### Built on Open Source
+
+IndexTables stands on the shoulders of these exceptional open source projects:
+
+- **[Apache Spark](https://github.com/apache/spark)** - The foundation that powers distributed data processing and analytics
+- **[Delta Lake](https://github.com/delta-io/delta)** - Inspiration for the transaction log architecture and ACID semantics
+- **[Tantivy](https://github.com/quickwit-oss/tantivy)** - The high-performance full-text search engine at the core of IndexTables
+- **[Quickwit](https://github.com/quickwit-oss/quickwit)** - Source of the split file format and remote search patterns
+
+### Development Assistance
 
 This project was developed with coding assistance from **Anthropic Claude**, an AI assistant that helped with implementation, testing, documentation, and architectural design decisions throughout the development process.
