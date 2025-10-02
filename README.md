@@ -1021,6 +1021,8 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Arrays and embedded structures**: Support for complex column types
 - **S3 Mock Test Improvementss**: Remove requirement for "real" S3 access for many test cases
 - **Test independence**:  "mvn test" can't run without large available memory (using run_tests_individually.sh method)
+- **Legacy cleanup**: Removal of unused legacy V1 datasource code
+- **Redundant code refactor**: Clean up duplicative code (from AI code generation)
 
 
 ## Known Issues and Solutions
