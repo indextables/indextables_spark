@@ -108,7 +108,7 @@ class TransactionLog(
         id = java.util.UUID.randomUUID().toString,
         name = None,
         description = None,
-        format = FileFormat("tantivy4spark", Map.empty),
+        format = FileFormat("indextables", Map.empty),
         schemaString = schema.json,
         partitionColumns = partitionColumns,
         configuration = Map.empty,

@@ -129,37 +129,47 @@ class OptimizedTransactionLog(
   }
 
   /** Initialize transaction log with schema */
-  def initialize(schema: StructType, partitionColumns: Seq[String] = Seq.empty): Unit =
+  def initialize(schema: StructType, partitionColumns: Seq[String] = Seq.empty): Unit = {
+    val version0Path = new Path(transactionLogPath, "00000000000000000000.json").toString
+
+    // Check if already initialized by looking for version 0 file
+    if (cloudProvider.exists(version0Path)) {
+      logger.debug(s"Transaction log already initialized at $transactionLogPath")
+      return
+    }
+
+    // Create directory if it doesn't exist
     if (!cloudProvider.exists(transactionLogPath.toString)) {
       cloudProvider.createDirectory(transactionLogPath.toString)
-
-      // Validate partition columns
-      val schemaFields         = schema.fieldNames.toSet
-      val invalidPartitionCols = partitionColumns.filterNot(schemaFields.contains)
-      if (invalidPartitionCols.nonEmpty) {
-        throw new IllegalArgumentException(
-          s"Partition columns ${invalidPartitionCols.mkString(", ")} not found in schema"
-        )
-      }
-
-      logger.info(s"Initializing transaction log with schema: ${schema.prettyJson}")
-
-      // Write protocol and metadata in version 0
-      val protocolAction = ProtocolVersion.defaultProtocol()
-      val metadataAction = MetadataAction(
-        id = java.util.UUID.randomUUID().toString,
-        name = None,
-        description = None,
-        format = FileFormat("tantivy4spark", Map.empty),
-        schemaString = schema.json,
-        partitionColumns = partitionColumns,
-        configuration = Map.empty,
-        createdTime = Some(System.currentTimeMillis())
-      )
-
-      writeActions(0, Seq(protocolAction, metadataAction))
-      logger.info(s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}")
     }
+
+    // Validate partition columns
+    val schemaFields         = schema.fieldNames.toSet
+    val invalidPartitionCols = partitionColumns.filterNot(schemaFields.contains)
+    if (invalidPartitionCols.nonEmpty) {
+      throw new IllegalArgumentException(
+        s"Partition columns ${invalidPartitionCols.mkString(", ")} not found in schema"
+      )
+    }
+
+    logger.info(s"Initializing transaction log with schema: ${schema.prettyJson}")
+
+    // Write protocol and metadata in version 0
+    val protocolAction = ProtocolVersion.defaultProtocol()
+    val metadataAction = MetadataAction(
+      id = java.util.UUID.randomUUID().toString,
+      name = None,
+      description = None,
+      format = FileFormat("indextables", Map.empty),
+      schemaString = schema.json,
+      partitionColumns = partitionColumns,
+      configuration = Map.empty,
+      createdTime = Some(System.currentTimeMillis())
+    )
+
+    writeActions(0, Seq(protocolAction, metadataAction))
+    logger.info(s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}")
+  }
 
   /** Add files using parallel batch write */
   def addFiles(addActions: Seq[AddAction]): Long = {
