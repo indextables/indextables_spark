@@ -939,7 +939,9 @@ class IndexTables4SparkGroupByAggregateReader(
                   val sumValue = sumResult.getSum
                   val fieldType = getInputFieldType(sum, schema)
                   val result: Any = fieldType match {
-                    case IntegerType | LongType => java.lang.Long.valueOf(sumValue.toLong)
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(sumValue)
+                      java.lang.Long.valueOf(longVal)
                     case _ => java.lang.Double.valueOf(sumValue)
                   }
                   result
@@ -970,8 +972,12 @@ class IndexTables4SparkGroupByAggregateReader(
                   val minValue = minResult.getMin
                   val fieldType = getInputFieldType(min, schema)
                   val result: Any = fieldType match {
-                    case IntegerType => java.lang.Integer.valueOf(minValue.toInt)
-                    case LongType => java.lang.Long.valueOf(minValue.toLong)
+                    case IntegerType =>
+                      val intVal: Int = Math.round(minValue).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
+                      val longVal: Long = Math.round(minValue)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType => java.lang.Float.valueOf(minValue.toFloat)
                     case _ => java.lang.Double.valueOf(minValue)
                   }
@@ -995,8 +1001,12 @@ class IndexTables4SparkGroupByAggregateReader(
                   val maxValue = maxResult.getMax
                   val fieldType = getInputFieldType(max, schema)
                   val result: Any = fieldType match {
-                    case IntegerType => java.lang.Integer.valueOf(maxValue.toInt)
-                    case LongType => java.lang.Long.valueOf(maxValue.toLong)
+                    case IntegerType =>
+                      val intVal: Int = Math.round(maxValue).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
+                      val longVal: Long = Math.round(maxValue)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType => java.lang.Float.valueOf(maxValue.toFloat)
                     case _ => java.lang.Double.valueOf(maxValue)
                   }
@@ -1051,7 +1061,9 @@ class IndexTables4SparkGroupByAggregateReader(
                   val fieldType = getFieldType(fieldName)
                   // Return appropriate type based on field type
                   fieldType match {
-                    case IntegerType | LongType => sumResult.getSum.toLong
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(sumResult.getSum)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => sumResult.getSum.toDouble
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
@@ -1084,7 +1096,9 @@ class IndexTables4SparkGroupByAggregateReader(
                   val fieldType = getFieldType(fieldName)
                   // Return appropriate type based on field type
                   fieldType match {
-                    case IntegerType | LongType => minResult.getMin.toLong
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(minResult.getMin)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => minResult.getMin.toDouble
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
@@ -1109,7 +1123,9 @@ class IndexTables4SparkGroupByAggregateReader(
                   val fieldType = getFieldType(fieldName)
                   // Return appropriate type based on field type
                   fieldType match {
-                    case IntegerType | LongType => maxResult.getMax.toLong
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(maxResult.getMax)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => maxResult.getMax.toDouble
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")

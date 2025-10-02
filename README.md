@@ -1,6 +1,6 @@
 # IndexTables for Spark
 
-IndexTables is an experimental open-table format for Apache Spark that enables fast full-text search and retrieval across large-scale data—often with sub-second performance. It integrates seamlessly with Spark SQL, allowing you to combine powerful search capabilities with joins, aggregations, and standard SQL operations. Originally built for log observability and cybersecurity investigations, IndexTables works well for any use case requiring fast data retrieval.
+IndexTables is an experimental open-table format for Apache Spark that enables fast retrieval and full-text search across large-scale data. It integrates seamlessly with Spark SQL, allowing you to combine powerful search capabilities with joins, aggregations, and standard SQL operations. Originally built for log observability and cybersecurity investigations, IndexTables works well for any use case requiring fast data retrieval.
 
 IndexTables runs entirely within your existing Spark cluster with no additional infrastructure. It stores data in object storage (tested on AWS S3) and has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. While Spark is the only supported platform today, we're exploring future support for Presto and Trino. We welcome community feedback on other Spark distributions.
 
@@ -999,6 +999,8 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 
 ### Planned Features
 - **Table hygiene**: Capability similar to Delta "VACUUM" command
+- **Transaction log hygiene**: Better testing for purging of old log segments
+- **Transaction log storage efficiencye**: Consider use of parquet (like delta) of avro (like iceberg) with checkpoints
 - **Multi-cloud Enhancements**: Expanded Azure and GCP support
 - **Catalog support**: Support for Hive catalogs
 - **Schema migration**: Support for updating schemas and indexing schemes

@@ -507,20 +507,26 @@ class IndexTables4SparkSimpleAggregateReader(
 
               if (result.hasAggregations()) {
                 val sumResult = result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
-                val sumValue = if (sumResult != null) {
-                  // Return appropriate type based on field type
+                val sumValue: Any = if (sumResult != null) {
+                  // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
-                    case IntegerType | LongType => sumResult.getSum.toLong
-                    case FloatType | DoubleType => sumResult.getSum.toDouble
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(sumResult.getSum)  // Explicit Long type for proper boxing
+                      longVal
+                    case FloatType | DoubleType => sumResult.getSum
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
-                      sumResult.getSum.toDouble
+                      sumResult.getSum
                   }
                 } else {
                   fieldType match {
-                    case IntegerType | LongType => 0L
+                    case IntegerType | LongType =>
+                      val longVal: Long = 0L
+                      longVal
                     case FloatType | DoubleType => 0.0
-                    case _ => 0L
+                    case _ =>
+                      val longVal: Long = 0L
+                      longVal
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
@@ -555,20 +561,26 @@ class IndexTables4SparkSimpleAggregateReader(
 
               if (result.hasAggregations()) {
                 val minResult = result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
-                val minValue = if (minResult != null) {
-                  // Return appropriate type based on field type
+                val minValue: Any = if (minResult != null) {
+                  // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
-                    case IntegerType | LongType => minResult.getMin.toLong
-                    case FloatType | DoubleType => minResult.getMin.toDouble
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(minResult.getMin)  // Explicit Long type for proper boxing
+                      longVal
+                    case FloatType | DoubleType => minResult.getMin
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
-                      minResult.getMin.toDouble
+                      minResult.getMin
                   }
                 } else {
                   fieldType match {
-                    case IntegerType | LongType => 0L
+                    case IntegerType | LongType =>
+                      val longVal: Long = 0L
+                      longVal
                     case FloatType | DoubleType => 0.0
-                    case _ => 0L
+                    case _ =>
+                      val longVal: Long = 0L
+                      longVal
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
@@ -593,20 +605,26 @@ class IndexTables4SparkSimpleAggregateReader(
 
               if (result.hasAggregations()) {
                 val maxResult = result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
-                val maxValue = if (maxResult != null) {
-                  // Return appropriate type based on field type
+                val maxValue: Any = if (maxResult != null) {
+                  // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
-                    case IntegerType | LongType => maxResult.getMax.toLong
-                    case FloatType | DoubleType => maxResult.getMax.toDouble
+                    case IntegerType | LongType =>
+                      val longVal: Long = Math.round(maxResult.getMax)  // Explicit Long type for proper boxing
+                      longVal
+                    case FloatType | DoubleType => maxResult.getMax
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
-                      maxResult.getMax.toDouble
+                      maxResult.getMax
                   }
                 } else {
                   fieldType match {
-                    case IntegerType | LongType => 0L
+                    case IntegerType | LongType =>
+                      val longVal: Long = 0L
+                      longVal
                     case FloatType | DoubleType => 0.0
-                    case _ => 0L
+                    case _ =>
+                      val longVal: Long = 0L
+                      longVal
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")

@@ -77,7 +77,7 @@ class IndexTables4SparkScan(
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
 
     // Check if pre-warm is enabled
-    val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
+    val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
 
     // Execute pre-warm phase if enabled
     if (isPreWarmEnabled && filteredActions.nonEmpty) {

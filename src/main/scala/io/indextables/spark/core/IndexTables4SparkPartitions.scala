@@ -296,7 +296,7 @@ class IndexTables4SparkPartitionReader(
 
         // Check if pre-warm is enabled and try to join warmup future
         val broadcasted      = config
-        val isPreWarmEnabled = broadcasted.getOrElse("spark.indextables.cache.prewarm.enabled", "true").toBoolean
+        val isPreWarmEnabled = broadcasted.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
         if (isPreWarmEnabled) {
           // Generate query hash from filters for warmup future lookup
           val allFilters   = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters

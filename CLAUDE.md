@@ -28,6 +28,7 @@
 
 ## Build & Test
 ```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # Set Java 11
 mvn clean compile  # Build
 mvn test          # Run tests
 ```
@@ -40,7 +41,7 @@ Key settings with defaults:
 - `spark.indextables.indexWriter.batchSize`: `10000` documents
 - `spark.indextables.indexWriter.threads`: `2`
 - `spark.indextables.cache.maxSize`: `200000000` (200MB)
-- `spark.indextables.cache.prewarm.enabled`: `true` (Enable proactive cache warming)
+- `spark.indextables.cache.prewarm.enabled`: `false` (Enable proactive cache warming)
 - `spark.indextables.docBatch.enabled`: `true` (Enable batch document retrieval for better performance)
 - `spark.indextables.docBatch.maxSize`: `1000` (Maximum documents per batch)
 - `spark.indextables.optimizeWrite.targetRecordsPerSplit`: `1000000`
