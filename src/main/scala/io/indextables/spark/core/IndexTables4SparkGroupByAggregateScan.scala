@@ -1059,9 +1059,10 @@ class IndexTables4SparkGroupByAggregateReader(
                 if (sumResult != null) {
                   val fieldName = getFieldName(sum.column)
                   val fieldType = getFieldType(fieldName)
-                  // Return appropriate type based on field type
+                  // Return appropriate type based on OUTPUT type (SUM widens integers to Long)
                   fieldType match {
                     case IntegerType | LongType =>
+                      // SUM widens to LongType in schema, always return Long
                       val longVal: Long = Math.round(sumResult.getSum)
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => sumResult.getSum.toDouble
@@ -1096,7 +1097,10 @@ class IndexTables4SparkGroupByAggregateReader(
                   val fieldType = getFieldType(fieldName)
                   // Return appropriate type based on field type
                   fieldType match {
-                    case IntegerType | LongType =>
+                    case IntegerType =>
+                      val intVal: Int = Math.round(minResult.getMin).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
                       val longVal: Long = Math.round(minResult.getMin)
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => minResult.getMin.toDouble
@@ -1123,7 +1127,10 @@ class IndexTables4SparkGroupByAggregateReader(
                   val fieldType = getFieldType(fieldName)
                   // Return appropriate type based on field type
                   fieldType match {
-                    case IntegerType | LongType =>
+                    case IntegerType =>
+                      val intVal: Int = Math.round(maxResult.getMax).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
                       val longVal: Long = Math.round(maxResult.getMax)
                       java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => maxResult.getMax.toDouble

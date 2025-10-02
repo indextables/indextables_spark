@@ -508,25 +508,23 @@ class IndexTables4SparkSimpleAggregateReader(
               if (result.hasAggregations()) {
                 val sumResult = result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 val sumValue: Any = if (sumResult != null) {
-                  // tantivy4java returns double - convert to appropriate type based on source field type
+                  // tantivy4java returns double - convert based on OUTPUT type (which widens integers to Long)
                   fieldType match {
                     case IntegerType | LongType =>
-                      val longVal: Long = Math.round(sumResult.getSum)  // Explicit Long type for proper boxing
-                      longVal
+                      // SUM widens to LongType in schema, always return Long
+                      val longVal: Long = Math.round(sumResult.getSum)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => sumResult.getSum
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for SUM on '$fieldName': $fieldType, returning as Double")
                       sumResult.getSum
                   }
                 } else {
+                  // SUM widens integer types to Long in schema, so always return Long
                   fieldType match {
-                    case IntegerType | LongType =>
-                      val longVal: Long = 0L
-                      longVal
+                    case IntegerType | LongType => java.lang.Long.valueOf(0L)
                     case FloatType | DoubleType => 0.0
-                    case _ =>
-                      val longVal: Long = 0L
-                      longVal
+                    case _ => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
@@ -534,7 +532,7 @@ class IndexTables4SparkSimpleAggregateReader(
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
-                  case IntegerType | LongType => 0L
+                  case IntegerType | LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
                   case _ => 0L
                 })
@@ -564,9 +562,12 @@ class IndexTables4SparkSimpleAggregateReader(
                 val minValue: Any = if (minResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
-                    case IntegerType | LongType =>
-                      val longVal: Long = Math.round(minResult.getMin)  // Explicit Long type for proper boxing
-                      longVal
+                    case IntegerType =>
+                      val intVal: Int = Math.round(minResult.getMin).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
+                      val longVal: Long = Math.round(minResult.getMin)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => minResult.getMin
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MIN on '$fieldName': $fieldType, returning as Double")
@@ -574,13 +575,10 @@ class IndexTables4SparkSimpleAggregateReader(
                   }
                 } else {
                   fieldType match {
-                    case IntegerType | LongType =>
-                      val longVal: Long = 0L
-                      longVal
+                    case IntegerType => java.lang.Integer.valueOf(0)
+                    case LongType => java.lang.Long.valueOf(0L)
                     case FloatType | DoubleType => 0.0
-                    case _ =>
-                      val longVal: Long = 0L
-                      longVal
+                    case _ => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
@@ -588,9 +586,10 @@ class IndexTables4SparkSimpleAggregateReader(
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
-                  case IntegerType | LongType => 0L
+                  case IntegerType => java.lang.Integer.valueOf(0)
+                  case LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
-                  case _ => 0L
+                  case _ => java.lang.Long.valueOf(0L)
                 })
               }
 
@@ -608,9 +607,12 @@ class IndexTables4SparkSimpleAggregateReader(
                 val maxValue: Any = if (maxResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
-                    case IntegerType | LongType =>
-                      val longVal: Long = Math.round(maxResult.getMax)  // Explicit Long type for proper boxing
-                      longVal
+                    case IntegerType =>
+                      val intVal: Int = Math.round(maxResult.getMax).toInt
+                      java.lang.Integer.valueOf(intVal)
+                    case LongType =>
+                      val longVal: Long = Math.round(maxResult.getMax)
+                      java.lang.Long.valueOf(longVal)
                     case FloatType | DoubleType => maxResult.getMax
                     case _ =>
                       logger.warn(s"🔍 AGGREGATION TYPE: Unexpected field type for MAX on '$fieldName': $fieldType, returning as Double")
@@ -618,13 +620,10 @@ class IndexTables4SparkSimpleAggregateReader(
                   }
                 } else {
                   fieldType match {
-                    case IntegerType | LongType =>
-                      val longVal: Long = 0L
-                      longVal
+                    case IntegerType => java.lang.Integer.valueOf(0)
+                    case LongType => java.lang.Long.valueOf(0L)
                     case FloatType | DoubleType => 0.0
-                    case _ =>
-                      val longVal: Long = 0L
-                      longVal
+                    case _ => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
@@ -632,9 +631,10 @@ class IndexTables4SparkSimpleAggregateReader(
               } else {
                 logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
-                  case IntegerType | LongType => 0L
+                  case IntegerType => java.lang.Integer.valueOf(0)
+                  case LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
-                  case _ => 0L
+                  case _ => java.lang.Long.valueOf(0L)
                 })
               }
 
