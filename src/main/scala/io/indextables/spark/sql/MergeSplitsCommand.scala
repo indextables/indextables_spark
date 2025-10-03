@@ -651,71 +651,115 @@ class MergeSplitsExecutor(
       )
     }
 
-    // Execute merges in parallel across Spark executors
-    println(s"🏗️  [DRIVER] Distributing ${limitedMergeGroups.length} merge operations across Spark executors")
-    logger.info(s"Distributing ${limitedMergeGroups.length} merge operations across Spark executors")
+    // Get batch configuration - Delta Lake-inspired batching strategy
+    val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+    val batchSize = sparkSession.conf
+      .getOption("spark.indextables.merge.batchSize")
+      .map(_.toInt)
+      .getOrElse(defaultParallelism)
+
+    val maxConcurrentBatches = sparkSession.conf
+      .getOption("spark.indextables.merge.maxConcurrentBatches")
+      .map(_.toInt)
+      .getOrElse(2)
+
+    logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
+
+    // Split merge groups into batches based on batch size
+    val batches = limitedMergeGroups.grouped(batchSize).toSeq
+    logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
+
+    batches.zipWithIndex.foreach { case (batch, idx) =>
+      logger.info(s"Batch ${idx + 1}/${batches.length}: ${batch.length} merge groups")
+    }
+
+    // Execute batches concurrently with controlled parallelism
+    println(s"🏗️  [DRIVER] Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
+    logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
 
     // Broadcast AWS configuration to executors
     val broadcastAwsConfig = sparkSession.sparkContext.broadcast(awsConfig)
     val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
 
-    // Set descriptive names for Spark UI
-    val totalSplits = limitedMergeGroups.map(_.files.length).sum
-    val totalSizeGB = limitedMergeGroups.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
-    val jobGroup    = s"tantivy4spark-merge-splits"
-    val jobDescription =
-      f"MERGE SPLITS: Consolidating $totalSplits splits ($totalSizeGB%.2f GB) across ${limitedMergeGroups.length} groups"
-    val stageName = f"Merge Splits: ${limitedMergeGroups.length} groups, $totalSplits splits ($totalSizeGB%.2f GB)"
+    // Process batches with controlled concurrency using Scala parallel collections
+    import scala.collection.parallel.ForkJoinTaskSupport
+    import scala.collection.parallel.immutable.ParSeq
+    import java.util.concurrent.ForkJoinPool
+    import scala.util.{Try, Success, Failure}
 
-    sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
+    val batchResults = batches.zipWithIndex.par
+    val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
+    batchResults.tasksupport = customTaskSupport
 
-    val physicalMergeResults =
-      try {
-        val mergeGroupsRDD = sparkSession.sparkContext
-          .parallelize(limitedMergeGroups, limitedMergeGroups.length)
-          .setName(stageName)
-        mergeGroupsRDD
-          .map(group =>
-            MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)
-          )
-          .setName("Merge Split Results")
-          .collect()
-      } finally
-        sparkSession.sparkContext.clearJobGroup()
+    // Track batch failures
+    var failedBatchCount = 0
+    var successfulBatchCount = 0
 
-    // Now handle transaction log operations on driver (these cannot be distributed)
-    logger.info(s"Processing ${physicalMergeResults.length} merge results on driver for transaction log updates")
+    val allResults = try {
+      batchResults.flatMap { case (batch, batchIdx) =>
+        Try {
+        val batchNum = batchIdx + 1
+        val totalSplits = batch.map(_.files.length).sum
+        val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
 
-    // CRITICAL: Validate all merged files actually exist before updating transaction log
-    println(
-      s"🔍 [DRIVER] Validating ${physicalMergeResults.length} merged files actually exist before transaction log update"
-    )
-    physicalMergeResults.foreach { result =>
-      val fullMergedPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
-        s"${tablePath.toString.replaceAll("/$", "")}/${result.mergedSplitInfo.path}"
-      } else {
-        new org.apache.hadoop.fs.Path(tablePath.toString, result.mergedSplitInfo.path).toString
-      }
+        logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, ${totalSizeGB}%.2f GB")
+        println(s"🔄 [DRIVER] Starting batch $batchNum/${batches.length}: ${batch.length} merge groups")
 
-      try {
-        // For S3, we can't easily check file existence from driver, but we can at least log the expected path
-        println(s"🔍 [DRIVER] Merged file should exist at: $fullMergedPath")
-        println(s"🔍 [DRIVER] Relative path in transaction log: ${result.mergedSplitInfo.path}")
+        // Set descriptive names for Spark UI
+        val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
+        val jobDescription = f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits ($totalSizeGB%.2f GB)"
+        val stageName = f"Merge Batch $batchNum/${batches.length}: ${batch.length} groups, $totalSplits splits"
 
-        // TODO: Add actual S3 existence check here if needed for production validation
+        sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
 
-      } catch {
-        case ex: Exception =>
-          println(s"⚠️  [DRIVER] Could not validate merged file existence: ${ex.getMessage}")
-          logger.warn(s"Could not validate merged file existence", ex)
-      }
-    }
+        val batchStartTime = System.currentTimeMillis()
 
-    // Collect all remove and add actions from all merge results for a single transaction
-    val allRemoveActions = ArrayBuffer[RemoveAction]()
-    val allAddActions = ArrayBuffer[AddAction]()
+        val physicalMergeResults = try {
+          val mergeGroupsRDD = sparkSession.sparkContext
+            .parallelize(batch, batch.length)
+            .setName(stageName)
+          mergeGroupsRDD
+            .map(group =>
+              MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)
+            )
+            .setName(s"Merge Results Batch $batchNum")
+            .collect()
+        } finally {
+          sparkSession.sparkContext.clearJobGroup()
+        }
 
-    val results = physicalMergeResults.map { result =>
+        val batchElapsed = System.currentTimeMillis() - batchStartTime
+        logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
+        println(s"✅ [DRIVER] Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
+
+        // Now handle transaction log operations on driver (these cannot be distributed)
+        logger.info(s"Processing ${physicalMergeResults.length} merge results for batch $batchNum transaction log updates")
+
+        // CRITICAL: Validate all merged files actually exist before updating transaction log
+        println(
+          s"🔍 [DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
+        )
+        physicalMergeResults.foreach { result =>
+          val fullMergedPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+            s"${tablePath.toString.replaceAll("/$", "")}/${result.mergedSplitInfo.path}"
+          } else {
+            new org.apache.hadoop.fs.Path(tablePath.toString, result.mergedSplitInfo.path).toString
+          }
+
+          try {
+            // For S3, we can't easily check file existence from driver, but we can at least log the expected path
+            logger.debug(s"[Batch $batchNum] Merged file should exist at: $fullMergedPath")
+          } catch {
+            case ex: Exception =>
+              logger.warn(s"[Batch $batchNum] Could not validate merged file existence: ${ex.getMessage}", ex)
+          }
+        }
+
+        // Collect all remove and add actions from this batch's merge results
+        val batchRemoveActions = ArrayBuffer[RemoveAction]()
+        val batchAddActions = ArrayBuffer[AddAction]()
+
+        val batchResults = physicalMergeResults.map { result =>
       val startTime = System.currentTimeMillis()
 
       logger.info(s"Processing transaction log for merge group with ${result.mergeGroup.files.length} files")
@@ -917,38 +961,76 @@ class MergeSplitsExecutor(
         )
 
         // Collect actions for batch commit instead of committing individually
-        allRemoveActions ++= removeActions
-        allAddActions += addAction
+        batchRemoveActions ++= removeActions
+        batchAddActions += addAction
 
-        logger.info(s"Prepared transaction actions: ${removeActions.length} removes, 1 add")
+        logger.info(s"[Batch $batchNum] Prepared transaction actions: ${removeActions.length} removes, 1 add")
 
         // Return the merge result with updated timing
         result.copy(executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime))
       } // End of else block for indexUid check
+        }
+
+        // Commit this batch's actions in a single transaction
+        if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty) {
+          val txnStartTime = System.currentTimeMillis()
+          logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
+          println(s"💾 [DRIVER] Batch $batchNum: Committing ${batchRemoveActions.length} removes, ${batchAddActions.length} adds")
+
+          val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
+          transactionLog.invalidateCache() // Ensure cache is updated
+
+          val txnElapsed = System.currentTimeMillis() - txnStartTime
+          logger.info(s"[Batch $batchNum] Transaction log updated at version $version in ${txnElapsed}ms")
+          println(s"✅ [DRIVER] Batch $batchNum: Transaction committed at version $version in ${txnElapsed}ms")
+        } else {
+          logger.info(s"[Batch $batchNum] No transaction actions to commit")
+        }
+
+        val batchTotalTime = System.currentTimeMillis() - batchStartTime
+        logger.info(s"[Batch $batchNum] Total batch time (merge + transaction): ${batchTotalTime}ms")
+        println(s"⏱️  [DRIVER] Batch $batchNum: Completed in ${batchTotalTime}ms")
+
+        successfulBatchCount += 1
+
+        // Return results from this batch
+        batchResults
+        } match {
+          case Success(results) => results
+          case Failure(ex) =>
+            failedBatchCount += 1
+            val batchNum = batchIdx + 1
+            logger.error(s"[Batch $batchNum] Failed to process batch", ex)
+            println(s"❌ [DRIVER] Batch $batchNum: Failed with error: ${ex.getMessage}")
+            Seq.empty // Return empty sequence for failed batches
+        }
+      }.toList
+    } finally {
+      customTaskSupport.environment.shutdown()
     }
 
-    // Commit all actions in a single transaction
-    if (allAddActions.nonEmpty || allRemoveActions.nonEmpty) {
-      logger.info(s"Committing single transaction with ${allRemoveActions.length} removes and ${allAddActions.length} adds")
-      val version = transactionLog.commitMergeSplits(allRemoveActions, allAddActions)
-      transactionLog.invalidateCache() // Ensure cache is updated
-      logger.info(s"Transaction log updated at version $version: removed ${allRemoveActions.length} files, added ${allAddActions.length} merged files")
+    val totalMergedFiles  = allResults.map(_.mergedFiles).sum
+    val totalMergeGroups  = allResults.length
+    val totalOriginalSize = allResults.map(_.originalSize).sum
+    val totalMergedSize   = allResults.map(_.mergedSize).sum
+
+    val status = if (failedBatchCount == 0) "success" else "partial_success"
+    val statusMessage = if (failedBatchCount == 0) {
+      s"All ${batches.length} batches completed successfully"
     } else {
-      logger.info("No transaction actions to commit")
+      s"$successfulBatchCount/${batches.length} batches succeeded, $failedBatchCount failed"
     }
 
-    val totalMergedFiles  = results.map(_.mergedFiles).sum
-    val totalMergeGroups  = results.length
-    val totalOriginalSize = results.map(_.originalSize).sum
-    val totalMergedSize   = results.map(_.mergedSize).sum
-
-    logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits")
+    logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits across ${batches.length} batches")
+    logger.info(s"Batch summary: $successfulBatchCount successful, $failedBatchCount failed")
     logger.info(s"Size change: $totalOriginalSize bytes -> $totalMergedSize bytes")
+    println(s"🎉 [DRIVER] $statusMessage")
 
     Seq(
       Row(
         tablePath.toString,
-        Row("success", totalMergedFiles.asInstanceOf[Long], totalMergeGroups.asInstanceOf[Long], totalOriginalSize, totalMergedSize, null),
+        Row(status, totalMergedFiles.asInstanceOf[Long], totalMergeGroups.asInstanceOf[Long], totalOriginalSize, totalMergedSize,
+            s"batches: ${batches.length}, successful: $successfulBatchCount, failed: $failedBatchCount"),
         awsConfig.tempDirectoryPath.getOrElse(null),
         if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
       )
