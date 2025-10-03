@@ -93,32 +93,16 @@ class TransactionLogCountBatch(
 
   /** Compute the count from transaction log on the driver side. */
   private def computeCountFromTransactionLog(transactionLog: TransactionLog, pushedFilters: Array[Filter]): Long = {
-    println(s"🔍 TRANSACTION LOG COUNT: Computing count from transaction log on driver")
-    println(s"🔍 TRANSACTION LOG COUNT: Number of pushed filters: ${pushedFilters.length}")
-    pushedFilters.foreach(filter => println(s"🔍 TRANSACTION LOG COUNT: Filter: $filter"))
-
     if (pushedFilters.isEmpty) {
       // No filters - return total count from transaction log
-      val totalCount = transactionLog.getTotalRowCount()
-      println(s"🔍 TRANSACTION LOG COUNT: Total count (no filters): $totalCount")
-      totalCount
+      transactionLog.getTotalRowCount()
     } else {
       // Apply partition filters and sum counts
       val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog))
-      println(s"🔍 TRANSACTION LOG COUNT: Found ${partitionFilters.length} partition filters out of ${pushedFilters.length} total filters")
-      partitionFilters.foreach(filter => println(s"🔍 TRANSACTION LOG COUNT: Partition filter: $filter"))
-
       val allFiles = transactionLog.listFiles()
-      println(s"🔍 TRANSACTION LOG COUNT: Total files in transaction log: ${allFiles.length}")
-
       val matchingFiles = allFiles.filter(file => matchesPartitionFilters(file, partitionFilters))
-      println(s"🔍 TRANSACTION LOG COUNT: Files matching partition filters: ${matchingFiles.length}")
 
-      matchingFiles.foreach { file =>
-        println(s"🔍 TRANSACTION LOG COUNT: Matching file: ${file.path}, partitionValues: ${file.partitionValues}, numRecords: ${file.numRecords}")
-      }
-
-      val filteredCount = matchingFiles.map { file =>
+      matchingFiles.map { file =>
         file.numRecords
           .map { (count: Any) =>
             // Handle any numeric type and convert to Long
@@ -131,33 +115,22 @@ class TransactionLogCountBatch(
           }
           .getOrElse(0L)
       }.sum
-
-      println(s"🔍 TRANSACTION LOG COUNT: Filtered count (${partitionFilters.length} partition filters): $filteredCount")
-      filteredCount
     }
   }
 
   /** Compute grouped counts from transaction log for GROUP BY partition columns. */
   private def computeGroupByCountFromTransactionLog(groupByCols: Array[String]): Seq[(Array[String], Long)] = {
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Computing grouped counts from transaction log")
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: GROUP BY columns: ${groupByCols.mkString(", ")}")
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Number of pushed filters: ${pushedFilters.length}")
-    pushedFilters.foreach(filter => println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Filter: $filter"))
-
     // Get all files from transaction log
     val allFiles = transactionLog.listFiles()
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Total files in transaction log: ${allFiles.length}")
 
     // Apply partition filters if any
     val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog))
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Found ${partitionFilters.length} partition filters")
 
     val matchingFiles = if (partitionFilters.isEmpty) {
       allFiles
     } else {
       allFiles.filter(file => matchesPartitionFilters(file, partitionFilters))
     }
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Files after filtering: ${matchingFiles.length}")
 
     // Group by partition values and sum record counts
     val grouped = matchingFiles.groupBy { file =>
@@ -165,10 +138,8 @@ class TransactionLogCountBatch(
       groupByCols.map(col => file.partitionValues.getOrElse(col, ""))
     }
 
-    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Number of groups: ${grouped.size}")
-
     // Sum counts for each group
-    val result = grouped.map {
+    grouped.map {
       case (partitionValues, files) =>
         val totalCount = files.map { file =>
           file.numRecords
@@ -184,12 +155,6 @@ class TransactionLogCountBatch(
         }.sum
         (partitionValues, totalCount)
     }.toSeq.sortBy(_._1.mkString(",")) // Sort for deterministic output
-
-    result.foreach { case (partitionValues, count) =>
-      println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Group ${partitionValues.mkString(", ")} => $count records")
-    }
-
-    result
   }
 
   /** Check if a filter is a partition filter. */
