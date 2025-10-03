@@ -134,19 +134,33 @@ class IndexTables4SparkScanBuilder(
     logger.info(s"🔍 GROUP BY SCAN: Creating GROUP BY scan for aggregation: $aggregation")
     logger.info(s"🔍 GROUP BY SCAN: GROUP BY columns: ${groupByColumns.mkString(", ")}")
 
-    // TODO: Verify that GROUP BY aggregations are also using the shared data skipping function
-    // For now, create a specialized GROUP BY scan
-    // This will be implemented as IndexTables4SparkGroupByAggregateScan
-    new IndexTables4SparkGroupByAggregateScan(
-      sparkSession,
-      transactionLog,
-      schema,
-      _pushedFilters,
-      options,
-      config,
-      aggregation,
-      groupByColumns
-    )
+    // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
+    if (canUseTransactionLogGroupByCount(aggregation, groupByColumns)) {
+      println(s"🔍 GROUP BY SCAN: Using transaction log optimization for partition-only GROUP BY COUNT")
+      logger.info(s"🔍 GROUP BY SCAN: Using transaction log optimization for partition-only GROUP BY COUNT")
+      new TransactionLogCountScan(
+        sparkSession,
+        transactionLog,
+        _pushedFilters,
+        options,
+        config,
+        Some(groupByColumns) // Pass GROUP BY columns for grouped aggregation
+      )
+    } else {
+      // Regular GROUP BY scan using tantivy aggregations
+      println(s"🔍 GROUP BY SCAN: Using tantivy aggregation for GROUP BY")
+      logger.info(s"🔍 GROUP BY SCAN: Using tantivy aggregation for GROUP BY")
+      new IndexTables4SparkGroupByAggregateScan(
+        sparkSession,
+        transactionLog,
+        schema,
+        _pushedFilters,
+        options,
+        config,
+        aggregation,
+        groupByColumns
+      )
+    }
   }
 
   /** Create a simple aggregation scan (no GROUP BY). */
@@ -199,6 +213,51 @@ class IndexTables4SparkScanBuilder(
     }
     println(s"🔍 SCAN BUILDER: canUseTransactionLogCount returning: $result")
     result
+  }
+
+  /** Check if we can optimize GROUP BY partition columns COUNT using transaction log. */
+  private def canUseTransactionLogGroupByCount(aggregation: Aggregation, groupByColumns: Array[String]): Boolean = {
+    import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
+
+    println(s"🔍 SCAN BUILDER: canUseTransactionLogGroupByCount called")
+    println(s"🔍 SCAN BUILDER: GROUP BY columns: ${groupByColumns.mkString(", ")}")
+    println(s"🔍 SCAN BUILDER: Aggregations: ${aggregation.aggregateExpressions.map(_.getClass.getSimpleName).mkString(", ")}")
+
+    // Check 1: All GROUP BY columns must be partition columns
+    val partitionColumns = transactionLog.getPartitionColumns()
+    println(s"🔍 SCAN BUILDER: Table partition columns: ${partitionColumns.mkString(", ")}")
+
+    val allGroupByColumnsArePartitions = groupByColumns.forall(partitionColumns.contains)
+    println(s"🔍 SCAN BUILDER: All GROUP BY columns are partitions: $allGroupByColumnsArePartitions")
+
+    if (!allGroupByColumnsArePartitions) {
+      println(s"🔍 SCAN BUILDER: Cannot use transaction log - not all GROUP BY columns are partition columns")
+      return false
+    }
+
+    // Check 2: Only COUNT aggregations are supported
+    val onlyCountAggregations = aggregation.aggregateExpressions.forall {
+      case _: Count | _: CountStar => true
+      case _ => false
+    }
+    println(s"🔍 SCAN BUILDER: Only COUNT aggregations: $onlyCountAggregations")
+
+    if (!onlyCountAggregations) {
+      println(s"🔍 SCAN BUILDER: Cannot use transaction log - non-COUNT aggregations present")
+      return false
+    }
+
+    // Check 3: Only partition filters are allowed (or no filters)
+    val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+    println(s"🔍 SCAN BUILDER: Only partition filters: $hasOnlyPartitionFilters")
+
+    if (!hasOnlyPartitionFilters) {
+      println(s"🔍 SCAN BUILDER: Cannot use transaction log - non-partition filters present")
+      return false
+    }
+
+    println(s"🔍 SCAN BUILDER: ✅ Can use transaction log for partition-only GROUP BY COUNT")
+    true
   }
 
   /** Create a specialized scan that returns count from transaction log. */

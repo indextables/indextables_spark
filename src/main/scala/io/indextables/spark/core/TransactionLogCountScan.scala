@@ -20,7 +20,7 @@ package io.indextables.spark.core
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReader, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{LongType, StructField, StructType}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.broadcast.Broadcast
@@ -29,27 +29,41 @@ import org.slf4j.LoggerFactory
 
 /**
  * Specialized scan that returns count directly from transaction log for optimal performance. This is used when we can
- * optimize COUNT(*) queries without any non-partition filters.
+ * optimize COUNT(*) queries without any non-partition filters, including:
+ * - Simple COUNT(*) with no GROUP BY
+ * - GROUP BY partition_column(s) COUNT(*) - groups and counts from transaction log metadata
  */
 class TransactionLogCountScan(
   sparkSession: SparkSession,
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  config: Map[String, String] // Direct config instead of broadcast
+  config: Map[String, String], // Direct config instead of broadcast
+  groupByColumns: Option[Array[String]] = None // GROUP BY columns (if any)
 ) extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountScan])
 
-  override def readSchema(): StructType =
-    // Return schema with a single count column
-    StructType(Seq(StructField("count", LongType, nullable = false)))
+  override def readSchema(): StructType = {
+    groupByColumns match {
+      case Some(cols) =>
+        // GROUP BY: Return schema with GROUP BY columns + count column
+        val groupByFields = cols.map(col => StructField(col, StringType, nullable = true))
+        val countField = StructField("count", LongType, nullable = false)
+        StructType(groupByFields :+ countField)
+      case None =>
+        // Simple COUNT: Return schema with a single count column
+        StructType(Seq(StructField("count", LongType, nullable = false)))
+    }
+  }
 
   override def toBatch: Batch =
-    new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, config)
+    new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, config, groupByColumns)
 
-  override def description(): String =
-    s"TransactionLogCountScan(path=${transactionLog.getTablePath()})"
+  override def description(): String = {
+    val groupByDesc = groupByColumns.map(cols => s", groupBy=[${cols.mkString(", ")}]").getOrElse("")
+    s"TransactionLogCountScan(path=${transactionLog.getTablePath()}$groupByDesc)"
+  }
 }
 
 /** Batch implementation for transaction log count. */
@@ -58,15 +72,23 @@ class TransactionLogCountBatch(
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  config: Map[String, String] // Direct config instead of broadcast
+  config: Map[String, String], // Direct config instead of broadcast
+  groupByColumns: Option[Array[String]] = None
 ) extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountBatch])
 
   override def planInputPartitions(): Array[InputPartition] = {
-    // Pre-compute the count on the driver side to avoid serialization issues
-    val precomputedCount = computeCountFromTransactionLog(transactionLog, pushedFilters)
-    Array(TransactionLogCountPartition(precomputedCount))
+    groupByColumns match {
+      case Some(cols) =>
+        // GROUP BY: Pre-compute grouped counts on driver
+        val groupedCounts = computeGroupByCountFromTransactionLog(cols)
+        Array(TransactionLogGroupByCountPartition(groupedCounts, cols))
+      case None =>
+        // Simple COUNT: Pre-compute total count on driver
+        val precomputedCount = computeCountFromTransactionLog(transactionLog, pushedFilters)
+        Array(TransactionLogCountPartition(precomputedCount))
+    }
   }
 
   /** Compute the count from transaction log on the driver side. */
@@ -113,6 +135,61 @@ class TransactionLogCountBatch(
       println(s"🔍 TRANSACTION LOG COUNT: Filtered count (${partitionFilters.length} partition filters): $filteredCount")
       filteredCount
     }
+  }
+
+  /** Compute grouped counts from transaction log for GROUP BY partition columns. */
+  private def computeGroupByCountFromTransactionLog(groupByCols: Array[String]): Seq[(Array[String], Long)] = {
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Computing grouped counts from transaction log")
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: GROUP BY columns: ${groupByCols.mkString(", ")}")
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Number of pushed filters: ${pushedFilters.length}")
+    pushedFilters.foreach(filter => println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Filter: $filter"))
+
+    // Get all files from transaction log
+    val allFiles = transactionLog.listFiles()
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Total files in transaction log: ${allFiles.length}")
+
+    // Apply partition filters if any
+    val partitionFilters = pushedFilters.filter(isPartitionFilter(_, transactionLog))
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Found ${partitionFilters.length} partition filters")
+
+    val matchingFiles = if (partitionFilters.isEmpty) {
+      allFiles
+    } else {
+      allFiles.filter(file => matchesPartitionFilters(file, partitionFilters))
+    }
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Files after filtering: ${matchingFiles.length}")
+
+    // Group by partition values and sum record counts
+    val grouped = matchingFiles.groupBy { file =>
+      // Extract partition values for GROUP BY columns (preserve order)
+      groupByCols.map(col => file.partitionValues.getOrElse(col, ""))
+    }
+
+    println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Number of groups: ${grouped.size}")
+
+    // Sum counts for each group
+    val result = grouped.map {
+      case (partitionValues, files) =>
+        val totalCount = files.map { file =>
+          file.numRecords
+            .map { (count: Any) =>
+              count match {
+                case l: Long              => l
+                case i: Int               => i.toLong
+                case i: java.lang.Integer => i.toLong
+                case other                => other.toString.toLong
+              }
+            }
+            .getOrElse(0L)
+        }.sum
+        (partitionValues, totalCount)
+    }.toSeq.sortBy(_._1.mkString(",")) // Sort for deterministic output
+
+    result.foreach { case (partitionValues, count) =>
+      println(s"🔍 TRANSACTION LOG GROUP BY COUNT: Group ${partitionValues.mkString(", ")} => $count records")
+    }
+
+    result
   }
 
   /** Check if a filter is a partition filter. */
@@ -187,6 +264,15 @@ case class TransactionLogCountPartition(
   precomputedCount: Long)
     extends InputPartition
 
+/**
+ * Input partition for transaction log GROUP BY count.
+ * Contains precomputed grouped counts to avoid serialization issues.
+ */
+case class TransactionLogGroupByCountPartition(
+  groupedCounts: Seq[(Array[String], Long)],
+  groupByColumns: Array[String])
+    extends InputPartition
+
 /** Reader factory for transaction log count. */
 class TransactionLogCountReaderFactory(
   config: Map[String, String] // Direct config instead of broadcast
@@ -196,6 +282,8 @@ class TransactionLogCountReaderFactory(
     partition match {
       case countPartition: TransactionLogCountPartition =>
         new TransactionLogCountPartitionReader(countPartition, config)
+      case groupByPartition: TransactionLogGroupByCountPartition =>
+        new TransactionLogGroupByCountPartitionReader(groupByPartition, config)
       case _ =>
         throw new IllegalArgumentException(s"Unexpected partition type: ${partition.getClass}")
     }
@@ -221,6 +309,35 @@ class TransactionLogCountPartitionReader(
   override def get(): InternalRow =
     // Return a single row with the precomputed count
     InternalRow(partition.precomputedCount)
+
+  override def close(): Unit = {
+    // Nothing to close
+  }
+}
+
+/** Partition reader that returns the precomputed grouped counts. */
+class TransactionLogGroupByCountPartitionReader(
+  partition: TransactionLogGroupByCountPartition,
+  config: Map[String, String])
+    extends PartitionReader[InternalRow] {
+
+  private val logger           = LoggerFactory.getLogger(classOf[TransactionLogGroupByCountPartitionReader])
+  private val iterator         = partition.groupedCounts.iterator
+  private var currentRow: InternalRow = _
+
+  override def next(): Boolean =
+    if (iterator.hasNext) {
+      val (partitionValues, count) = iterator.next()
+      // Convert partition values to UTF8String
+      val utf8PartitionValues = partitionValues.map(v => org.apache.spark.unsafe.types.UTF8String.fromString(v))
+      // Create row: partition columns + count
+      currentRow = InternalRow.fromSeq(utf8PartitionValues :+ count)
+      true
+    } else {
+      false
+    }
+
+  override def get(): InternalRow = currentRow
 
   override def close(): Unit = {
     // Nothing to close

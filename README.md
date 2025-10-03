@@ -1008,6 +1008,7 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Table hygiene**: Capability similar to Delta "VACUUM" command
 - **Transaction log hygiene**: Better testing for purging of old log segments
 - **Transaction log storage efficiencye**: Consider use of parquet (like delta) of avro (like iceberg) with checkpoints
+- **Transaction log multi-process concurrency**: Tolearate multiple writer processes, especially when checkpointing
 - **Multi-cloud Enhancements**: Expanded Azure and GCP support
 - **Catalog support**: Support for Hive catalogs
 - **Schema migration**: Support for updating schemas and indexing schemes
@@ -1025,6 +1026,7 @@ See [BACKLOG.md](BACKLOG.md) for detailed development roadmap including:
 - **Test independence**:  "mvn test" can't run without large available memory (using run_tests_individually.sh method)
 - **Legacy cleanup**: Removal of unused legacy V1 datasource code
 - **Redundant code refactor**: Clean up duplicative code (from AI code generation)
+- **Legacy naming cleanup**: Removing old references to "tantivy4spark" (old name of indextables for spark)
 
 
 ## Known Issues and Solutions
