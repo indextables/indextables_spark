@@ -710,6 +710,11 @@ class MergeSplitsExecutor(
           logger.warn(s"Could not validate merged file existence", ex)
       }
     }
+
+    // Collect all remove and add actions from all merge results for a single transaction
+    val allRemoveActions = ArrayBuffer[RemoveAction]()
+    val allAddActions = ArrayBuffer[AddAction]()
+
     val results = physicalMergeResults.map { result =>
       val startTime = System.currentTimeMillis()
 
@@ -911,15 +916,25 @@ class MergeSplitsExecutor(
           uncompressedSizeBytes = uncompressedSizeBytes
         )
 
-        // Write transaction log entry using the atomic merge API
-        val version = transactionLog.commitMergeSplits(removeActions, Seq(addAction))
-        transactionLog.invalidateCache() // Ensure cache is updated
+        // Collect actions for batch commit instead of committing individually
+        allRemoveActions ++= removeActions
+        allAddActions += addAction
 
-        logger.info(s"Transaction log updated: removed ${removeActions.length} files, added 1 merged file")
+        logger.info(s"Prepared transaction actions: ${removeActions.length} removes, 1 add")
 
         // Return the merge result with updated timing
         result.copy(executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime))
       } // End of else block for indexUid check
+    }
+
+    // Commit all actions in a single transaction
+    if (allAddActions.nonEmpty || allRemoveActions.nonEmpty) {
+      logger.info(s"Committing single transaction with ${allRemoveActions.length} removes and ${allAddActions.length} adds")
+      val version = transactionLog.commitMergeSplits(allRemoveActions, allAddActions)
+      transactionLog.invalidateCache() // Ensure cache is updated
+      logger.info(s"Transaction log updated at version $version: removed ${allRemoveActions.length} files, added ${allAddActions.length} merged files")
+    } else {
+      logger.info("No transaction actions to commit")
     }
 
     val totalMergedFiles  = results.map(_.mergedFiles).sum
