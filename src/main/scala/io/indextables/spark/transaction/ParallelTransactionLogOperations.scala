@@ -126,22 +126,28 @@ class ParallelTransactionLogOperations(
       return Future.successful(())
     }
 
-    // Group actions by type for better compression
-    val groupedActions = actions.groupBy(_.getClass.getSimpleName)
+    // CRITICAL FIX: Transaction log versions must be single atomic files with Delta Lake naming
+    // Previous implementation created multiple files per version (version_index.json) which is incompatible
+    // Format must be exactly 20 digits zero-padded: 00000000000000000002.json
+    // Use String.format with Locale.ROOT to ensure locale-independent formatting
+    val versionFileName = String.format(java.util.Locale.ROOT, "%020d.json", version.asInstanceOf[AnyRef])
+    val versionFile = new Path(transactionLogPath, versionFileName)
 
-    // Prepare content for each group
-    val writeFutures = groupedActions.zipWithIndex.map {
-      case ((actionType, group), index) =>
-        commitPool.submitSimple {
-          val versionFile = new Path(transactionLogPath, f"${version}_$index%03d.json")
-          val content     = serializeActions(group)
-          cloudProvider.writeFile(versionFile.toString, content.getBytes("UTF-8"))
-          logger.debug(s"Written ${group.size} $actionType actions to version $version part $index")
-        }
+    // Serialize all actions into a single atomic file (transaction atomicity requirement)
+    commitPool.submitSimple {
+      val content = serializeActions(actions)
+      // Use conditional write to prevent overwriting (S3 Conditional Writes)
+      val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFile.toString, content.getBytes("UTF-8"))
+
+      if (!writeSucceeded) {
+        throw new IllegalStateException(
+          s"Failed to write transaction log version $version - file already exists at ${versionFile.toString}. " +
+          "This indicates a concurrent write conflict or version counter synchronization issue."
+        )
+      }
+
+      logger.debug(s"Written ${actions.size} actions to version $version (${versionFile.getName})")
     }
-
-    // Combine all write futures
-    Future.sequence(writeFutures)(collection.breakOut, commitEc).map(_ => ())(commitEc)
   }
 
   /** Optimized state reconstruction with partitioned processing */
