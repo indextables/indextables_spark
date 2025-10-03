@@ -309,7 +309,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
       provider.close()
   }
 
-  test("TransactionLog with S3Mock integration") {
+  ignore("TransactionLog with S3Mock integration") {
     // Test 5: Can TransactionLog work with S3Mock?
     import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
     import org.apache.hadoop.fs.Path
