@@ -195,6 +195,8 @@ val df = spark.read.format("indextables")
 #### Merge Operation Settings
 - `spark.indextables.merge.heapSize`: Heap size for merge operations in bytes (default: `1073741824` - 1GB, supports human-readable formats like "2G", "500M")
 - `spark.indextables.merge.debug`: Enable debug logging in merge operations (default: `false`)
+- `spark.indextables.merge.batchSize`: Number of merge groups per batch (default: `defaultParallelism` - Spark's default parallelism)
+- `spark.indextables.merge.maxConcurrentBatches`: Maximum number of batches to process concurrently (default: `2`)
 
 #### Automatic `/local_disk0` Detection
 All directory configurations now automatically detect and use `/local_disk0` when available and writable:

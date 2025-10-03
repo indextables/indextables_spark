@@ -524,6 +524,8 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
 | `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
+| `spark.indextables.merge.batchSize` | `defaultParallelism` | Number of merge groups per batch (defaults to Spark's defaultParallelism) |
+| `spark.indextables.merge.maxConcurrentBatches` | `2` | Maximum number of batches to process concurrently |
 | `spark.indextables.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.indextables.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.indextables.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
