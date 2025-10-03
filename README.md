@@ -1137,6 +1137,7 @@ IndexTables stands on the shoulders of these exceptional open source projects:
 - **[Delta Lake](https://github.com/delta-io/delta)** - Inspiration for the transaction log architecture and ACID semantics
 - **[Tantivy](https://github.com/quickwit-oss/tantivy)** - The high-performance full-text search engine at the core of IndexTables
 - **[Quickwit](https://github.com/quickwit-oss/quickwit)** - Source of the split file format and remote search patterns
+- **[Tantivy4Java](https://github.com/indextables/tantivy4java)** - Java wrapper around Tantivy and Quickwit
 
 ### Development Assistance
 
