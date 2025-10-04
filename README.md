@@ -175,12 +175,12 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 
 Follow these steps to install IndexTables on Databricks:
 
-1. **Upload JAR**: Install the platform-specific JAR to your workspace (e.g., `/Workspace/Users/me/indextables_x86_64_0.0.1.jar`)
+1. **Upload JAR**: Install the platform-specific JAR to your workspace (e.g., `/Workspace/Users/me/indextables_spark-0.3.0_spark_3.5.3-linux-x86_64-shaded.jar`)
 2. **Create startup script**: Add a script named `add_indextables_to_classpath.sh` to copy the JAR to the Databricks jars directory:
 
 ```
 #!/bin/bash
-cp /Workspace/Users/me/indextables_x86_64_0.0.1.jar /databricks/jars
+cp /Workspace/Users/me/indextables_spark-0.3.0_spark_3.5.3-linux-x86_64-shaded.jar /databricks/jars
 ```
 
 3. **Configure startup script**: Add the script to your cluster's startup configuration
