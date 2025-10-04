@@ -63,6 +63,7 @@ class IndexTables4SparkScanBuilder(
   private var _pushedGroupBy: Option[Array[String]]   = None
 
   // Get relation object from ThreadLocal (set by V2IndexQueryExpressionRule)
+  // ThreadLocal is cleared at the start of V2IndexQueryExpressionRule to ensure fresh state per query
   private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
   println(s"INDEXQUERY_DEBUG 🏗️ SCAN BUILDER INIT: Relation from ThreadLocal=${relationForIndexQuery.map(System.identityHashCode)}")
 
@@ -1127,12 +1128,19 @@ object IndexTables4SparkScanBuilder {
 
   // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
   // This works even with AQE because the same relation object is used throughout planning
+  // Lifecycle: V2 rule checks relation identity → clears if different → sets new relation → ScanBuilder gets it
+  // We track the relation's identity hash (stable within query, different for self-joins) to avoid clearing mid-query
   private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
+  private val currentRelationId: ThreadLocal[Option[Int]] = ThreadLocal.withInitial(() => None)
 
   /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
   def setCurrentRelation(relation: AnyRef): Unit = {
+    // Use relation object identity - this is stable within a query execution
+    // and correctly handles self-joins (which get different relation instances via newInstance())
+    val relationId = System.identityHashCode(relation)
     currentRelation.set(Some(relation))
-    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL SET: Relation object=${System.identityHashCode(relation)}")
+    currentRelationId.set(Some(relationId))
+    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL SET: Relation ID=$relationId")
   }
 
   /** Get the current relation object for this thread (called by ScanBuilder). */
@@ -1142,10 +1150,34 @@ object IndexTables4SparkScanBuilder {
     rel
   }
 
-  /** Clear the current relation object for this thread. */
+  /**
+   * Clear the current relation object for this thread, but only if it's a different relation.
+   * This allows the same relation to be reused across multiple optimization phases.
+   */
+  def clearCurrentRelationIfDifferent(newRelation: Option[AnyRef]): Unit = {
+    val currentId = currentRelationId.get()
+    val newId = newRelation.map(System.identityHashCode)
+
+    if (currentId.isDefined && newId.isDefined && currentId != newId) {
+      // Different relation - clear the old one
+      currentRelation.remove()
+      currentRelationId.remove()
+      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation changed from ${currentId.get} to ${newId.get}")
+    } else if (currentId.isDefined && newId.isEmpty) {
+      // New query with no IndexQuery - clear
+      currentRelation.remove()
+      currentRelationId.remove()
+      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: New query without IndexQuery (was ${currentId.get})")
+    } else if (currentId == newId && currentId.isDefined) {
+      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL KEEP: Same relation ${currentId.get} - keeping ThreadLocal")
+    }
+  }
+
+  /** Clear the current relation object for this thread (for tests). */
   def clearCurrentRelation(): Unit = {
     currentRelation.remove()
-    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation cleared")
+    currentRelationId.remove()
+    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation cleared (explicit)")
   }
 
   /** Store IndexQuery expressions for a specific relation object. */

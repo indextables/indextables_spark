@@ -40,6 +40,13 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     println(s"🔍 V2IndexQueryExpressionRule.apply() called with plan: ${plan.getClass.getSimpleName}")
 
+    // Find the relation in this plan (if any) to check if we need to clear ThreadLocal
+    import io.indextables.spark.core.IndexTables4SparkScanBuilder
+    val relationInPlan = plan.collectFirst { case relation: DataSourceV2Relation if isCompatibleV2DataSource(relation) => relation }
+
+    // Clear ThreadLocal only if we're starting a new query (different relation ID)
+    IndexTables4SparkScanBuilder.clearCurrentRelationIfDifferent(relationInPlan)
+
     val result = plan.transformUp {
       case filter @ Filter(condition, child: DataSourceV2Relation) =>
         println(s"🔍 V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation")
