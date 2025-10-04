@@ -37,6 +37,13 @@ df = spark.read \
     .format("io.indextables.provider.IndexTablesProvider") \
     .load("s3://bucket/path/table")
 
+# Optionally explicitly set your aws credentials
+#
+# read.option("spark.indextables.indexing.aws.accessKey", accessKey) \
+#     .option("spark.indextables.indexing.aws.secretKey", secretKey) \
+#     .option("spark.indextables.indexing.aws.sessionToken", sessionToken) \
+#            -- or --  (see docs for more info)
+#     .option("spark.indextables.aws.credentialsProviderClass", "com.MyCredentialProvider")
 
 # SQL queries including full Spark SQL syntax
 # plus Quickwit filters via "indexquery" operand
@@ -186,7 +193,7 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 
 5. **Upgrade Java (Databricks 15.4)**: Set environment variable `JNAME=zulu17-ca-amd64` to use Java 17
 
-6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider:
+6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider: *NOTE THAT THIS HAS NOT BEEN VALIDATED YET, PLEASE LET ME KNOW IF IT WORKS FOR YOU*
 
 ```scala
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
