@@ -193,6 +193,8 @@ spark.conf.set("spark.indextables.aws.credentialsProviderClass",
   "io.indextables.spark.auth.unity.UnityCredentialProvider")
 ```
 
+*Note*: Photon does not directly accelerate indextables, so it is not necessary to enable it.
+
 ---
 
 ## Common Use Cases
