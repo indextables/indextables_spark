@@ -4,7 +4,7 @@ IndexTables is an experimental open-table format for Apache Spark that enables f
 
 IndexTables runs entirely within your existing Spark cluster with no additional infrastructure. It stores data in object storage (tested on AWS S3) and has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. While Spark is the only supported platform today, we're exploring future support for Presto and Trino. We welcome community feedback on our plans, our implementation, and anything else.
 
-Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet. This hybrid row and columnar storage format, combined with advanced indexing, delivers extremely fast keyword searches across massive datasets.
+Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet. This hybrid row and columnar storage format, combined with advanced indexing, delivers extremely fast keyword searches, aggregates, and filtered retrieval across massive datasets.
 
 > **⚠️ Development Status**: IndexTables is under active development with frequent updates and improvements. APIs and features may change as the project evolves. We recommend thorough testing in non-production environments before deploying to production workloads.  *DO NOT USE THIS TABLE FORMAT TO STORE THE ONLY COPY OF YOUR BUSINESS DATA*
 
