@@ -21,9 +21,11 @@ import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
 import org.apache.spark.sql.execution.command.RunnableCommand
-import org.apache.spark.sql.types.{StringType, LongType}
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import org.apache.spark.sql.types.{LongType, StringType}
+
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.slf4j.LoggerFactory
 
 /**

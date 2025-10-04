@@ -1,15 +1,18 @@
 package io.indextables.spark
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.matchers.should.Matchers
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
-import java.nio.file.Files
 import java.io.File
 import java.io.FileInputStream
+import java.nio.file.Files
 import java.util.{Properties, UUID}
+
 import scala.util.Using
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * EXACT REPRODUCTION of failing test 647 from RealS3IntegrationTest. This isolates the MERGE SPLITS test to debug the

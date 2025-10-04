@@ -17,9 +17,11 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.TestBase
 
 /** Tests for auto-sizing options in IndexTables4SparkOptions. */
 class IndexTables4SparkOptionsAutoSizeTest extends TestBase {

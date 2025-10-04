@@ -17,9 +17,11 @@
 
 package io.indextables.spark.io
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import java.util.{Collections => JCollections}
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.TestBase
 
 /** Test cloud storage provider configuration and factory */
 class CloudStorageProviderTest extends TestBase {

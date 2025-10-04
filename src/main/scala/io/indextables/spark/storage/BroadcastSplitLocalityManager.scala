@@ -17,10 +17,12 @@
 
 package io.indextables.spark.storage
 
-import org.apache.spark.SparkContext
-import org.apache.spark.broadcast.Broadcast
-import org.slf4j.LoggerFactory
 import scala.collection.concurrent.TrieMap
+
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.SparkContext
+
+import org.slf4j.LoggerFactory
 
 /**
  * Broadcast-based split locality manager that enables efficient distribution of cache locality information across the

@@ -17,11 +17,12 @@
 
 package io.indextables.spark.search
 
-import io.indextables.tantivy4java.query.{Query, Occur}
-import io.indextables.tantivy4java.core.Schema
-import org.slf4j.LoggerFactory
-import scala.util.Try
 import scala.jdk.CollectionConverters._
+import scala.util.Try
+
+import io.indextables.tantivy4java.core.Schema
+import io.indextables.tantivy4java.query.{Occur, Query}
+import org.slf4j.LoggerFactory
 
 /**
  * Simple query parser for converting string queries to tantivy4java Query objects.

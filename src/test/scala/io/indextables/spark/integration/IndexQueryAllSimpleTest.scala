@@ -17,16 +17,17 @@
 
 package io.indextables.spark.integration
 
+import org.apache.spark.sql.catalyst.expressions.Literal
+import org.apache.spark.sql.types.StringType
 import org.apache.spark.sql.SparkSession
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
-import io.indextables.spark.TestBase
+import org.apache.spark.unsafe.types.UTF8String
+
 import io.indextables.spark.expressions.IndexQueryAllExpression
 import io.indextables.spark.filters.IndexQueryAllFilter
 import io.indextables.spark.util.ExpressionUtils
-import org.apache.spark.unsafe.types.UTF8String
-import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.catalyst.expressions.Literal
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 class IndexQueryAllSimpleTest extends AnyFunSuite with TestBase with BeforeAndAfterEach {
 

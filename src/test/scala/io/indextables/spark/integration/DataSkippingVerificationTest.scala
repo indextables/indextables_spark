@@ -17,15 +17,18 @@
 
 package io.indextables.spark.integration
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLog, AddAction}
-import io.indextables.spark.core.IndexTables4SparkScan
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.sources._
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.BeforeAndAfterEach
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.sources._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.core.IndexTables4SparkScan
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
@@ -100,7 +103,8 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     assert(gtPartitions.length == 2, s"GreaterThan: Expected 2 partitions, got ${gtPartitions.length}")
 
-    val gtPaths = gtPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val gtPaths =
+      gtPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(!gtPaths.exists(_.contains("range1")), "GreaterThan should skip range1")
     assert(gtPaths.exists(_.contains("range2")), "GreaterThan should include range2")
     assert(gtPaths.exists(_.contains("range3")), "GreaterThan should include range3")
@@ -112,7 +116,8 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     assert(ltPartitions.length == 2, s"LessThan: Expected 2 partitions, got ${ltPartitions.length}")
 
-    val ltPaths = ltPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val ltPaths =
+      ltPartitions.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(ltPaths.exists(_.contains("range1")), "LessThan should include range1")
     assert(ltPaths.exists(_.contains("range2")), "LessThan should include range2")
     assert(!ltPaths.exists(_.contains("range3")), "LessThan should skip range3")

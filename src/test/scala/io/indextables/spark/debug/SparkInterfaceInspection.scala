@@ -1,7 +1,8 @@
 package io.indextables.spark.debug
 
-import org.apache.spark.sql.connector.read.SupportsPushDownAggregates
 import java.lang.reflect.Method
+
+import org.apache.spark.sql.connector.read.SupportsPushDownAggregates
 
 object SparkInterfaceInspection {
   def main(args: Array[String]): Unit = {

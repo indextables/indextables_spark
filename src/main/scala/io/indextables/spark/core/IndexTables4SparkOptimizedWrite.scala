@@ -17,25 +17,27 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.connector.distributions.{ClusteredDistribution, Distribution, Distributions}
+import org.apache.spark.sql.connector.expressions.{Expressions, LogicalExpressions, SortDirection, SortOrder}
 import org.apache.spark.sql.connector.write.{
   BatchWrite,
   DataWriterFactory,
   PhysicalWriteInfo,
+  RequiresDistributionAndOrdering,
   SupportsOverwrite,
   SupportsTruncate,
   Write,
-  WriterCommitMessage,
-  RequiresDistributionAndOrdering
+  WriterCommitMessage
 }
-import org.apache.spark.sql.connector.distributions.{Distribution, Distributions, ClusteredDistribution}
-import org.apache.spark.sql.connector.expressions.{SortOrder, SortDirection, Expressions, LogicalExpressions}
+import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.transaction.{TransactionLog, AddAction}
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
 import io.indextables.spark.config.{IndexTables4SparkConfig, IndexTables4SparkSQLConf}
 import io.indextables.spark.optimize.IndexTables4SparkOptimizedWriterExec
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.connector.write.LogicalWriteInfo
+import io.indextables.spark.transaction.{AddAction, TransactionLog}
 import org.slf4j.LoggerFactory
 
 /**
@@ -407,7 +409,7 @@ class IndexTables4SparkOptimizedWrite(
 
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _                               => Seq.empty[AddAction]
+      case _                                   => Seq.empty[AddAction]
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
@@ -497,7 +499,7 @@ class IndexTables4SparkOptimizedWrite(
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _                               => Seq.empty[AddAction]
+      case _                                   => Seq.empty[AddAction]
     }
 
     // In a real implementation, we would delete the physical files here

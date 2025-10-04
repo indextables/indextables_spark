@@ -1,9 +1,10 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 
 class DataSourceApiComparisonTest extends TestBase {
 

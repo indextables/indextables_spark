@@ -17,11 +17,12 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.search.TantivySearchEngine
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+
+import io.indextables.spark.search.TantivySearchEngine
+import io.indextables.spark.TestBase
 
 class DocumentExtractionTest extends TestBase {
 

@@ -17,20 +17,22 @@
 
 package io.indextables.spark.optimize
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.physical.{HashPartitioning, RoundRobinPartitioning}
-import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.{SparkPlan, UnaryExecNode}
+import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.metric.{SQLMetric, SQLMetrics}
-import org.slf4j.LoggerFactory
+import org.apache.spark.sql.SparkSession
+
 import io.indextables.spark.config.IndexTables4SparkSQLConf
+import org.slf4j.LoggerFactory
 
 /**
- * An execution node that optimizes writes to IndexTables4Spark tables by adding an adaptive shuffle to target a specific
- * number of records per split file.
+ * An execution node that optimizes writes to IndexTables4Spark tables by adding an adaptive shuffle to target a
+ * specific number of records per split file.
  *
- * This is similar to Delta Lake's DeltaOptimizedWriterExec, but adapted for IndexTables4Spark's split-based architecture.
+ * This is similar to Delta Lake's DeltaOptimizedWriterExec, but adapted for IndexTables4Spark's split-based
+ * architecture.
  *
  * @param child
  *   The child execution plan

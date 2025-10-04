@@ -17,14 +17,16 @@
 
 package io.indextables.spark.sql
 
+import java.io.File
+import java.nio.file.Files
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions.{concat, lit}
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions.{lit, concat}
-import org.apache.spark.sql.types.{StringType, IntegerType, StructType, StructField}
-import java.nio.file.Files
-import java.io.File
 
 class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
 
@@ -293,7 +295,10 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     assert(result.head.getString(0) == "PRE-COMMIT MERGE", "Should indicate pre-commit merge in first column")
     val metricsRow = result.head.getStruct(1)
     assert(metricsRow.getString(0) == "pending", "Status should be 'pending'")
-    assert(metricsRow.getString(5).contains("Functionality pending implementation"), "Should indicate functionality pending")
+    assert(
+      metricsRow.getString(5).contains("Functionality pending implementation"),
+      "Should indicate functionality pending"
+    )
   }
 
   test("MERGE SPLITS should handle S3 paths correctly") {
@@ -317,14 +322,15 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
       val result = s3Command.run(spark)
       assert(result.nonEmpty, "Should return result for non-existent S3 path")
       val metricsRow = result.head.getStruct(1)
-      val status = metricsRow.getString(0)
-      val message = metricsRow.getString(5)
+      val status     = metricsRow.getString(0)
+      val message    = metricsRow.getString(5)
       assert(
         status == "error" || status == "no_action",
         "Status should indicate error or no action"
       )
       assert(
-        message != null && (message.contains("does not exist") || message.contains("empty") || message.toLowerCase.contains("not a valid")),
+        message != null && (message.contains("does not exist") || message.contains("empty") || message.toLowerCase
+          .contains("not a valid")),
         "Message should indicate path doesn't exist or table issue"
       )
     } catch {

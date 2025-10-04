@@ -17,16 +17,18 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.search.{TantivyNative, TantivySearchEngine, SplitSearchEngine}
-import io.indextables.spark.storage.SplitCacheConfig
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import java.io.File
+
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
+
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.unsafe.types.UTF8String
-import java.io.File
+import io.indextables.spark.search.{SplitSearchEngine, TantivyNative, TantivySearchEngine}
+import io.indextables.spark.storage.SplitCacheConfig
+import io.indextables.spark.TestBase
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 class NativeLibraryTest extends TestBase {
 

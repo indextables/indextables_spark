@@ -17,18 +17,20 @@
 
 package io.indextables.spark.debug
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions._
 import java.io.File
 import java.nio.file.{Files, Paths}
+
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Literal}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{IntegerType, StringType}
+import org.apache.spark.sql.Column
+import org.apache.spark.unsafe.types.UTF8String
+
 import io.indextables.spark.expressions.IndexQueryExpression
 import io.indextables.spark.util.ExpressionUtils
-import org.apache.spark.sql.catalyst.expressions.{Literal, AttributeReference}
-import org.apache.spark.sql.types.{StringType, IntegerType}
-import org.apache.spark.unsafe.types.UTF8String
-import org.apache.spark.sql.Column
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 class IndexQueryPushdownDebugTest extends AnyFunSuite with TestBase with BeforeAndAfterEach {
 

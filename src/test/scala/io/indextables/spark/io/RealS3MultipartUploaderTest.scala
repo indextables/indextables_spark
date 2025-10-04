@@ -17,16 +17,18 @@
 
 package io.indextables.spark.io
 
-import io.indextables.spark.RealS3TestBase
-import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.model._
 import java.io.{ByteArrayInputStream, File, FileInputStream}
 import java.util.Properties
 import java.util.UUID
-import scala.util.Using
+
 import scala.util.Random
+import scala.util.Using
+
+import io.indextables.spark.RealS3TestBase
+import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.model._
+import software.amazon.awssdk.services.s3.S3Client
 
 /**
  * Real AWS S3 multipart upload tests using test-tantivy4sparkbucket.

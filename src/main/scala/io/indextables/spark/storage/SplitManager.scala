@@ -17,20 +17,23 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.split.SplitCacheManager
-import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
-import org.apache.hadoop.fs.Path
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.types.StructType
-import org.slf4j.LoggerFactory
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.slf4j.LoggerFactory
-import scala.util.Try
-import java.util.UUID
-import java.time.Instant
 import java.io.File
 import java.nio.file.{Files, Paths}
+import java.time.Instant
+import java.util.UUID
+
+import scala.util.Try
+
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitCacheManager
+import org.slf4j.LoggerFactory
 
 /**
  * Manager for IndexTables4Spark split operations using tantivy4java's QuickwitSplit functionality.
@@ -136,7 +139,6 @@ object SplitManager {
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
           logger.warn(s"✅ SPLIT CREATED WITH fast=true - correct!")
         }
-
 
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)

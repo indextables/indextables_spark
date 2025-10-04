@@ -17,16 +17,18 @@
 
 package io.indextables.spark.storage
 
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, Executors}
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.util.ErrorUtil
+import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider
 import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest}
-import org.slf4j.LoggerFactory
-import io.indextables.spark.util.ErrorUtil
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.{ConcurrentHashMap, Executors, CompletableFuture}
+import software.amazon.awssdk.services.s3.S3Client
 
 class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy {
 

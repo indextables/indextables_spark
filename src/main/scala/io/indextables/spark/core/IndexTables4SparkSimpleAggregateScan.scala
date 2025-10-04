@@ -17,18 +17,20 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.read.{Scan, Batch, InputPartition}
-import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{StructType, StructField, LongType, DoubleType, IntegerType, FloatType, DataType}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
+import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.types.{DataType, DoubleType, FloatType, IntegerType, LongType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
 import io.indextables.spark.transaction.TransactionLog
-import org.slf4j.LoggerFactory
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
-import scala.jdk.CollectionConverters._
+import org.slf4j.LoggerFactory
 
 /**
  * Specialized scan for simple aggregations (no GROUP BY). Handles queries like SELECT COUNT(*) FROM table, SELECT
@@ -109,7 +111,7 @@ class IndexTables4SparkSimpleAggregateScan(
             val sumType = fieldType match {
               case IntegerType | LongType => LongType
               case FloatType | DoubleType => DoubleType
-              case _ => DoubleType
+              case _                      => DoubleType
             }
             (s"sum", sumType)
           case _: Avg =>
@@ -138,7 +140,8 @@ class IndexTables4SparkSimpleAggregateScan(
   /** Get the input field type for an aggregation expression. */
   private def getInputFieldType(
     aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc,
-    schema: StructType): DataType = {
+    schema: StructType
+  ): DataType = {
 
     // Get the column reference from the aggregation
     val column = aggExpr.children().headOption.getOrElse {
@@ -391,7 +394,13 @@ class IndexTables4SparkSimpleAggregateReader(
     import org.apache.spark.sql.catalyst.InternalRow
     import org.apache.spark.unsafe.types.UTF8String
     import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
-    import io.indextables.tantivy4java.aggregation.{CountAggregation, SumAggregation, AverageAggregation, MinAggregation, MaxAggregation}
+    import io.indextables.tantivy4java.aggregation.{
+      CountAggregation,
+      SumAggregation,
+      AverageAggregation,
+      MinAggregation,
+      MaxAggregation
+    }
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
@@ -521,7 +530,8 @@ class IndexTables4SparkSimpleAggregateReader(
               val result = searcher.search(splitQuery, 0, s"sum_agg", sumAgg)
 
               if (result.hasAggregations()) {
-                val sumResult = result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
+                val sumResult =
+                  result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 val sumValue: Any = if (sumResult != null) {
                   // tantivy4java returns double - convert based on OUTPUT type (which widens integers to Long)
                   fieldType match {
@@ -539,7 +549,7 @@ class IndexTables4SparkSimpleAggregateReader(
                   fieldType match {
                     case IntegerType | LongType => java.lang.Long.valueOf(0L)
                     case FloatType | DoubleType => 0.0
-                    case _ => java.lang.Long.valueOf(0L)
+                    case _                      => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
@@ -549,7 +559,7 @@ class IndexTables4SparkSimpleAggregateReader(
                 aggregationResults += (fieldType match {
                   case IntegerType | LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
-                  case _ => 0L
+                  case _                      => 0L
                 })
               }
 
@@ -573,7 +583,8 @@ class IndexTables4SparkSimpleAggregateReader(
               val result = searcher.search(splitQuery, 0, s"min_agg", minAgg)
 
               if (result.hasAggregations()) {
-                val minResult = result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
+                val minResult =
+                  result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 val minValue: Any = if (minResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
@@ -595,10 +606,10 @@ class IndexTables4SparkSimpleAggregateReader(
                 } else {
                   fieldType match {
                     case IntegerType => java.lang.Integer.valueOf(0)
-                    case LongType => java.lang.Long.valueOf(0L)
-                    case FloatType => java.lang.Float.valueOf(0.0f)
-                    case DoubleType => 0.0
-                    case _ => java.lang.Long.valueOf(0L)
+                    case LongType    => java.lang.Long.valueOf(0L)
+                    case FloatType   => java.lang.Float.valueOf(0.0f)
+                    case DoubleType  => 0.0
+                    case _           => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
@@ -607,10 +618,10 @@ class IndexTables4SparkSimpleAggregateReader(
                 logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
-                  case LongType => java.lang.Long.valueOf(0L)
-                  case FloatType => java.lang.Float.valueOf(0.0f)
-                  case DoubleType => 0.0
-                  case _ => java.lang.Long.valueOf(0L)
+                  case LongType    => java.lang.Long.valueOf(0L)
+                  case FloatType   => java.lang.Float.valueOf(0.0f)
+                  case DoubleType  => 0.0
+                  case _           => java.lang.Long.valueOf(0L)
                 })
               }
 
@@ -624,7 +635,8 @@ class IndexTables4SparkSimpleAggregateReader(
               val result = searcher.search(splitQuery, 0, s"max_agg", maxAgg)
 
               if (result.hasAggregations()) {
-                val maxResult = result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
+                val maxResult =
+                  result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 val maxValue: Any = if (maxResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
@@ -646,10 +658,10 @@ class IndexTables4SparkSimpleAggregateReader(
                 } else {
                   fieldType match {
                     case IntegerType => java.lang.Integer.valueOf(0)
-                    case LongType => java.lang.Long.valueOf(0L)
-                    case FloatType => java.lang.Float.valueOf(0.0f)
-                    case DoubleType => 0.0
-                    case _ => java.lang.Long.valueOf(0L)
+                    case LongType    => java.lang.Long.valueOf(0L)
+                    case FloatType   => java.lang.Float.valueOf(0.0f)
+                    case DoubleType  => 0.0
+                    case _           => java.lang.Long.valueOf(0L)
                   }
                 }
                 logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
@@ -658,10 +670,10 @@ class IndexTables4SparkSimpleAggregateReader(
                 logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
-                  case LongType => java.lang.Long.valueOf(0L)
-                  case FloatType => java.lang.Float.valueOf(0.0f)
-                  case DoubleType => 0.0
-                  case _ => java.lang.Long.valueOf(0L)
+                  case LongType    => java.lang.Long.valueOf(0L)
+                  case FloatType   => java.lang.Float.valueOf(0.0f)
+                  case DoubleType  => 0.0
+                  case _           => java.lang.Long.valueOf(0L)
                 })
               }
 
@@ -705,7 +717,9 @@ class IndexTables4SparkSimpleAggregateReader(
           if (splitMetadata != null && splitMetadata.hasFooterOffsets()) {
             (splitMetadata.getFooterStartOffset(), splitMetadata.getFooterEndOffset())
           } else {
-            logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No footer offsets available for split: ${partition.split.path}")
+            logger.debug(
+              s"🔍 SIMPLE AGGREGATE EXECUTION: No footer offsets available for split: ${partition.split.path}"
+            )
             (0L, 1024L) // Minimal fallback
           }
         } catch {
@@ -745,14 +759,13 @@ class IndexTables4SparkSimpleAggregateReader(
   }
 
   /** Get the Spark DataType for a field from the schema */
-  private def getFieldType(fieldName: String): DataType = {
+  private def getFieldType(fieldName: String): DataType =
     partition.schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
         logger.debug(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
         LongType
     }
-  }
 
   /** Extract field name from column expression for aggregations */
   private def getFieldName(column: org.apache.spark.sql.connector.expressions.Expression): String =

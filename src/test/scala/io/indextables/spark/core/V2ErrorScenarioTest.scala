@@ -17,12 +17,14 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{AnalysisException, SparkSession}
-import org.apache.spark.sql.functions._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import java.io.{File, FileWriter}
 import java.nio.file.{Files, Paths}
+
+import org.apache.spark.sql.{AnalysisException, SparkSession}
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * Test error scenarios in V2 DataSource API including:
@@ -307,11 +309,13 @@ class V2ErrorScenarioTest extends TestBase with BeforeAndAfterAll with BeforeAnd
   test("should fail job when split reading fails rather than returning partial results") {
     withTempPath { path =>
       // Create valid data and write it
-      val data = spark.range(3).select(
-        concat(lit("doc"), col("id").cast("string")).as("id"),
-        concat(lit("content"), col("id").cast("string")).as("content"),
-        (col("id") * 100 + 100).cast("int").as("score")
-      )
+      val data = spark
+        .range(3)
+        .select(
+          concat(lit("doc"), col("id").cast("string")).as("id"),
+          concat(lit("content"), col("id").cast("string")).as("content"),
+          (col("id") * 100 + 100).cast("int").as("score")
+        )
 
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")

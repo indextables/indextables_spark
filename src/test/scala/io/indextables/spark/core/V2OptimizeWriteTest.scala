@@ -17,12 +17,14 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.{SparkSession, DataFrame}
+import java.nio.file.Files
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+
+import io.indextables.spark.config.IndexTables4SparkSQLConf
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
-import io.indextables.spark.TestBase
-import io.indextables.spark.config.IndexTables4SparkSQLConf
-import java.nio.file.Files
 
 /**
  * Tests for optimizeWrite functionality with V2 DataSource API.

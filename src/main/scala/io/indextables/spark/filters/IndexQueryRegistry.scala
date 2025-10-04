@@ -18,8 +18,9 @@
 package io.indextables.spark.filters
 
 import java.util.UUID
-import scala.collection.mutable
+
 import scala.collection.concurrent
+import scala.collection.mutable
 
 /**
  * Registry for IndexQuery information that uses query-scoped keys for distributed safety. Instead of relying on

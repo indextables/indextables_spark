@@ -1,9 +1,10 @@
 package io.indextables.spark.debug
 
-import org.apache.spark.sql.SparkSession
+import java.nio.file.Files
+
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
-import java.nio.file.Files
+import org.apache.spark.sql.SparkSession
 
 object NumericFieldFilteringDemo {
   def main(args: Array[String]): Unit = {

@@ -17,12 +17,15 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import io.findify.s3mock.S3Mock
 import java.net.ServerSocket
+
 import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import io.findify.s3mock.S3Mock
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * Test for S3 split read/write operations using S3Mock.

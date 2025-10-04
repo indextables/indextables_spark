@@ -17,12 +17,15 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{DataFrame, SaveMode}
-import org.apache.spark.sql.functions._
 import java.sql.{Date, Timestamp}
 import java.time.{LocalDate, LocalDateTime}
+
 import scala.util.Random
+
+import org.apache.spark.sql.{DataFrame, SaveMode}
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 
 /**
  * Isolated test for the failing "should handle date and timestamp queries" test. This helps debug date/timestamp type

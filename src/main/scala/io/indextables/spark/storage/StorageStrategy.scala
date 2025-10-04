@@ -17,9 +17,10 @@
 
 package io.indextables.spark.storage
 
+import java.io.Closeable
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import java.io.Closeable
 
 trait StorageStrategy extends Closeable {
   def readFile(): Array[Byte]

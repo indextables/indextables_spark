@@ -17,11 +17,13 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.{SparkSession, DataFrame}
+import java.nio.file.Files
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
-import io.indextables.spark.TestBase
-import java.nio.file.Files
 
 /** Debug test to isolate V2 write issues. */
 class V2WriteDebugTest extends AnyFunSuite with TestBase {

@@ -17,17 +17,20 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.spark.RealS3TestBase
-import io.indextables.spark.utils.CredentialProviderFactory
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.functions._
 import java.io.{File, FileInputStream}
-import java.util.{Properties, UUID}
-import scala.util.Using
 import java.net.URI
+import java.util.{Properties, UUID}
+
+import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import org.apache.hadoop.conf.Configuration
 
 // Import real AWS SDK interfaces
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicAWSCredentials}
+import io.indextables.spark.utils.CredentialProviderFactory
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Test credential provider that records the URI passed to its constructor and uses real AWS credentials loaded from

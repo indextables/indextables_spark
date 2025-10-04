@@ -17,9 +17,9 @@
 
 package io.indextables.spark.prewarm
 
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * Simple unit test for PreWarmManager that doesn't require full Spark setup. This tests the basic functionality without

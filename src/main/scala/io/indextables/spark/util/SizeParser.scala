@@ -17,8 +17,9 @@
 
 package io.indextables.spark.util
 
+import scala.util.{Failure, Success, Try}
+
 import org.slf4j.LoggerFactory
-import scala.util.{Try, Success, Failure}
 
 /**
  * Utility for parsing size strings in various formats (bytes, MB, GB).

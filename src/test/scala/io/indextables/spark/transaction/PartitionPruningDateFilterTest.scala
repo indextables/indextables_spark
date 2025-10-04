@@ -17,10 +17,12 @@
 
 package io.indextables.spark.transaction
 
+import java.sql.Date
+
+import org.apache.spark.sql.sources._
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.apache.spark.sql.sources._
-import java.sql.Date
 
 /**
  * Unit tests for date filtering in partition pruning that don't require Spark. Tests the core logic of comparing

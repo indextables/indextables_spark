@@ -17,14 +17,15 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLog}
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
-
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.SparkSession
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /** Test to validate that files with zero records are not inserted into the transaction log */
 class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {

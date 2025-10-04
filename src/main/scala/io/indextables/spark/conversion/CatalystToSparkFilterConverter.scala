@@ -20,6 +20,7 @@ package io.indextables.spark.conversion
 import org.apache.spark.sql.catalyst.expressions
 import org.apache.spark.sql.sources
 import org.apache.spark.sql.types._
+
 import org.slf4j.LoggerFactory
 
 /**

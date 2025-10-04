@@ -17,11 +17,12 @@
 
 package io.indextables.spark.catalyst
 
-import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, SubqueryAlias, View}
 import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, SubqueryAlias, View}
+import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
+
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
 
 /**
  * Catalyst rule to convert IndexQuery expressions to V2-compatible filters.
@@ -40,7 +41,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     // Find the relation in this plan (if any) to check if we need to clear ThreadLocal
     import io.indextables.spark.core.IndexTables4SparkScanBuilder
-    val relationInPlan = plan.collectFirst { case relation: DataSourceV2Relation if isCompatibleV2DataSource(relation) => relation }
+    val relationInPlan = plan.collectFirst {
+      case relation: DataSourceV2Relation if isCompatibleV2DataSource(relation) => relation
+    }
 
     // Clear ThreadLocal only if we're starting a new query (different relation ID)
     IndexTables4SparkScanBuilder.clearCurrentRelationIfDifferent(relationInPlan)
@@ -67,7 +70,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
           println(s"🔍 V2IndexQueryExpressionRule: Not compatible V2 DataSource - REJECTING IndexQuery")
           // Check if condition contains IndexQuery to warn user
           if (containsIndexQueryExpression(condition)) {
-            println(s"⚠️  WARNING: IndexQuery expression detected but rejected because table is not compatible V2 DataSource")
+            println(
+              s"⚠️  WARNING: IndexQuery expression detected but rejected because table is not compatible V2 DataSource"
+            )
             println(s"⚠️  Table class: ${child.table.getClass.getName}, Table name: ${child.table.name()}")
           }
           filter
@@ -128,7 +133,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
                   // Check if condition contains IndexQuery to warn user
                   if (containsIndexQueryExpression(condition)) {
                     println(s"⚠️  WARNING: IndexQuery expression detected but rejected because table is not compatible V2 DataSource")
-                    println(s"⚠️  Table class: ${v2Relation.table.getClass.getName}, Table name: ${v2Relation.table.name()}")
+                    println(
+                      s"⚠️  Table class: ${v2Relation.table.getClass.getName}, Table name: ${v2Relation.table.name()}"
+                    )
                   }
                   filter
                 }

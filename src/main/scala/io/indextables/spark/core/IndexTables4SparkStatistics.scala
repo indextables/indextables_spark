@@ -17,15 +17,17 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.connector.read.Statistics
+import java.util.{HashMap => JavaHashMap, Map => JavaMap, Optional, OptionalLong}
+
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
-import java.util.{OptionalLong, Map => JavaMap, HashMap => JavaHashMap, Optional}
+import org.apache.spark.sql.connector.read.Statistics
+
 import io.indextables.spark.transaction.AddAction
 
 /**
- * Implementation of Spark's Statistics interface for IndexTables4Spark. Provides table-level statistics including size in
- * bytes, number of rows, and column-level statistics where available.
+ * Implementation of Spark's Statistics interface for IndexTables4Spark. Provides table-level statistics including size
+ * in bytes, number of rows, and column-level statistics where available.
  */
 class IndexTables4SparkStatistics(
   totalSizeInBytes: Option[Long],

@@ -17,14 +17,17 @@
 
 package io.indextables.spark.demo
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
-import io.indextables.spark.core.IndexTables4SparkScan
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.sources._
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.sources._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.core.IndexTables4SparkScan
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
 
 /**
  * Demonstration of data skipping functionality in IndexTables4Spark.
@@ -197,7 +200,8 @@ object DataSkippingDemo extends TestBase {
 
     val options              = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
     val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-    val scan = new IndexTables4SparkScan(spark, transactionLog, schema, filters, options, None, emptyBroadcastConfig.value)
+    val scan =
+      new IndexTables4SparkScan(spark, transactionLog, schema, filters, options, None, emptyBroadcastConfig.value)
 
     val totalFiles   = transactionLog.listFiles().length
     val partitions   = scan.planInputPartitions()

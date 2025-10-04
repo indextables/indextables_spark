@@ -17,14 +17,17 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.spark.RealS3TestBase
-import org.apache.spark.sql.functions._
 import java.io.{File, FileInputStream}
-import java.util.Properties
-import java.util.UUID
-import scala.util.Using
 import java.sql.Date
 import java.time.LocalDate
+import java.util.Properties
+import java.util.UUID
+
+import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Real AWS S3 integration tests using test-tantivy4sparkbucket in us-east-2.

@@ -17,19 +17,21 @@
 
 package io.indextables.spark.prewarm
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.apache.spark.sql.{SparkSession, DataFrame}
-import org.apache.spark.sql.functions.{col, _}
-import io.indextables.spark.storage.BroadcastSplitLocalityManager
 import java.io.File
 import java.nio.file.{Files, Paths}
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions.{col, _}
+
+import io.indextables.spark.storage.BroadcastSplitLocalityManager
 import org.apache.commons.io.FileUtils
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
 /**
- * Integration test for the pre-warm functionality with actual IndexTables4Spark DataSource. This test verifies the complete
- * pre-warm flow from write to read with cache warming.
+ * Integration test for the pre-warm functionality with actual IndexTables4Spark DataSource. This test verifies the
+ * complete pre-warm flow from write to read with cache warming.
  */
 class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 

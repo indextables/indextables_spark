@@ -17,10 +17,12 @@
 
 package io.indextables.spark.transaction
 
-import org.slf4j.LoggerFactory
 import java.util.concurrent.{ConcurrentHashMap, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicLong
+
 import scala.jdk.CollectionConverters._
+
+import org.slf4j.LoggerFactory
 
 /**
  * Time-based cache for transaction log data with configurable expiration. Designed to reduce repeated

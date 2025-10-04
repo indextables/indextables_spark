@@ -17,14 +17,17 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLog, AddAction, SkipAction}
-import io.indextables.spark.sql.SerializableSplitMetadata
-import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Try
+
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.sql.SerializableSplitMetadata
+import io.indextables.spark.transaction.{AddAction, SkipAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Test suite to validate that merge operations correctly handle skipped files:

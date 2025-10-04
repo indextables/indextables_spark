@@ -17,16 +17,17 @@
 
 package io.indextables.spark.extensions
 
-import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.FunctionIdentifier
-import org.apache.spark.sql.catalyst.expressions.ExpressionInfo
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.catalyst.expressions.ExpressionInfo
+import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.unsafe.types.UTF8String
-import io.indextables.spark.sql.IndexTables4SparkSqlParser
-import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
+
 import io.indextables.spark.catalyst.V2IndexQueryExpressionRule
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.sql.IndexTables4SparkSqlParser
 
 /**
  * Spark session extensions for IndexTables4Spark.

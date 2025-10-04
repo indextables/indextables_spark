@@ -17,13 +17,14 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter, Searcher}
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitTermQuery, SplitMatchAllQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Searcher}
+import io.indextables.tantivy4java.query.Query
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery, SplitSearcher, SplitTermQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 /** Simple test to validate that tantivy4java term queries work properly on the indexes we create. */
 class SimpleTermQueryTest extends TestBase {

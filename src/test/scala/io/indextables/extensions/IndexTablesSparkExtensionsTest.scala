@@ -17,10 +17,11 @@
 
 package io.indextables.extensions
 
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
+
+import io.indextables.spark.extensions.IndexTables4SparkExtensions
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
-import io.indextables.spark.extensions.IndexTables4SparkExtensions
 
 /** Test suite to verify that IndexTablesSparkExtensions correctly aliases IndexTables4SparkExtensions functionality. */
 class IndexTablesSparkExtensionsTest extends AnyFunSuite with Matchers {

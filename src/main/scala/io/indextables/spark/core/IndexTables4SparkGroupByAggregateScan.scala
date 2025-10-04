@@ -17,20 +17,31 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.connector.read.{Scan, Batch, InputPartition}
-import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{StructType, StructField, StringType, LongType, IntegerType, FloatType, DoubleType, DataType}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
+import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.types.{
+  DataType,
+  DoubleType,
+  FloatType,
+  IntegerType,
+  LongType,
+  StringType,
+  StructField,
+  StructType
+}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
 import io.indextables.spark.transaction.TransactionLog
-import org.slf4j.LoggerFactory
+import io.indextables.tantivy4java.aggregation.TermsResult
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
-import io.indextables.tantivy4java.aggregation.TermsResult
 import io.indextables.tantivy4java.split.SplitMatchAllQuery
-import scala.jdk.CollectionConverters._
+import org.slf4j.LoggerFactory
 
 /**
  * Specialized scan for GROUP BY aggregation operations. Implements distributed GROUP BY aggregation using tantivy's
@@ -98,7 +109,11 @@ class IndexTables4SparkGroupByAggregateScan(
     logger.info(s"🔍 GROUP BY SCHEMA: Creating schema for GROUP BY on columns: ${groupByColumns.mkString(", ")}")
 
     // Start with GROUP BY columns
-    logger.info(s"🔍 GROUP BY SCHEMA: Looking up field types from schema with ${schema.fields.length} fields: ${schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
+    logger.info(
+      s"🔍 GROUP BY SCHEMA: Looking up field types from schema with ${schema.fields.length} fields: ${schema.fields
+          .map(f => s"${f.name}:${f.dataType}")
+          .mkString(", ")}"
+    )
 
     val groupByFields = groupByColumns.map { columnName =>
       // Find the column type from the original schema
@@ -128,7 +143,7 @@ class IndexTables4SparkGroupByAggregateScan(
             val sumType = fieldType match {
               case IntegerType | LongType => LongType
               case FloatType | DoubleType => DoubleType
-              case _ => DoubleType  // Default to DoubleType for unknown types
+              case _                      => DoubleType // Default to DoubleType for unknown types
             }
             (s"sum", sumType)
           case avg: Avg =>
@@ -161,7 +176,8 @@ class IndexTables4SparkGroupByAggregateScan(
   /** Get the input field type for an aggregation expression. */
   private def getInputFieldType(
     aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc,
-    schema: StructType): DataType = {
+    schema: StructType
+  ): DataType = {
 
     // Get the column reference from the aggregation
     val column = aggExpr.children().headOption.getOrElse {
@@ -439,7 +455,14 @@ class IndexTables4SparkGroupByAggregateReader(
     import org.apache.spark.sql.catalyst.InternalRow
     import org.apache.spark.unsafe.types.UTF8String
     import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
-    import io.indextables.tantivy4java.aggregation.{CountAggregation, SumAggregation, AverageAggregation, MinAggregation, MaxAggregation, TermsAggregation}
+    import io.indextables.tantivy4java.aggregation.{
+      CountAggregation,
+      SumAggregation,
+      AverageAggregation,
+      MinAggregation,
+      MaxAggregation,
+      TermsAggregation
+    }
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
@@ -498,7 +521,8 @@ class IndexTables4SparkGroupByAggregateReader(
           logger.info(s"🔍 GROUP BY EXECUTION: Using native MultiTermsAggregation")
 
           // Create MultiTermsAggregation with the field array
-          val multiTermsAgg = new io.indextables.tantivy4java.aggregation.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
+          val multiTermsAgg =
+            new io.indextables.tantivy4java.aggregation.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
           logger.info(
             s"🔍 GROUP BY EXECUTION: Created MultiTermsAggregation for fields: ${groupByColumns.mkString(", ")}"
           )
@@ -521,9 +545,15 @@ class IndexTables4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"sum_$index", new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName))
+                    terms.addSubAggregation(
+                      s"sum_$index",
+                      new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
+                    )
                   case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"sum_$index", new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName))
+                    multiTerms.addSubAggregation(
+                      s"sum_$index",
+                      new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
+                    )
                 }
 
               case avg: Avg =>
@@ -540,9 +570,15 @@ class IndexTables4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"min_$index", new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName))
+                    terms.addSubAggregation(
+                      s"min_$index",
+                      new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
+                    )
                   case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"min_$index", new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName))
+                    multiTerms.addSubAggregation(
+                      s"min_$index",
+                      new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
+                    )
                 }
 
               case max: Max =>
@@ -550,9 +586,15 @@ class IndexTables4SparkGroupByAggregateReader(
                 logger.info(s"🔍 GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
-                    terms.addSubAggregation(s"max_$index", new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName))
+                    terms.addSubAggregation(
+                      s"max_$index",
+                      new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
+                    )
                   case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(s"max_$index", new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName))
+                    multiTerms.addSubAggregation(
+                      s"max_$index",
+                      new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
+                    )
                 }
 
               case other =>
@@ -572,20 +614,21 @@ class IndexTables4SparkGroupByAggregateReader(
           logger.info(s"🔍 GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
 
           // Get the split field names for schema validation
-          val splitFieldNames = try {
-            import scala.collection.JavaConverters._
-            val schema = splitSearchEngine.getSchema()
-            if (schema != null) {
-              Some(schema.getFieldNames().asScala.toSet)
-            } else {
-              logger.debug(s"🔍 GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
-              None
+          val splitFieldNames =
+            try {
+              import scala.collection.JavaConverters._
+              val schema = splitSearchEngine.getSchema()
+              if (schema != null) {
+                Some(schema.getFieldNames().asScala.toSet)
+              } else {
+                logger.debug(s"🔍 GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
+                None
+              }
+            } catch {
+              case e: Exception =>
+                logger.debug(s"🔍 GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
+                None
             }
-          } catch {
-            case e: Exception =>
-              logger.debug(s"🔍 GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
-              None
-          }
 
           // Create options from broadcast config
           import scala.jdk.CollectionConverters._
@@ -641,9 +684,10 @@ class IndexTables4SparkGroupByAggregateReader(
 
             // The aggregationResult is a TermsResult containing the nested structure
             // We need to wrap it in a MultiTermsResult to flatten the nested buckets
-            val termsResult      = aggregationResult.asInstanceOf[TermsResult]
-            val multiTermsResult = new io.indextables.tantivy4java.aggregation.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
-            val multiBuckets     = multiTermsResult.getBuckets
+            val termsResult = aggregationResult.asInstanceOf[TermsResult]
+            val multiTermsResult =
+              new io.indextables.tantivy4java.aggregation.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
+            val multiBuckets = multiTermsResult.getBuckets
 
             if (multiBuckets == null) {
               logger.error(s"🔍 GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
@@ -657,11 +701,12 @@ class IndexTables4SparkGroupByAggregateReader(
               .filter(_ != null)
               .map { multiBucket =>
                 try {
-                  val fieldValues   = multiBucket.getFieldValues()
-                  val groupByValues = fieldValues.zipWithIndex.map { case (value, idx) =>
-                    val fieldName = groupByColumns(idx)
-                    val fieldType = getFieldType(fieldName)
-                    convertStringValueToSpark(value, fieldType)
+                  val fieldValues = multiBucket.getFieldValues()
+                  val groupByValues = fieldValues.zipWithIndex.map {
+                    case (value, idx) =>
+                      val fieldName = groupByColumns(idx)
+                      val fieldType = getFieldType(fieldName)
+                      convertStringValueToSpark(value, fieldType)
                   }
                   val aggregationValues =
                     calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
@@ -746,7 +791,11 @@ class IndexTables4SparkGroupByAggregateReader(
       Some(partition.tablePath.toString)
     )
 
-    logger.info(s"🔍 GROUP BY EXECUTION: Created cache config with AWS credentials - accessKey=${cacheConfig.awsAccessKey.map(k => s"${k.take(4)}***").getOrElse("None")}")
+    logger.info(
+      s"🔍 GROUP BY EXECUTION: Created cache config with AWS credentials - accessKey=${cacheConfig.awsAccessKey
+          .map(k => s"${k.take(4)}***")
+          .getOrElse("None")}"
+    )
 
     // Return SplitCacheConfig directly (for SplitSearchEngine)
     cacheConfig
@@ -827,7 +876,10 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Convert bucket key to appropriate Spark value. */
-  private def convertBucketKeyToSpark(bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket, fieldName: String): Any = {
+  private def convertBucketKeyToSpark(
+    bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket,
+    fieldName: String
+  ): Any = {
     import org.apache.spark.unsafe.types.UTF8String
 
     if (bucket == null) {
@@ -886,8 +938,10 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Calculate aggregation values from bucket data. Currently only supports COUNT aggregations with GROUP BY. */
-  private def calculateAggregationValues(bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket, aggregation: Aggregation)
-    : Array[Any] = {
+  private def calculateAggregationValues(
+    bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket,
+    aggregation: Aggregation
+  ): Array[Any] = {
     // This method is now deprecated - metric aggregations are calculated separately
     // Keep for backward compatibility with COUNT-only queries
     import org.apache.spark.sql.connector.expressions.aggregate._
@@ -969,19 +1023,19 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Get the Spark DataType for a field from the schema */
-  private def getFieldType(fieldName: String): DataType = {
+  private def getFieldType(fieldName: String): DataType =
     partition.schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
         logger.debug(s"🔍 AGGREGATION TYPE: Field '$fieldName' not found in schema, defaulting to LongType")
         LongType
     }
-  }
 
   /** Get the input field type for an aggregation expression. */
   private def getInputFieldType(
     aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc,
-    schema: StructType): DataType = {
+    schema: StructType
+  ): DataType = {
 
     // Get the column reference from the aggregation
     val column = aggExpr.children().headOption.getOrElse {
@@ -998,7 +1052,7 @@ class IndexTables4SparkGroupByAggregateReader(
         val pattern = """FieldReference\(([^)]+)\)""".r
         pattern.findFirstMatchIn(exprStr) match {
           case Some(m) => m.group(1)
-          case None => "unknown_field"
+          case None    => "unknown_field"
         }
       } else {
         "unknown_field"
@@ -1040,10 +1094,12 @@ class IndexTables4SparkGroupByAggregateReader(
             case sum: Sum =>
               // Extract SUM result from sub-aggregation
               try {
-                val sumResult = multiBucket.getSubAggregation(s"sum_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
+                val sumResult = multiBucket
+                  .getSubAggregation(s"sum_$index")
+                  .asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 if (sumResult != null) {
                   // tantivy4java returns double, convert to appropriate type based on input field
-                  val sumValue = sumResult.getSum
+                  val sumValue  = sumResult.getSum
                   val fieldType = getInputFieldType(sum, schema)
                   val result: Any = fieldType match {
                     case IntegerType | LongType =>
@@ -1073,10 +1129,12 @@ class IndexTables4SparkGroupByAggregateReader(
             case min: Min =>
               // Extract MIN result from sub-aggregation
               try {
-                val minResult = multiBucket.getSubAggregation(s"min_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
+                val minResult = multiBucket
+                  .getSubAggregation(s"min_$index")
+                  .asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 if (minResult != null) {
                   // tantivy4java returns double, convert to appropriate type based on input field
-                  val minValue = minResult.getMin
+                  val minValue  = minResult.getMin
                   val fieldType = getInputFieldType(min, schema)
                   val result: Any = fieldType match {
                     case IntegerType =>
@@ -1086,7 +1144,7 @@ class IndexTables4SparkGroupByAggregateReader(
                       val longVal: Long = Math.round(minValue)
                       java.lang.Long.valueOf(longVal)
                     case FloatType => java.lang.Float.valueOf(minValue.toFloat)
-                    case _ => java.lang.Double.valueOf(minValue)
+                    case _         => java.lang.Double.valueOf(minValue)
                   }
                   result
                 } else {
@@ -1102,10 +1160,12 @@ class IndexTables4SparkGroupByAggregateReader(
             case max: Max =>
               // Extract MAX result from sub-aggregation
               try {
-                val maxResult = multiBucket.getSubAggregation(s"max_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
+                val maxResult = multiBucket
+                  .getSubAggregation(s"max_$index")
+                  .asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 if (maxResult != null) {
                   // tantivy4java returns double, convert to appropriate type based on input field
-                  val maxValue = maxResult.getMax
+                  val maxValue  = maxResult.getMax
                   val fieldType = getInputFieldType(max, schema)
                   val result: Any = fieldType match {
                     case IntegerType =>
@@ -1115,7 +1175,7 @@ class IndexTables4SparkGroupByAggregateReader(
                       val longVal: Long = Math.round(maxValue)
                       java.lang.Long.valueOf(longVal)
                     case FloatType => java.lang.Float.valueOf(maxValue.toFloat)
-                    case _ => java.lang.Double.valueOf(maxValue)
+                    case _         => java.lang.Double.valueOf(maxValue)
                   }
                   result
                 } else {
@@ -1162,7 +1222,8 @@ class IndexTables4SparkGroupByAggregateReader(
             case sum: Sum =>
               // Extract SUM result from sub-aggregation
               try {
-                val sumResult = bucket.getSubAggregation(s"sum_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
+                val sumResult =
+                  bucket.getSubAggregation(s"sum_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 if (sumResult != null) {
                   val fieldName = getFieldName(sum.column)
                   val fieldType = getFieldType(fieldName)
@@ -1198,7 +1259,8 @@ class IndexTables4SparkGroupByAggregateReader(
             case min: Min =>
               // Extract MIN result from sub-aggregation
               try {
-                val minResult = bucket.getSubAggregation(s"min_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
+                val minResult =
+                  bucket.getSubAggregation(s"min_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 if (minResult != null) {
                   val fieldName = getFieldName(min.column)
                   val fieldType = getFieldType(fieldName)
@@ -1228,7 +1290,8 @@ class IndexTables4SparkGroupByAggregateReader(
             case max: Max =>
               // Extract MAX result from sub-aggregation
               try {
-                val maxResult = bucket.getSubAggregation(s"max_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
+                val maxResult =
+                  bucket.getSubAggregation(s"max_$index").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 if (maxResult != null) {
                   val fieldName = getFieldName(max.column)
                   val fieldType = getFieldType(fieldName)

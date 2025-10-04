@@ -17,9 +17,10 @@
 
 package io.indextables.spark.io
 
+import java.io.ByteArrayOutputStream
+
 import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
-import java.io.ByteArrayOutputStream
 
 class S3CloudStorageProviderMultipartTest extends AnyFunSuite with TestBase {
 

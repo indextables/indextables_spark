@@ -17,43 +17,46 @@
 
 package io.indextables.spark.core
 
+import java.util
+
+import scala.collection.JavaConverters._
+
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
 import org.apache.spark.sql.sources.{
   BaseRelation,
+  CatalystScan,
   CreatableRelationProvider,
   DataSourceRegister,
-  RelationProvider,
-  TableScan,
+  Filter,
   PrunedFilteredScan,
-  CatalystScan,
-  Filter
+  RelationProvider,
+  TableScan
 }
-import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
-import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{
-  StructType,
-  TimestampType,
+  BooleanType,
   DateType,
-  LongType,
-  StringType,
   DoubleType,
   FloatType,
   IntegerType,
-  BooleanType
+  LongType,
+  StringType,
+  StructType,
+  TimestampType
 }
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
-import org.slf4j.LoggerFactory
 
-import java.util
-import scala.collection.JavaConverters._
+import org.apache.hadoop.fs.Path
+
 import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import org.slf4j.LoggerFactory
 
 object IndexTables4SparkRelation {
   def extractZipToDirectory(zipData: Array[Byte], targetDir: java.nio.file.Path): Unit = {

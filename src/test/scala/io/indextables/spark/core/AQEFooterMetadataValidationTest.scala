@@ -17,16 +17,19 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.catalyst.plans.logical.{GlobalLimit, LocalLimit}
-import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
-import org.apache.spark.sql.execution.{CollectLimitExec, SparkPlan}
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.scalatest.matchers.should.Matchers
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
-import org.apache.hadoop.fs.Path
 import scala.collection.mutable
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.catalyst.plans.logical.{GlobalLimit, LocalLimit}
+import org.apache.spark.sql.execution.{CollectLimitExec, SparkPlan}
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
+import org.apache.spark.sql.functions._
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Tests to validate that footer metadata isn't lost during Spark's Adaptive Query Execution (AQE), specifically

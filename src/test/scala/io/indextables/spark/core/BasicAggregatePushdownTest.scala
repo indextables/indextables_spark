@@ -17,8 +17,9 @@
 
 package io.indextables.spark.core
 
-import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
 
 /** Basic test for aggregate pushdown functionality. */
 class BasicAggregatePushdownTest extends AnyFunSuite {

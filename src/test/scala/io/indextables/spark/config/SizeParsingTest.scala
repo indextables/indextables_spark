@@ -1,12 +1,13 @@
 package io.indextables.spark.config
 
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
-
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /** Test to verify that human-readable size formats work for indexWriter.heapSize */
 class SizeParsingTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {

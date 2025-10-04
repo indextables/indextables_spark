@@ -17,10 +17,12 @@
 
 package io.indextables.spark.search
 
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.apache.hadoop.conf.Configuration
+
 import org.slf4j.LoggerFactory
 
 class TantivySearchEngine private (

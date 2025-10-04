@@ -17,16 +17,20 @@
 
 package io.indextables.spark.core
 
+import java.net.ServerSocket
+
+import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import io.findify.s3mock.S3Mock
 import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import io.findify.s3mock.S3Mock
-import java.net.ServerSocket
-import scala.util.Using
-import org.apache.spark.sql.functions._
 
 /**
  * Test to demonstrate the credential propagation issue in V2 read path. Specifically tests that AWS credentials are
- * properly passed from driver to executors when using SplitSearchEngine.fromSplitFile in IndexTables4SparkPartitionReader.
+ * properly passed from driver to executors when using SplitSearchEngine.fromSplitFile in
+ * IndexTables4SparkPartitionReader.
  */
 class V2S3CredentialTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 

@@ -17,19 +17,23 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.util.JsonUtil
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.{Dataset, SparkSession}
-import org.apache.spark.sql.functions._
-import org.slf4j.LoggerFactory
 import java.io._
-import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.{Files, Paths, StandardOpenOption}
+import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicLong
+
 import scala.collection.mutable
 import scala.util.{Failure, Success, Try, Using}
-import java.util.concurrent.atomic.AtomicLong
+
+import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql.functions._
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.util.JsonUtil
+import org.slf4j.LoggerFactory
 
 /**
  * Memory-optimized operations for transaction log processing. Implements streaming, columnar processing, and external

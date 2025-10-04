@@ -17,10 +17,11 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
+
+import io.indextables.spark.TestBase
 
 /**
  * Test V2 DataSource with local storage and date filtering. This test validates proper DateType handling and data

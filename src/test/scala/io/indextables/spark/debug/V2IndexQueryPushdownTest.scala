@@ -17,17 +17,19 @@
 
 package io.indextables.spark.debug
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions.col
-import org.apache.spark.sql.{Column, DataFrame}
-import org.apache.spark.sql.catalyst.expressions.Literal
-import org.apache.spark.sql.types.StringType
-import org.apache.spark.unsafe.types.UTF8String
-import io.indextables.spark.expressions.IndexQueryExpression
 import java.io.File
 import java.nio.file.{Files, Paths}
+
+import org.apache.spark.sql.{Column, DataFrame}
+import org.apache.spark.sql.catalyst.expressions.Literal
+import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.types.StringType
+import org.apache.spark.unsafe.types.UTF8String
+
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Debug test specifically for V2 IndexQuery pushdown issues. This test isolates V2 DataSource API behavior to verify

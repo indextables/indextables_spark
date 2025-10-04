@@ -17,9 +17,11 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.SaveMode
 import java.sql.Timestamp
+
+import org.apache.spark.sql.SaveMode
+
+import io.indextables.spark.TestBase
 
 /**
  * Test to validate timestamp round-trip accuracy for V2 table provider. This test specifically checks for the bug where

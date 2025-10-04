@@ -17,8 +17,9 @@
 
 package io.indextables.spark.util
 
-import org.slf4j.Logger
 import java.io.IOException
+
+import org.slf4j.Logger
 
 object ErrorUtil {
 

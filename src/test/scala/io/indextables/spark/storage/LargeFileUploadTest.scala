@@ -17,11 +17,14 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.types._
-import java.nio.file.{Files, Paths}
 import java.io.RandomAccessFile
+import java.nio.file.{Files, Paths}
+
 import scala.util.Random
+
+import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
 
 /**
  * Test memory-efficient upload for large splits to prevent OOM errors. Tests both the streaming upload mechanism and

@@ -3,9 +3,9 @@ package io.indextables.provider
 import io.indextables.spark.core.IndexTables4SparkTableProvider
 
 /**
- * Alias for IndexTables4SparkTableProvider to provide a more generic interface. This allows users to access IndexTables4Spark
- * functionality using the io.indextables.provider.IndexTablesProvider format. Configuration uses spark.indextables
- * prefix which is interchangeable with spark.indextables.
+ * Alias for IndexTables4SparkTableProvider to provide a more generic interface. This allows users to access
+ * IndexTables4Spark functionality using the io.indextables.provider.IndexTablesProvider format. Configuration uses
+ * spark.indextables prefix which is interchangeable with spark.indextables.
  *
  * Usage: spark.read.format("io.indextables.provider.IndexTablesProvider").load("s3://bucket/path")
  * spark.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")

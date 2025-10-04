@@ -17,17 +17,20 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
 
 class PrewarmCacheTest extends TestBase {
 
   test("prewarmCache should populate cache on table initialization") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         // Initialize table with some data
@@ -58,7 +61,7 @@ class PrewarmCacheTest extends TestBase {
 
         // Verify cache is populated by checking that subsequent reads are fast
         val cacheStartTime = System.currentTimeMillis()
-        val files = txLog.listFiles()
+        val files          = txLog.listFiles()
         val cachedReadTime = System.currentTimeMillis() - cacheStartTime
 
         files.size shouldBe 5
@@ -75,9 +78,8 @@ class PrewarmCacheTest extends TestBase {
           case None =>
             println("No cache stats available (using standard TransactionLog)")
         }
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -87,13 +89,15 @@ class PrewarmCacheTest extends TestBase {
 
       // First, create a table with V2 API
       val df = spark.range(100).selectExpr("id", "concat('text_', id) as content")
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
 
       // Now read with V2 API - prewarm should happen automatically
       val startTime = System.currentTimeMillis()
-      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
       val initTime = System.currentTimeMillis() - startTime
 
@@ -114,7 +118,7 @@ class PrewarmCacheTest extends TestBase {
   test("prewarmCache should handle empty tables gracefully") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         // Initialize empty table
@@ -127,19 +131,20 @@ class PrewarmCacheTest extends TestBase {
         // Verify table is still accessible
         val files = txLog.listFiles()
         files.size shouldBe 0
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("prewarmCache should handle tables with checkpoints") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val options = new CaseInsensitiveStringMap(Map(
-        "spark.indextables.checkpoint.enabled" -> "true",
-        "spark.indextables.checkpoint.interval" -> "3"
-      ).asJava)
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.checkpoint.enabled"  -> "true",
+          "spark.indextables.checkpoint.interval" -> "3"
+        ).asJava
+      )
       val txLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
@@ -170,25 +175,23 @@ class PrewarmCacheTest extends TestBase {
         // Verify cache is populated and checkpoint is available
         val files = txLog.listFiles()
         files.size shouldBe 5
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("prewarmCache should be non-fatal on errors") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
-      try {
+      try
         // Call prewarm on non-existent table - should not throw exception
         noException shouldBe thrownBy {
           txLog.prewarmCache()
         }
-      } finally {
+      finally
         txLog.close()
-      }
     }
   }
 }

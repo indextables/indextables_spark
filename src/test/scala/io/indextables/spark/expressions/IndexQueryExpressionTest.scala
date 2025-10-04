@@ -17,10 +17,11 @@
 
 package io.indextables.spark.expressions
 
-import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.analysis.{TypeCheckResult, UnresolvedAttribute}
+import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
+
 import org.scalatest.funsuite.AnyFunSuite
 
 class IndexQueryExpressionTest extends AnyFunSuite {

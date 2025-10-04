@@ -17,14 +17,17 @@
 
 package io.indextables.spark.core
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.SaveMode
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Random
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Comprehensive test for AVG aggregation functionality with and without GROUP BY. Verifies that Spark correctly

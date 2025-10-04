@@ -17,12 +17,14 @@
 
 package io.indextables.spark
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.apache.spark.sql.SparkSession
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Base class for real AWS S3 integration tests.

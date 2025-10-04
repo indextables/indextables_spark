@@ -17,9 +17,10 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
 /**

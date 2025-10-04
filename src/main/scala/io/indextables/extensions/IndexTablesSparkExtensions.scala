@@ -3,8 +3,8 @@ package io.indextables.extensions
 import io.indextables.spark.extensions.IndexTables4SparkExtensions
 
 /**
- * Alias for IndexTables4SparkExtensions to provide a more generic interface. This allows users to register IndexTables4Spark
- * SQL extensions using the io.indextables namespace.
+ * Alias for IndexTables4SparkExtensions to provide a more generic interface. This allows users to register
+ * IndexTables4Spark SQL extensions using the io.indextables namespace.
  *
  * Extensions provided (inherited from IndexTables4SparkExtensions):
  *   - Custom SQL parser for MERGE SPLITS command

@@ -17,20 +17,22 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
-import io.findify.s3mock.S3Mock
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.matchers.should.Matchers._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.CreateBucketRequest
-
 import java.net.{ServerSocket, URI}
+
 import scala.jdk.CollectionConverters._
 import scala.util.Using
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.findify.s3mock.S3Mock
+import io.indextables.spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.matchers.should.Matchers._
+import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest
+import software.amazon.awssdk.services.s3.S3Client
 
 /**
  * Isolated tests to debug S3 flow issues. These tests isolate each component to identify the root cause of S3 operation

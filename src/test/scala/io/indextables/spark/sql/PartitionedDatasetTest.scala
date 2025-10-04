@@ -17,14 +17,17 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions._
+import java.io.File
 import java.nio.file.{Files, Paths}
 import java.sql.Timestamp
 import java.time.{LocalDate, LocalDateTime}
+
 import scala.util.Random
-import java.io.File
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 import org.apache.commons.io.FileUtils
 
 class PartitionedDatasetTest extends TestBase {

@@ -17,12 +17,12 @@
 
 package io.indextables.spark.core
 
+import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import org.scalatest.funsuite.AnyFunSuite
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
 /**
- * Unit tests for IndexQuery cache implementation using WeakHashMap with relation objects.
- * Tests storage and retrieval based on DataSourceV2Relation object identity.
+ * Unit tests for IndexQuery cache implementation using WeakHashMap with relation objects. Tests storage and retrieval
+ * based on DataSourceV2Relation object identity.
  */
 class IndexQueryCacheTest extends AnyFunSuite {
 
@@ -51,7 +51,7 @@ class IndexQueryCacheTest extends AnyFunSuite {
 
   test("cache should allow clearing of entries") {
     val relation = new Object()
-    val filters = Seq(IndexQueryFilter("field", "query"))
+    val filters  = Seq(IndexQueryFilter("field", "query"))
 
     IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters)
     assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).nonEmpty)
@@ -117,7 +117,7 @@ class IndexQueryCacheTest extends AnyFunSuite {
 
   test("WeakHashMap should allow GC to clean up unreferenced relations") {
     var relation: AnyRef = new Object()
-    val filters = Seq(IndexQueryFilter("field", "query"))
+    val filters          = Seq(IndexQueryFilter("field", "query"))
 
     IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters)
     assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).nonEmpty)

@@ -17,15 +17,19 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.{SparkSession, Row}
+import java.nio.file.{Files, Paths}
+
+import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
-import java.nio.file.{Files, Paths}
-import scala.collection.JavaConverters._
 
 class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll with BeforeAndAfterEach {
 

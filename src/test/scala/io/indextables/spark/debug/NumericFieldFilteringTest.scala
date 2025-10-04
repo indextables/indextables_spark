@@ -1,8 +1,9 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
+
+import io.indextables.spark.TestBase
 
 class NumericFieldFilteringTest extends TestBase {
 

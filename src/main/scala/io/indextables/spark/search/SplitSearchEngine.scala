@@ -17,22 +17,24 @@
 
 package io.indextables.spark.search
 
-import io.indextables.tantivy4java.split.{
-  SplitSearcher,
-  SplitCacheManager,
-  SplitQuery,
-  SplitMatchAllQuery,
-  SplitTermQuery,
-  SplitBooleanQuery
-}
-import io.indextables.tantivy4java.result.SearchResult
-import io.indextables.tantivy4java.core.Schema
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
-import io.indextables.spark.schema.SchemaMapping
+import scala.util.Try
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
+
+import io.indextables.spark.schema.SchemaMapping
+import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.tantivy4java.core.Schema
+import io.indextables.tantivy4java.result.SearchResult
+import io.indextables.tantivy4java.split.{
+  SplitBooleanQuery,
+  SplitCacheManager,
+  SplitMatchAllQuery,
+  SplitQuery,
+  SplitSearcher,
+  SplitTermQuery
+}
 import org.slf4j.LoggerFactory
-import scala.util.Try
 
 /**
  * Search engine implementation using tantivy4java's SplitSearcher with global caching.
@@ -279,50 +281,51 @@ class SplitSearchEngine private (
       val docAddresses = hits.map(hit => hit.getDocAddress())
 
       // Use configurable document retrieval strategy
-      val documents: Array[io.indextables.tantivy4java.core.Document] = if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-        logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
+      val documents: Array[io.indextables.tantivy4java.core.Document] =
+        if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
+          logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
 
-        // Process in batches to respect maximum batch size
-        val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
-        logger.debug(s"Processing ${batches.length} batch(es) of documents")
+          // Process in batches to respect maximum batch size
+          val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
+          logger.debug(s"Processing ${batches.length} batch(es) of documents")
 
-        batches.flatMap { batchAddresses =>
-          try {
-            import scala.jdk.CollectionConverters._
-            val javaAddresses = batchAddresses.toList.asJava
-            val javaDocuments = splitSearcher.docBatch(javaAddresses)
-            javaDocuments.asScala
-          } catch {
-            case e: Exception =>
-              logger.warn(
-                s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval",
-                e
-              )
-              // Fallback to individual doc calls for this batch
-              batchAddresses.map { address =>
-                try
-                  splitSearcher.doc(address)
-                catch {
-                  case ex: Exception =>
-                    logger.warn(s"Error retrieving individual document for address: $address", ex)
-                    null
+          batches.flatMap { batchAddresses =>
+            try {
+              import scala.jdk.CollectionConverters._
+              val javaAddresses = batchAddresses.toList.asJava
+              val javaDocuments = splitSearcher.docBatch(javaAddresses)
+              javaDocuments.asScala
+            } catch {
+              case e: Exception =>
+                logger.warn(
+                  s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval",
+                  e
+                )
+                // Fallback to individual doc calls for this batch
+                batchAddresses.map { address =>
+                  try
+                    splitSearcher.doc(address)
+                  catch {
+                    case ex: Exception =>
+                      logger.warn(s"Error retrieving individual document for address: $address", ex)
+                      null
+                  }
                 }
-              }
+            }
+          }
+        } else {
+          logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
+          // Use individual doc calls when batch is disabled or only one document
+          hits.map { hit =>
+            try
+              splitSearcher.doc(hit.getDocAddress())
+            catch {
+              case ex: Exception =>
+                logger.warn(s"Error retrieving individual document for address: ${hit.getDocAddress()}", ex)
+                null
+            }
           }
         }
-      } else {
-        logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
-        // Use individual doc calls when batch is disabled or only one document
-        hits.map { hit =>
-          try
-            splitSearcher.doc(hit.getDocAddress())
-          catch {
-            case ex: Exception =>
-              logger.warn(s"Error retrieving individual document for address: ${hit.getDocAddress()}", ex)
-              null
-          }
-        }
-      }
 
       // Convert documents to InternalRows
       val rows = documents.zipWithIndex.map {

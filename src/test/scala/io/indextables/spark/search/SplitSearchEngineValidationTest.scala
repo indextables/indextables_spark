@@ -17,11 +17,12 @@
 
 package io.indextables.spark.search
 
-import org.scalatest.funsuite.AnyFunSuite
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.apache.spark.sql.types._
-import org.mockito.Mockito._
+
 import io.indextables.spark.storage.SplitCacheConfig
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.mockito.Mockito._
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Tests for SplitSearchEngine validation of metadata when creating searchers. Verifies that proper exceptions are

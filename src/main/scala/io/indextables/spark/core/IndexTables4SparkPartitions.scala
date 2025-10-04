@@ -17,29 +17,33 @@
 
 package io.indextables.spark.core
 
+import java.io.{ByteArrayOutputStream, IOException}
+import java.util.UUID
+
+import scala.jdk.CollectionConverters._
+
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.sql.connector.write.{DataWriter, DataWriterFactory, WriterCommitMessage}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.transaction.{AddAction, PartitionUtils}
-import io.indextables.spark.search.{TantivySearchEngine, SplitSearchEngine}
-import io.indextables.spark.storage.{
-  SplitCacheConfig,
-  GlobalSplitCacheManager,
-  SplitLocationRegistry,
-  BroadcastSplitLocalityManager
-}
-import io.indextables.spark.prewarm.PreWarmManager
-import io.indextables.spark.util.StatisticsCalculator
-import java.util.UUID
-import io.indextables.spark.io.CloudStorageProviderFactory
+
 import org.apache.hadoop.fs.Path
-import org.apache.spark.broadcast.Broadcast
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.prewarm.PreWarmManager
+import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
+import io.indextables.spark.storage.{
+  BroadcastSplitLocalityManager,
+  GlobalSplitCacheManager,
+  SplitCacheConfig,
+  SplitLocationRegistry
+}
+import io.indextables.spark.transaction.{AddAction, PartitionUtils}
+import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
-import java.io.{IOException, ByteArrayOutputStream}
-import scala.jdk.CollectionConverters._
 
 /** Utility for consistent path resolution across different scan types. */
 object PathResolutionUtils {
@@ -209,15 +213,15 @@ class IndexTables4SparkPartitionReader(
     logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
     broadcasted.foreach {
       case (k, v) =>
-        val safeValue = Option(v).getOrElse("null")
+        val safeValue   = Option(v).getOrElse("null")
         val maskedValue = maskSensitiveValue(k, safeValue)
         logger.debug(s"🔍 Broadcast config: $k -> $maskedValue")
     }
 
     // Helper function to get config from broadcast with defaults
     def getBroadcastConfig(configKey: String, default: String = ""): String = {
-      val value     = broadcasted.getOrElse(configKey, default)
-      val safeValue = Option(value).getOrElse(default)
+      val value       = broadcasted.getOrElse(configKey, default)
+      val safeValue   = Option(value).getOrElse(default)
       val maskedValue = maskSensitiveValue(configKey, Option(safeValue).getOrElse("null"))
       logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
       safeValue
@@ -225,7 +229,7 @@ class IndexTables4SparkPartitionReader(
 
     def getBroadcastConfigOption(configKey: String): Option[String] = {
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-      val value = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
+      val value       = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
       val maskedValue = value.map(v => maskSensitiveValue(configKey, v)).getOrElse("None")
       logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
       value

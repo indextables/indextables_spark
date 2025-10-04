@@ -17,11 +17,13 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
+import java.io.File
+import java.nio.file.Files
+
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
-import java.nio.file.Files
-import java.io.File
+
+import io.indextables.spark.TestBase
 
 /**
  * Comprehensive test suite for simple aggregation pushdown functionality. Tests COUNT, SUM, AVG, MIN, MAX aggregations
@@ -808,20 +810,22 @@ class SimpleAggregatePushdownTest extends TestBase {
       // Read and aggregate
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
-      val result = df.agg(
-        count("*").as("total_count"),
-        sum("value").as("total_sum"),
-        avg("value").as("avg_value"),
-        min("value").as("min_value"),
-        max("value").as("max_value")
-      ).collect()
+      val result = df
+        .agg(
+          count("*").as("total_count"),
+          sum("value").as("total_sum"),
+          avg("value").as("avg_value"),
+          min("value").as("min_value"),
+          max("value").as("max_value")
+        )
+        .collect()
 
       val row = result(0)
-      row.getLong(0) shouldBe 5L        // count
-      row.getLong(1) shouldBe 1000L     // sum: 100+200+150+300+250
-      row.getDouble(2) shouldBe 200.0   // avg: 1000/5
-      row.getInt(3) shouldBe 100        // min
-      row.getInt(4) shouldBe 300        // max
+      row.getLong(0) shouldBe 5L      // count
+      row.getLong(1) shouldBe 1000L   // sum: 100+200+150+300+250
+      row.getDouble(2) shouldBe 200.0 // avg: 1000/5
+      row.getInt(3) shouldBe 100      // min
+      row.getInt(4) shouldBe 300      // max
 
       println(s"✅ Integer field aggregation test passed!")
     }
@@ -863,13 +867,15 @@ class SimpleAggregatePushdownTest extends TestBase {
       // Read and aggregate
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
-      val result = df.agg(
-        count("*").as("total_count"),
-        sum("bytes_transferred").as("total_bytes"),
-        avg("bytes_transferred").as("avg_bytes"),
-        min("bytes_transferred").as("min_bytes"),
-        max("bytes_transferred").as("max_bytes")
-      ).collect()
+      val result = df
+        .agg(
+          count("*").as("total_count"),
+          sum("bytes_transferred").as("total_bytes"),
+          avg("bytes_transferred").as("avg_bytes"),
+          min("bytes_transferred").as("min_bytes"),
+          max("bytes_transferred").as("max_bytes")
+        )
+        .collect()
 
       val row = result(0)
       row.getLong(0) shouldBe 5L          // count
@@ -917,20 +923,22 @@ class SimpleAggregatePushdownTest extends TestBase {
       // Read and aggregate
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
-      val result = df.agg(
-        count("*").as("total_count"),
-        sum("temperature").as("total_temp"),
-        avg("temperature").as("avg_temp"),
-        min("temperature").as("min_temp"),
-        max("temperature").as("max_temp")
-      ).collect()
+      val result = df
+        .agg(
+          count("*").as("total_count"),
+          sum("temperature").as("total_temp"),
+          avg("temperature").as("avg_temp"),
+          min("temperature").as("min_temp"),
+          max("temperature").as("max_temp")
+        )
+        .collect()
 
       val row = result(0)
-      row.getLong(0) shouldBe 5L                       // count
-      Math.abs(row.getDouble(1) - 112.5) < 0.01 shouldBe true  // sum: 20.5+21.5+22.5+23.5+24.5
-      Math.abs(row.getDouble(2) - 22.5) < 0.01 shouldBe true   // avg: 112.5/5
-      Math.abs(row.getFloat(3) - 20.5f) < 0.01 shouldBe true   // min
-      Math.abs(row.getFloat(4) - 24.5f) < 0.01 shouldBe true   // max
+      row.getLong(0) shouldBe 5L                              // count
+      Math.abs(row.getDouble(1) - 112.5) < 0.01 shouldBe true // sum: 20.5+21.5+22.5+23.5+24.5
+      Math.abs(row.getDouble(2) - 22.5) < 0.01 shouldBe true  // avg: 112.5/5
+      Math.abs(row.getFloat(3) - 20.5f) < 0.01 shouldBe true  // min
+      Math.abs(row.getFloat(4) - 24.5f) < 0.01 shouldBe true  // max
 
       println(s"✅ Float field aggregation test passed!")
     }
@@ -972,20 +980,22 @@ class SimpleAggregatePushdownTest extends TestBase {
       // Read and aggregate
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
-      val result = df.agg(
-        count("*").as("total_count"),
-        sum("measurement").as("total_measurement"),
-        avg("measurement").as("avg_measurement"),
-        min("measurement").as("min_measurement"),
-        max("measurement").as("max_measurement")
-      ).collect()
+      val result = df
+        .agg(
+          count("*").as("total_count"),
+          sum("measurement").as("total_measurement"),
+          avg("measurement").as("avg_measurement"),
+          min("measurement").as("min_measurement"),
+          max("measurement").as("max_measurement")
+        )
+        .collect()
 
       val row = result(0)
-      row.getLong(0) shouldBe 5L                              // count
-      Math.abs(row.getDouble(1) - 152.5) < 0.0001 shouldBe true  // sum: 10.5+20.5+30.5+40.5+50.5
-      Math.abs(row.getDouble(2) - 30.5) < 0.0001 shouldBe true   // avg: 152.5/5
-      Math.abs(row.getDouble(3) - 10.5) < 0.0001 shouldBe true   // min
-      Math.abs(row.getDouble(4) - 50.5) < 0.0001 shouldBe true   // max
+      row.getLong(0) shouldBe 5L                                // count
+      Math.abs(row.getDouble(1) - 152.5) < 0.0001 shouldBe true // sum: 10.5+20.5+30.5+40.5+50.5
+      Math.abs(row.getDouble(2) - 30.5) < 0.0001 shouldBe true  // avg: 152.5/5
+      Math.abs(row.getDouble(3) - 10.5) < 0.0001 shouldBe true  // min
+      Math.abs(row.getDouble(4) - 50.5) < 0.0001 shouldBe true  // max
 
       println(s"✅ Double field aggregation test passed!")
     }

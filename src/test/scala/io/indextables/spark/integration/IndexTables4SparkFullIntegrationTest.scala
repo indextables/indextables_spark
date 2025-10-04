@@ -17,11 +17,14 @@
 
 package io.indextables.spark.integration
 
-import io.indextables.spark.TestBase
+import java.sql.{Date, Timestamp}
+
+import scala.util.Random
+
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
-import java.sql.{Date, Timestamp}
-import scala.util.Random
+
+import io.indextables.spark.TestBase
 
 class IndexTables4SparkFullIntegrationTest extends TestBase {
 

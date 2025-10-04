@@ -17,15 +17,17 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory, TransactionLog}
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
-
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Try
+
+import org.apache.spark.sql.SparkSession
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Integration test to validate that merge operations correctly populate the numRecords field in transaction log

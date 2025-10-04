@@ -17,19 +17,16 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.sources._
-import io.indextables.tantivy4java.query.{Query, Occur}
-import io.indextables.tantivy4java.split.{
-  SplitQuery,
-  SplitMatchAllQuery,
-  SplitTermQuery,
-  SplitBooleanQuery
-}
-import io.indextables.tantivy4java.core.{Schema, FieldType, Index}
-import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.sources._
+
+import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.search.SplitSearchEngine
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
+import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
+import io.indextables.tantivy4java.query.{Occur, Query}
+import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
+import org.slf4j.LoggerFactory
 
 // Data class for storing range optimization information
 case class RangeInfo(
@@ -174,7 +171,8 @@ object FiltersToQueryConverter {
         case None => io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded()
       }
 
-      val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(field, lowerBound, upperBound, tantivyFieldType)
+      val rangeQuery =
+        new io.indextables.tantivy4java.split.SplitRangeQuery(field, lowerBound, upperBound, tantivyFieldType)
       queryLog(s"Creating optimized SplitRangeQuery: $rangeQuery")
       Some(rangeQuery)
     } catch {
@@ -1099,7 +1097,7 @@ object FiltersToQueryConverter {
               val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
                 attribute,
                 io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(startDateStr), // Include start of day
-                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endDateStr),   // Exclude start of next day
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endDateStr), // Exclude start of next day
                 "date" // Use "date" field type as shown in SplitDateRangeQueryTest
               )
               queryLog(s"Creating date equality SplitRangeQuery with date strings: [$startDateStr TO $endDateStr) for $localDate")

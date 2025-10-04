@@ -17,14 +17,17 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
+import java.net.ServerSocket
+
+import scala.util.Using
+
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+
 import io.findify.s3mock.S3Mock
-import java.net.ServerSocket
-import scala.util.Using
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * Test V2 DataSource with S3 storage using review data with date filtering.

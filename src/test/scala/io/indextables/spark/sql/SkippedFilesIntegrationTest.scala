@@ -17,13 +17,16 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction, SkipAction}
-import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Try
+
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.transaction.{AddAction, SkipAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Comprehensive integration test that validates the complete skipped files functionality:

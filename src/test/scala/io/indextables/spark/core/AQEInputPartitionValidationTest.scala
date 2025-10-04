@@ -17,14 +17,17 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.sources.{Filter, EqualTo}
-import org.apache.spark.sql.types.{StructType, StringType, StructField, LongType}
-import org.scalatest.matchers.should.Matchers
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.sources.{EqualTo, Filter}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Tests to validate that IndexTables4SparkInputPartition correctly preserves footer metadata during AQE stage-wise

@@ -3,11 +3,14 @@
  */
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.{CloudStorageProviderFactory, CloudStorageConfig}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import java.util.{Collections => JCollections}
+
 import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.io.{CloudStorageConfig, CloudStorageProviderFactory}
+import io.indextables.spark.TestBase
 
 class CredentialDebugTest extends TestBase {
 

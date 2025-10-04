@@ -17,10 +17,11 @@
 
 package io.indextables.spark.search
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.types._
+
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.TestBase
 
 class SchemaConverterTest extends TestBase {
 

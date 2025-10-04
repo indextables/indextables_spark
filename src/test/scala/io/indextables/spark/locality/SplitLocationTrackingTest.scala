@@ -1,10 +1,11 @@
 package io.indextables.spark.locality
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.storage.SplitLocationRegistry
-import org.scalatest.BeforeAndAfterEach
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
+
+import io.indextables.spark.storage.SplitLocationRegistry
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 class SplitLocationTrackingTest extends TestBase with BeforeAndAfterEach {
 

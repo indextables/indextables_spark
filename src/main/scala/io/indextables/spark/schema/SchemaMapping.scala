@@ -17,8 +17,9 @@
 
 package io.indextables.spark.schema
 
-import io.indextables.tantivy4java.core.{FieldType, Schema}
 import org.apache.spark.sql.types._
+
+import io.indextables.tantivy4java.core.{FieldType, Schema}
 import org.slf4j.LoggerFactory
 
 /**

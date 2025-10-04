@@ -17,12 +17,14 @@
 
 package io.indextables.spark.schema
 
-import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{SchemaBuilder, FieldType}
-import org.apache.spark.sql.types._
-import org.scalatest.matchers.should.Matchers
 import java.sql.{Date, Timestamp}
 import java.time.{LocalDate, LocalDateTime}
+
+import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
+import io.indextables.tantivy4java.core.{FieldType, SchemaBuilder}
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Test to validate date/timestamp type conversions between Tantivy and Spark. This test specifically validates INTEGER

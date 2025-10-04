@@ -17,12 +17,13 @@
 
 package io.indextables.spark.optimize
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.config.IndexTables4SparkConfig
-import io.indextables.spark.core.IndexTables4SparkOptions
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.config.IndexTables4SparkConfig
+import io.indextables.spark.core.IndexTables4SparkOptions
+import io.indextables.spark.TestBase
 
 class OptimizedWriteTest extends TestBase {
 

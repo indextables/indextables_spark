@@ -1,12 +1,14 @@
 package io.indextables.spark
 
-import org.scalatest.funsuite.AnyFunSuite
-import _root_.io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
-import _root_.io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import _root_.io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager}
-import _root_.io.indextables.tantivy4java.split.merge.QuickwitSplit
 import java.nio.file.{Files, Paths}
+
 import scala.jdk.CollectionConverters._
+
+import _root_.io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
+import _root_.io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
+import _root_.io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher}
+import _root_.io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.scalatest.funsuite.AnyFunSuite
 
 /** Test if tantivy4java's QuickwitSplit.mergeSplits() preserves fast field configuration. */
 class FastFieldMergeTest extends AnyFunSuite {

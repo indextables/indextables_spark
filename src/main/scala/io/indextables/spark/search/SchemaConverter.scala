@@ -17,8 +17,9 @@
 
 package io.indextables.spark.search
 
-import io.indextables.spark.util.{JsonUtil, TypeConversionUtil}
 import org.apache.spark.sql.types._
+
+import io.indextables.spark.util.{JsonUtil, TypeConversionUtil}
 
 object SchemaConverter {
 

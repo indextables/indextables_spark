@@ -17,10 +17,11 @@
 
 package io.indextables.spark.io
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.storage.SplitCacheConfig
-import org.scalatest.funsuite.AnyFunSuite
 import scala.concurrent.duration._
+
+import io.indextables.spark.storage.SplitCacheConfig
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * S3MultipartUploader tests using real AWS S3.

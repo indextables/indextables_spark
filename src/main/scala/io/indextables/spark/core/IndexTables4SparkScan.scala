@@ -17,22 +17,23 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.read.{
   Batch,
   InputPartition,
   PartitionReaderFactory,
   Scan,
-  SupportsReportStatistics,
-  Statistics
+  Statistics,
+  SupportsReportStatistics
 }
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{StructType, DateType, IntegerType, LongType, FloatType, DoubleType}
+import org.apache.spark.sql.types.{DateType, DoubleType, FloatType, IntegerType, LongType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.transaction.{TransactionLog, AddAction, PartitionPruning}
-import io.indextables.spark.storage.{SplitLocationRegistry, BroadcastSplitLocalityManager}
+import org.apache.spark.sql.SparkSession
+
 import io.indextables.spark.prewarm.PreWarmManager
-import org.apache.spark.broadcast.Broadcast
+import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -456,7 +457,9 @@ class IndexTables4SparkScan(
               val filterDate = LocalDate.parse(dateStr)
               val epochDate  = LocalDate.of(1970, 1, 1)
               val days       = epochDate.until(filterDate).getDays
-              logger.debug(s"🔍 DATE CONVERSION: String '$dateStr' -> LocalDate '$filterDate' -> days since epoch: $days")
+              logger.debug(
+                s"🔍 DATE CONVERSION: String '$dateStr' -> LocalDate '$filterDate' -> days since epoch: $days"
+              )
               days
             case sqlDate: Date =>
               logger.debug(s"🔍 DATE CONVERSION: Converting SQL Date: $sqlDate")

@@ -17,10 +17,12 @@
 
 package io.indextables.spark.transaction
 
+import scala.collection.mutable
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
+
 import org.slf4j.LoggerFactory
-import scala.collection.mutable
 
 /**
  * Utilities for handling partition operations similar to Delta Lake. Provides functionality for extracting partition

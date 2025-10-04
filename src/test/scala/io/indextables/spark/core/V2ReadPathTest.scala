@@ -17,9 +17,10 @@
 
 package io.indextables.spark.core
 
+import org.apache.spark.sql.functions._
+
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
-import org.apache.spark.sql.functions._
 
 /**
  * Focused test for V2 DataSource API read path to ensure no serialization issues. This test specifically checks the V2

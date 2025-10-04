@@ -17,12 +17,15 @@
 
 package io.indextables.spark.integration
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLog, AddAction}
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.{DataFrame, SaveMode}
-import org.scalatest.BeforeAndAfterEach
 import scala.collection.mutable.ArrayBuffer
+
+import org.apache.spark.sql.{DataFrame, SaveMode}
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Integration tests specifically focused on verifying that statistics are correctly written to and read from the

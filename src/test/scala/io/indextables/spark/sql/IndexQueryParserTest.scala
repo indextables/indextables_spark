@@ -17,10 +17,11 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.expressions.IndexQueryExpression
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
+
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 
 class IndexQueryParserTest extends AnyFunSuite with TestBase {

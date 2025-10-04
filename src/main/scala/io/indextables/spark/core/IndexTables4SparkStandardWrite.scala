@@ -24,9 +24,11 @@ import org.apache.spark.sql.connector.write.{
   Write,
   WriterCommitMessage
 }
-import io.indextables.spark.transaction.{TransactionLog, AddAction}
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.connector.write.LogicalWriteInfo
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog}
 import org.slf4j.LoggerFactory
 
 /**
@@ -165,7 +167,7 @@ class IndexTables4SparkStandardWrite(
 
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _                               => Seq.empty[AddAction]
+      case _                                   => Seq.empty[AddAction]
     }
 
     // Log how many empty partitions were filtered out
@@ -239,7 +241,7 @@ class IndexTables4SparkStandardWrite(
     // Clean up any files that were created but not committed
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _                               => Seq.empty[AddAction]
+      case _                                   => Seq.empty[AddAction]
     }
 
     // TODO: In a real implementation, we would delete the physical files here

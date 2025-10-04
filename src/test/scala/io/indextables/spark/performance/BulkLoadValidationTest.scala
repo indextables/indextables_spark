@@ -17,9 +17,10 @@
 
 package io.indextables.spark.performance
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 
 class BulkLoadValidationTest extends TestBase {
 

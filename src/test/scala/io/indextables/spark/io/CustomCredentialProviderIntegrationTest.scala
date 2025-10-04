@@ -17,13 +17,16 @@
 
 package io.indextables.spark.io
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.testutils.{TestV1CredentialProvider, TestV2CredentialProvider, TestDualCredentialProvider}
-import io.indextables.spark.utils.CredentialProviderFactory
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.conf.Configuration
+
+import io.indextables.spark.testutils.{TestDualCredentialProvider, TestV1CredentialProvider, TestV2CredentialProvider}
+import io.indextables.spark.utils.CredentialProviderFactory
+import io.indextables.spark.TestBase
+import org.slf4j.LoggerFactory
 
 /**
  * Integration tests for custom AWS credential provider functionality Tests the complete flow from configuration to

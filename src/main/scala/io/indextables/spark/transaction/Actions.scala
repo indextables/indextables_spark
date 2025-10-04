@@ -17,11 +17,12 @@
 
 package io.indextables.spark.transaction
 
-import com.fasterxml.jackson.annotation.{JsonProperty, JsonCreator}
-import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
 import scala.util.Try
+
+import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 
 sealed trait Action extends Serializable
 
@@ -108,23 +109,27 @@ case class SkipAction(
 ) extends Action
 
 /**
- * Protocol action that defines the minimum reader and writer versions required to access the table.
- * This follows Delta Lake's protocol versioning approach to ensure backwards compatibility.
+ * Protocol action that defines the minimum reader and writer versions required to access the table. This follows Delta
+ * Lake's protocol versioning approach to ensure backwards compatibility.
  *
- * Readers and writers MUST check protocol version before performing any operations.
- * Clients MUST silently ignore unknown fields and actions.
+ * Readers and writers MUST check protocol version before performing any operations. Clients MUST silently ignore
+ * unknown fields and actions.
  *
- * @param minReaderVersion Minimum version required to read the table
- * @param minWriterVersion Minimum version required to write to the table
- * @param readerFeatures Optional set of reader feature names (for version 3+)
- * @param writerFeatures Optional set of writer feature names (for version 3+)
+ * @param minReaderVersion
+ *   Minimum version required to read the table
+ * @param minWriterVersion
+ *   Minimum version required to write to the table
+ * @param readerFeatures
+ *   Optional set of reader feature names (for version 3+)
+ * @param writerFeatures
+ *   Optional set of writer feature names (for version 3+)
  */
 case class ProtocolAction(
   minReaderVersion: Int,
   minWriterVersion: Int,
   readerFeatures: Option[Set[String]] = None,
-  writerFeatures: Option[Set[String]] = None
-) extends Action
+  writerFeatures: Option[Set[String]] = None)
+    extends Action
 
 case class FileStats(
   numRecords: Long,

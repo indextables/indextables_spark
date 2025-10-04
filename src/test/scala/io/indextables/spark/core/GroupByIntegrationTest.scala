@@ -17,12 +17,15 @@
 
 package io.indextables.spark.core
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Random
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Integration test for GROUP BY functionality with actual Spark DataFrames. This test demonstrates what we need to
@@ -373,8 +376,8 @@ class GroupByIntegrationTest extends AnyFunSuite {
       // Write data with string fields for exact matching and fast fields for aggregation
       testData.write
         .format("tantivy4spark")
-        .option("spark.indextables.indexing.typemap.referrer", "string")  // String for exact match
-        .option("spark.indextables.indexing.typemap.status", "string")    // String for GROUP BY
+        .option("spark.indextables.indexing.typemap.referrer", "string")                  // String for exact match
+        .option("spark.indextables.indexing.typemap.status", "string")                    // String for GROUP BY
         .option("spark.indextables.indexing.fastfields", "referrer,status,response_time") // All fields as fast
         .mode("overwrite")
         .save(tablePath)
@@ -402,9 +405,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val results = filteredGroupByResult.collect()
 
       println("🔍 GROUP BY FILTER TEST: Results after filtering for referrer='myhost.com':")
-      results.foreach { row =>
-        println(s"  ${row.getString(0)}: count=${row.getLong(1)}, sum=${row.getLong(2)}")
-      }
+      results.foreach(row => println(s"  ${row.getString(0)}: count=${row.getLong(1)}, sum=${row.getLong(2)}"))
 
       // Verify expected results
       val resultMap = results.map(row => row.getString(0) -> (row.getLong(1), row.getLong(2))).toMap
@@ -493,10 +494,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY on integer field with COUNT and SUM
-      val groupByResult = df.groupBy("priority").agg(
-        count("*").as("total_count"),
-        sum("score").as("total_score")
-      )
+      val groupByResult = df
+        .groupBy("priority")
+        .agg(
+          count("*").as("total_count"),
+          sum("score").as("total_score")
+        )
 
       val results   = groupByResult.collect()
       val resultMap = results.map(row => row.getInt(0) -> (row.getLong(1), row.getLong(2))).toMap
@@ -547,10 +550,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY on long field with COUNT and SUM
-      val groupByResult = df.groupBy("timestamp_bucket").agg(
-        count("*").as("total_count"),
-        sum("value").as("total_value")
-      )
+      val groupByResult = df
+        .groupBy("timestamp_bucket")
+        .agg(
+          count("*").as("total_count"),
+          sum("value").as("total_value")
+        )
 
       val results   = groupByResult.collect()
       val resultMap = results.map(row => row.getLong(0) -> (row.getLong(1), row.getLong(2))).toMap
@@ -601,10 +606,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY on float field with COUNT and SUM
-      val groupByResult = df.groupBy("rating").agg(
-        count("*").as("total_count"),
-        sum("sales").as("total_sales")
-      )
+      val groupByResult = df
+        .groupBy("rating")
+        .agg(
+          count("*").as("total_count"),
+          sum("sales").as("total_sales")
+        )
 
       val results   = groupByResult.collect()
       val resultMap = results.map(row => row.getFloat(0) -> (row.getLong(1), row.getLong(2))).toMap
@@ -655,10 +662,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // Perform GROUP BY on double field with COUNT and SUM
-      val groupByResult = df.groupBy("latitude").agg(
-        count("*").as("total_count"),
-        sum("population").as("total_population")
-      )
+      val groupByResult = df
+        .groupBy("latitude")
+        .agg(
+          count("*").as("total_count"),
+          sum("population").as("total_population")
+        )
 
       val results   = groupByResult.collect()
       val resultMap = results.map(row => row.getDouble(0) -> (row.getLong(1), row.getLong(2))).toMap
@@ -709,7 +718,10 @@ class GroupByIntegrationTest extends AnyFunSuite {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.region", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
-        .option("spark.indextables.indexing.fastfields", "region,priority,timestamp_bucket,latitude,rating,category,value")
+        .option(
+          "spark.indextables.indexing.fastfields",
+          "region,priority,timestamp_bucket,latitude,rating,category,value"
+        )
         .mode("overwrite")
         .save(tablePath)
 
@@ -737,7 +749,8 @@ class GroupByIntegrationTest extends AnyFunSuite {
       println("🔍 6-DIMENSIONAL GROUP BY TEST: Results:")
       results.foreach { row =>
         println(
-          s"  ${row.getString(0)}/${row.getInt(1)}/${row.getLong(2)}/${row.getDouble(3)}/${row.getFloat(4)}/${row.getString(5)}: " +
+          s"  ${row.getString(0)}/${row.getInt(1)}/${row.getLong(2)}/${row.getDouble(3)}/${row.getFloat(4)}/${row
+              .getString(5)}: " +
             s"count=${row.getLong(6)}, sum=${row.getLong(7)}, avg=${row.getDouble(8)}, min=${row.getInt(9)}, max=${row.getInt(10)}"
         )
       }
@@ -747,18 +760,18 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       val resultMap = results.map { row =>
         (
-          row.getString(0),  // region
-          row.getInt(1),     // priority
-          row.getLong(2),    // timestamp_bucket
-          row.getDouble(3),  // latitude
-          row.getFloat(4),   // rating
-          row.getString(5)   // category
+          row.getString(0), // region
+          row.getInt(1),    // priority
+          row.getLong(2),   // timestamp_bucket
+          row.getDouble(3), // latitude
+          row.getFloat(4),  // rating
+          row.getString(5)  // category
         ) -> (
-          row.getLong(6),    // count
-          row.getLong(7),    // sum
-          row.getDouble(8),  // avg
-          row.getInt(9),     // min
-          row.getInt(10)     // max
+          row.getLong(6),   // count
+          row.getLong(7),   // sum
+          row.getDouble(8), // avg
+          row.getInt(9),    // min
+          row.getInt(10)    // max
         )
       }.toMap
 

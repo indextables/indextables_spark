@@ -17,9 +17,11 @@
 
 package io.indextables.spark.util
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
 
 /** Tests for SplitSizeAnalyzer - analyzing historical split data for auto-sizing. */
 class SplitSizeAnalyzerTest extends TestBase {

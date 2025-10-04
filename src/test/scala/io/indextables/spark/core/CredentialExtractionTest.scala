@@ -17,10 +17,12 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.matchers.should.Matchers._
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers._
 
 /**
  * Test to verify that credential extraction logic in IndexTables4SparkRelation works correctly. This test validates the

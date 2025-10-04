@@ -1,9 +1,10 @@
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
+
+import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+import io.indextables.spark.TestBase
 
 class FlushIndexTablesCacheCommandTest extends TestBase {
 

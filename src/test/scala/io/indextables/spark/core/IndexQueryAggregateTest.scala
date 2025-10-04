@@ -17,14 +17,14 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
 
+import io.indextables.spark.TestBase
+
 /**
- * Integration tests for IndexQuery expressions with aggregate operations.
- * Validates that IndexQuery filters are properly passed to aggregate scans
- * (both SimpleAggregateScan and GroupByAggregateScan).
+ * Integration tests for IndexQuery expressions with aggregate operations. Validates that IndexQuery filters are
+ * properly passed to aggregate scans (both SimpleAggregateScan and GroupByAggregateScan).
  */
 class IndexQueryAggregateTest extends TestBase {
 
@@ -128,18 +128,20 @@ class IndexQueryAggregateTest extends TestBase {
       df.createOrReplaceTempView("test_docs")
 
       // Test multiple aggregations with IndexQuery
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT COUNT(*) as count, SUM(score) as total, AVG(score) as avg, MIN(score) as min, MAX(score) as max
         FROM test_docs
         WHERE content indexquery 'spark'
-      """).collect()
+      """)
+        .collect()
 
-      val row = result(0)
+      val row   = result(0)
       val count = row.getLong(0)
       val total = row.getLong(1)
-      val avg = row.getDouble(2)
-      val min = row.getInt(3)
-      val max = row.getInt(4)
+      val avg   = row.getDouble(2)
+      val min   = row.getInt(3)
+      val max   = row.getInt(4)
 
       assert(count == 3, s"Expected count=3, got $count")
       assert(total == 600, s"Expected total=600, got $total")
@@ -203,19 +205,21 @@ class IndexQueryAggregateTest extends TestBase {
 
       // Test GROUP BY with IndexQuery filter
       // Only docs with "spark" (all in "technology" category): 100, 200, 300
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT category, COUNT(*) as count, SUM(score) as total
         FROM test_docs
         WHERE content indexquery 'spark'
         GROUP BY category
-      """).collect()
+      """)
+        .collect()
 
       assert(result.length == 1, s"Expected 1 group (technology), got ${result.length}")
 
-      val row = result(0)
+      val row      = result(0)
       val category = row.getString(0)
-      val count = row.getLong(1)
-      val total = row.getLong(2)
+      val count    = row.getLong(1)
+      val total    = row.getLong(2)
 
       assert(category == "technology", s"Expected category='technology', got '$category'")
       assert(count == 3, s"Expected count=3, got $count")
@@ -253,13 +257,15 @@ class IndexQueryAggregateTest extends TestBase {
       df.createOrReplaceTempView("test_docs")
 
       // Test GROUP BY with IndexQuery - should find docs with "spark" in 2 categories
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT category, COUNT(*) as count, SUM(score) as total
         FROM test_docs
         WHERE content indexquery 'spark'
         GROUP BY category
         ORDER BY category
-      """).collect()
+      """)
+        .collect()
 
       assert(result.length == 2, s"Expected 2 groups (business, tech), got ${result.length}")
 
@@ -286,7 +292,9 @@ class IndexQueryAggregateTest extends TestBase {
       val testData = createTestData()
 
       // Write with multiple partitions to create multiple splits
-      testData.repartition(2).write
+      testData
+        .repartition(2)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.content", "text")
         .option("spark.indextables.indexing.fastfields", "score")
@@ -332,19 +340,21 @@ class IndexQueryAggregateTest extends TestBase {
       // Test combining IndexQuery + equality filter + range filter
       // Expected: docs with "spark" AND category="technology" AND score >= 150 AND score <= 300
       // Should match: doc2 (score=200), doc4 (score=300)
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT COUNT(*) as count, SUM(score) as total, AVG(score) as avg
         FROM test_docs
         WHERE content indexquery 'spark'
           AND category = 'technology'
           AND score >= 150
           AND score <= 300
-      """).collect()
+      """)
+        .collect()
 
-      val row = result(0)
+      val row   = result(0)
       val count = row.getLong(0)
       val total = row.getLong(1)
-      val avg = row.getDouble(2)
+      val avg   = row.getDouble(2)
 
       assert(count == 2, s"Expected count=2 (doc2, doc4), got $count")
       assert(total == 500, s"Expected total=500 (200+300), got $total")
@@ -387,7 +397,8 @@ class IndexQueryAggregateTest extends TestBase {
       // Expected: docs with "spark" AND score >= 150 AND score <= 300, grouped by category
       // tech: doc3 (150), doc4 (300) = 2 docs, sum=450
       // business: doc2 (200), doc6 (180) = 2 docs, sum=380
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT category, COUNT(*) as count, SUM(score) as total
         FROM test_docs
         WHERE content indexquery 'spark'
@@ -395,7 +406,8 @@ class IndexQueryAggregateTest extends TestBase {
           AND score <= 300
         GROUP BY category
         ORDER BY category
-      """).collect()
+      """)
+        .collect()
 
       assert(result.length == 2, s"Expected 2 groups (business, tech), got ${result.length}")
 
@@ -438,7 +450,8 @@ class IndexQueryAggregateTest extends TestBase {
       // Test regular query (not aggregation) with combined filters
       // Expected: docs with "spark" AND category="technology" AND score >= 150 AND score <= 300
       // Should match: doc2 (score=200, content="machine learning with spark"), doc4 (score=300, content="spark streaming applications")
-      val result = spark.sql("""
+      val result = spark
+        .sql("""
         SELECT id, content, category, score
         FROM test_docs
         WHERE content indexquery 'spark'
@@ -446,7 +459,8 @@ class IndexQueryAggregateTest extends TestBase {
           AND score >= 150
           AND score <= 300
         ORDER BY score
-      """).collect()
+      """)
+        .collect()
 
       assert(result.length == 2, s"Expected 2 documents, got ${result.length}")
 

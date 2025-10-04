@@ -17,9 +17,11 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.types._
 import java.util.OptionalLong
+
+import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
 
 class StatisticsIntegrationTest extends TestBase {
 

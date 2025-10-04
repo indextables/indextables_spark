@@ -17,15 +17,18 @@
 
 package io.indextables.spark.search
 
-import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter, Tantivy}
-import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import org.slf4j.LoggerFactory
-import java.nio.file.{Path, Files}
 import java.io.File
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.catalyst.InternalRow
-import scala.util.Using
+import java.nio.file.{Files, Path}
+
 import scala.jdk.CollectionConverters._
+import scala.util.Using
+
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types.StructType
+
+import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Tantivy}
+import org.slf4j.LoggerFactory
 
 /**
  * Direct tantivy4java interface that eliminates Long handles and thread safety issues. Each instance manages its own
@@ -68,7 +71,9 @@ object TantivyDirectInterface {
     // DEBUG: WHERE IS THE CONFIGURATION COMING FROM?
     logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: currentFastFields = ${currentFastFields.mkString(", ")}")
     logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: currentNonFastFields = ${currentNonFastFields.mkString(", ")}")
-    logger.debug(s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}")
+    logger.debug(
+      s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}"
+    )
     logger.warn(
       s"🔍 AUTO-FAST-FIELD DEBUG: ALL options keys = ${options.entrySet().asScala.map(_.getKey).mkString(", ")}"
     )

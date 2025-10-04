@@ -17,22 +17,25 @@
 
 package io.indextables.spark.prewarm
 
-import org.apache.spark.SparkContext
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.sources.Filter
-import io.indextables.spark.transaction.AddAction
-import io.indextables.spark.storage.{SplitCacheConfig, GlobalSplitCacheManager, BroadcastSplitLocalityManager}
-import io.indextables.spark.search.SplitSearchEngine
-import io.indextables.spark.core.FiltersToQueryConverter
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitQuery, SplitMatchAllQuery}
-import org.slf4j.LoggerFactory
-import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
-import scala.collection.concurrent.TrieMap
-import scala.util.{Try, Success, Failure}
 import java.net.InetAddress
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
+
+import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters._
+import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.SparkContext
+
+import io.indextables.spark.core.FiltersToQueryConverter
+import io.indextables.spark.search.SplitSearchEngine
+import io.indextables.spark.storage.{BroadcastSplitLocalityManager, GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.spark.transaction.AddAction
+import io.indextables.tantivy4java.query.Query
+import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery}
+import org.slf4j.LoggerFactory
 
 /**
  * Manages pre-warming of split caches across the Spark cluster to optimize query performance.

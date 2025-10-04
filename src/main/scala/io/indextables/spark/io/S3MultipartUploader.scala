@@ -17,17 +17,19 @@
 
 package io.indextables.spark.io
 
-import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model._
-import software.amazon.awssdk.core.sync.RequestBody
-import org.slf4j.LoggerFactory
-import java.util.concurrent.{CompletableFuture, Executors, ThreadFactory, ForkJoinPool}
-import java.util.concurrent.atomic.AtomicInteger
-import scala.jdk.CollectionConverters._
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Try, Success, Failure}
 import java.io.{ByteArrayInputStream, InputStream}
 import java.security.MessageDigest
+import java.util.concurrent.{CompletableFuture, Executors, ForkJoinPool, ThreadFactory}
+import java.util.concurrent.atomic.AtomicInteger
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters._
+import scala.util.{Failure, Success, Try}
+
+import org.slf4j.LoggerFactory
+import software.amazon.awssdk.core.sync.RequestBody
+import software.amazon.awssdk.services.s3.model._
+import software.amazon.awssdk.services.s3.S3Client
 
 /**
  * High-performance S3 multipart uploader with parallel part uploads.

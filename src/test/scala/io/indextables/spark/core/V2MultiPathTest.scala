@@ -17,9 +17,10 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
@@ -139,7 +140,10 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("text").as("data_type")
         )
 
-      numericData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(numericPath)
+      numericData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(numericPath)
       textData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(textPath)
 
       // Read both paths together
@@ -190,13 +194,22 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("sibling").as("location")
         )
 
-      parentData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(parentPath)
-      childData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(childPath)
-      siblingData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(siblingPath)
+      parentData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(parentPath)
+      childData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(childPath)
+      siblingData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(siblingPath)
 
       // Read each path individually to verify separation
-      val parentResult  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(parentPath)
-      val childResult   = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(childPath)
+      val parentResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(parentPath)
+      val childResult  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(childPath)
       val siblingResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(siblingPath)
 
       // Verify each dataset is distinct
@@ -240,7 +253,10 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
           lit("").as("name")
         )
         .filter(lit(false)) // Filter out all rows
-      emptyData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(emptyPath)
+      emptyData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(emptyPath)
 
       // Read both paths together
       val result = spark.read
@@ -263,12 +279,19 @@ class V2MultiPathTest extends TestBase with BeforeAndAfterAll with BeforeAndAfte
 
       // Write to paths with various naming patterns
       data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(normalPath)
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(pathWithSpaces)
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(pathWithSpecialChars)
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(pathWithSpaces)
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(pathWithSpecialChars)
 
       // Read from each path
       val normalResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(normalPath)
-      val spacesResult = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(pathWithSpaces)
+      val spacesResult =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(pathWithSpaces)
       val specialResult =
         spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(pathWithSpecialChars)
 

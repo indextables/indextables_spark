@@ -1,8 +1,9 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions.{col, lit}
+
+import io.indextables.spark.TestBase
 
 class V2IndexQueryAllValidationTest extends TestBase {
 

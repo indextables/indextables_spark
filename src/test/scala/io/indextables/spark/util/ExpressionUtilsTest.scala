@@ -17,13 +17,14 @@
 
 package io.indextables.spark.util
 
-import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
-import org.scalatest.funsuite.AnyFunSuite
+
 import io.indextables.spark.expressions.IndexQueryExpression
 import io.indextables.spark.filters.IndexQueryFilter
+import org.scalatest.funsuite.AnyFunSuite
 
 class ExpressionUtilsTest extends AnyFunSuite {
 

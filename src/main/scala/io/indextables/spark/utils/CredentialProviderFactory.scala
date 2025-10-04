@@ -17,12 +17,14 @@
 
 package io.indextables.spark.utils
 
-import org.apache.hadoop.conf.Configuration
-import org.slf4j.LoggerFactory
-
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
-import scala.util.{Try, Success, Failure}
+
+import scala.util.{Failure, Success, Try}
+
+import org.apache.hadoop.conf.Configuration
+
+import org.slf4j.LoggerFactory
 
 /**
  * Factory for creating and managing AWS credential providers using reflection. This approach avoids compile-time

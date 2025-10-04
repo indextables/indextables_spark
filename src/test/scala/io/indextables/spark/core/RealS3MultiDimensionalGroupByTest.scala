@@ -17,18 +17,21 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.RealS3TestBase
-import org.apache.spark.sql.functions._
 import java.io.{File, FileInputStream}
 import java.util.Properties
 import java.util.UUID
+
 import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Real AWS S3 integration test for multi-dimensional GROUP BY aggregations.
  *
- * This test validates that multi-dimensional GROUP BY operations work correctly
- * with real S3 storage, using AWS credentials from ~/.aws/credentials.
+ * This test validates that multi-dimensional GROUP BY operations work correctly with real S3 storage, using AWS
+ * credentials from ~/.aws/credentials.
  */
 class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
 
@@ -131,33 +134,37 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
     import org.apache.spark.sql.types._
     import org.apache.spark.sql.Row
 
-    val schema = StructType(Seq(
-      StructField("region", StringType, nullable = false),
-      StructField("category", StringType, nullable = false),
-      StructField("status", StringType, nullable = false),
-      StructField("sales", IntegerType, nullable = false),
-      StructField("rating", DoubleType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("region", StringType, nullable = false),
+        StructField("category", StringType, nullable = false),
+        StructField("status", StringType, nullable = false),
+        StructField("sales", IntegerType, nullable = false),
+        StructField("rating", DoubleType, nullable = false)
+      )
+    )
 
     val testData = spark.createDataFrame(
-      spark.sparkContext.parallelize(Seq(
-        Row("us-east", "electronics", "active", 100, 4.5),
-        Row("us-east", "electronics", "active", 150, 4.7),
-        Row("us-east", "electronics", "inactive", 75, 3.8),
-        Row("us-east", "books", "active", 50, 4.2),
-        Row("us-east", "books", "active", 60, 4.3),
-        Row("us-east", "books", "inactive", 30, 3.5),
-        Row("us-west", "electronics", "active", 200, 4.9),
-        Row("us-west", "electronics", "active", 180, 4.8),
-        Row("us-west", "electronics", "inactive", 90, 3.9),
-        Row("us-west", "books", "active", 70, 4.4),
-        Row("us-west", "books", "active", 80, 4.6),
-        Row("us-west", "books", "inactive", 40, 3.6),
-        Row("eu-west", "electronics", "active", 120, 4.1),
-        Row("eu-west", "electronics", "inactive", 110, 4.0),
-        Row("eu-west", "books", "active", 55, 4.2),
-        Row("eu-west", "books", "inactive", 45, 3.7)
-      )),
+      spark.sparkContext.parallelize(
+        Seq(
+          Row("us-east", "electronics", "active", 100, 4.5),
+          Row("us-east", "electronics", "active", 150, 4.7),
+          Row("us-east", "electronics", "inactive", 75, 3.8),
+          Row("us-east", "books", "active", 50, 4.2),
+          Row("us-east", "books", "active", 60, 4.3),
+          Row("us-east", "books", "inactive", 30, 3.5),
+          Row("us-west", "electronics", "active", 200, 4.9),
+          Row("us-west", "electronics", "active", 180, 4.8),
+          Row("us-west", "electronics", "inactive", 90, 3.9),
+          Row("us-west", "books", "active", 70, 4.4),
+          Row("us-west", "books", "active", 80, 4.6),
+          Row("us-west", "books", "inactive", 40, 3.6),
+          Row("eu-west", "electronics", "active", 120, 4.1),
+          Row("eu-west", "electronics", "inactive", 110, 4.0),
+          Row("eu-west", "books", "active", 55, 4.2),
+          Row("eu-west", "books", "inactive", 45, 3.7)
+        )
+      ),
       schema
     )
 
@@ -200,17 +207,17 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
 
     // Expected results based on test data
     val expectedResults = Map(
-      ("eu-west", "books", "active")       -> (1L, 55.0),
-      ("eu-west", "books", "inactive")     -> (1L, 45.0),
-      ("eu-west", "electronics", "active") -> (1L, 120.0),
+      ("eu-west", "books", "active")         -> (1L, 55.0),
+      ("eu-west", "books", "inactive")       -> (1L, 45.0),
+      ("eu-west", "electronics", "active")   -> (1L, 120.0),
       ("eu-west", "electronics", "inactive") -> (1L, 110.0),
-      ("us-east", "books", "active")       -> (2L, 110.0),
-      ("us-east", "books", "inactive")     -> (1L, 30.0),
-      ("us-east", "electronics", "active") -> (2L, 250.0),
+      ("us-east", "books", "active")         -> (2L, 110.0),
+      ("us-east", "books", "inactive")       -> (1L, 30.0),
+      ("us-east", "electronics", "active")   -> (2L, 250.0),
       ("us-east", "electronics", "inactive") -> (1L, 75.0),
-      ("us-west", "books", "active")       -> (2L, 150.0),
-      ("us-west", "books", "inactive")     -> (1L, 40.0),
-      ("us-west", "electronics", "active") -> (2L, 380.0),
+      ("us-west", "books", "active")         -> (2L, 150.0),
+      ("us-west", "books", "inactive")       -> (1L, 40.0),
+      ("us-west", "electronics", "active")   -> (2L, 380.0),
       ("us-west", "electronics", "inactive") -> (1L, 90.0)
     )
 
@@ -220,28 +227,29 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
     // Print actual results for debugging
     println(s"📊 Actual results from query:")
     results.foreach { row =>
-      val region   = row.getAs[String]("region")
-      val category = row.getAs[String]("category")
-      val status   = row.getAs[String]("status")
-      val count    = row.getAs[Long]("count")
+      val region     = row.getAs[String]("region")
+      val category   = row.getAs[String]("category")
+      val status     = row.getAs[String]("status")
+      val count      = row.getAs[Long]("count")
       val totalSales = row.getAs[Long]("total_sales")
       println(s"  ($region, $category, $status) -> count=$count, sales=$totalSales")
     }
 
     results.foreach { row =>
-      val region   = row.getAs[String]("region")
-      val category = row.getAs[String]("category")
-      val status   = row.getAs[String]("status")
-      val count    = row.getAs[Long]("count")
+      val region     = row.getAs[String]("region")
+      val category   = row.getAs[String]("category")
+      val status     = row.getAs[String]("status")
+      val count      = row.getAs[Long]("count")
       val totalSales = row.getAs[Long]("total_sales")
 
       val key = (region, category, status)
       expectedResults.get(key) match {
         case Some((expectedCount, expectedSales)) =>
-          assert(count == expectedCount,
-            s"Count mismatch for $key: expected $expectedCount, got $count")
-          assert(totalSales == expectedSales.toLong,
-            s"Total sales mismatch for $key: expected ${expectedSales.toLong}, got $totalSales")
+          assert(count == expectedCount, s"Count mismatch for $key: expected $expectedCount, got $count")
+          assert(
+            totalSales == expectedSales.toLong,
+            s"Total sales mismatch for $key: expected ${expectedSales.toLong}, got $totalSales"
+          )
           println(s"✅ Validated: $key -> count=$count, sales=$totalSales")
         case None =>
           fail(s"Unexpected result for key: $key")
@@ -249,16 +257,17 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
     }
 
     // Verify we got all expected results
-    assert(results.length == expectedResults.size,
-      s"Expected ${expectedResults.size} groups, got ${results.length}")
+    assert(results.length == expectedResults.size, s"Expected ${expectedResults.size} groups, got ${results.length}")
 
     println(s"✅ All multi-dimensional GROUP BY validations passed!")
     println(s"📊 Successfully validated ${results.length} aggregation groups")
 
     // Verify pushdown is happening by checking the physical plan
     val physicalPlan = groupByResult.queryExecution.executedPlan.toString()
-    assert(physicalPlan.contains("IndexTables4SparkGroupByAggregateScan"),
-      "Expected GROUP BY pushdown to use IndexTables4SparkGroupByAggregateScan")
+    assert(
+      physicalPlan.contains("IndexTables4SparkGroupByAggregateScan"),
+      "Expected GROUP BY pushdown to use IndexTables4SparkGroupByAggregateScan"
+    )
 
     println(s"✅ Verified GROUP BY pushdown is active in physical plan")
   }
@@ -271,16 +280,18 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
     println(s"📝 Creating test data for two-dimensional GROUP BY test")
 
     // Create simpler test data with two dimensions: category and status
-    val testData = spark.createDataFrame(
-      Seq(
-        ("electronics", "active", 100),
-        ("electronics", "active", 150),
-        ("electronics", "inactive", 75),
-        ("books", "active", 50),
-        ("books", "active", 60),
-        ("books", "inactive", 30)
+    val testData = spark
+      .createDataFrame(
+        Seq(
+          ("electronics", "active", 100),
+          ("electronics", "active", 150),
+          ("electronics", "inactive", 75),
+          ("books", "active", 50),
+          ("books", "active", 60),
+          ("books", "inactive", 30)
+        )
       )
-    ).toDF("category", "status", "value")
+      .toDF("category", "status", "value")
 
     println(s"🚀 Writing test data to S3: $tablePath")
 
@@ -314,18 +325,22 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
     val results = groupByResult.collect()
 
     // Validate specific expected values
-    val booksActive = results.find(row =>
-      row.getAs[String]("category") == "books" &&
-      row.getAs[String]("status") == "active"
-    ).get
+    val booksActive = results
+      .find(row =>
+        row.getAs[String]("category") == "books" &&
+          row.getAs[String]("status") == "active"
+      )
+      .get
 
     assert(booksActive.getAs[Long]("count") == 2L, "Books active count should be 2")
     assert(booksActive.getAs[Long]("total_value") == 110L, "Books active total should be 110")
 
-    val electronicsActive = results.find(row =>
-      row.getAs[String]("category") == "electronics" &&
-      row.getAs[String]("status") == "active"
-    ).get
+    val electronicsActive = results
+      .find(row =>
+        row.getAs[String]("category") == "electronics" &&
+          row.getAs[String]("status") == "active"
+      )
+      .get
 
     assert(electronicsActive.getAs[Long]("count") == 2L, "Electronics active count should be 2")
     assert(electronicsActive.getAs[Long]("total_value") == 250L, "Electronics active total should be 250")

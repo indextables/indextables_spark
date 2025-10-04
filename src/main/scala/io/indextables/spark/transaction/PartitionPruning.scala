@@ -18,6 +18,7 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.sources._
+
 import org.slf4j.LoggerFactory
 
 /**

@@ -17,24 +17,26 @@
 
 package io.indextables.spark.io
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, OutputStream}
+import java.net.URI
+import java.util.concurrent.{CompletableFuture, Executors}
+
+import scala.jdk.CollectionConverters._
+import scala.util.Try
+
+import io.indextables.spark.utils.CredentialProviderFactory
+import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
   AwsSessionCredentials,
-  StaticCredentialsProvider,
-  DefaultCredentialsProvider
+  DefaultCredentialsProvider,
+  StaticCredentialsProvider
 }
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model._
-import software.amazon.awssdk.core.ResponseInputStream
 import software.amazon.awssdk.core.sync.RequestBody
-import org.slf4j.LoggerFactory
-import java.io.{InputStream, OutputStream, ByteArrayInputStream, ByteArrayOutputStream}
-import java.net.URI
-import java.util.concurrent.{CompletableFuture, Executors}
-import scala.jdk.CollectionConverters._
-import scala.util.Try
-import io.indextables.spark.utils.CredentialProviderFactory
+import software.amazon.awssdk.core.ResponseInputStream
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.model._
+import software.amazon.awssdk.services.s3.S3Client
 
 /**
  * High-performance S3 storage provider using AWS SDK directly. Bypasses Hadoop filesystem for better performance and

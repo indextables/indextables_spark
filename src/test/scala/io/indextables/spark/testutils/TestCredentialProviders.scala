@@ -17,15 +17,16 @@
 
 package io.indextables.spark.testutils
 
-import org.apache.hadoop.conf.Configuration
 import java.net.URI
+
+import org.apache.hadoop.conf.Configuration
 
 // Import real AWS SDK interfaces
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicAWSCredentials, BasicSessionCredentials}
 import software.amazon.awssdk.auth.credentials.{
+  AwsBasicCredentials,
   AwsCredentials,
   AwsCredentialsProvider,
-  AwsBasicCredentials,
   AwsSessionCredentials
 }
 

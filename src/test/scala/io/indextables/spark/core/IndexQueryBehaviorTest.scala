@@ -17,8 +17,8 @@
 
 package io.indextables.spark.core
 
+import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.TestBase
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
 class IndexQueryBehaviorTest extends TestBase {
 

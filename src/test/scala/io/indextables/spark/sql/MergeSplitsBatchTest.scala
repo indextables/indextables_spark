@@ -17,20 +17,20 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLogFactory, TransactionLog}
+import java.nio.file.Files
+
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 
-import java.nio.file.Files
-
 /**
  * Tests for batch processing in MERGE SPLITS operations. Validates:
- *   1. Correct number of batches based on batch size configuration
- *   2. Concurrent batch processing with configurable parallelism
- *   3. Transaction log commits per batch instead of global
- *   4. Failure tracking and partial success reporting
+ *   1. Correct number of batches based on batch size configuration 2. Concurrent batch processing with configurable
+ *      parallelism 3. Transaction log commits per batch instead of global 4. Failure tracking and partial success
+ *      reporting
  */
 class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
 
@@ -49,8 +49,8 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
     logger.info(s"Created test table at: $tempTablePath")
   }
 
-  override def afterEach(): Unit = {
-    try {
+  override def afterEach(): Unit =
+    try
       if (tempTablePath != null) {
         val dir = new java.io.File(tempTablePath)
         if (dir.exists()) {
@@ -63,17 +63,16 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
           deleteRecursively(dir)
         }
       }
-    } finally {
+    finally
       super.afterEach()
-    }
-  }
 
   test("should create correct number of batches based on batch size") {
     // Create multiple small files
     val data = (1 to 6).map(i => (s"id$i", s"content$i", i))
-    val df = spark.createDataFrame(data).toDF("id", "content", "score").repartition(6)
+    val df   = spark.createDataFrame(data).toDF("id", "content", "score").repartition(6)
 
-    df.write.format("io.indextables.provider.IndexTablesProvider")
+    df.write
+      .format("io.indextables.provider.IndexTablesProvider")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
@@ -95,7 +94,7 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
     assert(result.length == 1, s"Expected 1 result row, got ${result.length}")
     val resultRow = result(0)
     val statusRow = resultRow.getStruct(1)
-    val message = statusRow.getString(5)
+    val message   = statusRow.getString(5)
 
     logger.info(s"Merge result message: $message")
 
@@ -108,9 +107,10 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
   test("should commit transaction per batch") {
     // Create multiple small files
     val data = (1 to 6).map(i => (s"id$i", s"content$i", i))
-    val df = spark.createDataFrame(data).toDF("id", "content", "score").repartition(6)
+    val df   = spark.createDataFrame(data).toDF("id", "content", "score").repartition(6)
 
-    df.write.format("io.indextables.provider.IndexTablesProvider")
+    df.write
+      .format("io.indextables.provider.IndexTablesProvider")
       .mode("append") // Use append for first write
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
@@ -131,7 +131,7 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
     assert(result.length == 1, s"Expected 1 result row, got ${result.length}")
     val resultRow = result(0)
     val statusRow = resultRow.getStruct(1)
-    val message = statusRow.getString(5)
+    val message   = statusRow.getString(5)
 
     logger.info(s"Merge result message: $message")
 
@@ -148,9 +148,10 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
     // Actual concurrency is hard to test without timing, so we just verify it doesn't error
 
     val data = (1 to 4).map(i => (s"id$i", s"content$i", i))
-    val df = spark.createDataFrame(data).toDF("id", "content", "score")
+    val df   = spark.createDataFrame(data).toDF("id", "content", "score")
 
-    df.write.format("io.indextables.provider.IndexTablesProvider")
+    df.write
+      .format("io.indextables.provider.IndexTablesProvider")
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
@@ -164,7 +165,7 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
 
     assert(result.length == 1)
     val statusRow = result(0).getStruct(1)
-    val status = statusRow.getString(0)
+    val status    = statusRow.getString(0)
 
     assert(status == "success" || status == "partial_success", s"Merge should succeed, got status: $status")
   }
@@ -175,10 +176,11 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
 
     // Create enough files to test batching
     val numFiles = defaultParallelism * 2
-    val data = (1 to numFiles).map(i => (s"id$i", s"content$i", i))
-    val df = spark.createDataFrame(data).toDF("id", "content", "score")
+    val data     = (1 to numFiles).map(i => (s"id$i", s"content$i", i))
+    val df       = spark.createDataFrame(data).toDF("id", "content", "score")
 
-    df.write.format("io.indextables.provider.IndexTablesProvider")
+    df.write
+      .format("io.indextables.provider.IndexTablesProvider")
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
@@ -192,7 +194,7 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
 
     assert(result.length == 1)
     val statusRow = result(0).getStruct(1)
-    val message = statusRow.getString(5)
+    val message   = statusRow.getString(5)
 
     logger.info(s"Merge result with default batch size: $message")
 

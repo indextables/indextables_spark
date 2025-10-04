@@ -17,12 +17,16 @@
 
 package io.indextables.spark.io
 
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.apache.hadoop.conf.Configuration
-import org.slf4j.LoggerFactory
-import java.io.{InputStream, OutputStream, Closeable}
-import scala.util.Try
+import java.io.{Closeable, InputStream, OutputStream}
+
 import scala.jdk.CollectionConverters._
+import scala.util.Try
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.conf.Configuration
+
+import org.slf4j.LoggerFactory
 
 /**
  * High-performance cloud storage abstraction that bypasses Hadoop filesystem for direct cloud API access. Supports
@@ -59,13 +63,17 @@ trait CloudStorageProvider extends Closeable {
   def writeFile(path: String, content: Array[Byte]): Unit
 
   /**
-   * Write content to a file ONLY if it does not already exist (conditional write).
-   * This is critical for transaction log integrity - prevents accidental overwrites.
+   * Write content to a file ONLY if it does not already exist (conditional write). This is critical for transaction log
+   * integrity - prevents accidental overwrites.
    *
-   * @param path The file path
-   * @param content The content to write
-   * @return true if file was written, false if file already exists
-   * @throws RuntimeException if write fails for reasons other than file already existing
+   * @param path
+   *   The file path
+   * @param content
+   *   The content to write
+   * @return
+   *   true if file was written, false if file already exists
+   * @throws RuntimeException
+   *   if write fails for reasons other than file already existing
    */
   def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean
 
@@ -292,9 +300,13 @@ object CloudStorageProviderFactory {
         if (entry.getKey.contains("secret") || entry.getKey.contains("Secret")) "***" else entry.getValue
       logger.info(s"  ${entry.getKey} = $displayValue")
     }
-    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.indextables.aws.accessKey: ${Option(hadoopConf.get("spark.indextables.aws.accessKey")).map(_.take(4) + "...").getOrElse("None")}")
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.indextables.aws.accessKey: ${Option(
+        hadoopConf.get("spark.indextables.aws.accessKey")
+      ).map(_.take(4) + "...").getOrElse("None")}")
     logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.indextables.aws.region: ${hadoopConf.get("spark.indextables.aws.region")}")
-    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.hadoop.fs.s3a.access.key: ${Option(hadoopConf.get("spark.hadoop.fs.s3a.access.key")).map(_.take(4) + "...").getOrElse("None")}")
+    logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Hadoop conf spark.hadoop.fs.s3a.access.key: ${Option(
+        hadoopConf.get("spark.hadoop.fs.s3a.access.key")
+      ).map(_.take(4) + "...").getOrElse("None")}")
 
     // Trace credential extraction step by step
     val accessKeyFromOptions           = Option(options.get("spark.indextables.aws.accessKey"))
@@ -305,8 +317,12 @@ object CloudStorageProviderFactory {
 
     logger.info(s"Access key extraction:")
     logger.info(s"  - From options: ${accessKeyFromOptions.map(_.take(4) + "...").getOrElse("None")}")
-    logger.info(s"  - From hadoop tantivy config: ${accessKeyFromHadoopTantivy.map(_.take(4) + "...").getOrElse("None")}")
-    logger.info(s"  - From hadoop indextables config: ${accessKeyFromHadoopIndexTables.map(_.take(4) + "...").getOrElse("None")}")
+    logger.info(
+      s"  - From hadoop tantivy config: ${accessKeyFromHadoopTantivy.map(_.take(4) + "...").getOrElse("None")}"
+    )
+    logger.info(
+      s"  - From hadoop indextables config: ${accessKeyFromHadoopIndexTables.map(_.take(4) + "...").getOrElse("None")}"
+    )
     logger.info(s"  - From hadoop s3a config: ${accessKeyFromHadoopS3a.map(_.take(4) + "...").getOrElse("None")}")
     logger.info(s"  - From s3a config: ${accessKeyFromS3a.map(_.take(4) + "...").getOrElse("None")}")
 

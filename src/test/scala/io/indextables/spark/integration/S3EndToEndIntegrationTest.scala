@@ -17,19 +17,20 @@
 
 package io.indextables.spark.integration
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import java.io.{File, FileInputStream}
 import java.util.Properties
 import java.util.UUID
-import scala.util.{Try, Success, Failure}
 
 // Import Scala collection conversions and implicits
 import scala.collection.JavaConverters._
+import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * End-to-end integration test with real AWS S3 bucket.

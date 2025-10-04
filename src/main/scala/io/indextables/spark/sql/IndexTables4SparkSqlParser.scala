@@ -17,17 +17,22 @@
 
 package io.indextables.spark.sql
 
+import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
-import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
+import org.apache.spark.sql.catalyst.parser.ParseErrorListener
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
-import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
-import io.indextables.spark.sql.parser.{IndexTables4SparkSqlAstBuilder, IndexTables4SparkSqlBaseParser, IndexTables4SparkSqlBaseLexer}
+
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.sql.parser.{
+  IndexTables4SparkSqlAstBuilder,
+  IndexTables4SparkSqlBaseLexer,
+  IndexTables4SparkSqlBaseParser
+}
 import org.antlr.v4.runtime.{CharStreams, CommonTokenStream}
-import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.antlr.v4.runtime.atn.PredictionMode
-import org.apache.spark.sql.catalyst.parser.ParseErrorListener
+import org.antlr.v4.runtime.misc.ParseCancellationException
 import org.slf4j.LoggerFactory
 
 /**

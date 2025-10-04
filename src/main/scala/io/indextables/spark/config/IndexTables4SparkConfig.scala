@@ -19,7 +19,9 @@ package io.indextables.spark.config
 
 import io.indextables.spark.transaction.MetadataAction
 
-/** Configuration properties for IndexTables4Spark tables. These can be set as table properties in the transaction log. */
+/**
+ * Configuration properties for IndexTables4Spark tables. These can be set as table properties in the transaction log.
+ */
 object IndexTables4SparkConfig {
 
   /** Base trait for all IndexTables4Spark configuration entries. */

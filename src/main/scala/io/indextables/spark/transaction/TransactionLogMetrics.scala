@@ -17,12 +17,14 @@
 
 package io.indextables.spark.transaction
 
+import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+import scala.collection.mutable
+
 import com.codahale.metrics._
 import org.slf4j.LoggerFactory
-import java.util.concurrent.TimeUnit
-import scala.collection.mutable
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.{AtomicLong, AtomicInteger}
 
 /**
  * Comprehensive metrics collection for transaction log operations. Provides detailed performance monitoring and

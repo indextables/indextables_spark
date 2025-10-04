@@ -17,10 +17,11 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers._
 import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers._
 
 class SqlPushdownTest extends TestBase {
 

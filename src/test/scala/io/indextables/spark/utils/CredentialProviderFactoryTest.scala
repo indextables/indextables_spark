@@ -17,11 +17,12 @@
 
 package io.indextables.spark.utils
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.testutils._
+import java.net.URI
+
 import org.apache.hadoop.conf.Configuration
 
-import java.net.URI
+import io.indextables.spark.testutils._
+import io.indextables.spark.TestBase
 
 /** Comprehensive unit tests for CredentialProviderFactory */
 class CredentialProviderFactoryTest extends TestBase {

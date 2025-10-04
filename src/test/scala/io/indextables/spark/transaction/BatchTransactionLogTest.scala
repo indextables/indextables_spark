@@ -17,11 +17,13 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.CloudStorageProviderFactory
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.TestBase
 
 class BatchTransactionLogTest extends TestBase {
 

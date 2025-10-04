@@ -17,17 +17,21 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.io.CloudStorageProvider
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
-import org.slf4j.LoggerFactory
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
-import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
-import scala.collection.mutable
+
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProvider
+import org.slf4j.LoggerFactory
 
 /**
  * Advanced optimizations for transaction log operations including backward listing, incremental checksums, and async

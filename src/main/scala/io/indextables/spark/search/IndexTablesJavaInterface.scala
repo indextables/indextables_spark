@@ -17,12 +17,14 @@
 
 package io.indextables.spark.search
 
-import io.indextables.tantivy4java.core.Tantivy
+import java.util.concurrent.ConcurrentHashMap
+
+import org.apache.spark.sql.catalyst.InternalRow
+
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.tantivy4java.core.Tantivy
 import org.slf4j.LoggerFactory
-import org.apache.spark.sql.catalyst.InternalRow
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Simplified adapter that delegates to TantivyDirectInterface instances. Maintains compatibility with the old

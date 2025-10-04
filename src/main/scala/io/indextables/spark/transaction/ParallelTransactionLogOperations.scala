@@ -17,17 +17,21 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.io.{CloudStorageProvider, CloudFileInfo}
-import io.indextables.spark.util.JsonUtil
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
-import org.slf4j.LoggerFactory
+import java.util.concurrent.ConcurrentHashMap
+
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
-import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters._
+import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider}
+import io.indextables.spark.util.JsonUtil
+import org.slf4j.LoggerFactory
 
 /**
  * Parallel operations enhancement for transaction log operations. Provides optimized parallel reading, writing, and
@@ -131,7 +135,7 @@ class ParallelTransactionLogOperations(
     // Format must be exactly 20 digits zero-padded: 00000000000000000002.json
     // Use String.format with Locale.ROOT to ensure locale-independent formatting
     val versionFileName = String.format(java.util.Locale.ROOT, "%020d.json", version.asInstanceOf[AnyRef])
-    val versionFile = new Path(transactionLogPath, versionFileName)
+    val versionFile     = new Path(transactionLogPath, versionFileName)
 
     // Serialize all actions into a single atomic file (transaction atomicity requirement)
     commitPool.submitSimple {
@@ -142,7 +146,7 @@ class ParallelTransactionLogOperations(
       if (!writeSucceeded) {
         throw new IllegalStateException(
           s"Failed to write transaction log version $version - file already exists at ${versionFile.toString}. " +
-          "This indicates a concurrent write conflict or version counter synchronization issue."
+            "This indicates a concurrent write conflict or version counter synchronization issue."
         )
       }
 

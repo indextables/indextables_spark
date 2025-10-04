@@ -17,13 +17,16 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.Row
-import org.scalatest.BeforeAndAfterEach
 import java.nio.file.Files
+
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
 

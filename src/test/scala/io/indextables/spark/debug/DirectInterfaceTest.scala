@@ -17,14 +17,16 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.search.{TantivyDirectInterface, TantivySearchEngine, SplitSearchEngine}
-import io.indextables.spark.storage.SplitCacheConfig
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.unsafe.types.UTF8String
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.types.UTF8String
+
+import io.indextables.spark.search.{SplitSearchEngine, TantivyDirectInterface, TantivySearchEngine}
+import io.indextables.spark.storage.SplitCacheConfig
+import io.indextables.spark.TestBase
 
 class DirectInterfaceTest extends TestBase {
 

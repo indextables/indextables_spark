@@ -17,19 +17,22 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
-import io.findify.s3mock.S3Mock
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.scalatest.matchers.should.Matchers._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
-
 import java.net.ServerSocket
+
 import scala.jdk.CollectionConverters._
 import scala.util.Using
+
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.findify.s3mock.S3Mock
+import io.indextables.spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.matchers.should.Matchers._
 
 /**
  * Test to validate that AWS credentials are properly propagated through all code paths, especially the problematic

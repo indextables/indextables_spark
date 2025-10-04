@@ -17,14 +17,17 @@
 
 package io.indextables.spark
 
-import org.apache.spark.sql.{SparkSession, DataFrame}
+import java.io.File
+import java.nio.file.Files
+
+import scala.util.Random
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.types._
+
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import java.io.File
-import java.nio.file.Files
-import scala.util.Random
 
 trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 

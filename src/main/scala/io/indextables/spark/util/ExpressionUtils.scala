@@ -17,13 +17,14 @@
 
 package io.indextables.spark.util
 
-import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
+import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
-import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpression}
-import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
+
+import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 
 object ExpressionUtils {
 

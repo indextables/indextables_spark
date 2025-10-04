@@ -17,13 +17,16 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.RealS3TestBase
-import org.apache.spark.sql.functions._
 import java.io.File
-import java.util.UUID
 import java.io.FileInputStream
 import java.util.Properties
+import java.util.UUID
+
 import scala.util.Using
+
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Test to validate that spark.indextables.* configurations actually work during read, write, and merge operations,

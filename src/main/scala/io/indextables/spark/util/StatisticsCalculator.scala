@@ -17,9 +17,10 @@
 
 package io.indextables.spark.util
 
+import scala.collection.mutable
+
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
-import scala.collection.mutable
 
 object StatisticsCalculator {
 

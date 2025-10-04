@@ -1,13 +1,16 @@
 package io.indextables.spark.core
 
+import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
-import org.apache.hadoop.fs.Path
-import scala.collection.JavaConverters._
 
 /**
  * Unit tests for GROUP BY aggregate pushdown functionality. Tests the core GROUP BY components without requiring Spark

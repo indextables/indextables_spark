@@ -17,12 +17,13 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.scalatest.BeforeAndAfterEach
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
+
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
 

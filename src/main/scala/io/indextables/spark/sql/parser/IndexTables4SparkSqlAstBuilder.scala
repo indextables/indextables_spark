@@ -17,14 +17,16 @@
 
 package io.indextables.spark.sql.parser
 
-import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, MergeSplitsCommand, InvalidateTransactionLogCacheCommand}
-import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.catalyst.parser.ParserUtils
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.TableIdentifier
+
+import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, InvalidateTransactionLogCacheCommand, MergeSplitsCommand}
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
-import scala.jdk.CollectionConverters._
 
 /** Builder that converts ANTLR parse trees into Catalyst logical plans. */
 class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor[AnyRef] {

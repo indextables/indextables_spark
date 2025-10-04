@@ -17,13 +17,17 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.apache.hadoop.fs.Path
-import org.scalatest.BeforeAndAfterEach
 import java.util.Collections
+
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 

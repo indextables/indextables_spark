@@ -1,10 +1,11 @@
 package io.indextables.spark
 
-import org.scalatest.funsuite.AnyFunSuite
-import _root_.io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
-import _root_.io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import _root_.io.indextables.tantivy4java.split.merge.QuickwitSplit
 import java.nio.file.{Files, Paths}
+
+import _root_.io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
+import _root_.io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
+import _root_.io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.scalatest.funsuite.AnyFunSuite
 
 /** Scala reproduction of FastFieldBugReproductionTest.java to check for Scala/Java interop issues. */
 class FastFieldScalaReproTest extends AnyFunSuite {

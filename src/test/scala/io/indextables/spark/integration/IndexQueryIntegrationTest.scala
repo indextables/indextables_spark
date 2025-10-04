@@ -17,16 +17,17 @@
 
 package io.indextables.spark.integration
 
-import io.indextables.spark.TestBase
+import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
+import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.unsafe.types.UTF8String
+
 import io.indextables.spark.expressions.IndexQueryExpression
 import io.indextables.spark.filters.IndexQueryFilter
 import io.indextables.spark.util.ExpressionUtils
-import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
-import org.apache.spark.unsafe.types.UTF8String
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 
 class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {

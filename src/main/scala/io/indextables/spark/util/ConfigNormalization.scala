@@ -17,13 +17,14 @@
 
 package io.indextables.spark.util
 
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-
-import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.SparkConf
+
+import org.apache.hadoop.conf.Configuration
 
 /**
  * Utility object for normalizing IndexTables4Spark configuration keys.
@@ -50,8 +51,8 @@ object ConfigNormalization {
     key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
 
   /**
-   * Filters and normalizes a Map of configuration properties to extract only IndexTables4Spark-related keys with normalized
-   * prefixes.
+   * Filters and normalizes a Map of configuration properties to extract only IndexTables4Spark-related keys with
+   * normalized prefixes.
    */
   def filterAndNormalizeTantivyConfigs(configs: Map[String, String]): Map[String, String] =
     configs

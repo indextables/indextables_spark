@@ -17,9 +17,10 @@
 
 package io.indextables.spark.config
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
+
+import io.indextables.spark.TestBase
 
 class IndexWriterConfigTest extends TestBase {
 

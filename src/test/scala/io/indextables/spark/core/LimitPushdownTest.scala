@@ -17,8 +17,9 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
 
 class LimitPushdownTest extends TestBase {
@@ -173,7 +174,8 @@ class LimitPushdownTest extends TestBase {
 
       // Test ScanBuilder limit pushdown methods
       val emptyBroadcastConfig = spark.sparkContext.broadcast(Map.empty[String, String])
-      val scanBuilder = new IndexTables4SparkScanBuilder(spark, transactionLog, schema, options, emptyBroadcastConfig.value)
+      val scanBuilder =
+        new IndexTables4SparkScanBuilder(spark, transactionLog, schema, options, emptyBroadcastConfig.value)
 
       // Push a limit - should return true indicating support
       val limitPushed = scanBuilder.pushLimit(10)

@@ -17,13 +17,15 @@
 
 package io.indextables.spark.debug
 
+import java.nio.file.{Files, Paths}
+
+import scala.util.Using
+
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
-import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import java.nio.file.{Files, Paths}
-import scala.util.Using
 
 class MinimalSplitTest extends AnyFunSuite with BeforeAndAfterEach {
 

@@ -17,12 +17,15 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.functions._
-import org.scalatest.matchers.should.Matchers
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+
+import org.apache.spark.sql.functions._
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
+import org.scalatest.matchers.should.Matchers
 
 /**
  * Tests to validate that footer metadata survives serialization/deserialization during AQE.

@@ -17,13 +17,16 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
+import java.net.ServerSocket
+
+import scala.util.Using
+
 import org.apache.spark.sql.{SaveMode, SparkSession}
 import org.apache.spark.sql.functions._
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+
 import io.findify.s3mock.S3Mock
-import java.net.ServerSocket
-import scala.util.Using
+import io.indextables.spark.TestBase
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 
 /**
  * Test for MERGE SPLITS command with S3 storage using S3Mock. This test validates that the MERGE SPLITS command

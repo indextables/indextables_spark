@@ -17,12 +17,15 @@
 
 package io.indextables.spark.core
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType, LongType}
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import java.nio.file.Files
+
 import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Test suite for aggregate pushdown validation logic. Uses correct configuration parameters as noted by the user:

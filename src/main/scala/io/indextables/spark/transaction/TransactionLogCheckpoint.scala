@@ -17,14 +17,17 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.hadoop.fs.Path
-import org.slf4j.LoggerFactory
-import io.indextables.spark.util.JsonUtil
-import io.indextables.spark.io.CloudStorageProvider
-import scala.util.{Try, Success, Failure}
 import java.util.concurrent.{Executors, ThreadPoolExecutor}
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.util.JsonUtil
+import org.slf4j.LoggerFactory
 
 case class CheckpointInfo(
   version: Long,

@@ -1,7 +1,8 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 
 class TableExistsTest extends TestBase {
 

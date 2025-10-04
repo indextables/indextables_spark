@@ -17,11 +17,13 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SaveMode}
+import org.apache.spark.sql.types._
+
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 

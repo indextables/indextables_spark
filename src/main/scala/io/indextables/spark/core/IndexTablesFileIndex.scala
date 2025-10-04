@@ -17,11 +17,14 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
+import scala.collection.mutable
+
 import org.apache.spark.sql.execution.datasources.{FileIndex, PartitionDirectory}
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.SparkSession
+
 import org.apache.hadoop.fs.{FileStatus, Path}
-import scala.collection.mutable
+
 import org.slf4j.LoggerFactory
 
 /**

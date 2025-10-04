@@ -17,11 +17,14 @@
 
 package io.indextables.spark.io
 
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileSystem, Path, FileStatus}
-import org.slf4j.LoggerFactory
 import java.io.{InputStream, OutputStream}
+
 import scala.util.Try
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{FileStatus, FileSystem, Path}
+
+import org.slf4j.LoggerFactory
 
 /**
  * Hadoop-based storage provider for local, HDFS, and other Hadoop-compatible filesystems. Falls back to standard Hadoop

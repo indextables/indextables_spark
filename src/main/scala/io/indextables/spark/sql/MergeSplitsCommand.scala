@@ -17,26 +17,30 @@
 
 package io.indextables.spark.sql
 
+import java.util.concurrent.ThreadLocalRandom
+
+import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.command.RunnableCommand
-import org.apache.spark.sql.types.{StringType, LongType, StructType, StructField}
-import org.apache.spark.unsafe.types.UTF8String
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction, RemoveAction}
-import io.indextables.spark.storage.SplitManager
-import io.indextables.spark.io.CloudStorageProviderFactory
-import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.slf4j.LoggerFactory
-import scala.collection.mutable.ArrayBuffer
-import java.util.concurrent.ThreadLocalRandom
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.core.Index
+import org.apache.spark.unsafe.types.UTF8String
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.storage.SplitManager
+import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.util.ConfigNormalization
-import scala.jdk.CollectionConverters._
+import io.indextables.tantivy4java.core.Index
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.slf4j.LoggerFactory
 
 /**
  * SQL command to merge small split files into larger ones. Modeled after Delta Lake's OPTIMIZE command structure and
@@ -66,14 +70,19 @@ abstract class MergeSplitsCommandBase extends RunnableCommand {
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),
-    AttributeReference("metrics", StructType(Seq(
-      StructField("status", StringType, nullable = false),
-      StructField("merged_files", LongType, nullable = true),
-      StructField("merge_groups", LongType, nullable = true),
-      StructField("original_size_bytes", LongType, nullable = true),
-      StructField("merged_size_bytes", LongType, nullable = true),
-      StructField("message", StringType, nullable = true)
-    )))(),
+    AttributeReference(
+      "metrics",
+      StructType(
+        Seq(
+          StructField("status", StringType, nullable = false),
+          StructField("merged_files", LongType, nullable = true),
+          StructField("merge_groups", LongType, nullable = true),
+          StructField("original_size_bytes", LongType, nullable = true),
+          StructField("merged_size_bytes", LongType, nullable = true),
+          StructField("message", StringType, nullable = true)
+        )
+      )
+    )(),
     AttributeReference("temp_directory_path", StringType)(),
     AttributeReference("heap_size_bytes", LongType)()
   )
@@ -114,7 +123,14 @@ case class MergeSplitsCommand(
     // Handle pre-commit merge early (before any table path resolution)
     if (preCommitMerge) {
       logger.info("PRE-COMMIT MERGE: Executing pre-commit merge functionality")
-      return Seq(Row("PRE-COMMIT MERGE", Row("pending", null, null, null, null, "Functionality pending implementation"), null, null))
+      return Seq(
+        Row(
+          "PRE-COMMIT MERGE",
+          Row("pending", null, null, null, null, "Functionality pending implementation"),
+          null,
+          null
+        )
+      )
     }
 
     // Resolve table path from child logical plan
@@ -149,7 +165,14 @@ case class MergeSplitsCommand(
 
       if (!hasMetadata) {
         logger.info(s"No transaction log found at: $tablePath")
-        return Seq(Row(tablePath.toString, Row("error", null, null, null, null, "Not a valid IndexTables4Spark table"), null, null))
+        return Seq(
+          Row(
+            tablePath.toString,
+            Row("error", null, null, null, null, "Not a valid IndexTables4Spark table"),
+            null,
+            null
+          )
+        )
       }
 
       // Validate table has files
@@ -216,10 +239,11 @@ object MergeSplitsCommand {
   }
 
   /**
-   * Detect if /local_disk0 is available and writable for high-performance local storage.
-   * Follows the same pattern as SplitManager.scala for consistency.
+   * Detect if /local_disk0 is available and writable for high-performance local storage. Follows the same pattern as
+   * SplitManager.scala for consistency.
    *
-   * @return true if /local_disk0 exists, is a directory, and is writable; false otherwise
+   * @return
+   *   true if /local_disk0 exists, is a directory, and is writable; false otherwise
    */
   def isLocalDisk0Available(): Boolean = {
     val localDisk0 = new java.io.File("/local_disk0")
@@ -236,9 +260,9 @@ case class SerializableAwsConfig(
   endpoint: Option[String],
   pathStyleAccess: Boolean,
   tempDirectoryPath: Option[String] = None,
-  credentialsProviderClass: Option[String] = None,        // Custom credential provider class name
+  credentialsProviderClass: Option[String] = None,                // Custom credential provider class name
   heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
-  debugEnabled: Boolean = false                           // Enable debug logging in merge operations
+  debugEnabled: Boolean = false                                   // Enable debug logging in merge operations
 ) extends Serializable {
 
   /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
@@ -309,24 +333,25 @@ case class SerializableAwsConfig(
   }
 
   /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed out".
-   * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
+   * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
    */
   private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
-    val logger = LoggerFactory.getLogger(this.getClass)
-    val maxAttempts = 3
-    var attempt = 1
+    val logger                          = LoggerFactory.getLogger(this.getClass)
+    val maxAttempts                     = 3
+    var attempt                         = 1
     var lastException: RuntimeException = null
 
-    while (attempt <= maxAttempts) {
+    while (attempt <= maxAttempts)
       try {
         if (attempt > 1) {
           logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
         }
         return operation()
       } catch {
-        case e: RuntimeException if e.getMessage != null &&
-            (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
+        case e: RuntimeException
+            if e.getMessage != null &&
+              (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
           lastException = e
           logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
           if (attempt == maxAttempts) {
@@ -338,7 +363,6 @@ case class SerializableAwsConfig(
           // Non-retryable errors are propagated immediately
           throw e
       }
-    }
 
     // This should never be reached, but for completeness
     throw lastException
@@ -418,7 +442,8 @@ class MergeSplitsExecutor(
         .map(_.toLong)
         .map(java.lang.Long.valueOf)
         .getOrElse(java.lang.Long.valueOf(1073741824L)) // 1GB default
-      val debugEnabled = getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
+      val debugEnabled =
+        getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
 
       println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey
@@ -462,10 +487,10 @@ class MergeSplitsExecutor(
         region.getOrElse("us-east-1"),
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
-        tempDirectoryPath,       // Custom temp directory path for merge operations
+        tempDirectoryPath,        // Custom temp directory path for merge operations
         credentialsProviderClass, // Custom credential provider class name
-        heapSize,                // Heap size for merge operations
-        debugEnabled             // Debug logging for merge operations
+        heapSize,                 // Heap size for merge operations
+        debugEnabled              // Debug logging for merge operations
       )
     } catch {
       case ex: Exception =>
@@ -669,8 +694,9 @@ class MergeSplitsExecutor(
     val batches = limitedMergeGroups.grouped(batchSize).toSeq
     logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
 
-    batches.zipWithIndex.foreach { case (batch, idx) =>
-      logger.info(s"Batch ${idx + 1}/${batches.length}: ${batch.length} merge groups")
+    batches.zipWithIndex.foreach {
+      case (batch, idx) =>
+        logger.info(s"Batch ${idx + 1}/${batches.length}: ${batch.length} merge groups")
     }
 
     // Execute batches concurrently with controlled parallelism
@@ -687,327 +713,341 @@ class MergeSplitsExecutor(
     import java.util.concurrent.ForkJoinPool
     import scala.util.{Try, Success, Failure}
 
-    val batchResults = batches.zipWithIndex.par
+    val batchResults      = batches.zipWithIndex.par
     val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
     batchResults.tasksupport = customTaskSupport
 
     // Track batch failures
-    var failedBatchCount = 0
+    var failedBatchCount     = 0
     var successfulBatchCount = 0
 
-    val allResults = try {
-      batchResults.flatMap { case (batch, batchIdx) =>
-        Try {
-        val batchNum = batchIdx + 1
-        val totalSplits = batch.map(_.files.length).sum
-        val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
+    val allResults =
+      try {
+        batchResults.flatMap {
+          case (batch, batchIdx) =>
+            Try {
+              val batchNum    = batchIdx + 1
+              val totalSplits = batch.map(_.files.length).sum
+              val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
 
-        logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, ${totalSizeGB}%.2f GB")
-        println(s"🔄 [DRIVER] Starting batch $batchNum/${batches.length}: ${batch.length} merge groups")
+              logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, $totalSizeGB%.2f GB")
+              println(s"🔄 [DRIVER] Starting batch $batchNum/${batches.length}: ${batch.length} merge groups")
 
-        // Set descriptive names for Spark UI
-        val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
-        val jobDescription = f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits ($totalSizeGB%.2f GB)"
-        val stageName = f"Merge Batch $batchNum/${batches.length}: ${batch.length} groups, $totalSplits splits"
+              // Set descriptive names for Spark UI
+              val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
+              val jobDescription =
+                f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits ($totalSizeGB%.2f GB)"
+              val stageName = f"Merge Batch $batchNum/${batches.length}: ${batch.length} groups, $totalSplits splits"
 
-        sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
+              sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
 
-        val batchStartTime = System.currentTimeMillis()
+              val batchStartTime = System.currentTimeMillis()
 
-        val physicalMergeResults = try {
-          val mergeGroupsRDD = sparkSession.sparkContext
-            .parallelize(batch, batch.length)
-            .setName(stageName)
-          mergeGroupsRDD
-            .map(group =>
-              MergeSplitsExecutor.executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)
-            )
-            .setName(s"Merge Results Batch $batchNum")
-            .collect()
-        } finally {
-          sparkSession.sparkContext.clearJobGroup()
-        }
+              val physicalMergeResults =
+                try {
+                  val mergeGroupsRDD = sparkSession.sparkContext
+                    .parallelize(batch, batch.length)
+                    .setName(stageName)
+                  mergeGroupsRDD
+                    .map(group =>
+                      MergeSplitsExecutor
+                        .executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)
+                    )
+                    .setName(s"Merge Results Batch $batchNum")
+                    .collect()
+                } finally
+                  sparkSession.sparkContext.clearJobGroup()
 
-        val batchElapsed = System.currentTimeMillis() - batchStartTime
-        logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
-        println(s"✅ [DRIVER] Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
+              val batchElapsed = System.currentTimeMillis() - batchStartTime
+              logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
+              println(s"✅ [DRIVER] Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
 
-        // Now handle transaction log operations on driver (these cannot be distributed)
-        logger.info(s"Processing ${physicalMergeResults.length} merge results for batch $batchNum transaction log updates")
+              // Now handle transaction log operations on driver (these cannot be distributed)
+              logger.info(
+                s"Processing ${physicalMergeResults.length} merge results for batch $batchNum transaction log updates"
+              )
 
-        // CRITICAL: Validate all merged files actually exist before updating transaction log
-        println(
-          s"🔍 [DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
-        )
-        physicalMergeResults.foreach { result =>
-          val fullMergedPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
-            s"${tablePath.toString.replaceAll("/$", "")}/${result.mergedSplitInfo.path}"
-          } else {
-            new org.apache.hadoop.fs.Path(tablePath.toString, result.mergedSplitInfo.path).toString
-          }
+              // CRITICAL: Validate all merged files actually exist before updating transaction log
+              println(
+                s"🔍 [DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
+              )
+              physicalMergeResults.foreach { result =>
+                val fullMergedPath =
+                  if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+                    s"${tablePath.toString.replaceAll("/$", "")}/${result.mergedSplitInfo.path}"
+                  } else {
+                    new org.apache.hadoop.fs.Path(tablePath.toString, result.mergedSplitInfo.path).toString
+                  }
 
-          try {
-            // For S3, we can't easily check file existence from driver, but we can at least log the expected path
-            logger.debug(s"[Batch $batchNum] Merged file should exist at: $fullMergedPath")
-          } catch {
-            case ex: Exception =>
-              logger.warn(s"[Batch $batchNum] Could not validate merged file existence: ${ex.getMessage}", ex)
-          }
-        }
-
-        // Collect all remove and add actions from this batch's merge results
-        val batchRemoveActions = ArrayBuffer[RemoveAction]()
-        val batchAddActions = ArrayBuffer[AddAction]()
-
-        val batchResults = physicalMergeResults.map { result =>
-      val startTime = System.currentTimeMillis()
-
-      logger.info(s"Processing transaction log for merge group with ${result.mergeGroup.files.length} files")
-
-      // Check if merge was actually performed by examining indexUid in metadata
-      val mergedMetadata = result.mergedSplitInfo.metadata
-      val indexUid       = mergedMetadata.indexUid
-
-      // Extract skipped splits from the merge result to avoid marking them as removed
-      val skippedSplitPaths = Option(result.mergedSplitInfo.metadata.getSkippedSplits())
-        .map(_.asScala.toSet)
-        .getOrElse(Set.empty[String])
-
-      // Always record skipped files regardless of whether merge was performed
-      if (skippedSplitPaths.nonEmpty) {
-        logger.warn(s"⚠️  Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
-        println(
-          s"⚠️  [DRIVER] Merge operation skipped ${skippedSplitPaths.size} files: ${skippedSplitPaths.mkString(", ")}"
-        )
-
-        // Record skipped files in transaction log with cooldown period
-        val cooldownHours   = sparkSession.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
-        val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
-
-        if (trackingEnabled) {
-          skippedSplitPaths.foreach { skippedPath =>
-            logger.warn(s"⚠️  Recording skipped file in transaction log: $skippedPath")
-
-            // Find the corresponding file in merge group to get partition info and size
-            val correspondingFile = result.mergeGroup.files.find { file =>
-              val fullPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
-                val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-                s"$normalizedBaseUri/${file.path}"
-              } else {
-                new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
+                try
+                  // For S3, we can't easily check file existence from driver, but we can at least log the expected path
+                  logger.debug(s"[Batch $batchNum] Merged file should exist at: $fullMergedPath")
+                catch {
+                  case ex: Exception =>
+                    logger.warn(s"[Batch $batchNum] Could not validate merged file existence: ${ex.getMessage}", ex)
+                }
               }
-              fullPath == skippedPath || file.path == skippedPath
+
+              // Collect all remove and add actions from this batch's merge results
+              val batchRemoveActions = ArrayBuffer[RemoveAction]()
+              val batchAddActions    = ArrayBuffer[AddAction]()
+
+              val batchResults = physicalMergeResults.map { result =>
+                val startTime = System.currentTimeMillis()
+
+                logger.info(s"Processing transaction log for merge group with ${result.mergeGroup.files.length} files")
+
+                // Check if merge was actually performed by examining indexUid in metadata
+                val mergedMetadata = result.mergedSplitInfo.metadata
+                val indexUid       = mergedMetadata.indexUid
+
+                // Extract skipped splits from the merge result to avoid marking them as removed
+                val skippedSplitPaths = Option(result.mergedSplitInfo.metadata.getSkippedSplits())
+                  .map(_.asScala.toSet)
+                  .getOrElse(Set.empty[String])
+
+                // Always record skipped files regardless of whether merge was performed
+                if (skippedSplitPaths.nonEmpty) {
+                  logger.warn(s"⚠️  Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
+                  println(
+                    s"⚠️  [DRIVER] Merge operation skipped ${skippedSplitPaths.size} files: ${skippedSplitPaths.mkString(", ")}"
+                  )
+
+                  // Record skipped files in transaction log with cooldown period
+                  val cooldownHours =
+                    sparkSession.conf.get("spark.indextables.skippedFiles.cooldownDuration", "24").toInt
+                  val trackingEnabled =
+                    sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
+
+                  if (trackingEnabled) {
+                    skippedSplitPaths.foreach { skippedPath =>
+                      logger.warn(s"⚠️  Recording skipped file in transaction log: $skippedPath")
+
+                      // Find the corresponding file in merge group to get partition info and size
+                      val correspondingFile = result.mergeGroup.files.find { file =>
+                        val fullPath =
+                          if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+                            val normalizedBaseUri =
+                              tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+                            s"$normalizedBaseUri/${file.path}"
+                          } else {
+                            new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
+                          }
+                        fullPath == skippedPath || file.path == skippedPath
+                      }
+
+                      val reason = "Merge operation failed - possibly corrupted file or read error"
+                      transactionLog.recordSkippedFile(
+                        filePath = correspondingFile.map(_.path).getOrElse(skippedPath),
+                        reason = reason,
+                        operation = "merge",
+                        partitionValues = correspondingFile.map(_.partitionValues),
+                        size = correspondingFile.map(_.size),
+                        cooldownHours = cooldownHours
+                      )
+                      logger.warn(s"⚠️  Recorded skipped file with ${cooldownHours}h cooldown: ${correspondingFile.map(_.path).getOrElse(skippedPath)}")
+                    }
+                  }
+                }
+
+                // Check if no merge was performed (null or empty indexUid indicates this)
+                if (indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)) {
+                  logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
+                  println(
+                    s"⚠️  [DRIVER] No merge performed (null/empty indexUid) - skipping transaction log ADD/REMOVE operations"
+                  )
+
+                  // Return without performing ADD/REMOVE operations
+                  // Note: We still recorded the skipped files above, which is the desired behavior
+                  result.copy(
+                    mergedFiles = 0, // No files were actually merged
+                    mergedSize = 0L, // No merged split was created
+                    originalSize = result.mergeGroup.files.map(_.size).sum,
+                    executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime)
+                  )
+                } else {
+
+                  // Prepare transaction actions (REMOVE + ADD pattern from Delta Lake)
+                  // CRITICAL: Only remove files that were actually merged, not skipped files
+                  val removeActions = result.mergeGroup.files
+                    .filter { file =>
+                      val fullPath =
+                        if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
+                          // For S3 paths, construct full URL to match what tantivy4java reports
+                          val normalizedBaseUri =
+                            tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+                          s"$normalizedBaseUri/${file.path}"
+                        } else {
+                          // For local paths, use absolute path
+                          new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
+                        }
+
+                      val wasSkipped = skippedSplitPaths.contains(fullPath) || skippedSplitPaths.contains(file.path)
+                      if (wasSkipped) {
+                        logger.info(s"Preserving skipped file in transaction log (not marking as removed): ${file.path}")
+                        println(s"📝 [DRIVER] Preserving skipped file: ${file.path}")
+                      }
+                      !wasSkipped
+                    }
+                    .map { file =>
+                      RemoveAction(
+                        path = file.path,
+                        deletionTimestamp = Some(startTime),
+                        dataChange = false, // This is compaction, not data change
+                        extendedFileMetadata = Some(true),
+                        partitionValues = Some(file.partitionValues),
+                        size = Some(file.size),
+                        tags = file.tags
+                      )
+                    }
+
+                  // Extract ALL metadata from merged split for complete pipeline coverage
+                  // (mergedMetadata already extracted above for indexUid check)
+                  val (
+                    footerStartOffset,
+                    footerEndOffset,
+                    hotcacheStartOffset,
+                    hotcacheLength,
+                    hasFooterOffsets,
+                    timeRangeStart,
+                    timeRangeEnd,
+                    splitTags,
+                    deleteOpstamp,
+                    numMergeOps,
+                    docMappingJson,
+                    uncompressedSizeBytes,
+                    numDocs
+                  ) =
+                    if (mergedMetadata != null) {
+                      val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
+                      val timeEnd   = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
+                      val tags = Option(mergedMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
+                        import scala.jdk.CollectionConverters._
+                        tagSet.asScala.toSet
+                      }
+                      val docMapping = Option(mergedMetadata.getDocMappingJson())
+
+                      // CRITICAL DEBUG: Verify docMappingJson returned from tantivy4java merge
+                      docMapping match {
+                        case Some(json) =>
+                          logger.warn(
+                            s"✅ MERGE RESULT: docMappingJson extracted from merged split (${json.length} chars)"
+                          )
+                          logger.warn(s"✅ MERGE RESULT: docMappingJson content: $json")
+                        case None =>
+                          logger.error(
+                            s"❌ MERGE RESULT: No docMappingJson in merged split metadata - tantivy4java did not preserve it!"
+                          )
+                      }
+
+                      if (mergedMetadata.hasFooterOffsets) {
+                        (
+                          Some(mergedMetadata.getFooterStartOffset()),
+                          Some(mergedMetadata.getFooterEndOffset()),
+                          None, // hotcacheStartOffset - deprecated, use footer offsets instead
+                          None, // hotcacheLength - deprecated, use footer offsets instead
+                          true,
+                          timeStart,
+                          timeEnd,
+                          tags,
+                          Some(mergedMetadata.getDeleteOpstamp()),
+                          Some(mergedMetadata.getNumMergeOps()),
+                          docMapping,
+                          Some(mergedMetadata.getUncompressedSizeBytes()),
+                          Some(mergedMetadata.getNumDocs())
+                        )
+                      } else {
+                        throw new IllegalStateException(
+                          s"Merged split ${result.mergedSplitInfo.path} does not have footer offsets. This indicates a problem with the merge operation or tantivy4java library."
+                        )
+                      }
+                    } else {
+                      throw new IllegalStateException(
+                        s"Failed to extract metadata from merged split ${result.mergedSplitInfo.path}. This indicates a problem with the merge operation or tantivy4java library."
+                      )
+                    }
+
+                  // CRITICAL DEBUG: Verify docMappingJson being saved to AddAction
+                  docMappingJson match {
+                    case Some(json) =>
+                      logger.warn(s"✅ TRANSACTION LOG: Saving AddAction with docMappingJson (${json.length} chars)")
+                      logger.warn(s"✅ TRANSACTION LOG: docMappingJson being saved: $json")
+                    case None =>
+                      logger.error(s"❌ TRANSACTION LOG: AddAction has NO docMappingJson - fast fields will be lost!")
+                  }
+
+                  val addAction = AddAction(
+                    path = result.mergedSplitInfo.path,
+                    partitionValues = result.mergeGroup.partitionValues,
+                    size = result.mergedSplitInfo.size,
+                    modificationTime = startTime,
+                    dataChange = false, // This is compaction, not data change
+                    stats = None,
+                    tags = None,
+                    numRecords = numDocs, // Number of documents in the merged split
+                    // Footer offset optimization metadata preserved from merge operation
+                    footerStartOffset = footerStartOffset,
+                    footerEndOffset = footerEndOffset,
+                    hotcacheStartOffset = hotcacheStartOffset,
+                    hotcacheLength = hotcacheLength,
+                    hasFooterOffsets = hasFooterOffsets,
+                    // Complete tantivy4java SplitMetadata fields preserved from merge
+                    timeRangeStart = timeRangeStart,
+                    timeRangeEnd = timeRangeEnd,
+                    splitTags = splitTags,
+                    deleteOpstamp = deleteOpstamp,
+                    numMergeOps = numMergeOps,
+                    docMappingJson = docMappingJson,
+                    uncompressedSizeBytes = uncompressedSizeBytes
+                  )
+
+                  // Collect actions for batch commit instead of committing individually
+                  batchRemoveActions ++= removeActions
+                  batchAddActions += addAction
+
+                  logger.info(s"[Batch $batchNum] Prepared transaction actions: ${removeActions.length} removes, 1 add")
+
+                  // Return the merge result with updated timing
+                  result.copy(executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime))
+                } // End of else block for indexUid check
+              }
+
+              // Commit this batch's actions in a single transaction
+              if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty) {
+                val txnStartTime = System.currentTimeMillis()
+                logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
+                println(s"💾 [DRIVER] Batch $batchNum: Committing ${batchRemoveActions.length} removes, ${batchAddActions.length} adds")
+
+                val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
+                transactionLog.invalidateCache() // Ensure cache is updated
+
+                val txnElapsed = System.currentTimeMillis() - txnStartTime
+                logger.info(s"[Batch $batchNum] Transaction log updated at version $version in ${txnElapsed}ms")
+                println(s"✅ [DRIVER] Batch $batchNum: Transaction committed at version $version in ${txnElapsed}ms")
+              } else {
+                logger.info(s"[Batch $batchNum] No transaction actions to commit")
+              }
+
+              val batchTotalTime = System.currentTimeMillis() - batchStartTime
+              logger.info(s"[Batch $batchNum] Total batch time (merge + transaction): ${batchTotalTime}ms")
+              println(s"⏱️  [DRIVER] Batch $batchNum: Completed in ${batchTotalTime}ms")
+
+              successfulBatchCount += 1
+
+              // Return results from this batch
+              batchResults
+            } match {
+              case Success(results) => results
+              case Failure(ex) =>
+                failedBatchCount += 1
+                val batchNum = batchIdx + 1
+                logger.error(s"[Batch $batchNum] Failed to process batch", ex)
+                println(s"❌ [DRIVER] Batch $batchNum: Failed with error: ${ex.getMessage}")
+                Seq.empty // Return empty sequence for failed batches
             }
-
-            val reason = "Merge operation failed - possibly corrupted file or read error"
-            transactionLog.recordSkippedFile(
-              filePath = correspondingFile.map(_.path).getOrElse(skippedPath),
-              reason = reason,
-              operation = "merge",
-              partitionValues = correspondingFile.map(_.partitionValues),
-              size = correspondingFile.map(_.size),
-              cooldownHours = cooldownHours
-            )
-            logger.warn(s"⚠️  Recorded skipped file with ${cooldownHours}h cooldown: ${correspondingFile.map(_.path).getOrElse(skippedPath)}")
-          }
-        }
-      }
-
-      // Check if no merge was performed (null or empty indexUid indicates this)
-      if (indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)) {
-        logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
-        println(
-          s"⚠️  [DRIVER] No merge performed (null/empty indexUid) - skipping transaction log ADD/REMOVE operations"
-        )
-
-        // Return without performing ADD/REMOVE operations
-        // Note: We still recorded the skipped files above, which is the desired behavior
-        result.copy(
-          mergedFiles = 0, // No files were actually merged
-          mergedSize = 0L, // No merged split was created
-          originalSize = result.mergeGroup.files.map(_.size).sum,
-          executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime)
-        )
-      } else {
-
-        // Prepare transaction actions (REMOVE + ADD pattern from Delta Lake)
-        // CRITICAL: Only remove files that were actually merged, not skipped files
-        val removeActions = result.mergeGroup.files
-          .filter { file =>
-            val fullPath = if (tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")) {
-              // For S3 paths, construct full URL to match what tantivy4java reports
-              val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-              s"$normalizedBaseUri/${file.path}"
-            } else {
-              // For local paths, use absolute path
-              new org.apache.hadoop.fs.Path(tablePath.toString, file.path).toString
-            }
-
-            val wasSkipped = skippedSplitPaths.contains(fullPath) || skippedSplitPaths.contains(file.path)
-            if (wasSkipped) {
-              logger.info(s"Preserving skipped file in transaction log (not marking as removed): ${file.path}")
-              println(s"📝 [DRIVER] Preserving skipped file: ${file.path}")
-            }
-            !wasSkipped
-          }
-          .map { file =>
-            RemoveAction(
-              path = file.path,
-              deletionTimestamp = Some(startTime),
-              dataChange = false, // This is compaction, not data change
-              extendedFileMetadata = Some(true),
-              partitionValues = Some(file.partitionValues),
-              size = Some(file.size),
-              tags = file.tags
-            )
-          }
-
-        // Extract ALL metadata from merged split for complete pipeline coverage
-        // (mergedMetadata already extracted above for indexUid check)
-        val (
-          footerStartOffset,
-          footerEndOffset,
-          hotcacheStartOffset,
-          hotcacheLength,
-          hasFooterOffsets,
-          timeRangeStart,
-          timeRangeEnd,
-          splitTags,
-          deleteOpstamp,
-          numMergeOps,
-          docMappingJson,
-          uncompressedSizeBytes,
-          numDocs
-        ) =
-          if (mergedMetadata != null) {
-            val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
-            val timeEnd   = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
-            val tags = Option(mergedMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
-              import scala.jdk.CollectionConverters._
-              tagSet.asScala.toSet
-            }
-            val docMapping = Option(mergedMetadata.getDocMappingJson())
-
-            // CRITICAL DEBUG: Verify docMappingJson returned from tantivy4java merge
-            docMapping match {
-              case Some(json) =>
-                logger.warn(s"✅ MERGE RESULT: docMappingJson extracted from merged split (${json.length} chars)")
-                logger.warn(s"✅ MERGE RESULT: docMappingJson content: $json")
-              case None =>
-                logger.error(
-                  s"❌ MERGE RESULT: No docMappingJson in merged split metadata - tantivy4java did not preserve it!"
-                )
-            }
-
-            if (mergedMetadata.hasFooterOffsets) {
-              (
-                Some(mergedMetadata.getFooterStartOffset()),
-                Some(mergedMetadata.getFooterEndOffset()),
-                None, // hotcacheStartOffset - deprecated, use footer offsets instead
-                None, // hotcacheLength - deprecated, use footer offsets instead
-                true,
-                timeStart,
-                timeEnd,
-                tags,
-                Some(mergedMetadata.getDeleteOpstamp()),
-                Some(mergedMetadata.getNumMergeOps()),
-                docMapping,
-                Some(mergedMetadata.getUncompressedSizeBytes()),
-                Some(mergedMetadata.getNumDocs())
-              )
-            } else {
-              throw new IllegalStateException(
-                s"Merged split ${result.mergedSplitInfo.path} does not have footer offsets. This indicates a problem with the merge operation or tantivy4java library."
-              )
-            }
-          } else {
-            throw new IllegalStateException(
-              s"Failed to extract metadata from merged split ${result.mergedSplitInfo.path}. This indicates a problem with the merge operation or tantivy4java library."
-            )
-          }
-
-        // CRITICAL DEBUG: Verify docMappingJson being saved to AddAction
-        docMappingJson match {
-          case Some(json) =>
-            logger.warn(s"✅ TRANSACTION LOG: Saving AddAction with docMappingJson (${json.length} chars)")
-            logger.warn(s"✅ TRANSACTION LOG: docMappingJson being saved: $json")
-          case None =>
-            logger.error(s"❌ TRANSACTION LOG: AddAction has NO docMappingJson - fast fields will be lost!")
-        }
-
-        val addAction = AddAction(
-          path = result.mergedSplitInfo.path,
-          partitionValues = result.mergeGroup.partitionValues,
-          size = result.mergedSplitInfo.size,
-          modificationTime = startTime,
-          dataChange = false, // This is compaction, not data change
-          stats = None,
-          tags = None,
-          numRecords = numDocs, // Number of documents in the merged split
-          // Footer offset optimization metadata preserved from merge operation
-          footerStartOffset = footerStartOffset,
-          footerEndOffset = footerEndOffset,
-          hotcacheStartOffset = hotcacheStartOffset,
-          hotcacheLength = hotcacheLength,
-          hasFooterOffsets = hasFooterOffsets,
-          // Complete tantivy4java SplitMetadata fields preserved from merge
-          timeRangeStart = timeRangeStart,
-          timeRangeEnd = timeRangeEnd,
-          splitTags = splitTags,
-          deleteOpstamp = deleteOpstamp,
-          numMergeOps = numMergeOps,
-          docMappingJson = docMappingJson,
-          uncompressedSizeBytes = uncompressedSizeBytes
-        )
-
-        // Collect actions for batch commit instead of committing individually
-        batchRemoveActions ++= removeActions
-        batchAddActions += addAction
-
-        logger.info(s"[Batch $batchNum] Prepared transaction actions: ${removeActions.length} removes, 1 add")
-
-        // Return the merge result with updated timing
-        result.copy(executionTimeMs = result.executionTimeMs + (System.currentTimeMillis() - startTime))
-      } // End of else block for indexUid check
-        }
-
-        // Commit this batch's actions in a single transaction
-        if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty) {
-          val txnStartTime = System.currentTimeMillis()
-          logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
-          println(s"💾 [DRIVER] Batch $batchNum: Committing ${batchRemoveActions.length} removes, ${batchAddActions.length} adds")
-
-          val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
-          transactionLog.invalidateCache() // Ensure cache is updated
-
-          val txnElapsed = System.currentTimeMillis() - txnStartTime
-          logger.info(s"[Batch $batchNum] Transaction log updated at version $version in ${txnElapsed}ms")
-          println(s"✅ [DRIVER] Batch $batchNum: Transaction committed at version $version in ${txnElapsed}ms")
-        } else {
-          logger.info(s"[Batch $batchNum] No transaction actions to commit")
-        }
-
-        val batchTotalTime = System.currentTimeMillis() - batchStartTime
-        logger.info(s"[Batch $batchNum] Total batch time (merge + transaction): ${batchTotalTime}ms")
-        println(s"⏱️  [DRIVER] Batch $batchNum: Completed in ${batchTotalTime}ms")
-
-        successfulBatchCount += 1
-
-        // Return results from this batch
-        batchResults
-        } match {
-          case Success(results) => results
-          case Failure(ex) =>
-            failedBatchCount += 1
-            val batchNum = batchIdx + 1
-            logger.error(s"[Batch $batchNum] Failed to process batch", ex)
-            println(s"❌ [DRIVER] Batch $batchNum: Failed with error: ${ex.getMessage}")
-            Seq.empty // Return empty sequence for failed batches
-        }
-      }.toList
-    } finally {
-      customTaskSupport.environment.shutdown()
-    }
+        }.toList
+      } finally
+        customTaskSupport.environment.shutdown()
 
     val totalMergedFiles  = allResults.map(_.mergedFiles).sum
     val totalMergeGroups  = allResults.length
@@ -1029,8 +1069,14 @@ class MergeSplitsExecutor(
     Seq(
       Row(
         tablePath.toString,
-        Row(status, totalMergedFiles.asInstanceOf[Long], totalMergeGroups.asInstanceOf[Long], totalOriginalSize, totalMergedSize,
-            s"batches: ${batches.length}, successful: $successfulBatchCount, failed: $failedBatchCount"),
+        Row(
+          status,
+          totalMergedFiles.asInstanceOf[Long],
+          totalMergeGroups.asInstanceOf[Long],
+          totalOriginalSize,
+          totalMergedSize,
+          s"batches: ${batches.length}, successful: $successfulBatchCount, failed: $failedBatchCount"
+        ),
         awsConfig.tempDirectoryPath.getOrElse(null),
         if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
       )
@@ -1058,7 +1104,9 @@ class MergeSplitsExecutor(
 
     logger.warn("PRE-COMMIT MERGE: Implementation pending - this is a placeholder")
 
-    Seq(Row(tablePath.toString, Row("pending", null, null, null, null, "Functionality pending implementation"), null, null))
+    Seq(
+      Row(tablePath.toString, Row("pending", null, null, null, null, "Functionality pending implementation"), null, null)
+    )
   }
 
   /**
@@ -1491,9 +1539,9 @@ class MergeSplitsExecutor(
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
-      awsConfig.heapSize,                        // heapSizeBytes
-      awsConfig.debugEnabled                     // debugEnabled
+      awsConfig.tempDirectoryPath.getOrElse(null),      // tempDirectoryPath
+      awsConfig.heapSize,                               // heapSizeBytes
+      awsConfig.debugEnabled                            // debugEnabled
     )
 
     // Perform the actual merge using tantivy4java with retry logic for streaming errors and timeouts
@@ -1557,23 +1605,24 @@ class MergeSplitsExecutor(
   }
 
   /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed out".
-   * After 3 total attempts (1 initial + 2 retries), the exception is propagated.
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
+   * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
    */
   private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
-    val maxAttempts = 3
-    var attempt = 1
+    val maxAttempts                     = 3
+    var attempt                         = 1
     var lastException: RuntimeException = null
 
-    while (attempt <= maxAttempts) {
+    while (attempt <= maxAttempts)
       try {
         if (attempt > 1) {
           logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
         }
         return operation()
       } catch {
-        case e: RuntimeException if e.getMessage != null &&
-            (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
+        case e: RuntimeException
+            if e.getMessage != null &&
+              (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
           lastException = e
           logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
           if (attempt == maxAttempts) {
@@ -1585,7 +1634,6 @@ class MergeSplitsExecutor(
           // Non-retryable errors are propagated immediately
           throw e
       }
-    }
 
     // This should never be reached, but for completeness
     throw lastException
@@ -1686,9 +1734,9 @@ class MergeSplitsExecutor(
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
-      awsConfig.heapSize,                        // heapSizeBytes
-      awsConfig.debugEnabled                     // debugEnabled
+      awsConfig.tempDirectoryPath.getOrElse(null),            // tempDirectoryPath
+      awsConfig.heapSize,                                     // heapSizeBytes
+      awsConfig.debugEnabled                                  // debugEnabled
     )
 
     // Perform the actual merge using direct/in-process merge
@@ -2056,9 +2104,9 @@ object MergeSplitsExecutor {
       0L,                                        // partitionId
       java.util.Collections.emptyList[String](), // deleteQueries
       awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null), // tempDirectoryPath
-      awsConfig.heapSize,                        // heapSizeBytes
-      awsConfig.debugEnabled                     // debugEnabled
+      awsConfig.tempDirectoryPath.getOrElse(null),      // tempDirectoryPath
+      awsConfig.heapSize,                               // heapSizeBytes
+      awsConfig.debugEnabled                            // debugEnabled
     )
 
     // Perform the actual merge using direct/in-process merge
@@ -2205,7 +2253,8 @@ case class SerializableSplitMetadata(
 }
 
 object SerializableSplitMetadata {
-  def fromQuickwitSplitMetadata(metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata): SerializableSplitMetadata = {
+  def fromQuickwitSplitMetadata(metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata)
+    : SerializableSplitMetadata = {
     val timeStart = Option(metadata.getTimeRangeStart()).map(_.toString)
     val timeEnd   = Option(metadata.getTimeRangeEnd()).map(_.toString)
     val tags = Option(metadata.getTags()).filter(!_.isEmpty).map { tagSet =>

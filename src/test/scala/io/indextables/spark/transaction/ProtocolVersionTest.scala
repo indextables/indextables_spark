@@ -17,17 +17,20 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import scala.collection.JavaConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
 
 class ProtocolVersionTest extends TestBase {
 
   test("new table should have protocol version 2/2") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -36,16 +39,15 @@ class ProtocolVersionTest extends TestBase {
         val protocol = txLog.getProtocol()
         protocol.minReaderVersion shouldBe 2
         protocol.minWriterVersion shouldBe 2
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("protocol should be included in version 0") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -61,16 +63,15 @@ class ProtocolVersionTest extends TestBase {
         protocolAction shouldBe defined
         protocolAction.get.minReaderVersion shouldBe 2
         protocolAction.get.minWriterVersion shouldBe 2
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("legacy table without protocol should default to version 1/1") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val fs = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
+      val fs        = tablePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
 
       // Create a legacy table by manually writing only metadata (no protocol)
       fs.mkdirs(tablePath)
@@ -92,7 +93,7 @@ class ProtocolVersionTest extends TestBase {
       // Write metadata directly without protocol (simulating legacy table)
       val versionFile = new Path(transactionLogPath, "00000000000000000000.json")
       val jsonContent = s"""{"metaData":${io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(metadata)}}"""
-      val out = fs.create(versionFile)
+      val out         = fs.create(versionFile)
       out.write(jsonContent.getBytes("UTF-8"))
       out.close()
 
@@ -102,16 +103,15 @@ class ProtocolVersionTest extends TestBase {
         val protocol = txLog.getProtocol()
         protocol.minReaderVersion shouldBe 1
         protocol.minWriterVersion shouldBe 1
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("should reject reader when minReaderVersion too high") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -126,16 +126,15 @@ class ProtocolVersionTest extends TestBase {
         }
         exception.getMessage should include("minReaderVersion = 999")
         exception.getMessage should include("upgrade")
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("should reject writer when minWriterVersion too high") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -158,16 +157,15 @@ class ProtocolVersionTest extends TestBase {
         }
         exception.getMessage should include("minWriterVersion = 999")
         exception.getMessage should include("upgrade")
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("should allow reading table with lower protocol version") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -176,16 +174,15 @@ class ProtocolVersionTest extends TestBase {
         // Current version (2/2) should be able to read
         val files = txLog.listFiles()
         files shouldBe empty
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("protocol upgrade should preserve higher version") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -208,16 +205,15 @@ class ProtocolVersionTest extends TestBase {
         val upgradedProtocol = txLog.getProtocol()
         upgradedProtocol.minReaderVersion shouldBe 3 // Should upgrade
         upgradedProtocol.minWriterVersion shouldBe 3
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("protocol should be cached") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val txLog = TransactionLogFactory.create(tablePath, spark)
+      val txLog     = TransactionLogFactory.create(tablePath, spark)
 
       try {
         val schema = getTestSchema()
@@ -235,18 +231,19 @@ class ProtocolVersionTest extends TestBase {
         // Check cache stats
         val stats = txLog.getCacheStats()
         stats shouldBe defined
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("protocol check can be disabled via configuration") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val options = new CaseInsensitiveStringMap(Map(
-        ProtocolVersion.PROTOCOL_CHECK_ENABLED -> "false"
-      ).asJava)
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          ProtocolVersion.PROTOCOL_CHECK_ENABLED -> "false"
+        ).asJava
+      )
       val txLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
@@ -259,19 +256,20 @@ class ProtocolVersionTest extends TestBase {
         // Should NOT throw exception because checks are disabled
         val files = txLog.listFiles()
         files shouldBe empty
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
   test("protocol should persist in checkpoints") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val options = new CaseInsensitiveStringMap(Map(
-        "spark.indextables.checkpoint.enabled" -> "true",
-        "spark.indextables.checkpoint.interval" -> "3"
-      ).asJava)
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.checkpoint.enabled"  -> "true",
+          "spark.indextables.checkpoint.interval" -> "3"
+        ).asJava
+      )
       val txLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
@@ -298,9 +296,8 @@ class ProtocolVersionTest extends TestBase {
         val protocol = txLog.getProtocol()
         protocol.minReaderVersion shouldBe 2
         protocol.minWriterVersion shouldBe 2
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -312,7 +309,7 @@ class ProtocolVersionTest extends TestBase {
       writerFeatures = Some(Set("feature3", "feature4"))
     )
 
-    val json = io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(protocol)
+    val json         = io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(protocol)
     val deserialized = io.indextables.spark.util.JsonUtil.mapper.readValue(json, classOf[ProtocolAction])
 
     deserialized.minReaderVersion shouldBe protocol.minReaderVersion
@@ -353,9 +350,11 @@ class ProtocolVersionTest extends TestBase {
   test("protocol auto-upgrade can be disabled") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
-      val options = new CaseInsensitiveStringMap(Map(
-        ProtocolVersion.PROTOCOL_AUTO_UPGRADE -> "false"
-      ).asJava)
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          ProtocolVersion.PROTOCOL_AUTO_UPGRADE -> "false"
+        ).asJava
+      )
       val txLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
@@ -373,9 +372,8 @@ class ProtocolVersionTest extends TestBase {
         val protocol = txLog.getProtocol()
         protocol.minReaderVersion shouldBe 2
         protocol.minWriterVersion shouldBe 2
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 }

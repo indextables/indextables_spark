@@ -1,9 +1,11 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.{SaveMode, Row}
-import org.apache.spark.sql.functions._
 import java.nio.file.Files
+
+import org.apache.spark.sql.{Row, SaveMode}
+import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 
 class OverwriteDebugTest extends TestBase {
 

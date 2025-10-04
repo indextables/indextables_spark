@@ -17,12 +17,15 @@
 
 package io.indextables.spark.util
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import scala.util.{Failure, Success, Try}
+
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import org.slf4j.LoggerFactory
-import scala.util.{Try, Success, Failure}
 
 /** Analyzer for historical split sizes to calculate optimal target rows for auto-sizing. */
 class SplitSizeAnalyzer(

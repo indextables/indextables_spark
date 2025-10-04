@@ -17,9 +17,10 @@
 
 package io.indextables.spark.core
 
+import java.sql.Date
+
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
-import java.sql.Date
 
 class PartitionVsDataDateTest extends TestBase with Matchers {
 

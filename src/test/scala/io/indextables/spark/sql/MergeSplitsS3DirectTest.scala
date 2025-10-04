@@ -17,12 +17,15 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
-import io.findify.s3mock.S3Mock
 import java.net.ServerSocket
+
 import scala.util.Using
+
+import org.apache.spark.sql.SparkSession
+
+import io.findify.s3mock.S3Mock
+import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterAll
 
 /**
  * Direct test for MERGE SPLITS command with S3 WITHOUT any Hadoop dependencies. This test proves that MERGE SPLITS
@@ -147,8 +150,8 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
 
     // Should handle gracefully - either path doesn't exist or no valid table
     assert(result.nonEmpty, "Should return result")
-    val metrics = result.head.getAs[org.apache.spark.sql.Row](1)
-    val message = metrics.getString(5) // message is at index 5 in the metrics struct
+    val metrics      = result.head.getAs[org.apache.spark.sql.Row](1)
+    val message      = metrics.getString(5) // message is at index 5 in the metrics struct
     val messageLower = message.toLowerCase
     assert(
       messageLower.contains("does not exist") ||
@@ -178,8 +181,8 @@ class MergeSplitsS3DirectTest extends TestBase with BeforeAndAfterAll {
       val result = command.run(spark)
       assert(result.nonEmpty, s"Should return result for $path")
 
-      val metrics = result.head.getAs[org.apache.spark.sql.Row](1)
-      val message = metrics.getString(5) // message is at index 5 in the metrics struct
+      val metrics      = result.head.getAs[org.apache.spark.sql.Row](1)
+      val message      = metrics.getString(5) // message is at index 5 in the metrics struct
       val messageLower = message.toLowerCase
       assert(
         messageLower.contains("does not exist") || messageLower.contains("not a valid"),

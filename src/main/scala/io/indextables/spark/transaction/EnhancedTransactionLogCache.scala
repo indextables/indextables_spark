@@ -17,12 +17,14 @@
 
 package io.indextables.spark.transaction
 
+import java.util.concurrent.TimeUnit
+
+import scala.collection.concurrent.TrieMap
+import scala.util.Try
+
 import com.google.common.cache.{Cache, CacheBuilder, RemovalListener, RemovalNotification}
 import com.google.common.cache.{CacheStats => GuavaCacheStats}
 import org.slf4j.LoggerFactory
-import java.util.concurrent.TimeUnit
-import scala.collection.concurrent.TrieMap
-import scala.util.Try
 
 /**
  * Enhanced multi-level caching system for transaction logs using Google Guava cache with proper eviction policies, TTL
@@ -161,7 +163,9 @@ class EnhancedTransactionLogCache(
     Option(fileListCache.getIfPresent(key)) match {
       case Some(files) =>
         logger.debug(s"File list cache hit for $tablePath")
-        logger.debug(s" Cache hit for checksum $checksum, returning ${files.size} files: ${files.map(_.path).mkString(", ")}")
+        logger.debug(
+          s" Cache hit for checksum $checksum, returning ${files.size} files: ${files.map(_.path).mkString(", ")}"
+        )
         files
       case None =>
         logger.debug(s"File list cache miss for $tablePath")

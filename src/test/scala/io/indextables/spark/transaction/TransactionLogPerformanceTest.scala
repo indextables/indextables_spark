@@ -17,12 +17,16 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.fs.Path
+import java.io.File
+
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import scala.jdk.CollectionConverters._
-import java.io.File
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
 
 class TransactionLogPerformanceTest extends TestBase {
 

@@ -17,8 +17,9 @@
 
 package io.indextables.spark.util
 
-import io.indextables.spark.storage.SplitCacheConfig
 import org.apache.spark.broadcast.Broadcast
+
+import io.indextables.spark.storage.SplitCacheConfig
 import org.slf4j.LoggerFactory
 
 /** Utility functions for configuration management. */

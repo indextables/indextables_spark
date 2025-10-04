@@ -17,13 +17,15 @@
 
 package io.indextables.spark.debug
 
-import org.scalatest.funsuite.AnyFunSuite
-import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
-import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitTermQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.query.Query
 import java.nio.file.Files
+
 import scala.collection.JavaConverters._
+
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
+import io.indextables.tantivy4java.query.Query
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher, SplitTermQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.scalatest.funsuite.AnyFunSuite
 
 class FieldExtractionDebugTest extends AnyFunSuite {
 

@@ -17,9 +17,10 @@
 
 package io.indextables.spark.autosize
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.config.IndexTables4SparkSQLConf
 import java.nio.file.Files
+
+import io.indextables.spark.config.IndexTables4SparkSQLConf
+import io.indextables.spark.TestBase
 
 /** Comprehensive integration tests for auto-sizing feature covering both V1 and V2 APIs. */
 class AutoSizingIntegrationTest extends TestBase {

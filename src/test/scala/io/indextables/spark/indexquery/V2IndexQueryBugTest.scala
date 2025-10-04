@@ -17,14 +17,15 @@
 
 package io.indextables.spark.indexquery
 
-import io.indextables.spark.RealS3TestBase
 import java.util.UUID
+
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Test to demonstrate and validate the IndexQuery bug in V2 DataSource.
  *
- * Bug: The V2IndexQueryExpressionRule checks for "tantivy4spark" in the table class name,
- * but the package was renamed to "indextables", causing IndexQuery expressions to be ignored.
+ * Bug: The V2IndexQueryExpressionRule checks for "tantivy4spark" in the table class name, but the package was renamed
+ * to "indextables", causing IndexQuery expressions to be ignored.
  *
  * Uses real S3 to validate production scenario.
  */
@@ -32,7 +33,7 @@ class V2IndexQueryBugTest extends RealS3TestBase {
 
   // S3 bucket for testing - matches other real S3 tests
   private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val s3Prefix = s"test-indexquery-bug-${UUID.randomUUID()}"
+  private val s3Prefix  = s"test-indexquery-bug-${UUID.randomUUID()}"
 
   test("V2 DataSource should process IndexQuery expressions") {
     val s3Path = s"s3a://$S3_BUCKET/$s3Prefix/test1"
@@ -135,7 +136,8 @@ class V2IndexQueryBugTest extends RealS3TestBase {
     readDF.createOrReplaceTempView("test_docs_complex")
 
     // Test complex boolean query
-    val result = spark.sql("SELECT * FROM test_docs_complex WHERE content indexquery 'spark AND (streaming OR sql)'").collect()
+    val result =
+      spark.sql("SELECT * FROM test_docs_complex WHERE content indexquery 'spark AND (streaming OR sql)'").collect()
 
     // Should find doc2 (spark AND streaming) and doc4 (spark AND sql)
     assert(result.length == 2, s"Expected 2 documents, got ${result.length}")

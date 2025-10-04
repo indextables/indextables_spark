@@ -17,11 +17,13 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder, SupportsTruncate, SupportsOverwrite}
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, SupportsOverwrite, SupportsTruncate, WriteBuilder}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.apache.hadoop.fs.Path
-import io.indextables.spark.transaction.TransactionLog
+
 import io.indextables.spark.config.IndexTables4SparkConfig
+import io.indextables.spark.transaction.TransactionLog
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkWriteBuilder(

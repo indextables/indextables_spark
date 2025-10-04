@@ -17,23 +17,24 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
+import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.read.{
   Scan,
   ScanBuilder,
+  SupportsPushDownAggregates,
   SupportsPushDownFilters,
-  SupportsPushDownV2Filters,
-  SupportsPushDownRequiredColumns,
   SupportsPushDownLimit,
-  SupportsPushDownAggregates
+  SupportsPushDownRequiredColumns,
+  SupportsPushDownV2Filters
 }
-import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
 import io.indextables.spark.transaction.TransactionLog
-import org.apache.spark.broadcast.Broadcast
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -216,7 +217,7 @@ class IndexTables4SparkScanBuilder(
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
     // Check 1: All GROUP BY columns must be partition columns
-    val partitionColumns = transactionLog.getPartitionColumns()
+    val partitionColumns               = transactionLog.getPartitionColumns()
     val allGroupByColumnsArePartitions = groupByColumns.forall(partitionColumns.contains)
 
     if (!allGroupByColumnsArePartitions) {
@@ -226,7 +227,7 @@ class IndexTables4SparkScanBuilder(
     // Check 2: Only COUNT aggregations are supported
     val onlyCountAggregations = aggregation.aggregateExpressions.forall {
       case _: Count | _: CountStar => true
-      case _ => false
+      case _                       => false
     }
 
     if (!onlyCountAggregations) {
@@ -234,7 +235,7 @@ class IndexTables4SparkScanBuilder(
     }
 
     // Check 3: Only partition filters are allowed (or no filters), AND no IndexQuery filters
-    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    val indexQueryFilters       = extractIndexQueriesFromCurrentPlan()
     val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
 
     if (!hasOnlyPartitionFilters) {
@@ -1118,6 +1119,7 @@ class IndexTables4SparkScanBuilder(
  */
 object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
+
   import scala.collection.JavaConverters._
 
   // WeakHashMap using DataSourceV2Relation object as key
@@ -1130,7 +1132,7 @@ object IndexTables4SparkScanBuilder {
   // Lifecycle: V2 rule checks relation identity → clears if different → sets new relation → ScanBuilder gets it
   // We track the relation's identity hash (stable within query, different for self-joins) to avoid clearing mid-query
   private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
-  private val currentRelationId: ThreadLocal[Option[Int]] = ThreadLocal.withInitial(() => None)
+  private val currentRelationId: ThreadLocal[Option[Int]]  = ThreadLocal.withInitial(() => None)
 
   /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
   def setCurrentRelation(relation: AnyRef): Unit = {
@@ -1146,12 +1148,12 @@ object IndexTables4SparkScanBuilder {
     currentRelation.get()
 
   /**
-   * Clear the current relation object for this thread, but only if it's a different relation.
-   * This allows the same relation to be reused across multiple optimization phases.
+   * Clear the current relation object for this thread, but only if it's a different relation. This allows the same
+   * relation to be reused across multiple optimization phases.
    */
   def clearCurrentRelationIfDifferent(newRelation: Option[AnyRef]): Unit = {
     val currentId = currentRelationId.get()
-    val newId = newRelation.map(System.identityHashCode)
+    val newId     = newRelation.map(System.identityHashCode)
 
     if (currentId.isDefined && newId.isDefined && currentId != newId) {
       // Different relation - clear the old one
@@ -1172,29 +1174,26 @@ object IndexTables4SparkScanBuilder {
   }
 
   /** Store IndexQuery expressions for a specific relation object. */
-  def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit = {
+  def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit =
     relationIndexQueries.synchronized {
       relationIndexQueries.put(relation, indexQueries)
     }
-  }
 
   /** Retrieve IndexQuery expressions for a specific relation object. */
-  def getIndexQueries(relation: AnyRef): Seq[Any] = {
+  def getIndexQueries(relation: AnyRef): Seq[Any] =
     relationIndexQueries.synchronized {
       Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
     }
-  }
 
   /** Clear IndexQuery expressions for a specific relation object. */
-  def clearIndexQueries(relation: AnyRef): Unit = {
+  def clearIndexQueries(relation: AnyRef): Unit =
     relationIndexQueries.synchronized {
       relationIndexQueries.remove(relation)
     }
-  }
 
   /** Get cache statistics for monitoring. */
   def getCacheStats(): String = {
-    val size = relationIndexQueries.synchronized { relationIndexQueries.size() }
+    val size = relationIndexQueries.synchronized(relationIndexQueries.size())
     s"IndexQuery Cache Stats - Size: $size (WeakHashMap)"
   }
 }

@@ -17,11 +17,14 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import org.slf4j.LoggerFactory
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import org.slf4j.LoggerFactory
 
 /**
  * Factory for creating transaction log instances. Automatically selects optimized or standard implementation based on

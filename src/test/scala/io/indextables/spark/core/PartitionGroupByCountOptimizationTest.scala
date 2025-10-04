@@ -1,13 +1,14 @@
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.functions._
+
+import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
 
 /**
- * Test suite for transaction log optimization of GROUP BY partition columns COUNT queries.
- * Validates that queries like "SELECT partition_col, COUNT(*) GROUP BY partition_col"
- * are served directly from transaction log metadata without accessing split files.
+ * Test suite for transaction log optimization of GROUP BY partition columns COUNT queries. Validates that queries like
+ * "SELECT partition_col, COUNT(*) GROUP BY partition_col" are served directly from transaction log metadata without
+ * accessing split files.
  */
 class PartitionGroupByCountOptimizationTest extends TestBase {
 
@@ -32,7 +33,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .partitionBy("load_date", "load_hour")
-        .mode("overwrite").save(tablePath)
+        .mode("overwrite")
+        .save(tablePath)
 
       // Read and verify partition-only GROUP BY uses transaction log
       val df = spark.read
@@ -41,7 +43,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // Test 1: GROUP BY both partition columns
       println("🧪 TEST 1: GROUP BY load_date, load_hour")
-      val result1 = df.groupBy("load_date", "load_hour")
+      val result1 = df
+        .groupBy("load_date", "load_hour")
         .agg(count("*").as("count"))
         .orderBy("load_date", "load_hour")
         .collect()
@@ -68,7 +71,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // Test 2: GROUP BY single partition column (subset of partition keys)
       println("🧪 TEST 2: GROUP BY load_date only")
-      val result2 = df.groupBy("load_date")
+      val result2 = df
+        .groupBy("load_date")
         .agg(count("*").as("count"))
         .orderBy("load_date")
         .collect()
@@ -85,7 +89,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // Test 3: GROUP BY load_hour only (different subset)
       println("🧪 TEST 3: GROUP BY load_hour only")
-      val result3 = df.groupBy("load_hour")
+      val result3 = df
+        .groupBy("load_hour")
         .agg(count("*").as("count"))
         .orderBy("load_hour")
         .collect()
@@ -122,7 +127,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .partitionBy("load_date", "load_hour")
-        .mode("overwrite").save(tablePath)
+        .mode("overwrite")
+        .save(tablePath)
 
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -130,7 +136,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // Test with partition filter
       println("🧪 TEST: GROUP BY with WHERE load_date = '2024-01-01'")
-      val result = df.filter($"load_date" === "2024-01-01")
+      val result = df
+        .filter($"load_date" === "2024-01-01")
         .groupBy("load_hour")
         .agg(count("*").as("count"))
         .orderBy("load_hour")
@@ -166,7 +173,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .partitionBy("load_date")
-        .mode("overwrite").save(tablePath)
+        .mode("overwrite")
+        .save(tablePath)
 
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -174,7 +182,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // GROUP BY non-partition column - should use tantivy aggregation
       println("🧪 TEST: GROUP BY category (non-partition column)")
-      val result = df.groupBy("category")
+      val result = df
+        .groupBy("category")
         .agg(count("*").as("count"))
         .orderBy("category")
         .collect()
@@ -209,7 +218,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .partitionBy("load_date")
-        .mode("overwrite").save(tablePath)
+        .mode("overwrite")
+        .save(tablePath)
 
       val df = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -217,7 +227,8 @@ class PartitionGroupByCountOptimizationTest extends TestBase {
 
       // GROUP BY both partition and non-partition columns
       println("🧪 TEST: GROUP BY load_date, category (mixed)")
-      val result = df.groupBy("load_date", "category")
+      val result = df
+        .groupBy("load_date", "category")
         .agg(count("*").as("count"))
         .orderBy("load_date", "category")
         .collect()

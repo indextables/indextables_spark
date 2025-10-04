@@ -17,18 +17,21 @@
 
 package io.indextables.spark.prewarm
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.apache.spark.sql.{SparkSession, DataFrame}
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
-import org.apache.spark.sql.sources.EqualTo
-import io.indextables.spark.transaction.AddAction
-import io.indextables.spark.storage.BroadcastSplitLocalityManager
 import java.io.File
 import java.nio.file.{Files, Paths}
-import org.apache.commons.io.FileUtils
+
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.sources.EqualTo
+import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+
+import io.indextables.spark.storage.BroadcastSplitLocalityManager
+import io.indextables.spark.transaction.AddAction
+import org.apache.commons.io.FileUtils
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
 
 class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 

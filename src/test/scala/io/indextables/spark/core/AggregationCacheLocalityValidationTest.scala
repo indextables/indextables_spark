@@ -17,14 +17,16 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.connector.expressions.aggregate._
-import org.apache.spark.sql.types._
-import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.connector.expressions.aggregate._
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+
+import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
+import io.indextables.spark.TestBase
 
 /**
  * Test to validate that aggregate scans (both simple and GROUP BY) properly implement cache locality via

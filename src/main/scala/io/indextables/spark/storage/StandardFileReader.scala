@@ -17,13 +17,16 @@
 
 package io.indextables.spark.storage
 
+import java.io.IOException
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.slf4j.LoggerFactory
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import io.indextables.spark.util.ErrorUtil
+
 import io.indextables.spark.io.CloudStorageProviderFactory
-import java.io.IOException
+import io.indextables.spark.util.ErrorUtil
+import org.slf4j.LoggerFactory
 
 class StandardFileReader(path: Path, conf: Configuration) extends StorageStrategy {
 

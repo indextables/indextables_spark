@@ -17,10 +17,12 @@
 
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
+import scala.util.Random
+
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
-import scala.util.Random
+
+import io.indextables.spark.TestBase
 
 /**
  * Isolated test for the failing "should handle complex compound queries" test. This helps debug complex boolean logic

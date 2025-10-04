@@ -17,11 +17,13 @@
 
 package io.indextables.spark.storage
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.io.{CloudStorageConfig, S3CloudStorageProvider}
-import io.findify.s3mock.S3Mock
 import java.net.ServerSocket
+
 import scala.util.Using
+
+import io.findify.s3mock.S3Mock
+import io.indextables.spark.io.{CloudStorageConfig, S3CloudStorageProvider}
+import io.indextables.spark.TestBase
 import org.scalatest.BeforeAndAfterAll
 
 /**

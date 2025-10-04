@@ -17,30 +17,33 @@
 
 package io.indextables.spark.core
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType, LongType}
-import io.indextables.tantivy4java.core.{Index, Schema, SchemaBuilder, Document, IndexWriter}
-import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import io.indextables.tantivy4java.split.{SplitSearcher, SplitCacheManager, SplitAggregation, SplitMatchAllQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.aggregation.{
-  CountAggregation,
-  SumAggregation,
-  AverageAggregation,
-  MinAggregation,
-  MaxAggregation,
-  StatsAggregation,
-  CountResult,
-  SumResult,
-  AverageResult,
-  MinResult,
-  MaxResult,
-  StatsResult
-}
 import java.io.File
 import java.nio.file.Files
+
 import scala.util.Random
+
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.SparkSession
+
+import io.indextables.tantivy4java.aggregation.{
+  AverageAggregation,
+  AverageResult,
+  CountAggregation,
+  CountResult,
+  MaxAggregation,
+  MaxResult,
+  MinAggregation,
+  MinResult,
+  StatsAggregation,
+  StatsResult,
+  SumAggregation,
+  SumResult
+}
+import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
+import io.indextables.tantivy4java.split.{SplitAggregation, SplitCacheManager, SplitMatchAllQuery, SplitSearcher}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Integration test that actually creates tantivy4java indexes and executes aggregations. This validates the complete

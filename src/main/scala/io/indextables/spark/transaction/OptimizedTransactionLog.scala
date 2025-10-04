@@ -17,18 +17,22 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+
+import scala.collection.mutable.ListBuffer
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
+
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import io.indextables.spark.util.JsonUtil
-import io.indextables.spark.io.{ProtocolBasedIOFactory, CloudStorageProviderFactory}
 import org.slf4j.LoggerFactory
-import scala.collection.mutable.ListBuffer
-import scala.util.{Try, Success, Failure}
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-import java.util.concurrent.atomic.{AtomicReference, AtomicLong}
 
 /**
  * Optimized transaction log implementation that integrates all performance enhancements from the optimization plan
@@ -168,7 +172,9 @@ class OptimizedTransactionLog(
     )
 
     writeActions(0, Seq(protocolAction, metadataAction))
-    logger.info(s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}")
+    logger.info(
+      s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}"
+    )
   }
 
   /** Add files using parallel batch write */
@@ -318,7 +324,9 @@ class OptimizedTransactionLog(
 
           case None =>
             // Always use standard reconstruction with consistent versions to avoid caching issues
-            logger.debug(s" No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}")
+            logger.debug(
+              s" No snapshot available, using standard reconstruction with versions: ${versions.sorted.mkString(", ")}"
+            )
             reconstructStateStandard(versions)
         }
       }
@@ -467,8 +475,10 @@ class OptimizedTransactionLog(
     val currentProtocol = getProtocol()
 
     // Only upgrade if necessary
-    if (newMinReaderVersion > currentProtocol.minReaderVersion ||
-        newMinWriterVersion > currentProtocol.minWriterVersion) {
+    if (
+      newMinReaderVersion > currentProtocol.minReaderVersion ||
+      newMinWriterVersion > currentProtocol.minWriterVersion
+    ) {
 
       val updatedProtocol = ProtocolAction(
         minReaderVersion = math.max(newMinReaderVersion, currentProtocol.minReaderVersion),
@@ -481,17 +491,21 @@ class OptimizedTransactionLog(
       // Invalidate protocol cache
       enhancedCache.invalidateProtocol(tablePath.toString)
 
-      logger.info(s"Upgraded protocol from ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion} " +
-        s"to ${updatedProtocol.minReaderVersion}/${updatedProtocol.minWriterVersion}")
+      logger.info(
+        s"Upgraded protocol from ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion} " +
+          s"to ${updatedProtocol.minReaderVersion}/${updatedProtocol.minWriterVersion}"
+      )
     } else {
-      logger.debug(s"Protocol upgrade not needed: current ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion}, " +
-        s"requested $newMinReaderVersion/$newMinWriterVersion")
+      logger.debug(
+        s"Protocol upgrade not needed: current ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion}, " +
+          s"requested $newMinReaderVersion/$newMinWriterVersion"
+      )
     }
   }
 
   /** Initialize protocol for legacy tables */
   private def initializeProtocolIfNeeded(): Unit = {
-    val actions = getVersions().flatMap(readVersionOptimized)
+    val actions     = getVersions().flatMap(readVersionOptimized)
     val hasProtocol = actions.exists(_.isInstanceOf[ProtocolAction])
 
     if (!hasProtocol) {
@@ -529,9 +543,8 @@ class OptimizedTransactionLog(
     checkpoint.flatMap(_.getLastCheckpointVersion())
 
   /**
-   * Aggressively populate the transaction log cache to make subsequent reads faster.
-   * This should be called once during table initialization (V2 DataSource).
-   * Populates: protocol, metadata, file list, and recent versions.
+   * Aggressively populate the transaction log cache to make subsequent reads faster. This should be called once during
+   * table initialization (V2 DataSource). Populates: protocol, metadata, file list, and recent versions.
    */
   def prewarmCache(): Unit = {
     val startTime = System.currentTimeMillis()
@@ -589,7 +602,9 @@ class OptimizedTransactionLog(
 
   private def getVersions(): Seq[Long] = {
     val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
-    logger.debug(s" getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}")
+    logger.debug(
+      s" getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}"
+    )
     val versions = files.flatMap(file => parseVersionFromPath(file.path)).distinct
     logger.debug(s" getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
     versions
@@ -692,8 +707,8 @@ class OptimizedTransactionLog(
     if (!writeSucceeded) {
       throw new IllegalStateException(
         s"Failed to write transaction log version $version - file already exists at $versionFilePath. " +
-        "This indicates a concurrent write conflict or version counter synchronization issue. " +
-        "Transaction log files are immutable and must never be overwritten to ensure data integrity."
+          "This indicates a concurrent write conflict or version counter synchronization issue. " +
+          "Transaction log files are immutable and must never be overwritten to ensure data integrity."
       )
     }
 
@@ -732,9 +747,9 @@ class OptimizedTransactionLog(
     // Create checkpoint if needed (synchronously to ensure consistency)
     checkpoint.foreach { cp =>
       if (cp.shouldCreateCheckpoint(version)) {
-        try {
+        try
           createCheckpointOptimized(version)
-        } catch {
+        catch {
           case e: Exception =>
             logger.warn(s"Failed to create checkpoint at version $version", e)
         }

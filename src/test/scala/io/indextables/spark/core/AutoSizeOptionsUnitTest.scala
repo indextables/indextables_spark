@@ -17,10 +17,12 @@
 
 package io.indextables.spark.core
 
+import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
-import scala.jdk.CollectionConverters._
 
 /** Unit tests for auto-sizing options in IndexTables4SparkOptions that don't require Spark. */
 class AutoSizeOptionsUnitTest extends AnyFunSuite with Matchers {

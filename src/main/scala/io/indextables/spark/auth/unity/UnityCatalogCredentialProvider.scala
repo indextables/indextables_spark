@@ -17,22 +17,25 @@
 
 package io.indextables.spark.auth.unity
 
+import java.net.URI
+import java.util.concurrent.{Callable, TimeUnit}
+
+import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.conf.Configuration
+
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
-import com.databricks.sdk.WorkspaceClient
 import com.databricks.sdk.service.catalog.{
   AwsCredentials,
   GenerateTemporaryPathCredentialRequest,
   GenerateTemporaryPathCredentialResponse,
   PathOperation
 }
+import com.databricks.sdk.WorkspaceClient
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
-
-import java.net.URI
-import java.util.concurrent.{Callable, TimeUnit}
-import scala.util.{Failure, Success, Try}
 
 /**
  * AWS Credential Provider that integrates with Databricks Unity Catalog.
@@ -116,7 +119,7 @@ class UnityCatalogCredentialProvider(uri: URI, conf: Configuration) extends AWSC
   }
 
   /** Fetch credentials with automatic fallback from READ_WRITE to READ. */
-  private def fetchCredentialsWithFallback(path: String): CachedCredentials = {
+  private def fetchCredentialsWithFallback(path: String): CachedCredentials =
     // Try READ_WRITE first
     Try {
       logger.debug(s"Attempting to fetch READ_WRITE credentials for path: $path")
@@ -147,13 +150,12 @@ class UnityCatalogCredentialProvider(uri: URI, conf: Configuration) extends AWSC
             )
         }
     }
-  }
 
   /** Fetch credentials from Unity Catalog API. */
   private def fetchCredentials(path: String, operation: String): CachedCredentials = {
     var lastException: Option[Exception] = None
 
-    for (attempt <- 1 to retryAttempts) {
+    for (attempt <- 1 to retryAttempts)
       Try {
         logger.debug(s"Fetching $operation credentials for path: $path (attempt $attempt/$retryAttempts)")
 
@@ -190,7 +192,6 @@ class UnityCatalogCredentialProvider(uri: URI, conf: Configuration) extends AWSC
           }
         case Failure(t) => throw t // Re-throw non-exceptions (errors, etc.)
       }
-    }
 
     throw new Exception(
       s"Failed to fetch $operation credentials after $retryAttempts attempts",
@@ -228,13 +229,14 @@ class UnityCatalogCredentialProvider(uri: URI, conf: Configuration) extends AWSC
   private def getCurrentUserId(): String = {
     // Try to get user from CommandContext first (using reflection for optional dependency)
     val commandContextUser = Try {
-      val commandContextClass = Class.forName("com.databricks.spark.util.CommandContext")
+      val commandContextClass    = Class.forName("com.databricks.spark.util.CommandContext")
       val getContextObjectMethod = commandContextClass.getMethod("getContextObject")
-      val contextObject = getContextObjectMethod.invoke(null)
+      val contextObject          = getContextObjectMethod.invoke(null)
 
       if (contextObject != null) {
         val attributionContextMethod = contextObject.getClass.getMethod("attributionContext")
-        val attributionContext = attributionContextMethod.invoke(contextObject).asInstanceOf[scala.collection.Map[String, String]]
+        val attributionContext =
+          attributionContextMethod.invoke(contextObject).asInstanceOf[scala.collection.Map[String, String]]
         attributionContext.get("user")
       } else {
         None
@@ -269,22 +271,22 @@ object UnityCatalogCredentialProvider {
   private val RetryAttemptsKey   = "spark.indextables.unity.retry.attempts"
 
   // Default values
-  private val DefaultCacheTtlMinutes  = 20
-  private val DefaultCacheMaxSize     = 100
-  private val DefaultFallbackEnabled  = true
-  private val DefaultRetryAttempts    = 3
-  private val CredentialExpiryMillis  = 3600000L // 1 hour
+  private val DefaultCacheTtlMinutes = 20
+  private val DefaultCacheMaxSize    = 100
+  private val DefaultFallbackEnabled = true
+  private val DefaultRetryAttempts   = 3
+  private val CredentialExpiryMillis = 3600000L // 1 hour
 
   // Process-global static variables for sharing across all instances
   @volatile private var globalWorkspaceClient: WorkspaceClient                   = _
   @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _
-  private val initLock = new Object
+  private val initLock                                                           = new Object
 
   /**
    * Initialize process-global resources (workspace client and cache) only once. This ensures all instances share the
    * same client and cache for efficiency.
    */
-  private def initializeGlobalResources(conf: Configuration): Unit = {
+  private def initializeGlobalResources(conf: Configuration): Unit =
     if (globalWorkspaceClient == null || globalCredentialsCache == null) {
       initLock.synchronized {
         // Double-check locking pattern
@@ -298,7 +300,6 @@ object UnityCatalogCredentialProvider {
         }
       }
     }
-  }
 
   /**
    * Initialize the Databricks Workspace Client.
@@ -359,26 +360,19 @@ object UnityCatalogCredentialProvider {
     }
   }
 
-  /**
-   * Clear all cached credentials. This is a process-global operation that affects all instances.
-   */
-  def clearCache(): Unit = {
+  /** Clear all cached credentials. This is a process-global operation that affects all instances. */
+  def clearCache(): Unit =
     if (globalCredentialsCache != null) {
       logger.info("Clearing process-global credentials cache")
       globalCredentialsCache.invalidateAll()
     }
-  }
 
-  /**
-   * Get current cache statistics. Useful for monitoring and debugging.
-   */
+  /** Get current cache statistics. Useful for monitoring and debugging. */
   def getCacheStatistics(): Option[CacheStats] =
     Option(globalCredentialsCache).map(_.stats())
 
-  /**
-   * Shutdown and cleanup all process-global resources. Should be called when the application is shutting down.
-   */
-  def shutdown(): Unit = {
+  /** Shutdown and cleanup all process-global resources. Should be called when the application is shutting down. */
+  def shutdown(): Unit =
     initLock.synchronized {
       logger.info("Shutting down UnityCatalogCredentialProvider global resources")
 
@@ -388,15 +382,14 @@ object UnityCatalogCredentialProvider {
       }
 
       if (globalWorkspaceClient != null) {
-        try {
+        try
           // Close workspace client if it has a close method
           globalWorkspaceClient = null
-        } catch {
+        catch {
           case e: Exception => logger.warn("Error closing workspace client", e)
         }
       }
     }
-  }
 
   /** Internal case class for cached credentials. */
   private case class CachedCredentials(

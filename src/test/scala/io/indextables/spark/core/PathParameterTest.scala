@@ -17,8 +17,9 @@
 
 package io.indextables.spark.core
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.SaveMode
+
+import io.indextables.spark.TestBase
 
 class PathParameterTest extends TestBase {
 

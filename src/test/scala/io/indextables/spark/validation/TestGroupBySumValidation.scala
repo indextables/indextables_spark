@@ -1,9 +1,11 @@
 package io.indextables.spark.validation
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.apache.spark.sql.SparkSession
 import java.io.File
 import java.nio.file.Files
+
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
 
 class TestGroupBySumValidation extends AnyFunSuite {
 

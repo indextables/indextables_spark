@@ -20,7 +20,8 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.types.{StringType, LongType}
+import org.apache.spark.sql.types.{LongType, StringType}
+
 import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
 import org.slf4j.LoggerFactory
 

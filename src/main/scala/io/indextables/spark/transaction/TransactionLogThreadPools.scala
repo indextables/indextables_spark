@@ -19,11 +19,14 @@ package io.indextables.spark.transaction
 
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicInteger
-import org.apache.spark.sql.SparkSession
-import org.slf4j.LoggerFactory
+
 import scala.concurrent.{ExecutionContext, Future, Promise, TimeoutException}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
+
+import org.apache.spark.sql.SparkSession
+
+import org.slf4j.LoggerFactory
 
 /**
  * Manages specialized thread pools for different transaction log operations, following Delta Lake's architecture for

@@ -17,9 +17,10 @@
 
 package io.indextables.spark.schema
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.schema.SchemaMapping._
 import org.apache.spark.sql.types._
+
+import io.indextables.spark.schema.SchemaMapping._
+import io.indextables.spark.TestBase
 
 /** Simple tests for the schema mapping functionality that don't require tantivy4java mocking */
 class SchemaMappingSimpleTest extends TestBase {

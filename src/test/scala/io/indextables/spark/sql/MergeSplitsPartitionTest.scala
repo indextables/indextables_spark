@@ -17,14 +17,17 @@
 
 package io.indextables.spark.sql
 
+import java.io.File
+import java.nio.file.Files
+
+import org.apache.spark.sql.functions.{col, lit}
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
-import org.apache.spark.sql.functions.{col, lit}
-import org.apache.hadoop.fs.Path
-import java.nio.file.Files
-import java.io.File
 import org.slf4j.LoggerFactory
 
 /**

@@ -17,13 +17,15 @@
 
 package io.indextables.spark.search
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import io.indextables.spark.util.TypeConversionUtil
+import scala.collection.mutable
+
+import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData}
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.util.{ArrayData, ArrayBasedMapData}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
-import scala.collection.mutable
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import io.indextables.spark.util.TypeConversionUtil
 
 object RowConverter {
 

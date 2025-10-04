@@ -17,16 +17,20 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.SparkSession
+import java.util.concurrent.atomic.AtomicLong
+
+import scala.collection.mutable.ListBuffer
+import scala.util.{Failure, Success, Try}
+
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import io.indextables.spark.util.JsonUtil
-import io.indextables.spark.io.{ProtocolBasedIOFactory, CloudStorageProviderFactory}
 import org.slf4j.LoggerFactory
-import scala.collection.mutable.ListBuffer
-import scala.util.{Try, Success, Failure}
-import java.util.concurrent.atomic.AtomicLong
 
 class TransactionLog(
   tablePath: Path,
@@ -116,7 +120,9 @@ class TransactionLog(
       )
 
       writeActions(0, Seq(protocolAction, metadataAction))
-      logger.info(s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}")
+      logger.info(
+        s"Initialized table with protocol version ${protocolAction.minReaderVersion}/${protocolAction.minWriterVersion}"
+      )
     }
 
   def addFile(addAction: AddAction): Long = {
@@ -362,8 +368,8 @@ class TransactionLog(
     if (!writeSucceeded) {
       throw new IllegalStateException(
         s"Failed to write transaction log version $version - file already exists at $versionFilePath. " +
-        "This indicates a concurrent write conflict or version counter synchronization issue. " +
-        "Transaction log files are immutable and must never be overwritten to ensure data integrity."
+          "This indicates a concurrent write conflict or version counter synchronization issue. " +
+          "Transaction log files are immutable and must never be overwritten to ensure data integrity."
       )
     }
 
@@ -417,7 +423,7 @@ class TransactionLog(
         case remove: RemoveAction =>
           activeFiles --= activeFiles.filter(_.path == remove.path)
         case _: SkipAction =>
-          // Skip actions are transient and not included in checkpoints
+        // Skip actions are transient and not included in checkpoints
       }
     }
 
@@ -538,8 +544,8 @@ class TransactionLog(
     }
 
   /**
-   * Check if the current client can read this table based on protocol version.
-   * Throws ProtocolVersionException if the table requires a newer reader version.
+   * Check if the current client can read this table based on protocol version. Throws ProtocolVersionException if the
+   * table requires a newer reader version.
    */
   def assertTableReadable(): Unit = {
     val checkEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_CHECK_ENABLED, true)
@@ -586,8 +592,8 @@ class TransactionLog(
   }
 
   /**
-   * Check if the current client can write to this table based on protocol version.
-   * Throws ProtocolVersionException if the table requires a newer writer version.
+   * Check if the current client can write to this table based on protocol version. Throws ProtocolVersionException if
+   * the table requires a newer writer version.
    */
   def assertTableWritable(): Unit = {
     val checkEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_CHECK_ENABLED, true)
@@ -634,8 +640,8 @@ class TransactionLog(
   }
 
   /**
-   * Upgrade the table protocol to a new version. This is only allowed to increase version numbers.
-   * Auto-upgrade can be controlled via spark.indextables.protocol.autoUpgrade configuration.
+   * Upgrade the table protocol to a new version. This is only allowed to increase version numbers. Auto-upgrade can be
+   * controlled via spark.indextables.protocol.autoUpgrade configuration.
    */
   def upgradeProtocol(newMinReaderVersion: Int, newMinWriterVersion: Int): Unit = {
     val autoUpgradeEnabled = options.getBoolean(ProtocolVersion.PROTOCOL_AUTO_UPGRADE, true)
@@ -647,8 +653,10 @@ class TransactionLog(
     val currentProtocol = getProtocol()
 
     // Only upgrade if necessary
-    if (newMinReaderVersion > currentProtocol.minReaderVersion ||
-        newMinWriterVersion > currentProtocol.minWriterVersion) {
+    if (
+      newMinReaderVersion > currentProtocol.minReaderVersion ||
+      newMinWriterVersion > currentProtocol.minWriterVersion
+    ) {
 
       val updatedProtocol = ProtocolAction(
         minReaderVersion = math.max(newMinReaderVersion, currentProtocol.minReaderVersion),
@@ -661,20 +669,24 @@ class TransactionLog(
       // Invalidate protocol cache
       cache.foreach(_.invalidateProtocol())
 
-      logger.info(s"Upgraded protocol from ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion} " +
-        s"to ${updatedProtocol.minReaderVersion}/${updatedProtocol.minWriterVersion}")
+      logger.info(
+        s"Upgraded protocol from ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion} " +
+          s"to ${updatedProtocol.minReaderVersion}/${updatedProtocol.minWriterVersion}"
+      )
     } else {
-      logger.debug(s"Protocol upgrade not needed: current ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion}, " +
-        s"requested $newMinReaderVersion/$newMinWriterVersion")
+      logger.debug(
+        s"Protocol upgrade not needed: current ${currentProtocol.minReaderVersion}/${currentProtocol.minWriterVersion}, " +
+          s"requested $newMinReaderVersion/$newMinWriterVersion"
+      )
     }
   }
 
   /**
-   * Initialize protocol for legacy tables that don't have a protocol action.
-   * This is called automatically on first write to a legacy table.
+   * Initialize protocol for legacy tables that don't have a protocol action. This is called automatically on first
+   * write to a legacy table.
    */
   private def initializeProtocolIfNeeded(): Unit = {
-    val actions = getVersions().flatMap(readVersion)
+    val actions     = getVersions().flatMap(readVersion)
     val hasProtocol = actions.exists(_.isInstanceOf[ProtocolAction])
 
     if (!hasProtocol) {
@@ -809,8 +821,8 @@ class TransactionLog(
     checkpoint.flatMap(_.getLastCheckpointVersion())
 
   /**
-   * Prewarm the transaction log cache for faster subsequent reads.
-   * Default implementation is a no-op; optimized implementations may override.
+   * Prewarm the transaction log cache for faster subsequent reads. Default implementation is a no-op; optimized
+   * implementations may override.
    */
   def prewarmCache(): Unit = {
     // Default no-op implementation for standard TransactionLog
