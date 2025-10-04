@@ -131,6 +131,8 @@ class IndexTables4SparkScanBuilder(
 
   /** Create a GROUP BY aggregation scan. */
   private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String]): Scan = {
+    val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
+
     // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
     if (canUseTransactionLogGroupByCount(aggregation, groupByColumns)) {
       logger.info(s"Using transaction log optimization for partition-only GROUP BY COUNT")
@@ -152,7 +154,8 @@ class IndexTables4SparkScanBuilder(
         options,
         config,
         aggregation,
-        groupByColumns
+        groupByColumns,
+        extractedIndexQueryFilters
       )
     }
   }
@@ -168,7 +171,8 @@ class IndexTables4SparkScanBuilder(
       _pushedFilters,
       options,
       config,
-      aggregation
+      aggregation,
+      extractedIndexQueryFilters
     )
   }
 
@@ -185,16 +189,20 @@ class IndexTables4SparkScanBuilder(
     println(s"🔍 SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
     _pushedFilters.foreach(filter => println(s"🔍 SCAN BUILDER: Pushed filter: $filter"))
 
+    // Extract IndexQuery filters to check if we have any
+    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    println(s"🔍 SCAN BUILDER: Number of IndexQuery filters: ${indexQueryFilters.length}")
+
     val result = aggregation.aggregateExpressions.length == 1 && {
       aggregation.aggregateExpressions.head match {
         case _: Count =>
-          // Check if we only have partition filters or no filters
-          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
           println(s"🔍 SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters")
           hasOnlyPartitionFilters
         case _: CountStar =>
-          // Check if we only have partition filters or no filters
-          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
           println(s"🔍 SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters")
           hasOnlyPartitionFilters
         case _ =>
@@ -228,8 +236,9 @@ class IndexTables4SparkScanBuilder(
       return false
     }
 
-    // Check 3: Only partition filters are allowed (or no filters)
-    val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter)
+    // Check 3: Only partition filters are allowed (or no filters), AND no IndexQuery filters
+    val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
+    val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
 
     if (!hasOnlyPartitionFilters) {
       return false
@@ -1106,39 +1115,56 @@ class IndexTables4SparkScanBuilder(
  * V2IndexQueryExpressionRule to pass IndexQuery expressions directly to the ScanBuilder without a global registry.
  */
 object IndexTables4SparkScanBuilder {
-  import scala.collection.concurrent
+  import com.google.common.cache.{Cache, CacheBuilder}
 
-  // Thread-safe storage for IndexQuery expressions scoped by DataSource instance
-  private val instanceIndexQueries = concurrent.TrieMap[String, scala.collection.mutable.Buffer[Any]]()
+  // LRU cache for IndexQuery expressions with size-based eviction
+  private val instanceIndexQueries: Cache[String, Seq[Any]] = CacheBuilder
+    .newBuilder()
+    .maximumSize(1000)
+    .recordStats()
+    .build[String, Seq[Any]]()
 
   /**
    * Store IndexQuery expressions for a specific DataSource instance. The key should be unique per query execution to
    * avoid conflicts.
    */
   def storeIndexQueries(instanceKey: String, indexQueries: Seq[Any]): Unit = {
-    val buffer = instanceIndexQueries.getOrElseUpdate(instanceKey, scala.collection.mutable.Buffer.empty)
-    buffer.clear()
-    buffer ++= indexQueries
+    instanceIndexQueries.put(instanceKey, indexQueries)
     println(s"🔍 ScanBuilder: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey")
   }
 
   /** Retrieve IndexQuery expressions for a specific DataSource instance. */
   def getIndexQueries(instanceKey: String): Seq[Any] = {
-    val queries = instanceIndexQueries.getOrElse(instanceKey, scala.collection.mutable.Buffer.empty).toSeq
+    val queries = Option(instanceIndexQueries.getIfPresent(instanceKey)).getOrElse(Seq.empty)
     println(s"🔍 ScanBuilder: Retrieved ${queries.length} IndexQuery expressions for instance $instanceKey")
     queries
   }
 
   /** Clear IndexQuery expressions for a specific DataSource instance. */
   def clearIndexQueries(instanceKey: String): Unit = {
-    instanceIndexQueries.remove(instanceKey)
+    instanceIndexQueries.invalidate(instanceKey)
     println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for instance $instanceKey")
+  }
+
+  /** Get cache statistics for monitoring. */
+  def getCacheStats(): String = {
+    val stats = instanceIndexQueries.stats()
+    s"IndexQuery Cache Stats - Size: ${instanceIndexQueries.size()}, " +
+      s"Hits: ${stats.hitCount()}, Misses: ${stats.missCount()}, " +
+      s"Evictions: ${stats.evictionCount()}, Hit Rate: ${stats.hitRate()}"
   }
 
   /** Generate a unique instance key for a DataSource relation. */
   def generateInstanceKey(tablePath: String, executionId: Option[String]): String = {
-    // Use a more deterministic key based only on table path to avoid timing issues
-    val cleanPath = tablePath.replace('/', '_').replace('\\', '_')
-    cleanPath // Remove execution ID dependency for now
+    // Strip protocol prefix (s3://, s3a://, file://, hdfs://, etc.)
+    val protocolPattern = "^[a-zA-Z][a-zA-Z0-9+.-]*://+".r
+    val pathWithoutProtocol = protocolPattern.replaceFirstIn(tablePath, "")
+
+    // Clean path for use as key component
+    val cleanPath = pathWithoutProtocol.replace('/', '_').replace('\\', '_')
+
+    // Use path-only keys for now to avoid timing issues between planning and execution phases
+    // The execution ID might not be available during Catalyst rule application
+    cleanPath
   }
 }

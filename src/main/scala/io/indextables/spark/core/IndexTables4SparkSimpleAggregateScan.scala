@@ -41,13 +41,15 @@ class IndexTables4SparkSimpleAggregateScan(
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
-  aggregation: Aggregation)
+  aggregation: Aggregation,
+  indexQueryFilters: Array[Any] = Array.empty)
     extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateScan])
 
-  println(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters")
+  println(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
   pushedFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: Filter: $f"))
+  indexQueryFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: IndexQuery Filter: $f"))
 
   override def readSchema(): StructType =
     createSimpleAggregateSchema(aggregation)
@@ -76,7 +78,8 @@ class IndexTables4SparkSimpleAggregateScan(
       pushedFilters,
       options,
       config,
-      aggregation
+      aggregation,
+      indexQueryFilters
     )
   }
 
@@ -202,12 +205,13 @@ class IndexTables4SparkSimpleAggregateBatch(
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
-  aggregation: Aggregation)
+  aggregation: Aggregation,
+  indexQueryFilters: Array[Any] = Array.empty)
     extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateBatch])
 
-  println(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters")
+  println(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
 
   override def planInputPartitions(): Array[InputPartition] = {
     logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
@@ -226,7 +230,7 @@ class IndexTables4SparkSimpleAggregateBatch(
       options,
       None,
       config,
-      Array.empty
+      indexQueryFilters
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.info(s"🔍 SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
@@ -239,7 +243,8 @@ class IndexTables4SparkSimpleAggregateBatch(
         pushedFilters,
         config,
         aggregation,
-        transactionLog.getTablePath()
+        transactionLog.getTablePath(),
+        indexQueryFilters
       )
     }.toArray
   }
@@ -251,7 +256,8 @@ class IndexTables4SparkSimpleAggregateBatch(
       sparkSession,
       pushedFilters,
       config,
-      aggregation
+      aggregation,
+      indexQueryFilters
     )
   }
 }
@@ -263,7 +269,8 @@ class IndexTables4SparkSimpleAggregatePartition(
   val pushedFilters: Array[Filter],
   val config: Map[String, String], // Direct config instead of broadcast
   val aggregation: Aggregation,
-  val tablePath: org.apache.hadoop.fs.Path)
+  val tablePath: org.apache.hadoop.fs.Path,
+  val indexQueryFilters: Array[Any] = Array.empty)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregatePartition])
@@ -273,6 +280,7 @@ class IndexTables4SparkSimpleAggregatePartition(
   logger.info(
     s"🔍 SIMPLE AGGREGATE PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}"
   )
+  logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
    * Provide preferred locations for this aggregate partition based on split cache locality. Uses the same
@@ -308,10 +316,13 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
   sparkSession: SparkSession,
   pushedFilters: Array[Filter],
   config: Map[String, String], // Direct config instead of broadcast
-  aggregation: Aggregation)
+  aggregation: Aggregation,
+  indexQueryFilters: Array[Any] = Array.empty)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
+
+  logger.info(s"🔍 SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
@@ -447,18 +458,22 @@ class IndexTables4SparkSimpleAggregateReader(
             Set.empty[String]
         }
 
-      // Convert pushed filters to SplitQuery
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Converting ${partition.pushedFilters.length} pushed filters to query")
-      partition.pushedFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Filter: $f"))
+      // Merge IndexQuery filters with pushed filters
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
+      partition.pushedFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Pushed Filter: $f"))
+      partition.indexQueryFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: IndexQuery Filter: $f"))
 
-      val splitQuery = if (partition.pushedFilters.nonEmpty) {
+      // Combine pushed filters and IndexQuery filters
+      val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+
+      val splitQuery = if (allFilters.nonEmpty) {
         // Create options map from config for field configuration
         import scala.jdk.CollectionConverters._
         val optionsFromConfig = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
 
         val queryObj = if (splitFieldNames.nonEmpty) {
           val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(
-            partition.pushedFilters,
+            allFilters,
             splitSearchEngine,
             Some(splitFieldNames),
             Some(optionsFromConfig)
@@ -467,7 +482,7 @@ class IndexTables4SparkSimpleAggregateReader(
           validatedQuery
         } else {
           val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(
-            partition.pushedFilters,
+            allFilters,
             splitSearchEngine,
             None,
             Some(optionsFromConfig)

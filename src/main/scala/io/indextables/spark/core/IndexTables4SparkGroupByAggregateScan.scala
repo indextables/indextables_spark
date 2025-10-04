@@ -44,10 +44,15 @@ class IndexTables4SparkGroupByAggregateScan(
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast,
   aggregation: Aggregation,
-  groupByColumns: Array[String])
+  groupByColumns: Array[String],
+  indexQueryFilters: Array[Any] = Array.empty)
     extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateScan])
+
+  println(s"🔍 GROUP BY AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
+  pushedFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: Filter: $f"))
+  indexQueryFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: IndexQuery Filter: $f"))
 
   override def readSchema(): StructType =
     createGroupBySchema(aggregation, groupByColumns)
@@ -75,7 +80,8 @@ class IndexTables4SparkGroupByAggregateScan(
       options,
       config,
       aggregation,
-      groupByColumns
+      groupByColumns,
+      indexQueryFilters
     )
   }
 
@@ -230,10 +236,13 @@ class IndexTables4SparkGroupByAggregateBatch(
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
   aggregation: Aggregation,
-  groupByColumns: Array[String])
+  groupByColumns: Array[String],
+  indexQueryFilters: Array[Any] = Array.empty)
     extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateBatch])
+
+  println(s"🔍 GROUP BY BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
 
   override def planInputPartitions(): Array[InputPartition] = {
     logger.info(s"🔍 GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
@@ -252,7 +261,7 @@ class IndexTables4SparkGroupByAggregateBatch(
       options,
       None,
       config,
-      Array.empty
+      indexQueryFilters
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.info(s"🔍 GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
@@ -266,7 +275,8 @@ class IndexTables4SparkGroupByAggregateBatch(
         aggregation,
         groupByColumns,
         transactionLog.getTablePath(),
-        schema
+        schema,
+        indexQueryFilters
       )
     }.toArray
   }
@@ -280,7 +290,8 @@ class IndexTables4SparkGroupByAggregateBatch(
       config,
       aggregation,
       groupByColumns,
-      schema
+      schema,
+      indexQueryFilters
     )
   }
 }
@@ -293,7 +304,8 @@ class IndexTables4SparkGroupByAggregatePartition(
   val aggregation: Aggregation,
   val groupByColumns: Array[String],
   val tablePath: org.apache.hadoop.fs.Path,
-  val schema: StructType)
+  val schema: StructType,
+  val indexQueryFilters: Array[Any] = Array.empty)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregatePartition])
@@ -302,6 +314,7 @@ class IndexTables4SparkGroupByAggregatePartition(
   logger.info(s"🔍 GROUP BY PARTITION: Table path: $tablePath")
   logger.info(s"🔍 GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
   logger.info(s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
+  logger.info(s"🔍 GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
    * Provide preferred locations for this GROUP BY aggregate partition based on split cache locality. Uses the same
@@ -339,10 +352,13 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
   config: Map[String, String], // Direct config instead of broadcast
   aggregation: Aggregation,
   groupByColumns: Array[String],
-  schema: StructType)
+  schema: StructType,
+  indexQueryFilters: Array[Any] = Array.empty)
     extends org.apache.spark.sql.connector.read.PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
+
+  logger.info(s"🔍 GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
@@ -544,9 +560,16 @@ class IndexTables4SparkGroupByAggregateReader(
             }
         }
 
-        // Convert pushed filters to query
-        val query = if (partition.pushedFilters.nonEmpty) {
-          logger.info(s"🔍 GROUP BY EXECUTION: Converting ${partition.pushedFilters.length} pushed filters to query")
+        // Merge IndexQuery filters with pushed filters
+        logger.info(s"🔍 GROUP BY EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
+        partition.pushedFilters.foreach(f => logger.info(s"🔍 GROUP BY EXECUTION: Pushed Filter: $f"))
+        partition.indexQueryFilters.foreach(f => logger.info(s"🔍 GROUP BY EXECUTION: IndexQuery Filter: $f"))
+
+        // Combine pushed filters and IndexQuery filters
+        val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+
+        val query = if (allFilters.nonEmpty) {
+          logger.info(s"🔍 GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
 
           // Get the split field names for schema validation
           val splitFieldNames = try {
@@ -570,7 +593,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
           // Convert filters to query with schema validation
           val convertedQuery = FiltersToQueryConverter.convertToSplitQuery(
-            partition.pushedFilters,
+            allFilters,
             splitSearchEngine,
             splitFieldNames,
             Some(optionsFromBroadcast)
