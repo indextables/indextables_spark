@@ -65,7 +65,6 @@ class IndexTables4SparkScanBuilder(
   // Get relation object from ThreadLocal (set by V2IndexQueryExpressionRule)
   // ThreadLocal is cleared at the start of V2IndexQueryExpressionRule to ensure fresh state per query
   private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
-  println(s"INDEXQUERY_DEBUG 🏗️ SCAN BUILDER INIT: Relation from ThreadLocal=${relationForIndexQuery.map(System.identityHashCode)}")
 
   override def build(): Scan = {
     println(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
@@ -1140,15 +1139,11 @@ object IndexTables4SparkScanBuilder {
     val relationId = System.identityHashCode(relation)
     currentRelation.set(Some(relation))
     currentRelationId.set(Some(relationId))
-    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL SET: Relation ID=$relationId")
   }
 
   /** Get the current relation object for this thread (called by ScanBuilder). */
-  def getCurrentRelation(): Option[AnyRef] = {
-    val rel = currentRelation.get()
-    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL GET: Relation object=${rel.map(System.identityHashCode)}")
-    rel
-  }
+  def getCurrentRelation(): Option[AnyRef] =
+    currentRelation.get()
 
   /**
    * Clear the current relation object for this thread, but only if it's a different relation.
@@ -1162,55 +1157,32 @@ object IndexTables4SparkScanBuilder {
       // Different relation - clear the old one
       currentRelation.remove()
       currentRelationId.remove()
-      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation changed from ${currentId.get} to ${newId.get}")
     } else if (currentId.isDefined && newId.isEmpty) {
       // New query with no IndexQuery - clear
       currentRelation.remove()
       currentRelationId.remove()
-      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: New query without IndexQuery (was ${currentId.get})")
-    } else if (currentId == newId && currentId.isDefined) {
-      println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL KEEP: Same relation ${currentId.get} - keeping ThreadLocal")
     }
+    // else: same relation - keep ThreadLocal for reuse across optimization phases
   }
 
   /** Clear the current relation object for this thread (for tests). */
   def clearCurrentRelation(): Unit = {
     currentRelation.remove()
     currentRelationId.remove()
-    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation cleared (explicit)")
   }
 
   /** Store IndexQuery expressions for a specific relation object. */
   def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit = {
-    println(s"INDEXQUERY_DEBUG 💾 STORE: Storing ${indexQueries.length} IndexQuery expressions")
-    println(s"INDEXQUERY_DEBUG 💾 STORE: Relation object=${System.identityHashCode(relation)}")
-    indexQueries.zipWithIndex.foreach { case (query, idx) =>
-      println(s"INDEXQUERY_DEBUG 💾 STORE: Query[$idx]=$query")
-    }
-
     relationIndexQueries.synchronized {
       relationIndexQueries.put(relation, indexQueries)
     }
-
-    println(s"INDEXQUERY_DEBUG 💾 STORE: Successfully stored ${indexQueries.length} expressions")
-    println(s"INDEXQUERY_DEBUG 💾 STORE: Cache size now: ${relationIndexQueries.size()}")
   }
 
   /** Retrieve IndexQuery expressions for a specific relation object. */
   def getIndexQueries(relation: AnyRef): Seq[Any] = {
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Attempting to retrieve IndexQuery expressions")
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Relation object=${System.identityHashCode(relation)}")
-
-    val queries = relationIndexQueries.synchronized {
+    relationIndexQueries.synchronized {
       Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
     }
-
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Cache size: ${relationIndexQueries.size()}")
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Found ${queries.length} expressions")
-    queries.zipWithIndex.foreach { case (query, idx) =>
-      println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Query[$idx]=$query")
-    }
-    queries
   }
 
   /** Clear IndexQuery expressions for a specific relation object. */
@@ -1218,7 +1190,6 @@ object IndexTables4SparkScanBuilder {
     relationIndexQueries.synchronized {
       relationIndexQueries.remove(relation)
     }
-    println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for relation ${System.identityHashCode(relation)}")
   }
 
   /** Get cache statistics for monitoring. */

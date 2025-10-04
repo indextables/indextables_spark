@@ -38,8 +38,6 @@ import io.indextables.spark.expressions.{IndexQueryExpression, IndexQueryAllExpr
 object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    println(s"🔍 V2IndexQueryExpressionRule.apply() called with plan: ${plan.getClass.getSimpleName}")
-
     // Find the relation in this plan (if any) to check if we need to clear ThreadLocal
     import io.indextables.spark.core.IndexTables4SparkScanBuilder
     val relationInPlan = plan.collectFirst { case relation: DataSourceV2Relation if isCompatibleV2DataSource(relation) => relation }
@@ -175,7 +173,6 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         }
     }
 
-    println(s"🔍 V2IndexQueryExpressionRule.apply() completed")
     result
   }
 
@@ -203,8 +200,6 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     expr: Expression,
     relation: DataSourceV2Relation
   ): Expression = {
-    println(s"🔍 V2IndexQueryExpressionRule: convertIndexQueryExpressions called with expression: $expr")
-    println(s"🔍 V2IndexQueryExpressionRule: Relation object identity=${System.identityHashCode(relation)}")
 
     val indexQueries = scala.collection.mutable.Buffer[Any]()
 
