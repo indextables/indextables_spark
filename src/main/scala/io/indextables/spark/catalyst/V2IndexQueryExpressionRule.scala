@@ -198,9 +198,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   ): Expression = {
     println(s"🔍 V2IndexQueryExpressionRule: convertIndexQueryExpressions called with expression: $expr")
 
-    // Generate instance key for this relation to match ScanBuilder
-    val instanceKey = generateInstanceKeyForRelation(relation)
-    println(s"🔍 V2IndexQueryExpressionRule: Using instance key: $instanceKey")
+    // Generate stable relation key from output attributes
+    val relationKey = generateRelationKeyForV2(relation)
+    println(s"🔍 V2IndexQueryExpressionRule: Generated relationKey='$relationKey'")
 
     val indexQueries = scala.collection.mutable.Buffer[Any]()
 
@@ -250,12 +250,12 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         }
     }
 
-    // Store the collected IndexQueries for this instance
+    // Store the collected IndexQueries for this relation
     if (indexQueries.nonEmpty) {
       import io.indextables.spark.core.IndexTables4SparkScanBuilder
-      IndexTables4SparkScanBuilder.storeIndexQueries(instanceKey, indexQueries.toSeq)
+      IndexTables4SparkScanBuilder.storeIndexQueries(relationKey, indexQueries.toSeq)
       println(
-        s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for instance $instanceKey"
+        s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for relationKey='$relationKey'"
       )
     }
 
@@ -290,46 +290,22 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     // Use the base implementation which already handles Literal expressions correctly
     indexQuery.getQueryString
 
-  /** Generate an instance key for a DataSourceV2Relation that matches the ScanBuilder's key. */
-  private def generateInstanceKeyForRelation(relation: DataSourceV2Relation): String = {
-    // Extract the actual path from the IndexTables4Spark table
-    val tablePath =
-      try {
-        val table = relation.table
+  /** Generate a stable relation key from the relation's output attributes. */
+  private def generateRelationKeyForV2(relation: DataSourceV2Relation): String = {
+    println(s"INDEXQUERY_DEBUG 🔑 V2 RULE KEY GEN: Generating key from relation output")
 
-        // For IndexTables4Spark tables, extract path from table name which is in format: tantivy4spark.`/actual/path`
-        val tableName = table.name()
-        if (tableName.startsWith("tantivy4spark.`") && tableName.endsWith("`")) {
-          // Remove "tantivy4spark.`" prefix and "`" suffix to get the actual path
-          tableName.substring("tantivy4spark.`".length, tableName.length - 1)
-        } else {
-          // Fallback - try direct access to IndexTables4SparkTable path field
-          table match {
-            case t4sTable: io.indextables.spark.core.IndexTables4SparkTable =>
-              // Use reflection to get the private path field
-              val field = t4sTable.getClass.getDeclaredField("path")
-              field.setAccessible(true)
-              field.get(t4sTable).asInstanceOf[String]
-            case _ =>
-              tableName // Last resort fallback
-          }
-        }
-      } catch {
-        case _: Exception => "unknown"
-      }
+    // Convert output attributes to StructType to match what ScanBuilder uses
+    import org.apache.spark.sql.types.{StructType, StructField}
+    val schema = StructType(relation.output.map(attr =>
+      StructField(attr.name, attr.dataType, attr.nullable, attr.metadata)
+    ))
 
-    // Try to get execution ID from current thread context
-    val executionIdOpt =
-      try {
-        import org.apache.spark.sql.SparkSession
-        val currentSession = SparkSession.active
-        Option(currentSession.sparkContext.getLocalProperty("spark.sql.execution.id"))
-      } catch {
-        case _: Exception => None
-      }
-
+    // Use the same key generation logic as ScanBuilder
     import io.indextables.spark.core.IndexTables4SparkScanBuilder
-    IndexTables4SparkScanBuilder.generateInstanceKey(tablePath, executionIdOpt)
+    val key = IndexTables4SparkScanBuilder.generateRelationKey(schema)
+
+    println(s"INDEXQUERY_DEBUG 🔑 V2 RULE KEY GEN: Generated key='$key' from ${relation.output.length} attributes")
+    key
   }
 
 }
