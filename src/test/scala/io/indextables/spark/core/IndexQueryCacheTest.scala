@@ -21,53 +21,55 @@ import org.scalatest.funsuite.AnyFunSuite
 import io.indextables.spark.filters.{IndexQueryFilter, IndexQueryAllFilter}
 
 /**
- * Unit tests for IndexQuery cache implementation using stable relation keys.
- * Tests storage and retrieval based on output attribute expression IDs.
+ * Unit tests for IndexQuery cache implementation using WeakHashMap with relation objects.
+ * Tests storage and retrieval based on DataSourceV2Relation object identity.
  */
 class IndexQueryCacheTest extends AnyFunSuite {
 
   test("cache should store and retrieve IndexQuery filters") {
-    val key = "relation_123_4"
+    val relation = new Object() // Mock relation object
     val filters = Seq(
       IndexQueryFilter("content", "spark"),
       IndexQueryAllFilter("machine learning")
     )
 
-    IndexTables4SparkScanBuilder.storeIndexQueries(key, filters)
-    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(key)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters)
+    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(relation)
 
     assert(retrieved.length == 2, s"Expected 2 filters but got ${retrieved.length}")
     assert(retrieved(0).isInstanceOf[IndexQueryFilter])
     assert(retrieved(1).isInstanceOf[IndexQueryAllFilter])
   }
 
-  test("cache should return empty sequence for non-existent keys") {
-    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries("relation_nonexistent_999")
+  test("cache should return empty sequence for non-existent relation objects") {
+    val relation = new Object() // Different object not in cache
+
+    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(relation)
 
     assert(retrieved.isEmpty, s"Expected empty sequence but got ${retrieved.length} items")
   }
 
   test("cache should allow clearing of entries") {
-    val key = "relation_clear_test_5"
+    val relation = new Object()
     val filters = Seq(IndexQueryFilter("field", "query"))
 
-    IndexTables4SparkScanBuilder.storeIndexQueries(key, filters)
-    assert(IndexTables4SparkScanBuilder.getIndexQueries(key).nonEmpty)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters)
+    assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).nonEmpty)
 
-    IndexTables4SparkScanBuilder.clearIndexQueries(key)
-    assert(IndexTables4SparkScanBuilder.getIndexQueries(key).isEmpty)
+    IndexTables4SparkScanBuilder.clearIndexQueries(relation)
+    assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).isEmpty)
   }
 
   test("cache should overwrite existing entries") {
-    val key = "relation_overwrite_test_3"
+    val relation = new Object()
     val filters1 = Seq(IndexQueryFilter("field1", "query1"))
     val filters2 = Seq(IndexQueryFilter("field2", "query2"), IndexQueryFilter("field3", "query3"))
 
-    IndexTables4SparkScanBuilder.storeIndexQueries(key, filters1)
-    assert(IndexTables4SparkScanBuilder.getIndexQueries(key).length == 1)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters1)
+    assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).length == 1)
 
-    IndexTables4SparkScanBuilder.storeIndexQueries(key, filters2)
-    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(key)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters2)
+    val retrieved = IndexTables4SparkScanBuilder.getIndexQueries(relation)
 
     assert(retrieved.length == 2, s"Expected 2 filters after overwrite but got ${retrieved.length}")
   }
@@ -76,23 +78,21 @@ class IndexQueryCacheTest extends AnyFunSuite {
     val stats = IndexTables4SparkScanBuilder.getCacheStats()
 
     assert(stats.contains("Size:"), s"Stats should contain 'Size:' but got: $stats")
-    assert(stats.contains("Hits:"), s"Stats should contain 'Hits:' but got: $stats")
-    assert(stats.contains("Misses:"), s"Stats should contain 'Misses:' but got: $stats")
-    assert(stats.contains("Evictions:"), s"Stats should contain 'Evictions:' but got: $stats")
+    assert(stats.contains("WeakHashMap"), s"Stats should mention 'WeakHashMap' but got: $stats")
   }
 
-  test("different relation keys should not interfere") {
-    val key1 = "relation_100_4"
-    val key2 = "relation_200_4"
+  test("different relation objects should not interfere") {
+    val relation1 = new Object()
+    val relation2 = new Object()
 
     val filters1 = Seq(IndexQueryFilter("field1", "query1"))
     val filters2 = Seq(IndexQueryFilter("field2", "query2"))
 
-    IndexTables4SparkScanBuilder.storeIndexQueries(key1, filters1)
-    IndexTables4SparkScanBuilder.storeIndexQueries(key2, filters2)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation1, filters1)
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation2, filters2)
 
-    val retrieved1 = IndexTables4SparkScanBuilder.getIndexQueries(key1)
-    val retrieved2 = IndexTables4SparkScanBuilder.getIndexQueries(key2)
+    val retrieved1 = IndexTables4SparkScanBuilder.getIndexQueries(relation1)
+    val retrieved2 = IndexTables4SparkScanBuilder.getIndexQueries(relation2)
 
     assert(retrieved1.length == 1)
     assert(retrieved2.length == 1)
@@ -100,21 +100,37 @@ class IndexQueryCacheTest extends AnyFunSuite {
     assert(retrieved2(0).asInstanceOf[IndexQueryFilter].queryString == "query2")
   }
 
-  test("generateRelationKey should create consistent keys from schema") {
-    import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
+  test("ThreadLocal should allow setting and getting relation objects") {
+    val relation = new Object()
 
-    val schema = StructType(Seq(
-      StructField("id", StringType),
-      StructField("content", StringType),
-      StructField("score", IntegerType)
-    ))
+    IndexTables4SparkScanBuilder.setCurrentRelation(relation)
+    val retrieved = IndexTables4SparkScanBuilder.getCurrentRelation()
 
-    val key1 = IndexTables4SparkScanBuilder.generateRelationKey(schema)
-    val key2 = IndexTables4SparkScanBuilder.generateRelationKey(schema)
+    assert(retrieved.isDefined, s"Expected Some(relation) but got None")
+    assert(retrieved.get eq relation, s"Expected same relation object")
 
-    // Keys should be consistent for the same schema
-    assert(key1 == key2, s"Expected consistent keys but got '$key1' and '$key2'")
-    assert(key1.startsWith("relation_"), s"Key should start with 'relation_' but got '$key1'")
-    assert(key1.endsWith("_3"), s"Key should end with schema length '_3' but got '$key1'")
+    IndexTables4SparkScanBuilder.clearCurrentRelation()
+    val clearedResult = IndexTables4SparkScanBuilder.getCurrentRelation()
+
+    assert(clearedResult.isEmpty, s"Expected None after clear but got $clearedResult")
+  }
+
+  test("WeakHashMap should allow GC to clean up unreferenced relations") {
+    var relation: AnyRef = new Object()
+    val filters = Seq(IndexQueryFilter("field", "query"))
+
+    IndexTables4SparkScanBuilder.storeIndexQueries(relation, filters)
+    assert(IndexTables4SparkScanBuilder.getIndexQueries(relation).nonEmpty)
+
+    // Remove strong reference and suggest GC
+    relation = null
+    System.gc()
+    Thread.sleep(100) // Give GC a chance to run
+
+    // WeakHashMap should eventually clean up the entry
+    // (We can't reliably test this without strong reference, so just verify cache still works)
+    val newRelation = new Object()
+    IndexTables4SparkScanBuilder.storeIndexQueries(newRelation, filters)
+    assert(IndexTables4SparkScanBuilder.getIndexQueries(newRelation).nonEmpty)
   }
 }

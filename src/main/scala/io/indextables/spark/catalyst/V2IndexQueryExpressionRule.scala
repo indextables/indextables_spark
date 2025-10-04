@@ -197,10 +197,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     relation: DataSourceV2Relation
   ): Expression = {
     println(s"🔍 V2IndexQueryExpressionRule: convertIndexQueryExpressions called with expression: $expr")
-
-    // Generate stable relation key from output attributes
-    val relationKey = generateRelationKeyForV2(relation)
-    println(s"🔍 V2IndexQueryExpressionRule: Generated relationKey='$relationKey'")
+    println(s"🔍 V2IndexQueryExpressionRule: Relation object identity=${System.identityHashCode(relation)}")
 
     val indexQueries = scala.collection.mutable.Buffer[Any]()
 
@@ -250,12 +247,19 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         }
     }
 
-    // Store the collected IndexQueries for this relation
+    // Store the collected IndexQueries for this relation object
     if (indexQueries.nonEmpty) {
       import io.indextables.spark.core.IndexTables4SparkScanBuilder
-      IndexTables4SparkScanBuilder.storeIndexQueries(relationKey, indexQueries.toSeq)
+
+      // CRITICAL: Set ThreadLocal with relation object so ScanBuilder can retrieve the same object
+      // This works because Catalyst optimization and ScanBuilder creation happen on same thread
+      // Even with AQE, the same relation object is reused throughout planning
+      IndexTables4SparkScanBuilder.setCurrentRelation(relation)
+
+      // Store IndexQueries in WeakHashMap keyed by the relation object itself
+      IndexTables4SparkScanBuilder.storeIndexQueries(relation, indexQueries.toSeq)
       println(
-        s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for relationKey='$relationKey'"
+        s"🔍 V2IndexQueryExpressionRule: Stored ${indexQueries.length} IndexQuery expressions for relation ${System.identityHashCode(relation)}"
       )
     }
 
@@ -289,23 +293,5 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   private def extractQueryStringForV2(indexQuery: IndexQueryExpression): Option[String] =
     // Use the base implementation which already handles Literal expressions correctly
     indexQuery.getQueryString
-
-  /** Generate a stable relation key from the relation's output attributes. */
-  private def generateRelationKeyForV2(relation: DataSourceV2Relation): String = {
-    println(s"INDEXQUERY_DEBUG 🔑 V2 RULE KEY GEN: Generating key from relation output")
-
-    // Convert output attributes to StructType to match what ScanBuilder uses
-    import org.apache.spark.sql.types.{StructType, StructField}
-    val schema = StructType(relation.output.map(attr =>
-      StructField(attr.name, attr.dataType, attr.nullable, attr.metadata)
-    ))
-
-    // Use the same key generation logic as ScanBuilder
-    import io.indextables.spark.core.IndexTables4SparkScanBuilder
-    val key = IndexTables4SparkScanBuilder.generateRelationKey(schema)
-
-    println(s"INDEXQUERY_DEBUG 🔑 V2 RULE KEY GEN: Generated key='$key' from ${relation.output.length} attributes")
-    key
-  }
 
 }

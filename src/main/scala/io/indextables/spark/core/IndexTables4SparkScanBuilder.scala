@@ -62,9 +62,9 @@ class IndexTables4SparkScanBuilder(
   private var _pushedAggregation: Option[Aggregation] = None
   private var _pushedGroupBy: Option[Array[String]]   = None
 
-  // Generate stable relation key from schema output attribute IDs
-  private val relationKey = IndexTables4SparkScanBuilder.generateRelationKey(schema)
-  println(s"INDEXQUERY_DEBUG 🏗️ SCAN BUILDER INIT: Generated relation key='$relationKey' from schema")
+  // Get relation object from ThreadLocal (set by V2IndexQueryExpressionRule)
+  private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
+  println(s"INDEXQUERY_DEBUG 🏗️ SCAN BUILDER INIT: Relation from ThreadLocal=${relationForIndexQuery.map(System.identityHashCode)}")
 
   override def build(): Scan = {
     println(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
@@ -483,14 +483,19 @@ class IndexTables4SparkScanBuilder(
    * registry by using instance-scoped storage.
    */
   private def extractIndexQueriesFromCurrentPlan(): Array[Any] = {
-    logger.error(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction using relationKey='$relationKey'")
+    logger.error(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction")
 
-    // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this relation
-    val storedQueries = IndexTables4SparkScanBuilder.getIndexQueries(relationKey)
-    if (storedQueries.nonEmpty) {
-      logger.error(s"🔍 EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from relation storage")
-      storedQueries.foreach(q => logger.error(s"  - Relation IndexQuery: $q"))
-      return storedQueries.toArray
+    // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this relation object
+    relationForIndexQuery match {
+      case Some(relation) =>
+        val storedQueries = IndexTables4SparkScanBuilder.getIndexQueries(relation)
+        if (storedQueries.nonEmpty) {
+          logger.error(s"🔍 EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from relation storage")
+          storedQueries.foreach(q => logger.error(s"  - Relation IndexQuery: $q"))
+          return storedQueries.toArray
+        }
+      case None =>
+        logger.error(s"🔍 EXTRACT DEBUG: No relation object available from ThreadLocal")
     }
 
     // Method 2: Fall back to registry (temporary until we fully eliminate it)
@@ -1112,51 +1117,63 @@ class IndexTables4SparkScanBuilder(
  * V2IndexQueryExpressionRule to pass IndexQuery expressions directly to the ScanBuilder without a global registry.
  */
 object IndexTables4SparkScanBuilder {
-  import com.google.common.cache.{Cache, CacheBuilder}
+  import java.util.WeakHashMap
+  import scala.collection.JavaConverters._
 
-  // LRU cache for IndexQuery expressions keyed by stable relation identifier
-  // Uses hash of output attribute IDs which is stable across optimization/planning phases
-  private val instanceIndexQueries: Cache[String, Seq[Any]] = CacheBuilder
-    .newBuilder()
-    .maximumSize(1000)
-    .recordStats()
-    .build[String, Seq[Any]]()
+  // WeakHashMap using DataSourceV2Relation object as key
+  // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning
+  // WeakHashMap allows GC to clean up entries when relations are no longer referenced
+  private val relationIndexQueries: WeakHashMap[AnyRef, Seq[Any]] = new WeakHashMap[AnyRef, Seq[Any]]()
 
-  /**
-   * Generate a stable key for a relation based on its output schema.
-   * Uses hash of field names and types which remain stable across planning phases.
-   */
-  def generateRelationKey(schema: org.apache.spark.sql.types.StructType): String = {
-    // Hash field names and types to create a stable key
-    // This is simpler and more reliable than trying to access expression IDs from StructType
-    val schemaString = schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(",")
-    val hashCode = schemaString.hashCode.abs
+  // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
+  // This works even with AQE because the same relation object is used throughout planning
+  private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
 
-    s"relation_${hashCode}_${schema.fields.length}"
+  /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
+  def setCurrentRelation(relation: AnyRef): Unit = {
+    currentRelation.set(Some(relation))
+    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL SET: Relation object=${System.identityHashCode(relation)}")
   }
 
-  /** Store IndexQuery expressions for a specific relation. */
-  def storeIndexQueries(relationKey: String, indexQueries: Seq[Any]): Unit = {
+  /** Get the current relation object for this thread (called by ScanBuilder). */
+  def getCurrentRelation(): Option[AnyRef] = {
+    val rel = currentRelation.get()
+    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL GET: Relation object=${rel.map(System.identityHashCode)}")
+    rel
+  }
+
+  /** Clear the current relation object for this thread. */
+  def clearCurrentRelation(): Unit = {
+    currentRelation.remove()
+    println(s"INDEXQUERY_DEBUG 🔑 THREADLOCAL CLEAR: Relation cleared")
+  }
+
+  /** Store IndexQuery expressions for a specific relation object. */
+  def storeIndexQueries(relation: AnyRef, indexQueries: Seq[Any]): Unit = {
     println(s"INDEXQUERY_DEBUG 💾 STORE: Storing ${indexQueries.length} IndexQuery expressions")
-    println(s"INDEXQUERY_DEBUG 💾 STORE: RelationKey='$relationKey'")
+    println(s"INDEXQUERY_DEBUG 💾 STORE: Relation object=${System.identityHashCode(relation)}")
     indexQueries.zipWithIndex.foreach { case (query, idx) =>
       println(s"INDEXQUERY_DEBUG 💾 STORE: Query[$idx]=$query")
     }
 
-    instanceIndexQueries.put(relationKey, indexQueries)
+    relationIndexQueries.synchronized {
+      relationIndexQueries.put(relation, indexQueries)
+    }
 
     println(s"INDEXQUERY_DEBUG 💾 STORE: Successfully stored ${indexQueries.length} expressions")
-    println(s"INDEXQUERY_DEBUG 💾 STORE: Cache size now: ${instanceIndexQueries.size()}")
+    println(s"INDEXQUERY_DEBUG 💾 STORE: Cache size now: ${relationIndexQueries.size()}")
   }
 
-  /** Retrieve IndexQuery expressions for a specific relation. */
-  def getIndexQueries(relationKey: String): Seq[Any] = {
+  /** Retrieve IndexQuery expressions for a specific relation object. */
+  def getIndexQueries(relation: AnyRef): Seq[Any] = {
     println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Attempting to retrieve IndexQuery expressions")
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: RelationKey='$relationKey'")
-    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Cache size: ${instanceIndexQueries.size()}")
+    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Relation object=${System.identityHashCode(relation)}")
 
-    val queries = Option(instanceIndexQueries.getIfPresent(relationKey)).getOrElse(Seq.empty)
+    val queries = relationIndexQueries.synchronized {
+      Option(relationIndexQueries.get(relation)).getOrElse(Seq.empty)
+    }
 
+    println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Cache size: ${relationIndexQueries.size()}")
     println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Found ${queries.length} expressions")
     queries.zipWithIndex.foreach { case (query, idx) =>
       println(s"INDEXQUERY_DEBUG 📥 RETRIEVE: Query[$idx]=$query")
@@ -1164,17 +1181,17 @@ object IndexTables4SparkScanBuilder {
     queries
   }
 
-  /** Clear IndexQuery expressions for a specific relation. */
-  def clearIndexQueries(relationKey: String): Unit = {
-    instanceIndexQueries.invalidate(relationKey)
-    println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for relation $relationKey")
+  /** Clear IndexQuery expressions for a specific relation object. */
+  def clearIndexQueries(relation: AnyRef): Unit = {
+    relationIndexQueries.synchronized {
+      relationIndexQueries.remove(relation)
+    }
+    println(s"🔍 ScanBuilder: Cleared IndexQuery expressions for relation ${System.identityHashCode(relation)}")
   }
 
   /** Get cache statistics for monitoring. */
   def getCacheStats(): String = {
-    val stats = instanceIndexQueries.stats()
-    s"IndexQuery Cache Stats - Size: ${instanceIndexQueries.size()}, " +
-      s"Hits: ${stats.hitCount()}, Misses: ${stats.missCount()}, " +
-      s"Evictions: ${stats.evictionCount()}, Hit Rate: ${stats.hitRate()}"
+    val size = relationIndexQueries.synchronized { relationIndexQueries.size() }
+    s"IndexQuery Cache Stats - Size: $size (WeakHashMap)"
   }
 }
