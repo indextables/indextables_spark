@@ -774,12 +774,84 @@ class OptimizedTransactionLog(
   private def getAllCurrentActions(upToVersion: Long): Seq[Action] = {
     val versions = getVersions().filter(_ <= upToVersion)
 
-    if (parallelReadEnabled && versions.size > 10) {
+    val addActions = if (parallelReadEnabled && versions.size > 10) {
       // Use parallel reconstruction for many versions
       parallelOps.reconstructStateParallel(versions)
     } else {
       // Standard reconstruction with consistent versions
       reconstructStateStandard(versions)
+    }
+
+    // Build complete action sequence: protocol + metadata + add actions (with truncated stats)
+    val allActions = scala.collection.mutable.ListBuffer[Action]()
+
+    // Add protocol first
+    try {
+      allActions += getProtocol()
+    } catch {
+      case _: Exception => // No protocol found, skip
+    }
+
+    // Add metadata second
+    val metadata = try {
+      val md = getMetadata()
+      allActions += md
+      Some(md)
+    } catch {
+      case _: Exception => None // No metadata found, skip
+    }
+
+    // Apply statistics truncation to add actions before adding to checkpoint
+    val truncatedAddActions = applyStatisticsTruncation(addActions, metadata)
+    allActions ++= truncatedAddActions
+
+    allActions.toSeq
+  }
+
+  /**
+   * Apply statistics truncation to AddActions for checkpoint creation.
+   * Preserves partition column statistics while truncating data column statistics.
+   */
+  private def applyStatisticsTruncation(
+    addActions: Seq[AddAction],
+    metadata: Option[MetadataAction]
+  ): Seq[AddAction] = {
+    import io.indextables.spark.util.StatisticsTruncation
+
+    // Get configuration from Spark session and options
+    import scala.jdk.CollectionConverters._
+    val sparkConf = spark.conf.getAll
+    val optionsMap = options.asCaseSensitiveMap().asScala.toMap
+    val config = sparkConf ++ optionsMap
+
+    // Get partition columns to protect their statistics
+    val partitionColumns = metadata.map(_.partitionColumns.toSet).getOrElse(Set.empty[String])
+
+    addActions.map { add =>
+      val originalMinValues = add.minValues.getOrElse(Map.empty[String, String])
+      val originalMaxValues = add.maxValues.getOrElse(Map.empty[String, String])
+
+      // Separate partition column stats from data column stats
+      val (partitionMinValues, dataMinValues) = originalMinValues.partition { case (col, _) =>
+        partitionColumns.contains(col)
+      }
+      val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition { case (col, _) =>
+        partitionColumns.contains(col)
+      }
+
+      // Only truncate data column statistics, not partition column statistics
+      val (truncatedDataMinValues, truncatedDataMaxValues) =
+        StatisticsTruncation.truncateStatistics(dataMinValues, dataMaxValues, config)
+
+      // Merge partition stats back (they are never truncated)
+      val finalMinValues = partitionMinValues ++ truncatedDataMinValues
+      val finalMaxValues = partitionMaxValues ++ truncatedDataMaxValues
+
+      // Return new AddAction with truncated statistics
+      add.copy(
+        minValues = if (finalMinValues.nonEmpty) Some(finalMinValues) else None,
+        maxValues = if (finalMaxValues.nonEmpty) Some(finalMaxValues) else None
+      )
     }
   }
 
