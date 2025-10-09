@@ -759,8 +759,17 @@ class IndexTables4SparkDataWriter(
 
     logger.info(s"Created split file $fileName with $splitSize bytes, $recordCount records")
 
-    val minValues = statistics.getMinValues
-    val maxValues = statistics.getMaxValues
+    val rawMinValues = statistics.getMinValues
+    val rawMaxValues = statistics.getMaxValues
+
+    // Apply statistics truncation to prevent transaction log bloat from long values
+    import io.indextables.spark.util.StatisticsTruncation
+    val configMap = options.asCaseSensitiveMap().asScala.toMap
+    val (minValues, maxValues) = StatisticsTruncation.truncateStatistics(
+      rawMinValues,
+      rawMaxValues,
+      configMap
+    )
 
     // For AddAction path, we need to store the relative path including partition directory
     // Format: [partitionDir/]filename.split

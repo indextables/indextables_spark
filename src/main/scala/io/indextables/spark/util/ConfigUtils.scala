@@ -27,6 +27,14 @@ object ConfigUtils {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
+  // Statistics truncation configuration constants
+  val STATS_TRUNCATION_ENABLED    = "spark.indextables.stats.truncation.enabled"
+  val STATS_TRUNCATION_MAX_LENGTH = "spark.indextables.stats.truncation.maxLength"
+
+  // Default values
+  val DEFAULT_STATS_TRUNCATION_ENABLED    = true
+  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH = 256
+
   /**
    * Create a SplitCacheConfig from configuration map.
    *
@@ -132,4 +140,37 @@ object ConfigUtils {
     tablePathOpt: Option[String] = None
   ): SplitCacheConfig =
     createSplitCacheConfig(broadcastConfig.value, tablePathOpt)
+
+  /**
+   * Get a boolean configuration value from the config map with a default value.
+   *
+   * @param config Configuration map
+   * @param key Configuration key
+   * @param defaultValue Default value if key not found
+   * @return Boolean value
+   */
+  def getBoolean(config: Map[String, String], key: String, defaultValue: Boolean): Boolean =
+    config.get(key).map(_.toBoolean).getOrElse(defaultValue)
+
+  /**
+   * Get an integer configuration value from the config map with a default value.
+   *
+   * @param config Configuration map
+   * @param key Configuration key
+   * @param defaultValue Default value if key not found
+   * @return Integer value
+   */
+  def getInt(config: Map[String, String], key: String, defaultValue: Int): Int =
+    config.get(key).map(_.toInt).getOrElse(defaultValue)
+
+  /**
+   * Get a string configuration value from the config map with a default value.
+   *
+   * @param config Configuration map
+   * @param key Configuration key
+   * @param defaultValue Default value if key not found
+   * @return String value
+   */
+  def getString(config: Map[String, String], key: String, defaultValue: String): String =
+    config.getOrElse(key, defaultValue)
 }
