@@ -207,6 +207,142 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
       maxValues = None
     )
 
+  test("data skipping with truncated statistics - GreaterThanOrEqual should not skip when filterValue starts with truncated max") {
+    // Scenario: max="aaa" (truncated from "aaazzz"), filterValue="aaab"
+    // Actual values could be "aaac", "aaad", etc. which are >= "aaab"
+    // Should NOT skip this file
+    val fileWithTruncatedMax = createAddActionWithStats(
+      "truncated_max.tnt4s",
+      minValues = Map("name" -> "aaa"),
+      maxValues = Map("name" -> "aaa") // Truncated - actual max could be "aaazzz"
+    )
+
+    transactionLog.addFile(fileWithTruncatedMax)
+
+    // Test: filterValue="aaab" starts with max="aaa" - should NOT skip
+    val filter     = GreaterThanOrEqual("name", "aaab")
+    val scan       = createScanWithFilters(Array(filter))
+    val partitions = scan.planInputPartitions()
+
+    assert(partitions.length == 1, s"Should NOT skip file when filterValue starts with truncated max, got ${partitions.length} partitions")
+    println("✅ Truncated max test passed: GreaterThanOrEqual correctly did NOT skip when filterValue starts with max")
+  }
+
+  test("data skipping with truncated statistics - GreaterThanOrEqual should skip when filterValue does NOT start with truncated max") {
+    // Scenario: max="aaa" (truncated), filterValue="bbb"
+    // All actual values start with "aaa", so all are < "bbb"
+    // Should skip this file
+    val fileWithTruncatedMax = createAddActionWithStats(
+      "truncated_max2.tnt4s",
+      minValues = Map("name" -> "aaa"),
+      maxValues = Map("name" -> "aaa") // Truncated
+    )
+
+    transactionLog.addFile(fileWithTruncatedMax)
+
+    // Test: filterValue="bbb" does NOT start with max="aaa" and "aaa" < "bbb" - should skip
+    val filter     = GreaterThanOrEqual("name", "bbb")
+    val scan       = createScanWithFilters(Array(filter))
+    val partitions = scan.planInputPartitions()
+
+    assert(partitions.length == 0, s"Should skip file when max < filterValue and filterValue does NOT start with max, got ${partitions.length} partitions")
+    println("✅ Truncated max skip test passed: GreaterThanOrEqual correctly skipped when filterValue does NOT start with max")
+  }
+
+  test("data skipping with truncated statistics - LessThanOrEqual should not skip when filterValue starts with truncated min") {
+    // Scenario: min="bbb" (truncated from "bbbzzz"), filterValue="bbbc"
+    // Actual values could be "bbba", "bbbb", etc. which are <= "bbbc"
+    // Should NOT skip this file
+    val fileWithTruncatedMin = createAddActionWithStats(
+      "truncated_min.tnt4s",
+      minValues = Map("name" -> "bbb"), // Truncated - actual min could be "bbbzzz"
+      maxValues = Map("name" -> "bbb")
+    )
+
+    transactionLog.addFile(fileWithTruncatedMin)
+
+    // Test: filterValue="bbbc" starts with min="bbb" - should NOT skip
+    val filter     = LessThanOrEqual("name", "bbbc")
+    val scan       = createScanWithFilters(Array(filter))
+    val partitions = scan.planInputPartitions()
+
+    assert(partitions.length == 1, s"Should NOT skip file when filterValue starts with truncated min, got ${partitions.length} partitions")
+    println("✅ Truncated min test passed: LessThanOrEqual correctly did NOT skip when filterValue starts with min")
+  }
+
+  test("data skipping with truncated statistics - LessThanOrEqual should skip when filterValue does NOT start with truncated min") {
+    // Scenario: min="bbb" (truncated), filterValue="aaa"
+    // All actual values start with "bbb", so all are > "aaa"
+    // Should skip this file
+    val fileWithTruncatedMin = createAddActionWithStats(
+      "truncated_min2.tnt4s",
+      minValues = Map("name" -> "bbb"), // Truncated
+      maxValues = Map("name" -> "bbb")
+    )
+
+    transactionLog.addFile(fileWithTruncatedMin)
+
+    // Test: filterValue="aaa" does NOT start with min="bbb" and "bbb" > "aaa" - should skip
+    val filter     = LessThanOrEqual("name", "aaa")
+    val scan       = createScanWithFilters(Array(filter))
+    val partitions = scan.planInputPartitions()
+
+    assert(partitions.length == 0, s"Should skip file when min > filterValue and filterValue does NOT start with min, got ${partitions.length} partitions")
+    println("✅ Truncated min skip test passed: LessThanOrEqual correctly skipped when filterValue does NOT start with min")
+  }
+
+  test("data skipping with truncated statistics - complex scenarios") {
+    // File 1: min="log_2024_01_01" (full, not truncated), max="log_2024_01_31" (full, not truncated)
+    val file1 = createAddActionWithStats(
+      "file1.tnt4s",
+      minValues = Map("name" -> "log_2024_01_01"),
+      maxValues = Map("name" -> "log_2024_01_31")
+    )
+
+    // File 2: min="log_2024_02_01" (truncated to 64 chars), max="log_2024_02_28" (truncated to 64 chars)
+    // Simulating truncation by using shorter values
+    val file2 = createAddActionWithStats(
+      "file2.tnt4s",
+      minValues = Map("name" -> "log_2024_02_01_very_long_prefix_that_gets_truncated_at_64_ch"),
+      maxValues = Map("name" -> "log_2024_02_28_very_long_prefix_that_gets_truncated_at_64_ch")
+    )
+
+    // File 3: min="log_2024_03_01", max="log_2024_03_31"
+    val file3 = createAddActionWithStats(
+      "file3.tnt4s",
+      minValues = Map("name" -> "log_2024_03_01"),
+      maxValues = Map("name" -> "log_2024_03_31")
+    )
+
+    transactionLog.addFile(file1)
+    transactionLog.addFile(file2)
+    transactionLog.addFile(file3)
+
+    // Test 1: GreaterThanOrEqual with filterValue that starts with file2's truncated max
+    val filter1     = GreaterThanOrEqual("name", "log_2024_02_28_very_long_prefix_that_gets_truncated_at_64_characters")
+    val scan1       = createScanWithFilters(Array(filter1))
+    val partitions1 = scan1.planInputPartitions()
+
+    // Should include file2 (because filterValue starts with max) and file3
+    assert(partitions1.length >= 2, s"Expected at least 2 partitions (file2 and file3), got ${partitions1.length}")
+    val paths1 = partitions1.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    assert(paths1.exists(_.contains("file2")), "Should include file2 (truncated max with matching prefix)")
+    assert(paths1.exists(_.contains("file3")), "Should include file3")
+
+    // Test 2: LessThanOrEqual with filterValue that starts with file2's truncated min
+    val filter2     = LessThanOrEqual("name", "log_2024_02_01_very_long_prefix_that_gets_truncated_at_64_characters")
+    val scan2       = createScanWithFilters(Array(filter2))
+    val partitions2 = scan2.planInputPartitions()
+
+    // Should include file1 and file2 (because filterValue starts with min)
+    assert(partitions2.length >= 2, s"Expected at least 2 partitions (file1 and file2), got ${partitions2.length}")
+    val paths2 = partitions2.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    assert(paths2.exists(_.contains("file1")), "Should include file1")
+    assert(paths2.exists(_.contains("file2")), "Should include file2 (truncated min with matching prefix)")
+
+    println("✅ Complex truncation scenarios passed: Correctly handling prefix matching with truncated statistics")
+  }
+
   private def createScanWithFilters(filters: Array[Filter]): IndexTables4SparkScan = {
     val schema = StructType(
       Array(

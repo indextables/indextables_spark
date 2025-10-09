@@ -33,7 +33,7 @@ object ConfigUtils {
 
   // Default values
   val DEFAULT_STATS_TRUNCATION_ENABLED    = true
-  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH = 256
+  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH = 64
 
   /**
    * Create a SplitCacheConfig from configuration map.

@@ -20,25 +20,25 @@ package io.indextables.spark.util
 import org.slf4j.LoggerFactory
 
 /**
- * Utility object for dropping statistics for columns with excessively long values.
+ * Utility object for truncating statistics for columns with excessively long values.
  *
- * This prevents transaction log bloat by automatically removing min/max statistics for columns
- * with values exceeding a configurable threshold (default: 256 characters).
+ * This prevents transaction log bloat by automatically truncating min/max statistics for columns
+ * with values exceeding a configurable threshold (default: 64 characters).
  *
- * Note: Statistics are completely dropped (not truncated) to avoid creating misleading partial data
- * that could lead to incorrect query results.
+ * Note: Statistics are truncated to the configured threshold. On read, min statistics use >= comparison
+ * while max statistics use <= OR startsWith comparison to ensure correctness.
  */
 object StatisticsTruncation {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   /**
-   * Drops statistics for columns with excessively long values.
+   * Truncates statistics for columns with excessively long values.
    *
    * @param minValues Map of column names to minimum values
    * @param maxValues Map of column names to maximum values
    * @param config Configuration map
-   * @return Tuple of (filtered minValues, filtered maxValues)
+   * @return Tuple of (truncated minValues, truncated maxValues)
    */
   def truncateStatistics(
     minValues: Map[String, String],
@@ -63,32 +63,45 @@ object StatisticsTruncation {
     )
 
     // Find columns that need truncation (checking both min and max values)
-    val minValuesToDrop = minValues.filter { case (colName, value) =>
+    val minValuesToTruncate = minValues.filter { case (colName, value) =>
       value != null && value.length > maxLength
     }.keySet
 
-    val maxValuesToDrop = maxValues.filter { case (colName, value) =>
+    val maxValuesToTruncate = maxValues.filter { case (colName, value) =>
       value != null && value.length > maxLength
     }.keySet
 
-    val columnsToDrop = minValuesToDrop ++ maxValuesToDrop
+    val columnsToTruncate = minValuesToTruncate ++ maxValuesToTruncate
 
-    if (columnsToDrop.isEmpty) {
+    if (columnsToTruncate.isEmpty) {
       return (minValues, maxValues)
     }
 
     // Log truncation action
-    columnsToDrop.foreach { colName =>
+    columnsToTruncate.foreach { colName =>
       val minLen = minValues.get(colName).map(_.length).getOrElse(0)
       val maxLen = maxValues.get(colName).map(_.length).getOrElse(0)
-      logger.info(s"Dropping statistics for column '$colName' due to excessive value length " +
-                  s"(min: $minLen chars, max: $maxLen chars, threshold: $maxLength)")
+      logger.info(s"Truncating statistics for column '$colName' due to excessive value length " +
+                  s"(min: $minLen chars, max: $maxLen chars, truncating to: $maxLength)")
     }
 
-    // Drop statistics for columns with long values
-    val filteredMinValues = minValues.filterKeys(!columnsToDrop.contains(_))
-    val filteredMaxValues = maxValues.filterKeys(!columnsToDrop.contains(_))
+    // Truncate statistics for columns with long values
+    val truncatedMinValues = minValues.map { case (colName, value) =>
+      if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
+        (colName, value.substring(0, maxLength))
+      } else {
+        (colName, value)
+      }
+    }
 
-    (filteredMinValues, filteredMaxValues)
+    val truncatedMaxValues = maxValues.map { case (colName, value) =>
+      if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
+        (colName, value.substring(0, maxLength))
+      } else {
+        (colName, value)
+      }
+    }
+
+    (truncatedMinValues, truncatedMaxValues)
   }
 }
