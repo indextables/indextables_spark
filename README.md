@@ -599,6 +599,8 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.checkpoint.auto.minFileAge` | `600000` | Minimum file age for auto checkpoint (10 minutes in milliseconds) |
 | `spark.indextables.transaction.cache.enabled` | `true` | Enable transaction log caching |
 | `spark.indextables.transaction.cache.expirationSeconds` | `300` | Transaction cache TTL (5 minutes) |
+| `spark.indextables.stats.truncation.enabled` | `true` | Enable automatic statistics truncation for long values (enabled by default) |
+| `spark.indextables.stats.truncation.maxLength` | `256` | Maximum character length for min/max statistics values |
 
 #### IndexWriter Performance Configuration
 

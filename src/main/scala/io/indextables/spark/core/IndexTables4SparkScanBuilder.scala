@@ -133,14 +133,16 @@ class IndexTables4SparkScanBuilder(
 
     // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
     if (canUseTransactionLogGroupByCount(aggregation, groupByColumns)) {
-      logger.info(s"Using transaction log optimization for partition-only GROUP BY COUNT")
+      val hasAggregations = aggregation.aggregateExpressions().nonEmpty
+      logger.info(s"Using transaction log optimization for partition-only GROUP BY COUNT, hasAggregations=$hasAggregations")
       new TransactionLogCountScan(
         sparkSession,
         transactionLog,
         _pushedFilters,
         options,
         config,
-        Some(groupByColumns) // Pass GROUP BY columns for grouped aggregation
+        Some(groupByColumns),  // Pass GROUP BY columns for grouped aggregation
+        hasAggregations        // Indicate if this has aggregations or is just DISTINCT
       )
     } else {
       // Regular GROUP BY scan using tantivy aggregations
