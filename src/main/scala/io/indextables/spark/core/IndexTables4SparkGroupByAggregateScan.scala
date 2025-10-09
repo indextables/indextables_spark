@@ -65,8 +65,11 @@ class IndexTables4SparkGroupByAggregateScan(
   pushedFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: Filter: $f"))
   indexQueryFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: IndexQuery Filter: $f"))
 
-  override def readSchema(): StructType =
-    createGroupBySchema(aggregation, groupByColumns)
+  override def readSchema(): StructType = {
+    val resultSchema = createGroupBySchema(aggregation, groupByColumns)
+    println(s"🔍 GROUP BY readSchema(): Returning schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
+    resultSchema
+  }
 
   override def toBatch: Batch = {
     // Update broadcast locality information before partition planning
@@ -115,37 +118,40 @@ class IndexTables4SparkGroupByAggregateScan(
           .mkString(", ")}"
     )
 
-    val groupByFields = groupByColumns.map { columnName =>
+    // IMPORTANT: Spark expects GROUP BY columns to be named group_col_0, group_col_1, etc.
+    // See org.apache.spark.sql.execution.datasources.v2.V2ScanRelationPushDown lines 413-421
+    val groupByFields = groupByColumns.zipWithIndex.map { case (columnName, index) =>
       // Find the column type from the original schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>
-          logger.info(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}")
-          StructField(columnName, field.dataType, field.nullable)
+          logger.info(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}, naming as group_col_$index")
+          StructField(s"group_col_$index", field.dataType, field.nullable)
         case None =>
           // Fallback to string type
           logger.error(s"🔍 GROUP BY SCHEMA: Field '$columnName' NOT FOUND in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
-          StructField(columnName, StringType, nullable = true)
+          StructField(s"group_col_$index", StringType, nullable = true)
       }
     }
 
     // Add aggregation result columns
+    // IMPORTANT: Spark expects aggregation columns to be named agg_func_0, agg_func_1, etc.
+    // See org.apache.spark.sql.execution.datasources.v2.V2ScanRelationPushDown lines 417-420
     val aggregationFields = aggregation.aggregateExpressions.zipWithIndex.map {
       case (aggExpr, index) =>
-        val (columnName, dataType) = aggExpr match {
+        val dataType = aggExpr match {
           case count: Count =>
-            (s"count", LongType)
+            LongType
           case _: CountStar =>
-            (s"count", LongType)
+            LongType
           case sum: Sum =>
             // For partial aggregations, return type must match Spark's accumulator type
             // IntegerType/LongType SUM -> LongType, FloatType/DoubleType SUM -> DoubleType
             val fieldType = getInputFieldType(sum, schema)
-            val sumType = fieldType match {
+            fieldType match {
               case IntegerType | LongType => LongType
               case FloatType | DoubleType => DoubleType
               case _                      => DoubleType // Default to DoubleType for unknown types
             }
-            (s"sum", sumType)
           case avg: Avg =>
             // AVG should not appear here if supportCompletePushDown=false
             throw new IllegalStateException(
@@ -155,17 +161,15 @@ class IndexTables4SparkGroupByAggregateScan(
             )
           case min: Min =>
             // MIN/MAX return the same type as the input field
-            val fieldType = getInputFieldType(min, schema)
-            (s"min", fieldType)
+            getInputFieldType(min, schema)
           case max: Max =>
             // MIN/MAX return the same type as the input field
-            val fieldType = getInputFieldType(max, schema)
-            (s"max", fieldType)
+            getInputFieldType(max, schema)
           case other =>
             logger.warn(s"Unknown aggregation type: ${other.getClass.getSimpleName}")
-            (s"agg_$index", LongType)
+            LongType
         }
-        StructField(columnName, dataType, nullable = true)
+        StructField(s"agg_func_$index", dataType, nullable = true)
     }
 
     val resultSchema = StructType(groupByFields ++ aggregationFields)
