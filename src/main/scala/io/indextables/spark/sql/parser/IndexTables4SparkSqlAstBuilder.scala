@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
-import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, InvalidateTransactionLogCacheCommand, MergeSplitsCommand}
+import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, InvalidateTransactionLogCacheCommand, MergeSplitsCommand, RepairIndexFilesTransactionLogCommand}
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory
@@ -173,6 +173,32 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
     val result = InvalidateTransactionLogCacheCommand(pathOption)
     logger.debug(s"Created InvalidateTransactionLogCacheCommand: $result")
+    result
+  }
+
+  override def visitRepairIndexFilesTransactionLog(ctx: RepairIndexFilesTransactionLogContext): LogicalPlan = {
+    logger.debug(s"visitRepairIndexFilesTransactionLog called with context: $ctx")
+
+    // Extract source path
+    val sourcePath = if (ctx.sourcePath != null) {
+      val pathStr = ParserUtils.string(ctx.sourcePath)
+      logger.debug(s"Parsed source path: $pathStr")
+      pathStr
+    } else {
+      throw new IllegalArgumentException("REPAIR INDEXFILES TRANSACTION LOG requires a source path")
+    }
+
+    // Extract target path
+    val targetPath = if (ctx.targetPath != null) {
+      val pathStr = ParserUtils.string(ctx.targetPath)
+      logger.debug(s"Parsed target path: $pathStr")
+      pathStr
+    } else {
+      throw new IllegalArgumentException("REPAIR INDEXFILES TRANSACTION LOG requires AT LOCATION target path")
+    }
+
+    val result = RepairIndexFilesTransactionLogCommand(sourcePath, targetPath)
+    logger.debug(s"Created RepairIndexFilesTransactionLogCommand: $result")
     result
   }
 

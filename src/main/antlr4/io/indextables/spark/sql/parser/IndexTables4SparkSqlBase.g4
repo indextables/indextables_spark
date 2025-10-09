@@ -47,6 +47,8 @@ statement
         (TARGET SIZE targetSize=alphanumericValue)?
         (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
+    | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
+        AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
     | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
@@ -81,6 +83,7 @@ quotedIdentifier
 
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | FOR | TRANSACTION | LOG | MAX | GROUPS
+    | REPAIR | INDEXFILES | AT | LOCATION
     ;
 
 // Keywords (case-insensitive)
@@ -101,6 +104,10 @@ SEARCHER: [Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr];
 CACHE: [Cc][Aa][Cc][Hh][Ee];
 MAX: [Mm][Aa][Xx];
 GROUPS: [Gg][Rr][Oo][Uu][Pp][Ss];
+REPAIR: [Rr][Ee][Pp][Aa][Ii][Rr];
+INDEXFILES: [Ii][Nn][Dd][Ee][Xx][Ff][Ii][Ll][Ee][Ss];
+AT: [Aa][Tt];
+LOCATION: [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn];
 
 // Literals
 STRING
