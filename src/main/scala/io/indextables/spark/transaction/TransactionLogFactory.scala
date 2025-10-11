@@ -44,7 +44,7 @@ object TransactionLogFactory {
    * @param options
    *   Configuration options
    * @return
-   *   A TransactionLog instance (optimized or standard)
+   *   A TransactionLog instance (distributed, optimized, or standard)
    */
   def create(
     tablePath: Path,
@@ -52,6 +52,16 @@ object TransactionLogFactory {
     options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
   ): TransactionLog = {
     logger.debug(s" create method called for path: $tablePath")
+
+    // Check if distributed mode is enabled
+    val useDistributed = options.getBoolean(
+      "spark.indextables.transaction.distributed.enabled",
+      true // Enable by default for S3 tables
+    )
+
+    // Check protocol to determine if distributed mode should be used
+    val protocol = io.indextables.spark.io.ProtocolBasedIOFactory.determineProtocol(tablePath.toString)
+    val isS3 = protocol == io.indextables.spark.io.ProtocolBasedIOFactory.S3Protocol
 
     // Check if optimization is explicitly disabled
     val useOptimized = options.getBoolean(
@@ -68,12 +78,18 @@ object TransactionLogFactory {
     val useStandardForShortExpiration = expirationSeconds > 0 && expirationSeconds < 60
 
     val shouldUseOptimized = useOptimized && cacheEnabled && !useStandardForShortExpiration
+    val shouldUseDistributed = useDistributed && isS3 && shouldUseOptimized
 
-    logger.debug(s" Creating transaction log for $tablePath (shouldUseOptimized: $shouldUseOptimized)")
-    logger.info(s"Creating transaction log for $tablePath (useOptimized: $useOptimized, cacheEnabled: $cacheEnabled, expirationSeconds: $expirationSeconds, useStandardForShortExpiration: $useStandardForShortExpiration, shouldUseOptimized: $shouldUseOptimized)")
+    logger.debug(s" Creating transaction log for $tablePath (shouldUseDistributed: $shouldUseDistributed, shouldUseOptimized: $shouldUseOptimized)")
+    logger.info(s"Creating transaction log for $tablePath (useDistributed: $useDistributed, isS3: $isS3, useOptimized: $useOptimized, cacheEnabled: $cacheEnabled, expirationSeconds: $expirationSeconds, useStandardForShortExpiration: $useStandardForShortExpiration, shouldUseDistributed: $shouldUseDistributed, shouldUseOptimized: $shouldUseOptimized)")
 
-    if (shouldUseOptimized) {
+    if (shouldUseDistributed) {
+      // Create distributed transaction log for S3 tables
+      logger.info(s"Creating DistributedTransactionLog for $tablePath")
+      new TransactionLogAdapter(new DistributedTransactionLog(tablePath, spark, options), spark, options)
+    } else if (shouldUseOptimized) {
       // Create adapter that wraps OptimizedTransactionLog to match TransactionLog interface
+      logger.info(s"Creating OptimizedTransactionLog for $tablePath")
       new TransactionLogAdapter(new OptimizedTransactionLog(tablePath, spark, options), spark, options)
     } else {
       // Create standard TransactionLog for testing/compatibility

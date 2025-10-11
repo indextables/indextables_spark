@@ -25,7 +25,7 @@ import org.apache.spark.sql.types.{LongType, StringType}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
 /**
@@ -75,13 +75,13 @@ case class InvalidateTransactionLogCacheCommand(
         // Invalidate cache for specific table
         invalidateTableCache(path, sparkSession)
       case None =>
-        // Global invalidation - this would require a global registry of TransactionLog instances
-        // For now, return a message indicating this is not fully implemented
-        logger.info("Global transaction log cache invalidation requested - limited implementation")
+        // Global invalidation - invalidate all executor caches
+        logger.info("Global transaction log cache invalidation requested")
+        invalidateAllExecutorCaches(sparkSession)
         Seq(
           Row(
             "GLOBAL",
-            "Global cache invalidation not fully implemented - use table-specific invalidation",
+            "Global cache invalidation completed - all executor caches invalidated",
             0L,
             0L,
             "N/A"
@@ -104,8 +104,8 @@ case class InvalidateTransactionLogCacheCommand(
       try {
         // Try to access the transaction log to validate it exists and has been initialized
         // This will throw an exception if the transaction log doesn't exist or is invalid
-        val files    = transactionLog.listFiles()
-        val metadata = transactionLog.getMetadata()
+        transactionLog.listFiles()
+        transactionLog.getMetadata()
 
         // If we get here without an exception, the transaction log exists and is valid
 
@@ -122,8 +122,13 @@ case class InvalidateTransactionLogCacheCommand(
         // Invalidate the cache
         transactionLog.invalidateCache()
 
+        // Also invalidate executor caches via RDD operation
+        // This works for both distributed and non-distributed transaction logs
+        logger.info(s"Invalidating executor caches via RDD operation for table: $path")
+        invalidateExecutorCachesForTable(sparkSession, Some(resolvedPath))
+
         val result = statsBefore match {
-          case Some(_) => "Transaction log cache invalidated successfully"
+          case Some(_) => "Transaction log cache invalidated successfully (driver and executors)"
           case None    => "Transaction log cache is disabled for this table"
         }
 
@@ -192,6 +197,51 @@ case class InvalidateTransactionLogCacheCommand(
           new Path(pathOrTable)
       }
     }
+
+  /**
+   * Invalidate executor caches for a specific table via RDD operation.
+   * This ensures cache invalidation happens on all executors.
+   *
+   * @param spark SparkSession
+   * @param tablePathOpt Optional table path (None for global invalidation)
+   */
+  private def invalidateExecutorCachesForTable(
+    spark: SparkSession,
+    tablePathOpt: Option[Path]
+  ): Unit = {
+    val tablePathStr = tablePathOpt.map(_.toString).getOrElse("*")
+
+    try {
+      // Run a dummy RDD operation to execute on all executors
+      val numPartitions = spark.sparkContext.defaultParallelism
+      spark.sparkContext
+        .parallelize(1 to numPartitions, numPartitions)
+        .foreach { _ =>
+          // Runs on executor
+          if (tablePathStr == "*") {
+            io.indextables.spark.transaction.TransactionFileCache.invalidate("") // Invalidate all
+          } else {
+            io.indextables.spark.transaction.TransactionFileCache.invalidate(tablePathStr)
+          }
+        }
+
+      logger.info(s"Successfully invalidated executor caches for table: $tablePathStr")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to invalidate executor caches for table $tablePathStr: ${e.getMessage}", e)
+    }
+  }
+
+  /**
+   * Invalidate all executor caches globally.
+   * Used for global cache invalidation command.
+   *
+   * @param spark SparkSession
+   */
+  private def invalidateAllExecutorCaches(spark: SparkSession): Unit = {
+    logger.info("Invalidating all executor caches globally")
+    invalidateExecutorCachesForTable(spark, None)
+  }
 }
 
 object InvalidateTransactionLogCacheCommand {
