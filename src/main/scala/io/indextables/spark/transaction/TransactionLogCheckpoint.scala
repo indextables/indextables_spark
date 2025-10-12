@@ -26,6 +26,7 @@ import scala.util.{Failure, Success, Try}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -75,6 +76,19 @@ class TransactionLogCheckpoint(
   private val autoCheckpointEnabled = options.getBoolean("spark.indextables.checkpoint.auto.enabled", true)
   private val autoCheckpointMinFileAge = options.getLong("spark.indextables.checkpoint.auto.minFileAge", 10 * 60 * 1000L) // 10 minutes
 
+  // Compression configuration
+  private val compressionEnabled = options.getBoolean("spark.indextables.checkpoint.compression.enabled", true)
+  private val compressionCodec   = Option(options.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+  private val compressionLevel   = options.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+
+  private val codec: Option[CompressionCodec] = try {
+    if (compressionEnabled) CompressionUtils.getCodec(true, compressionCodec, compressionLevel) else None
+  } catch {
+    case e: IllegalArgumentException =>
+      logger.warn(s"Invalid compression configuration for checkpoint: ${e.getMessage}. Falling back to no compression.")
+      None
+  }
+
   private val executor                      = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
   implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
@@ -119,7 +133,12 @@ class TransactionLogCheckpoint(
         content.append(actionJson).append("\n")
       }
 
-      cloudProvider.writeFile(checkpointPathStr, content.toString.getBytes("UTF-8"))
+      // Apply compression if enabled
+      val jsonBytes       = content.toString.getBytes("UTF-8")
+      val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
+      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
+      cloudProvider.writeFile(checkpointPathStr, bytesToWrite)
 
       val numFiles = allActions.count(_.isInstanceOf[AddAction])
       val checkpointInfo = CheckpointInfo(
@@ -132,7 +151,7 @@ class TransactionLogCheckpoint(
 
       writeLastCheckpointFile(checkpointInfo)
 
-      logger.info(s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions")
+      logger.info(s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions${compressionInfo}")
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint for version $currentVersion", e)
@@ -151,7 +170,10 @@ class TransactionLogCheckpoint(
           return None
         }
 
-        val content = new String(cloudProvider.readFile(checkpointPathStr), "UTF-8")
+        // Read raw bytes and decompress if needed
+        val rawBytes          = cloudProvider.readFile(checkpointPathStr)
+        val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+        val content           = new String(decompressedBytes, "UTF-8")
         parseActionsFromContent(content)
       } match {
         case Success(actions) => Some(actions)
@@ -194,7 +216,10 @@ class TransactionLogCheckpoint(
     var retries = 0
     while (retries <= maxRetries)
       try {
-        val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
+        // Read raw bytes and decompress if needed
+        val rawBytes          = cloudProvider.readFile(versionFilePath)
+        val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+        val content           = new String(decompressedBytes, "UTF-8")
         return parseActionsFromContent(content)
       } catch {
         case e: Exception =>

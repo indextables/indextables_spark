@@ -31,6 +31,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
 
+import io.indextables.spark.transaction.compression.CompressionUtils
+
 class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var spark: SparkSession = _
@@ -213,7 +215,10 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
         // Read version 2 file to see what's in it
         val v2File = txnFiles.find(_.getName.startsWith("00000000000000000002"))
         v2File.foreach { file =>
-          val content = scala.io.Source.fromFile(file).getLines().toList
+          val rawBytes = Files.readAllBytes(file.toPath)
+          // Decompress if needed (handles both compressed and uncompressed files)
+          val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+          val content = new String(decompressedBytes, "UTF-8").split("\n").toList.filter(_.nonEmpty)
           println(s"Version 2 content (${content.size} lines):")
           content.foreach(line => println(s"  $line"))
         }
