@@ -191,13 +191,8 @@ class OptimizedTransactionLog(
     val version = getNextVersion()
     logger.debug(s" Assigning version $version for addFiles with ${addActions.size} actions")
 
-    // Use parallel write for large batches
-    if (addActions.size > 100 && parallelReadEnabled) {
-      val future = parallelOps.writeBatchParallel(version, addActions)
-      Await.result(future, 60.seconds)
-    } else {
-      writeActions(version, addActions)
-    }
+    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
+    writeActions(version, addActions)
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
@@ -269,13 +264,8 @@ class OptimizedTransactionLog(
     val allActions: Seq[Action] = removeActions ++ addActions
     logger.debug(s" Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
 
-    // Use parallel write for large batches
-    if (allActions.size > 100 && parallelReadEnabled) {
-      val future = parallelOps.writeBatchParallel(version, allActions)
-      Await.result(future, 60.seconds)
-    } else {
-      writeActions(version, allActions)
-    }
+    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
+    writeActions(version, allActions)
 
     // Clear all caches after overwrite
     enhancedCache.invalidateTable(tablePath.toString)
