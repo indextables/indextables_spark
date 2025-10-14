@@ -601,6 +601,9 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.transaction.cache.expirationSeconds` | `300` | Transaction cache TTL (5 minutes) |
 | `spark.indextables.stats.truncation.enabled` | `true` | Enable automatic statistics truncation for long values (enabled by default) |
 | `spark.indextables.stats.truncation.maxLength` | `256` | Maximum character length for min/max statistics values |
+| `spark.indextables.transaction.compression.enabled` | `true` | Enable GZIP compression for transaction log files (enabled by default) |
+| `spark.indextables.transaction.compression.codec` | `"gzip"` | Compression codec to use for transaction logs |
+| `spark.indextables.transaction.compression.gzip.level` | `6` | GZIP compression level (1-9, where 9 is maximum compression) |
 
 #### IndexWriter Performance Configuration
 

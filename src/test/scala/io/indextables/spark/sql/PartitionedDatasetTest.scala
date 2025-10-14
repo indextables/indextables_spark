@@ -28,6 +28,7 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
+import io.indextables.spark.transaction.compression.CompressionUtils
 import org.apache.commons.io.FileUtils
 
 class PartitionedDatasetTest extends TestBase {
@@ -470,7 +471,10 @@ class PartitionedDatasetTest extends TestBase {
 
     // For partitioned tables, we should see partition information in the log
     val hasPartitionInfo = logFiles.exists { file =>
-      val content = scala.io.Source.fromFile(file).getLines().mkString("\n")
+      val rawBytes = Files.readAllBytes(file.toPath)
+      // Decompress if needed (handles both compressed and uncompressed files)
+      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+      val content = new String(decompressedBytes, "UTF-8")
       content.contains("partitionBy") || content.contains("load_date") || content.contains("load_hour")
     }
 

@@ -470,26 +470,40 @@ class IndexTables4SparkOptimizedWrite(
     // Initialize transaction log with schema and partition columns
     transactionLog.initialize(writeInfo.schema(), partitionColumns)
 
-    // Use appropriate transaction log method based on write mode
-    val version = if (shouldOverwrite) {
-      println(s"🔍 DEBUG: Performing overwrite operation with ${addActions.length} new files")
-      logger.debug(s"🔍 DEBUG: Performing overwrite operation with ${addActions.length} new files")
-      transactionLog.overwriteFiles(addActions)
-    } else {
-      println(s"🔍 DEBUG: Performing append operation with ${addActions.length} files")
-      logger.debug(s"🔍 DEBUG: Performing append operation with ${addActions.length} files")
-      transactionLog.addFiles(addActions)
-    }
+    // Convert serializedOptions Map to CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+    val optionsMap = new java.util.HashMap[String, String]()
+    serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
+    val writeOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
 
-    logger.info(s"Successfully committed ${addActions.length} files in transaction version $version")
+    // Set thread-local write options so TransactionLog can access compression settings
+    TransactionLog.setWriteOptions(writeOptions)
 
-    // Log total row count after commit (safely handling different types)
     try {
-      val totalRows = transactionLog.getTotalRowCount()
-      logger.info(s"Total rows in table after commit: $totalRows")
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Could not calculate total row count: ${e.getMessage}")
+      // Use appropriate transaction log method based on write mode
+      val version = if (shouldOverwrite) {
+        println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        transactionLog.overwriteFiles(addActions)
+      } else {
+        println(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
+        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
+        transactionLog.addFiles(addActions)
+      }
+
+      logger.info(s"Successfully committed ${addActions.length} files in transaction version $version")
+
+      // Log total row count after commit (safely handling different types)
+      try {
+        val totalRows = transactionLog.getTotalRowCount()
+        logger.info(s"Total rows in table after commit: $totalRows")
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Could not calculate total row count: ${e.getMessage}")
+      }
+    } finally {
+      // Always clear thread-local to prevent memory leaks
+      TransactionLog.clearWriteOptions()
     }
   }
 

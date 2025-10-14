@@ -29,8 +29,27 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
+
+object TransactionLog {
+  // Thread-local storage for write-time options
+  // This allows writes to pass their DataFrameWriter options (including compression settings) to TransactionLog
+  private val writeOptions = new ThreadLocal[Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]]()
+
+  def setWriteOptions(options: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit = {
+    writeOptions.set(Some(options))
+  }
+
+  def clearWriteOptions(): Unit = {
+    writeOptions.remove()
+  }
+
+  def getWriteOptions(): Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = {
+    Option(writeOptions.get()).flatten
+  }
+}
 
 class TransactionLog(
   tablePath: Path,
@@ -71,6 +90,25 @@ class TransactionLog(
   private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
   private val checkpoint =
     if (checkpointEnabled) Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)) else None
+
+  // Compression configuration - check write-time options first, then Hadoop conf, then table options
+  // Simple approach: check thread-local override options, then fall back to table-level options
+  private def getCompressionCodec(): Option[CompressionCodec] = {
+    // Get compression config with priority: Thread-local options > Table options
+    val effectiveOptions = TransactionLog.getWriteOptions().getOrElse(options)
+
+    val compressionEnabled = effectiveOptions.getBoolean("spark.indextables.transaction.compression.enabled", true)
+    val compressionCodec   = Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+    val compressionLevel   = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+
+    try {
+      CompressionUtils.getCodec(compressionEnabled, compressionCodec, compressionLevel)
+    } catch {
+      case e: IllegalArgumentException =>
+        logger.warn(s"Invalid compression configuration: ${e.getMessage}. Falling back to no compression.")
+        None
+    }
+  }
 
   // Atomic version counter for thread-safe version assignment
   private val versionCounter = new AtomicLong(-1L)
@@ -361,9 +399,15 @@ class TransactionLog(
       content.append(actionJson).append("\n")
     }
 
+    // Apply compression if enabled - evaluate codec lazily to pick up write-time options
+    val jsonBytes       = content.toString.getBytes("UTF-8")
+    val codec           = getCompressionCodec()
+    val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
+    val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
     // CRITICAL: Use conditional write to prevent overwriting transaction log files
     // Transaction log files are immutable and should never be overwritten
-    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, content.toString.getBytes("UTF-8"))
+    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, bytesToWrite)
 
     if (!writeSucceeded) {
       throw new IllegalStateException(
@@ -377,7 +421,7 @@ class TransactionLog(
     cache.foreach(_.invalidateVersionDependentCaches())
 
     logger.info(
-      s"Written ${actions.length} actions to version $version: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      s"Written ${actions.length} actions to version $version${compressionInfo}: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
     )
 
     // Check if we should create a checkpoint
@@ -762,8 +806,11 @@ class TransactionLog(
         }
 
         Try {
-          val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-          val lines   = content.split("\n").filter(_.nonEmpty)
+          // Read raw bytes and decompress if needed
+          val rawBytes        = cloudProvider.readFile(versionFilePath)
+          val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+          val content         = new String(decompressedBytes, "UTF-8")
+          val lines           = content.split("\n").filter(_.nonEmpty)
 
           lines.map { line =>
             val jsonNode = JsonUtil.mapper.readTree(line)

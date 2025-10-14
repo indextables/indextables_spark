@@ -27,6 +27,7 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.TestBase
 import io.indextables.spark.util.JsonUtil
+import io.indextables.spark.transaction.compression.CompressionUtils
 
 /**
  * Test suite to verify that checkpoint creation applies statistics truncation.
@@ -107,7 +108,10 @@ class CheckpointStatisticsTruncationTest
       println(s"Reading checkpoint file: ${checkpointFile.getPath.getName}")
 
       // Read and parse checkpoint content
-      val checkpointContent = scala.io.Source.fromInputStream(fs.open(checkpointFile.getPath)).mkString
+      val rawBytes = org.apache.hadoop.io.IOUtils.readFullyToByteArray(fs.open(checkpointFile.getPath))
+      // Decompress if needed (handles both compressed and uncompressed files)
+      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+      val checkpointContent = new String(decompressedBytes, "UTF-8")
       val checkpointLines = checkpointContent.split("\n").filter(_.nonEmpty)
 
       println(s"Checkpoint has ${checkpointLines.length} lines")
@@ -198,7 +202,10 @@ class CheckpointStatisticsTruncationTest
 
       assert(checkpointFiles.nonEmpty, "Should have created checkpoint")
 
-      val checkpointContent = scala.io.Source.fromInputStream(fs.open(checkpointFiles.head.getPath)).mkString
+      val rawBytes2 = org.apache.hadoop.io.IOUtils.readFullyToByteArray(fs.open(checkpointFiles.head.getPath))
+      // Decompress if needed (handles both compressed and uncompressed files)
+      val decompressedBytes2 = CompressionUtils.readTransactionFile(rawBytes2)
+      val checkpointContent = new String(decompressedBytes2, "UTF-8")
       val checkpointLines = checkpointContent.split("\n").filter(_.nonEmpty)
 
       var partitionStatsFound = false

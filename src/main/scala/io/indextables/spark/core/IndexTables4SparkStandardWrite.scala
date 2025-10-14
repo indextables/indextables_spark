@@ -218,21 +218,35 @@ class IndexTables4SparkStandardWrite(
     // Initialize transaction log with schema if this is the first commit
     transactionLog.initialize(writeSchema, partitionColumns)
 
-    // Commit the changes
-    if (shouldOverwrite) {
-      println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-      logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-      val version = transactionLog.overwriteFiles(addActions)
-      logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
-    } else {
-      println(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
-      logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
-      // Standard append operation
-      val version = transactionLog.addFiles(addActions)
-      logger.info(s"Added ${addActions.length} files in transaction version $version")
-    }
+    // Convert serializedOptions Map to CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+    val optionsMap = new java.util.HashMap[String, String]()
+    serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
+    val writeOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
 
-    logger.info(s"Successfully committed ${addActions.length} files")
+    // Set thread-local write options so TransactionLog can access compression settings
+    TransactionLog.setWriteOptions(writeOptions)
+
+    try {
+      // Commit the changes
+      if (shouldOverwrite) {
+        println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        val version = transactionLog.overwriteFiles(addActions)
+        logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
+      } else {
+        println(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
+        // Standard append operation
+        val version = transactionLog.addFiles(addActions)
+        logger.info(s"Added ${addActions.length} files in transaction version $version")
+      }
+
+      logger.info(s"Successfully committed ${addActions.length} files")
+    } finally {
+      // Always clear thread-local to prevent memory leaks
+      TransactionLog.clearWriteOptions()
+    }
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {

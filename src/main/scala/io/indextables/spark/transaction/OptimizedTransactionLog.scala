@@ -32,6 +32,7 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import io.indextables.spark.util.JsonUtil
+import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import org.slf4j.LoggerFactory
 
 /**
@@ -190,13 +191,8 @@ class OptimizedTransactionLog(
     val version = getNextVersion()
     logger.debug(s" Assigning version $version for addFiles with ${addActions.size} actions")
 
-    // Use parallel write for large batches
-    if (addActions.size > 100 && parallelReadEnabled) {
-      val future = parallelOps.writeBatchParallel(version, addActions)
-      Await.result(future, 60.seconds)
-    } else {
-      writeActions(version, addActions)
-    }
+    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
+    writeActions(version, addActions)
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
@@ -268,13 +264,8 @@ class OptimizedTransactionLog(
     val allActions: Seq[Action] = removeActions ++ addActions
     logger.debug(s" Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
 
-    // Use parallel write for large batches
-    if (allActions.size > 100 && parallelReadEnabled) {
-      val future = parallelOps.writeBatchParallel(version, allActions)
-      Await.result(future, 60.seconds)
-    } else {
-      writeActions(version, allActions)
-    }
+    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
+    writeActions(version, allActions)
 
     // Clear all caches after overwrite
     enhancedCache.invalidateTable(tablePath.toString)
@@ -635,7 +626,10 @@ class OptimizedTransactionLog(
     }
 
     Try {
-      val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
+      val rawBytes = cloudProvider.readFile(versionFilePath)
+      // Decompress if needed (handles both compressed and uncompressed files)
+      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+      val content = new String(decompressedBytes, "UTF-8")
       logger.debug(s" Read version $version content: '${content.take(100)}...' (${content.length} chars)")
       val actions = parseActionsFromContent(content)
       logger.debug(s" Parsed ${actions.size} actions from version $version")
@@ -682,6 +676,27 @@ class OptimizedTransactionLog(
   private def writeAction(version: Long, action: Action): Unit =
     writeActions(version, Seq(action))
 
+  /**
+   * Get the compression codec based on configuration.
+   * Checks thread-local options first (from write operation), then falls back to table options.
+   */
+  private def getCompressionCodec(): Option[CompressionCodec] = {
+    // Get compression config with priority: Thread-local options > Table options
+    val effectiveOptions = TransactionLog.getWriteOptions().getOrElse(options)
+
+    val compressionEnabled = effectiveOptions.getBoolean("spark.indextables.transaction.compression.enabled", true)
+    val compressionCodec   = Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+    val compressionLevel   = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+
+    try {
+      CompressionUtils.getCodec(compressionEnabled, compressionCodec, compressionLevel)
+    } catch {
+      case e: IllegalArgumentException =>
+        logger.warn(s"Invalid compression configuration: ${e.getMessage}. Falling back to no compression.")
+        None
+    }
+  }
+
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
@@ -700,9 +715,19 @@ class OptimizedTransactionLog(
 
     logger.debug(s" Writing version $version to $versionFilePath with ${actions.size} actions")
 
+    // Apply compression if enabled - evaluate codec lazily to pick up write-time options
+    val jsonBytes       = content.toString.getBytes("UTF-8")
+    val codec           = getCompressionCodec()
+    val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
+    val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
+    logger.info(
+      s"Writing ${actions.length} actions to version $version${compressionInfo}: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+    )
+
     // CRITICAL: Use conditional write to prevent overwriting transaction log files
     // Transaction log files are immutable and should never be overwritten
-    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, content.toString.getBytes("UTF-8"))
+    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, bytesToWrite)
 
     if (!writeSucceeded) {
       throw new IllegalStateException(

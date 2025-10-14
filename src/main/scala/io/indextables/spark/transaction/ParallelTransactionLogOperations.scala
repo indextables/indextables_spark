@@ -119,41 +119,6 @@ class ParallelTransactionLogOperations(
     results.asScala.toMap
   }
 
-  /** Write actions in parallel batches */
-  def writeBatchParallel(
-    version: Long,
-    actions: Seq[Action],
-    batchSize: Int = 1000
-  ): Future[Unit] = {
-
-    if (actions.isEmpty) {
-      return Future.successful(())
-    }
-
-    // CRITICAL FIX: Transaction log versions must be single atomic files with Delta Lake naming
-    // Previous implementation created multiple files per version (version_index.json) which is incompatible
-    // Format must be exactly 20 digits zero-padded: 00000000000000000002.json
-    // Use String.format with Locale.ROOT to ensure locale-independent formatting
-    val versionFileName = String.format(java.util.Locale.ROOT, "%020d.json", version.asInstanceOf[AnyRef])
-    val versionFile     = new Path(transactionLogPath, versionFileName)
-
-    // Serialize all actions into a single atomic file (transaction atomicity requirement)
-    commitPool.submitSimple {
-      val content = serializeActions(actions)
-      // Use conditional write to prevent overwriting (S3 Conditional Writes)
-      val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFile.toString, content.getBytes("UTF-8"))
-
-      if (!writeSucceeded) {
-        throw new IllegalStateException(
-          s"Failed to write transaction log version $version - file already exists at ${versionFile.toString}. " +
-            "This indicates a concurrent write conflict or version counter synchronization issue."
-        )
-      }
-
-      logger.debug(s"Written ${actions.size} actions to version $version (${versionFile.getName})")
-    }
-  }
-
   /** Optimized state reconstruction with partitioned processing */
   def reconstructStateParallel(
     versions: Seq[Long],
