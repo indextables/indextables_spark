@@ -1122,7 +1122,7 @@ class IndexTables4SparkScanBuilder(
 object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
 
-  import scala.collection.JavaConverters._
+  import scala.jdk.CollectionConverters._
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

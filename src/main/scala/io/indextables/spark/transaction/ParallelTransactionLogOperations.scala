@@ -113,7 +113,8 @@ class ParallelTransactionLogOperations(
       }
 
       // Wait for batch completion before starting next batch
-      Try(scala.concurrent.Await.result(Future.sequence(futures)(collection.breakOut, parallelReadEc), 30.seconds))
+      implicit val ec: ExecutionContext = parallelReadEc
+      Try(scala.concurrent.Await.result(Future.sequence(futures), 30.seconds))
     }
 
     results.asScala.toMap
@@ -140,7 +141,8 @@ class ParallelTransactionLogOperations(
     }
 
     // Wait for all reads to complete
-    Try(scala.concurrent.Await.result(Future.sequence(futures)(collection.breakOut, parallelReadEc), 60.seconds))
+    implicit val ec: ExecutionContext = parallelReadEc
+    Try(scala.concurrent.Await.result(Future.sequence(futures), 60.seconds))
 
     // Now process actions in version order to maintain correct state
     val files = scala.collection.mutable.HashMap[String, AddAction]()
@@ -183,7 +185,8 @@ class ParallelTransactionLogOperations(
       }
       .toSeq
 
-    Try(scala.concurrent.Await.result(Future.sequence(futures)(collection.breakOut, fileListingEc), 30.seconds))
+    implicit val ec: ExecutionContext = fileListingEc
+    Try(scala.concurrent.Await.result(Future.sequence(futures), 30.seconds))
 
     results.asScala.toMap
   }
@@ -213,7 +216,8 @@ class ParallelTransactionLogOperations(
             }(commitEc)
         }
 
-        scala.concurrent.Await.result(Future.sequence(partFutures)(collection.breakOut, commitEc), 60.seconds)
+        implicit val ec: ExecutionContext = commitEc
+        scala.concurrent.Await.result(Future.sequence(partFutures), 60.seconds)
 
         // Write manifest
         val manifest        = CheckpointManifest(version, parts.length, actions.length)

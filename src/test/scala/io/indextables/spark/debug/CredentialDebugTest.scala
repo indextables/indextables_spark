@@ -5,7 +5,7 @@ package io.indextables.spark.debug
 
 import java.util.{Collections => JCollections}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
