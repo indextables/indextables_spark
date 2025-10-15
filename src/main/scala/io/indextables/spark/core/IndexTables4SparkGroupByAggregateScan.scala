@@ -468,7 +468,7 @@ class IndexTables4SparkGroupByAggregateReader(
       TermsAggregation
     }
     import scala.collection.mutable.ArrayBuffer
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     logger.info(s"🔍 GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}")
     logger.info(s"🔍 GROUP BY EXECUTION: Split path: ${partition.split.path}")
@@ -620,7 +620,7 @@ class IndexTables4SparkGroupByAggregateReader(
           // Get the split field names for schema validation
           val splitFieldNames =
             try {
-              import scala.collection.JavaConverters._
+              import scala.jdk.CollectionConverters._
               val schema = splitSearchEngine.getSchema()
               if (schema != null) {
                 Some(schema.getFieldNames().asScala.toSet)

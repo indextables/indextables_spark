@@ -292,9 +292,11 @@ class SplitSearchEngine private (
           batches.flatMap { batchAddresses =>
             try {
               import scala.jdk.CollectionConverters._
+              import scala.jdk.javaapi.CollectionConverters.asScala
               val javaAddresses = batchAddresses.toList.asJava
               val javaDocuments = splitSearcher.docBatch(javaAddresses)
-              javaDocuments.asScala
+              val javaList = javaDocuments.asInstanceOf[java.util.List[io.indextables.tantivy4java.core.Document]]
+              asScala(javaList).toSeq
             } catch {
               case e: Exception =>
                 logger.warn(
@@ -310,7 +312,7 @@ class SplitSearchEngine private (
                       logger.warn(s"Error retrieving individual document for address: $address", ex)
                       null
                   }
-                }
+                }.toSeq
             }
           }
         } else {

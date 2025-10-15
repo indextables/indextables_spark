@@ -46,14 +46,14 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <scala.version>2.12.20</scala.version>
-        <scala.compat.version>2.12</scala.compat.version>
+        <scala.version>2.13.15</scala.version>
+        <scala.compat.version>2.13</scala.compat.version>
         <spark.version>3.5.3</spark.version>
         <hadoop.version>3.3.4</hadoop.version>
         <aws.sdk.version>2.34.8</aws.sdk.version>
-        <scalatest.version>3.2.15</scalatest.version>
+        <scalatest.version>3.2.19</scalatest.version>
         <mockito.version>4.11.0</mockito.version>
-        <antlr.version>4.9.3</antlr.version>
+        <antlr.version>4.13.2</antlr.version>
     </properties>
 
     <dependencyManagement>
@@ -215,7 +215,7 @@
         <!-- Findify S3Mock for testing S3 functionality - stable, no logging conflicts -->
         <dependency>
             <groupId>io.findify</groupId>
-            <artifactId>s3mock_2.12</artifactId>
+            <artifactId>s3mock_2.13</artifactId>
             <version>0.2.6</version>
             <scope>test</scope>
         </dependency>
@@ -261,7 +261,7 @@
                         <arg>-feature</arg>
                         <arg>-unchecked</arg>
                         <arg>-Xlint</arg>
-                        <arg>-Ywarn-unused:imports</arg>
+                        <arg>-Wunused:imports</arg>
                     </args>
                 </configuration>
             </plugin>
@@ -334,7 +334,7 @@
             <plugin>
                 <groupId>org.scoverage</groupId>
                 <artifactId>scoverage-maven-plugin</artifactId>
-                <version>1.4.11</version>
+                <version>2.1.0</version>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
                     <minimumCoverage>90</minimumCoverage>

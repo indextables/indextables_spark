@@ -22,7 +22,7 @@ import java.util.Properties
 import java.util.UUID
 
 // Import Scala collection conversions and implicits
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
 import org.apache.spark.sql.{DataFrame, SparkSession}

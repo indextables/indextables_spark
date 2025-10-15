@@ -707,15 +707,10 @@ class MergeSplitsExecutor(
     val broadcastAwsConfig = sparkSession.sparkContext.broadcast(awsConfig)
     val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
 
-    // Process batches with controlled concurrency using Scala parallel collections
-    import scala.collection.parallel.ForkJoinTaskSupport
-    import scala.collection.parallel.immutable.ParSeq
-    import java.util.concurrent.ForkJoinPool
+    // Process batches sequentially (actual parallelization happens via Spark RDD)
     import scala.util.{Try, Success, Failure}
 
-    val batchResults      = batches.zipWithIndex.par
-    val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
-    batchResults.tasksupport = customTaskSupport
+    val batchResults = batches.zipWithIndex
 
     // Track batch failures
     var failedBatchCount     = 0
@@ -1018,7 +1013,7 @@ class MergeSplitsExecutor(
                 logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
                 println(s"💾 [DRIVER] Batch $batchNum: Committing ${batchRemoveActions.length} removes, ${batchAddActions.length} adds")
 
-                val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
+                val version = transactionLog.commitMergeSplits(batchRemoveActions.toSeq, batchAddActions.toSeq)
                 transactionLog.invalidateCache() // Ensure cache is updated
 
                 val txnElapsed = System.currentTimeMillis() - txnStartTime
@@ -1046,8 +1041,11 @@ class MergeSplitsExecutor(
                 Seq.empty // Return empty sequence for failed batches
             }
         }.toList
-      } finally
-        customTaskSupport.environment.shutdown()
+      } catch {
+        case ex: Exception =>
+          logger.error(s"Fatal error during batch processing", ex)
+          throw ex
+      }
 
     val totalMergedFiles  = allResults.map(_.mergedFiles).sum
     val totalMergeGroups  = allResults.length

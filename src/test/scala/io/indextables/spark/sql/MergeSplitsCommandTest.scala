@@ -305,7 +305,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     import io.indextables.spark.sql.{MergeSplitsCommand, MergeSplitsExecutor, MergeGroup}
     import io.indextables.spark.transaction.{TransactionLog, AddAction, MetadataAction}
     import org.apache.hadoop.fs.Path
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     // Test S3 path handling without actual S3 connection
     val s3TablePath = "s3://test-bucket/test-table"

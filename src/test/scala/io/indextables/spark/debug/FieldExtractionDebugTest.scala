@@ -19,7 +19,7 @@ package io.indextables.spark.debug
 
 import java.nio.file.Files
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
 import io.indextables.tantivy4java.query.Query

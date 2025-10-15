@@ -32,7 +32,7 @@ class IndexTables4SparkIntegrationTest extends TestBase {
   }
 
   test("should create table provider") {
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     val provider = new IndexTables4SparkTableProvider()
     provider.supportsExternalMetadata() shouldBe true

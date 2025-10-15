@@ -402,7 +402,7 @@ class IndexTables4SparkSimpleAggregateReader(
       MaxAggregation
     }
     import scala.collection.mutable.ArrayBuffer
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
 
     logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Starting simple aggregation")
     logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")

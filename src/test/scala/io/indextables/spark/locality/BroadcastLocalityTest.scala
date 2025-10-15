@@ -98,7 +98,7 @@ class BroadcastLocalityTest extends TestBase with BeforeAndAfterEach {
 
       // Verify data was read correctly
       assert(results.length == 3)
-      assert(results.map(_.getAs[String]("name")).sorted.deep == Array("Alice", "Bob", "Charlie").deep)
+      assert(results.map(_.getAs[String]("name")).sorted.sameElements(Array("Alice", "Bob", "Charlie")))
 
       // Force another broadcast update to see if locality was recorded during read
       println("🧪 [TEST] Forcing broadcast update after read...")

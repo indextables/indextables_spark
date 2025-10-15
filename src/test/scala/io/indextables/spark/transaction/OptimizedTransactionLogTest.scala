@@ -19,7 +19,7 @@ package io.indextables.spark.transaction
 
 import java.nio.file.{Files, Paths}
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.types._

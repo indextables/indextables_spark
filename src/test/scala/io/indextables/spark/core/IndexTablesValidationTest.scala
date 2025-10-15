@@ -233,7 +233,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
   }
 
   test("IndexTables4SparkOptions should handle spark.indextables configurations") {
-    import scala.collection.JavaConverters._
+    import scala.jdk.CollectionConverters._
     import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
     val options = new CaseInsensitiveStringMap(
