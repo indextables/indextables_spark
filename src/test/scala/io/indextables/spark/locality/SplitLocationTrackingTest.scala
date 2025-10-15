@@ -85,7 +85,7 @@ class SplitLocationTrackingTest extends TestBase with BeforeAndAfterEach {
 
       // Verify data was read correctly
       assert(results.length == 3)
-      assert(results.map(_.getAs[String]("name")).sorted.deep == Array("Alice", "Bob", "Charlie").deep)
+      assert(results.map(_.getAs[String]("name")).sorted.sameElements(Array("Alice", "Bob", "Charlie")))
 
       // The split location tracking should have recorded some split accesses
       // Note: In test environment, this will track localhost/hostname, but the mechanism is working
