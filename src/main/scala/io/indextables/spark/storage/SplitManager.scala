@@ -445,143 +445,159 @@ object SplitLocationRegistry {
 }
 
 /**
- * Global manager for split cache instances.
+ * Global manager for split cache instances - thin wrapper around tantivy4java's SplitCacheManager.
  *
- * Maintains JVM-wide split cache managers that are shared across all IndexTables4Spark operations within a single JVM
- * (e.g., all tasks in a Spark executor).
+ * This object provides a Spark-friendly interface to tantivy4java's native caching system.
+ * It translates Spark configuration to Java configuration and delegates to tantivy4java's
+ * singleton cache manager, which already handles credential-aware caching internally.
+ *
+ * Key design decisions:
+ * - No separate cache map maintained at Scala level (delegates to tantivy4java)
+ * - Credential rotation is handled automatically by tantivy4java's comprehensive cache key
+ * - Session token changes result in different cache keys, creating new cache instances automatically
+ * - Provides Scala-friendly APIs that return case classes for Spark integration
+ *
+ * How credential rotation works:
+ * 1. User refreshes AWS credentials (new session token)
+ * 2. New credentials passed to SplitCacheConfig
+ * 3. tantivy4java's CacheConfig.getCacheKey() generates key including session token
+ * 4. Different session token → Different cache key → New cache instance created
+ * 5. Old cache instance remains until explicitly closed or GC'd via shutdown hook
  */
 object GlobalSplitCacheManager {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  // JVM-wide cache managers indexed by cache key (includes all config elements including session tokens)
-  @volatile private var cacheManagers: Map[String, SplitCacheManager] = Map.empty
-  private val lock                                                    = new Object
-
   /**
-   * Generate a cache key that includes all configuration elements including session tokens. This ensures cache managers
-   * are not shared between different credential configurations.
-   */
-  private def generateCacheKey(config: SplitCacheConfig): String = {
-    val keyElements = Seq(
-      s"name=${config.cacheName}",
-      s"maxSize=${config.maxCacheSize}",
-      s"maxConcurrent=${config.maxConcurrentLoads}",
-      s"queryCache=${config.enableQueryCache}",
-      s"splitCachePath=${config.splitCachePath.orElse(SplitCacheConfig.getDefaultCachePath()).getOrElse("default")}",
-      s"awsKey=${config.awsAccessKey.getOrElse("none")}",
-      s"awsSecret=${config.awsSecretKey.map(_ => "***").getOrElse("none")}",
-      s"awsToken=${config.awsSessionToken.map(_ => "***").getOrElse("none")}",
-      s"awsRegion=${config.awsRegion.getOrElse("none")}",
-      s"awsEndpoint=${config.awsEndpoint.getOrElse("none")}",
-      s"azureName=${config.azureAccountName.getOrElse("none")}",
-      s"azureKey=${config.azureAccountKey.map(_ => "***").getOrElse("none")}",
-      s"azureConn=${config.azureConnectionString.map(_ => "***").getOrElse("none")}",
-      s"azureEndpoint=${config.azureEndpoint.getOrElse("none")}",
-      s"gcpProject=${config.gcpProjectId.getOrElse("none")}",
-      s"gcpKey=${config.gcpServiceAccountKey.map(_ => "***").getOrElse("none")}",
-      s"gcpFile=${config.gcpCredentialsFile.getOrElse("none")}",
-      s"gcpEndpoint=${config.gcpEndpoint.getOrElse("none")}"
-    )
-    keyElements.mkString("|")
-  }
-
-  /**
-   * Get or create a global split cache manager. Cache managers are now keyed by all config elements (including session
-   * tokens) to prevent configuration mismatches when reusing cache instances.
+   * Get or create a global split cache manager.
+   *
+   * This method delegates to tantivy4java's SplitCacheManager.getInstance(), which maintains
+   * its own singleton cache with credential-aware cache keys. When credentials change (including
+   * session token rotation), tantivy4java automatically creates a new cache instance with the
+   * new credentials.
+   *
+   * The session token value itself is included in tantivy4java's cache key generation,
+   * ensuring that credential changes result in new cache instances without any explicit
+   * timestamp tracking.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
-    val cacheKey = generateCacheKey(config)
-
     logger.debug(s"GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
     logger.debug(s"Current cache config - awsRegion: ${config.awsRegion.getOrElse("None")}, awsEndpoint: ${config.awsEndpoint.getOrElse("None")}")
-    logger.debug(s"Generated cache key: $cacheKey")
-    logger.debug(s"Existing cache managers: ${cacheManagers.keySet.size} entries")
+    logger.debug(s"Session token present: ${config.awsSessionToken.isDefined}")
 
-    cacheManagers.get(cacheKey) match {
-      case Some(manager) =>
-        logger.debug(s"Reusing existing cache manager with matching configuration: ${config.cacheName}")
-        manager
-      case None =>
-        lock.synchronized {
-          // Double-check pattern
-          cacheManagers.get(cacheKey) match {
-            case Some(manager) => manager
-            case None =>
-              logger.info(
-                s"Creating new global split cache manager: ${config.cacheName}, max size: ${config.maxCacheSize}"
-              )
-              logger.info(s"Cache key: $cacheKey")
-              val javaConfig = config.toJavaCacheConfig()
-              val manager    = SplitCacheManager.getInstance(javaConfig)
-              cacheManagers = cacheManagers + (cacheKey -> manager)
-              manager
-          }
-        }
+    // Convert Scala config to Java config and delegate to tantivy4java's singleton
+    val javaConfig = config.toJavaCacheConfig()
+    val manager    = SplitCacheManager.getInstance(javaConfig)
+
+    logger.debug(s"Retrieved cache manager from tantivy4java: ${config.cacheName}")
+    manager
+  }
+
+  /**
+   * Close all cache managers (typically called during JVM shutdown).
+   *
+   * Delegates to tantivy4java's getAllInstances() to find and close all cache managers.
+   */
+  def closeAll(): Unit = {
+    logger.info(s"Closing all tantivy4java split cache managers")
+    import scala.jdk.CollectionConverters._
+    val instances = SplitCacheManager.getAllInstances().asScala
+    instances.values.foreach { manager =>
+      try {
+        manager.close()
+      } catch {
+        case e: Exception =>
+          logger.warn("Error closing cache manager", e)
+      }
     }
   }
 
-  /** Close all cache managers (typically called during JVM shutdown). */
-  def closeAll(): Unit =
-    lock.synchronized {
-      logger.info(s"Closing ${cacheManagers.size} split cache managers")
-      cacheManagers.values.foreach { manager =>
-        try
-          manager.close()
-        catch {
-          case e: Exception =>
-            logger.warn("Error closing cache manager", e)
-        }
+  /**
+   * Flush all global split cache managers. This will close all cache managers managed by tantivy4java.
+   * Returns the number of cache managers that were flushed.
+   *
+   * Note: After flushing, tantivy4java's shutdown hook will clean up the instances map.
+   */
+  def flushAllCaches(): SplitCacheFlushResult = {
+    import scala.jdk.CollectionConverters._
+    val instances = SplitCacheManager.getAllInstances().asScala
+    val flushedCount = instances.size
+
+    logger.info(s"Flushing all split cache managers ($flushedCount managers)")
+
+    instances.values.foreach { manager =>
+      try {
+        manager.close()
+        logger.debug(s"Flushed cache manager")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Error flushing cache manager: ${ex.getMessage}")
       }
-      cacheManagers = Map.empty
     }
+
+    logger.info(s"Successfully flushed all split cache managers")
+    SplitCacheFlushResult(flushedCount)
+  }
 
   /**
-   * Flush all global split cache managers. This will close all cache managers and clear the global registry. Returns
-   * the number of cache managers that were flushed.
+   * Get statistics for all active cache managers.
+   *
+   * Queries tantivy4java for all active cache instances and returns their stats.
    */
-  def flushAllCaches(): SplitCacheFlushResult =
-    lock.synchronized {
-      val flushedCount = cacheManagers.size
-      logger.info(s"Flushing all split cache managers ($flushedCount managers)")
-
-      cacheManagers.values.foreach { manager =>
-        try {
-          manager.close()
-          logger.debug(s"Flushed cache manager")
-        } catch {
-          case ex: Exception =>
-            logger.warn(s"Error flushing cache manager: ${ex.getMessage}")
-        }
-      }
-
-      cacheManagers = Map.empty
-      logger.info(s"Successfully flushed all split cache managers")
-      SplitCacheFlushResult(flushedCount)
-    }
-
-  /** Get statistics for all active cache managers. */
-  def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] =
-    cacheManagers.map {
+  def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] = {
+    import scala.jdk.CollectionConverters._
+    SplitCacheManager.getAllInstances().asScala.map {
       case (cacheKey, manager) =>
         cacheKey -> manager.getGlobalCacheStats()
-    }
+    }.toMap
+  }
 
-  /** Get the number of active cache managers. */
-  def getCacheManagerCount(): Int = cacheManagers.size
+  /**
+   * Get the number of active cache managers.
+   *
+   * Delegates to tantivy4java to count active cache instances.
+   */
+  def getCacheManagerCount(): Int = {
+    import scala.jdk.CollectionConverters._
+    SplitCacheManager.getAllInstances().size
+  }
 
-  /** Clear all cache managers (for testing purposes). */
-  def clearAll(): Unit =
-    lock.synchronized {
-      cacheManagers.values.foreach { manager =>
-        try
-          manager.close()
-        catch {
-          case e: Exception =>
-            logger.warn("Error closing cache manager during clear", e)
-        }
+  /**
+   * Invalidate cache managers with stale credentials.
+   *
+   * This method closes all tantivy4java cache instances, forcing a fresh cache creation
+   * on next access with current credentials. This is useful when you know credentials have
+   * been rotated and want to immediately invalidate all old cache instances rather than
+   * waiting for them to be garbage collected.
+   *
+   * Note: In normal operation, you don't need to call this - tantivy4java automatically
+   * creates new cache instances when credentials change (different session token = different
+   * cache key). This method is primarily for explicit cleanup scenarios.
+   *
+   * @return Number of cache managers that were invalidated
+   */
+  def invalidateAllCredentialCaches(): Int = {
+    logger.info("Invalidating all credential-based cache managers")
+    val result = flushAllCaches()
+    result.flushedManagers
+  }
+
+  /**
+   * Clear all cache managers (for testing purposes).
+   *
+   * Delegates to tantivy4java to close all active cache instances.
+   */
+  def clearAll(): Unit = {
+    import scala.jdk.CollectionConverters._
+    val instances = SplitCacheManager.getAllInstances().asScala
+    instances.values.foreach { manager =>
+      try {
+        manager.close()
+      } catch {
+        case e: Exception =>
+          logger.warn("Error closing cache manager during clear", e)
       }
-      cacheManagers = Map.empty
     }
+  }
 }
 
 // Result classes for cache flush operations
