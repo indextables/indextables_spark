@@ -124,21 +124,15 @@ class IndexTables4SparkInputPartition(
    * cache tracking.
    */
   override def preferredLocations(): Array[String] = {
-    println(s"🎯 [PARTITION-$partitionId] preferredLocations() called for split: ${addAction.path}")
-
     val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(addAction.path)
     if (preferredHosts.nonEmpty) {
-      println(s"🎯 [PARTITION-$partitionId] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
       preferredHosts
     } else {
-      println(s"🎯 [PARTITION-$partitionId] No broadcast hosts found, trying legacy registry")
       // Fallback to legacy registry for compatibility
       val legacyHosts = SplitLocationRegistry.getPreferredHosts(addAction.path)
       if (legacyHosts.nonEmpty) {
-        println(s"🎯 [PARTITION-$partitionId] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
         legacyHosts
       } else {
-        println(s"🎯 [PARTITION-$partitionId] No preferred hosts found - letting Spark decide")
         // No cache history available, let Spark decide
         Array.empty[String]
       }
@@ -280,6 +274,10 @@ class IndexTables4SparkPartitionReader(
       azureAccountName = getBroadcastConfigOption("spark.indextables.azure.accountName"),
       azureAccountKey = getBroadcastConfigOption("spark.indextables.azure.accountKey"),
       azureConnectionString = getBroadcastConfigOption("spark.indextables.azure.connectionString"),
+      azureBearerToken = getBroadcastConfigOption("spark.indextables.azure.bearerToken"),
+      azureTenantId = getBroadcastConfigOption("spark.indextables.azure.tenantId"),
+      azureClientId = getBroadcastConfigOption("spark.indextables.azure.clientId"),
+      azureClientSecret = getBroadcastConfigOption("spark.indextables.azure.clientSecret"),
       azureEndpoint = getBroadcastConfigOption("spark.indextables.azure.endpoint"),
       // GCP configuration from broadcast
       gcpProjectId = getBroadcastConfigOption("spark.indextables.gcp.projectId"),
@@ -301,8 +299,8 @@ class IndexTables4SparkPartitionReader(
   private def initialize(): Unit = {
     if (!initialized) {
       try {
-        logger.error(s"🔍 ENTERING initialize() for split: ${addAction.path}")
-        logger.info(s"🔍 V2 PartitionReader initializing for split: ${addAction.path}")
+        logger.debug(s"🔍 ENTERING initialize() for split: ${addAction.path}")
+        logger.debug(s"🔍 V2 PartitionReader initializing for split: ${addAction.path}")
 
         // Record that this host has accessed this split for future scheduling locality
         val currentHostname = SplitLocationRegistry.getCurrentHostname
@@ -332,16 +330,30 @@ class IndexTables4SparkPartitionReader(
         logger.debug(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
 
         // Create split search engine using footer offset optimization when available
-        // Use raw filesystem path for tantivy4java compatibility
+        // Normalize URLs for tantivy4java compatibility (S3, Azure, etc.)
+        // Uses centralized normalization: s3a://->s3://, abfss://->azure://, etc.
         val actualPath = if (filePath.toString.startsWith("file:")) {
-          // Keep file URIs as URIs for tantivy4java to avoid working directory resolution issues
-          filePath.toString
-        } else if (filePath.toString.startsWith("s3a://") || filePath.toString.startsWith("s3n://")) {
-          // Normalize s3 paths for tantivy4java compatibility (s3a:// -> s3://)
-          filePath.toString.replaceFirst("^s3[an]://", "s3://")
+          filePath.toString // Keep file URIs as-is for tantivy4java
         } else {
-          filePath.toString
+          // Use CloudStorageProviderFactory's static normalization method
+          import org.apache.hadoop.conf.Configuration
+          import org.apache.spark.sql.util.CaseInsensitiveStringMap
+          import scala.jdk.CollectionConverters._
+
+          val hadoopConf = new Configuration()
+          val optionsMap = new CaseInsensitiveStringMap(config.asJava)
+          io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
+            filePath.toString,
+            optionsMap,
+            hadoopConf
+          )
         }
+
+        logger.debug(s"🔍 SPLIT PATH DEBUG:")
+        logger.debug(s"  - addAction.path: ${addAction.path}")
+        logger.debug(s"  - tablePath: ${tablePath.toString}")
+        logger.debug(s"  - filePath (resolved): ${filePath}")
+        logger.debug(s"  - actualPath (normalized): $actualPath")
 
         // Footer offset metadata is required for all split reading operations
         if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
@@ -418,17 +430,17 @@ class IndexTables4SparkPartitionReader(
           }
 
         // Log the filters and limit for debugging
-        logger.error(s"🔍 PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
-        logger.error(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
-        logger.error(
+        logger.debug(s"🔍 PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
+        logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
+        logger.info(
           s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}"
         )
-        logger.error(s"  - Limit: $effectiveLimit")
+        logger.info(s"  - Limit: $effectiveLimit")
 
         // Since partition values are stored in splits, we can apply all filters at the split level
         // (no need to exclude partition filters since they're queryable in the split data)
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.error(s"  - Combined Filters: ${allFilters.length} total filters")
+        logger.info(s"  - Combined Filters: ${allFilters.length} total filters")
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {

@@ -93,7 +93,7 @@ class IndexTables4SparkBatchWrite(
           val mapper = new ObjectMapper()
           mapper.registerModule(DefaultScalaModule)
           val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
-          logger.info(s"🔍 V2 BATCH DEBUG: Extracted partition columns: $partitionCols")
+          logger.debug(s"🔍 V2 BATCH DEBUG: Extracted partition columns: $partitionCols")
           partitionCols
         } catch {
           case e: Exception =>

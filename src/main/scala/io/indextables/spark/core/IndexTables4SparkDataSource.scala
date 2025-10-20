@@ -1021,8 +1021,10 @@ class IndexTables4SparkRelation(
       // Hadoop configuration already available above
 
       // Extract serializable data - resolve relative paths to full paths
-      // Normalize table path for tantivy4java compatibility (s3a:// -> s3://)
-      val normalizedTablePath = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+      // Normalize s3a:// URLs to s3:// for tantivy4java compatibility
+      val normalizedTablePath = if (path.startsWith("file:")) {
+        path // Keep file URIs as-is for tantivy4java
+      } else if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
         path.replaceFirst("^s3[an]://", "s3://")
       } else {
         path
@@ -1255,8 +1257,10 @@ class IndexTables4SparkRelation(
       spark.sparkContext.emptyRDD[org.apache.spark.sql.Row]
     } else {
       // Extract serializable data - resolve relative paths to full paths
-      // Normalize table path for tantivy4java compatibility (s3a:// -> s3://)
-      val normalizedTablePath = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+      // Normalize s3a:// URLs to s3:// for tantivy4java compatibility
+      val normalizedTablePath = if (path.startsWith("file:")) {
+        path // Keep file URIs as-is for tantivy4java
+      } else if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
         path.replaceFirst("^s3[an]://", "s3://")
       } else {
         path
@@ -1510,7 +1514,6 @@ class IndexTables4SparkTable(
     })
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    println(s"🚀 newScanBuilder called with options: ${options.asScala.keys.mkString(", ")}")
     // Create broadcast variable with proper precedence: read options > Spark config > Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
@@ -1552,7 +1555,6 @@ class IndexTables4SparkTable(
       }
 
     // Extract configurations from read options (highest precedence)
-    println(s"🔧 V2 Read: ALL options received: ${options.asScala.keys.mkString(", ")}")
     val readTantivyConfigs = options.asScala
       .filter {
         case (key, _) =>
@@ -1568,32 +1570,8 @@ class IndexTables4SparkTable(
       .filter(_._2 != null) // Filter out null values
       .toMap
 
-    // Debug: Log all configurations being merged with values
-    println(s"🔧 V2 Read: Hadoop configs: ${hadoopTantivyConfigs.keys.mkString(", ")}")
-    println(s"🔧 V2 Read: Spark session configs: ${sparkTantivyConfigs.keys.mkString(", ")}")
-    println(s"🔧 V2 Read: Read option configs: ${readTantivyConfigs.keys.mkString(", ")}")
-
-    // Debug: Show specific credential keys in each source (check both cases)
-    println(s"🔧 HADOOP accessKey: ${if (hadoopTantivyConfigs.contains("spark.indextables.aws.accessKey")) "SET"
-      else "MISSING"}")
-    println(
-      s"🔧 SPARK accessKey: ${if (sparkTantivyConfigs.contains("spark.indextables.aws.accessKey")) "SET" else "MISSING"}"
-    )
-    println(
-      s"🔧 OPTIONS accessKey: ${if (readTantivyConfigs.contains("spark.indextables.aws.accesskey")) "SET(lowercase)"
-        else if (readTantivyConfigs.contains("spark.indextables.aws.accessKey")) "SET(camelCase)"
-        else "MISSING"}"
-    )
-
     // Merge with proper precedence: Hadoop < Spark config < read options
     val tantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
-
-    // DEBUG: Print the final merged config
-    println(s"🔍 FINAL MERGED CONFIG: ${tantivyConfigs.size} total configs")
-    tantivyConfigs.foreach {
-      case (key, value) =>
-        println(s"   $key = $value")
-    }
 
     // Validate numeric configuration values early to provide better error messages
     def validateNumericConfig(
@@ -1601,41 +1579,33 @@ class IndexTables4SparkTable(
       value: String,
       expectedType: String
     ): Unit = {
-      println(s"🔧 Validating config: $key = '$value' (expected type: $expectedType)")
       try
         expectedType match {
           case "Long" =>
-            val parsed = value.toLong
-            println(s"✅ Successfully parsed $key as Long: $parsed")
+            value.toLong
           case "Int" =>
-            val parsed = value.toInt
-            println(s"✅ Successfully parsed $key as Int: $parsed")
+            value.toInt
           case _ => // No validation needed
         }
       catch {
         case e: NumberFormatException =>
-          println(s"❌ NumberFormatException for $key: '$value' - ${e.getMessage}")
           throw e
       }
     }
 
     // Validate ALL configurations that might be numeric
-    println(s"🔍 newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
+    logger.debug(s"🔍 newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
     tantivyConfigs.foreach {
       case (key, value) =>
-        println(s"📋 Found config: $key = $value")
         key.toLowerCase match {
           case k if k.contains("maxsize") =>
-            println(s"🎯 Matching maxSize config: $k")
             validateNumericConfig(key, value, "Long")
           case k if k.contains("maxconcurrentloads") =>
-            println(s"🎯 Matching maxConcurrentLoads config: $k")
             validateNumericConfig(key, value, "Int")
           case k if k.contains("targetrecordspersplit") =>
-            println(s"🎯 Matching targetRecordsPerSplit config: $k")
             validateNumericConfig(key, value, "Long")
           case _ =>
-            println(s"⏭️ Skipping validation for: $key")
+            // No validation needed
         }
     }
 

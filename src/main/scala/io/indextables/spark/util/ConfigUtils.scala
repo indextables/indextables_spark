@@ -114,6 +114,10 @@ object ConfigUtils {
       azureAccountName = getConfigOption("spark.indextables.azure.accountName"),
       azureAccountKey = getConfigOption("spark.indextables.azure.accountKey"),
       azureConnectionString = getConfigOption("spark.indextables.azure.connectionString"),
+      azureBearerToken = getConfigOption("spark.indextables.azure.bearerToken"),
+      azureTenantId = getConfigOption("spark.indextables.azure.tenantId"),
+      azureClientId = getConfigOption("spark.indextables.azure.clientId"),
+      azureClientSecret = getConfigOption("spark.indextables.azure.clientSecret"),
       azureEndpoint = getConfigOption("spark.indextables.azure.endpoint"),
       // GCP configuration from broadcast
       gcpProjectId = getConfigOption("spark.indextables.gcp.projectId"),

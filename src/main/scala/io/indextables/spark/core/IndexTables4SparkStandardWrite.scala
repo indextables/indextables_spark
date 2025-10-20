@@ -80,12 +80,12 @@ class IndexTables4SparkStandardWrite(
           mapper.registerModule(DefaultScalaModule)
           val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
 
-          println(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
-          logger.info(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          logger.debug(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          logger.debug(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
           partitionCols
         } catch {
           case e: Exception =>
-            println(s"🔍 PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
+            logger.debug(s"🔍 PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
             logger.warn(s"Failed to parse partition columns from options: $partitionColumnsJson", e)
             Seq.empty
         }
@@ -93,12 +93,12 @@ class IndexTables4SparkStandardWrite(
         // Fallback: try to read from existing transaction log
         try {
           val cols = transactionLog.getPartitionColumns()
-          println(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
-          logger.info(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          logger.debug(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          logger.debug(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
           cols
         } catch {
           case ex: Exception =>
-            println(s"🔍 PARTITION DEBUG: No partition columns found")
+            logger.debug(s"🔍 PARTITION DEBUG: No partition columns found")
             logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
             Seq.empty[String]
         }
@@ -143,9 +143,9 @@ class IndexTables4SparkStandardWrite(
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
+    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
     serializedOptions.foreach {
       case (k, v) =>
         val redactedValue =
@@ -157,7 +157,7 @@ class IndexTables4SparkStandardWrite(
           } else {
             v
           }
-        println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+        logger.debug(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
 
     // Validate indexing configuration for append operations
@@ -180,7 +180,7 @@ class IndexTables4SparkStandardWrite(
     // Determine if this should be an overwrite based on existing table state and mode
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
-      println(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
+      logger.debug(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
       logger.debug(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
       true
     } else {
@@ -210,7 +210,7 @@ class IndexTables4SparkStandardWrite(
           logger.warn(s"Unknown saveMode: $other, defaulting to append")
           false
       }
-      println(s"🔍 DEBUG: Final saveMode decision: $saveMode")
+      logger.debug(s"🔍 DEBUG: Final saveMode decision: $saveMode")
       logger.debug(s"🔍 DEBUG: Final saveMode decision: $saveMode")
       saveMode
     }
@@ -230,12 +230,12 @@ class IndexTables4SparkStandardWrite(
     try {
       // Commit the changes
       if (shouldOverwrite) {
-        println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         val version = transactionLog.overwriteFiles(addActions)
         logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
       } else {
-        println(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
         logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
         // Standard append operation
         val version = transactionLog.addFiles(addActions)

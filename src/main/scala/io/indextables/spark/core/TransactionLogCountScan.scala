@@ -68,7 +68,7 @@ class TransactionLogCountScan(
         // Simple COUNT: Return schema with a single count column
         StructType(Seq(StructField("count", LongType, nullable = false)))
     }
-    println(s"🔍 TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
+    logger.debug(s"🔍 TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
     schema
   }
 

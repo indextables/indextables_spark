@@ -74,7 +74,7 @@ object TantivyDirectInterface {
     logger.debug(
       s"🔍 AUTO-FAST-FIELD DEBUG: options raw value = ${options.get("spark.indextables.indexing.fastfields")}"
     )
-    logger.warn(
+    logger.debug(
       s"🔍 AUTO-FAST-FIELD DEBUG: ALL options keys = ${options.entrySet().asScala.map(_.getKey).mkString(", ")}"
     )
 

@@ -565,7 +565,7 @@ class OptimizedTransactionLog(
       logger.info(s"Cache prewarm completed in ${elapsed}ms - loaded ${files.size} files from transaction log")
     } catch {
       case e: Exception =>
-        logger.warn(s"Failed to prewarm cache (non-fatal): ${e.getMessage}", e)
+        logger.debug(s"Failed to prewarm cache (non-fatal): ${e.getMessage}")
     }
   }
 

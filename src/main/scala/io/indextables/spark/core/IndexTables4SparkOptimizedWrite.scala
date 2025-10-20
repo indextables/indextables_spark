@@ -390,9 +390,9 @@ class IndexTables4SparkOptimizedWrite(
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    println(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
     logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    println(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
+    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
     serializedOptions.foreach {
       case (k, v) =>
         val redactedValue =
@@ -404,7 +404,7 @@ class IndexTables4SparkOptimizedWrite(
           } else {
             v
           }
-        println(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+        logger.debug(s"🔍 DEBUG: serializedOption $k = $redactedValue")
     }
 
     val addActions: Seq[AddAction] = messages.flatMap {
@@ -457,7 +457,7 @@ class IndexTables4SparkOptimizedWrite(
           val mapper = new ObjectMapper()
           mapper.registerModule(DefaultScalaModule)
           val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
-          logger.info(s"🔍 V2 OPTIMIZED DEBUG: Extracted partition columns: $partitionCols")
+          logger.debug(s"🔍 V2 OPTIMIZED DEBUG: Extracted partition columns: $partitionCols")
           partitionCols
         } catch {
           case e: Exception =>
@@ -482,11 +482,11 @@ class IndexTables4SparkOptimizedWrite(
     try {
       // Use appropriate transaction log method based on write mode
       val version = if (shouldOverwrite) {
-        println(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         transactionLog.overwriteFiles(addActions)
       } else {
-        println(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
+        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
         logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
         transactionLog.addFiles(addActions)
       }

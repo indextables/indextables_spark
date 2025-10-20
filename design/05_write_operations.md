@@ -1084,14 +1084,24 @@ private def commitWriter(
 
 **Split File Path Examples:**
 
-**Non-Partitioned:**
+**Non-Partitioned (S3):**
 ```
 s3://bucket/table/part-00000-1234567890-abc123.split
 ```
 
-**Partitioned:**
+**Non-Partitioned (Azure ADLS Gen2):**
+```
+abfss://container@account.dfs.core.windows.net/table/part-00000-1234567890-abc123.split
+```
+
+**Partitioned (S3):**
 ```
 s3://bucket/table/date=2024-01-15/hour=10/part-00000-1234567890-abc123.split
+```
+
+**Partitioned (Azure):**
+```
+abfss://container@account.dfs.core.windows.net/table/date=2024-01-15/hour=10/part-00000-1234567890-abc123.split
 ```
 
 ### AddAction Metadata
@@ -1183,9 +1193,28 @@ partitionPath = "year=2024/month=01/day=15"
 
 ### Physical Layout
 
-**Partitioned Table Structure:**
+**Partitioned Table Structure (S3 example):**
 ```
 s3://bucket/table/
+├── _transaction_log/
+│   ├── 000000000000000000.json
+│   ├── 000000000000000001.json
+│   └── _last_checkpoint
+├── year=2024/
+│   ├── month=01/
+│   │   ├── day=01/
+│   │   │   ├── part-00000-123-abc.split
+│   │   │   └── part-00001-456-def.split
+│   │   └── day=02/
+│   │       └── part-00000-789-ghi.split
+│   └── month=02/
+│       └── day=01/
+│           └── part-00000-321-jkl.split
+```
+
+**Partitioned Table Structure (Azure ADLS Gen2 example):**
+```
+abfss://container@account.dfs.core.windows.net/table/
 ├── _transaction_log/
 │   ├── 000000000000000000.json
 │   ├── 000000000000000001.json
@@ -1235,7 +1264,7 @@ engine.addDocument(record)  // Complete record with partition values
 
 ---
 
-## 5.10 S3 Upload Optimization
+## 5.10 Cloud Storage Upload Optimization
 
 ### Upload Strategy Selection
 
@@ -1244,20 +1273,20 @@ IndexTables4Spark uses **intelligent upload strategy selection** based on file s
 ```
 Upload Strategy Decision:
 ├─ splitSize < 100MB (default threshold)
-│  └─> Direct byte array upload
-│     • Single PutObject operation
+│  └─> Direct upload
+│     • Single PUT operation (S3/Azure)
 │     • Simple and fast for small files
 │
 └─ splitSize >= 100MB
    └─> Parallel streaming multipart upload
       • Memory-efficient streaming
-      • Configurable concurrency
+      • Configurable concurrency (S3)
       • Supports files up to 5TB
 ```
 
 ### Configuration
 
-**S3 Upload Settings:**
+**S3 Upload Settings (AWS):**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -1266,7 +1295,12 @@ Upload Strategy Decision:
 | `spark.indextables.s3.maxConcurrency` | `4` | Parallel upload threads |
 | `spark.indextables.s3.partSize` | `67108864` (64MB) | Multipart upload part size |
 
-**Example Configuration:**
+**Azure Upload Settings:**
+- Azure uploads use native Azure Blob Storage SDK with automatic optimization
+- All uploads are handled through `AzureCloudStorageProvider`
+- OAuth bearer tokens are automatically refreshed when using Service Principal authentication
+
+**Example Configuration (AWS S3):**
 ```scala
 df.write
   .option("spark.indextables.s3.maxConcurrency", "12")
@@ -1274,9 +1308,19 @@ df.write
   .save("s3://bucket/path")
 ```
 
+**Example Configuration (Azure):**
+```scala
+df.write
+  .option("spark.indextables.azure.accountName", "mystorageaccount")
+  .option("spark.indextables.azure.accountKey", "your-account-key")
+  .save("abfss://container@mystorageaccount.dfs.core.windows.net/path")
+```
+
 ### Small File Upload
 
-**Direct PutObject:**
+**Direct PUT Operation (S3 PutObject / Azure Put Blob):**
+
+**AWS S3:**
 ```java
 // Read entire file into memory
 byte[] fileContent = Files.readAllBytes(splitFilePath);
@@ -1291,6 +1335,16 @@ s3Client.putObject(
 );
 ```
 
+**Azure Blob Storage:**
+```java
+// Upload directly via CloudStorageProvider
+cloudStorageProvider.putObject(
+  normalizedPath,
+  fileContent
+);
+// Automatically uses Azure SDK BlobClient.upload()
+```
+
 **Characteristics:**
 - **Fast:** Single network round-trip
 - **Simple:** No part management overhead
@@ -1299,7 +1353,9 @@ s3Client.putObject(
 
 ### Large File Upload (Parallel Streaming)
 
-**Buffered Chunking Strategy:**
+**Note:** Parallel streaming multipart upload is currently implemented for AWS S3 only. Azure uploads use the Azure Blob Storage SDK's native upload method.
+
+**Buffered Chunking Strategy (S3):**
 
 ```java
 // Create multipart upload
@@ -1732,7 +1788,7 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("s3://bucket/large-table")
 ```
 
-**High-Performance Configuration:**
+**High-Performance Configuration (S3):**
 ```scala
 df.write
   .option("spark.indextables.indexWriter.tempDirectoryPath", "/local_disk0/temp")
@@ -1741,6 +1797,19 @@ df.write
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "200M")
   .save("s3://bucket/optimized-table")
+```
+
+**High-Performance Configuration (Azure):**
+```scala
+df.write
+  .option("spark.indextables.indexWriter.tempDirectoryPath", "/local_disk0/temp")
+  .option("spark.indextables.azure.accountName", "mystorageaccount")
+  .option("spark.indextables.azure.tenantId", "your-tenant-id")
+  .option("spark.indextables.azure.clientId", "your-client-id")
+  .option("spark.indextables.azure.clientSecret", "your-client-secret")
+  .option("spark.indextables.autoSize.enabled", "true")
+  .option("spark.indextables.autoSize.targetSplitSize", "200M")
+  .save("abfss://container@mystorageaccount.dfs.core.windows.net/optimized-table")
 ```
 
 ---

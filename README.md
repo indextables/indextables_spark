@@ -2,7 +2,7 @@
 
 IndexTables is an experimental open-table format for Apache Spark that enables fast retrieval and full-text search across large-scale data. It integrates seamlessly with Spark SQL, allowing you to combine powerful search capabilities with joins, aggregations, and standard SQL operations. Originally built for log observability and cybersecurity investigations, IndexTables works well for any use case requiring fast data retrieval.
 
-IndexTables runs entirely within your existing Spark cluster with no additional infrastructure. It stores data in object storage (tested on AWS S3) and has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. While Spark is the only supported platform today, we're exploring future support for Presto and Trino. We welcome community feedback on our plans, our implementation, and anything else.
+IndexTables runs entirely within your existing Spark cluster with no additional infrastructure. It stores data in object storage (AWS S3 and Azure Blob Storage fully supported) and has been verified on OSS Spark 3.5.2 and Databricks 15.4 LTS. While Spark is the only supported platform today, we're exploring future support for Presto and Trino. We welcome community feedback on our plans, our implementation, and anything else.
 
 Under the hood, IndexTables uses [Tantivy](https://github.com/quickwit-oss/tantivy) and [Quickwit splits](https://github.com/quickwit-oss/quickwit) instead of Parquet. This hybrid row and columnar storage format, combined with advanced indexing, delivers extremely fast keyword searches, aggregates, and filtered retrieval across massive datasets.
 
@@ -120,12 +120,12 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 ## Features
 
 - 🚀 **Embedded Search**: Runs directly within Spark executors with no additional infrastructure required
-- 💾 **S3 Storage**: Stores indexed data in cost-effective object storage (tested on AWS S3)
+- ☁️ **Multi-Cloud Storage**: Stores indexed data in cost-effective object storage (AWS S3 and Azure Blob Storage fully supported)
 - ⚡ **Smart File Skipping**: Delta/Iceberg-style transaction log with min/max statistics for efficient query pruning
 - 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
 - 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
-- 🔐 **Flexible AWS Authentication**: Supports instance profiles, programmatic credentials, and custom credential providers
+- 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 
 ---
 
@@ -145,11 +145,13 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 │             │   │ File Management  │            │
 │             │   └──────────────────┘            │
 ├─────────────┴───────────────────────────────────┤
-│            S3 Storage Layer                     │
+│       Multi-Cloud Storage Layer                 │
 │   ┌──────────┐ ┌──────────┐ ┌──────────────┐    │
 │   │  Splits  │ │  Splits  │ │ Transaction  │    │
 │   │  (.split)│ │  (.split)│ │     Log      │    │
 │   └──────────┘ └──────────┘ └──────────────┘    │
+│                                                  │
+│   AWS S3  │  Azure Blob Storage                 │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -668,6 +670,207 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.aws.region", "us-west-2")
   .save("s3://bucket/path")
 ```
+
+#### Azure Blob Storage Configuration
+
+**New in v2.0**: Full Azure Blob Storage support for multi-cloud deployments with native authentication and high-performance operations.
+
+##### Azure Authentication Methods
+
+IndexTables supports multiple Azure authentication methods:
+
+1. **OAuth Service Principal (Client Credentials)**: Azure Active Directory authentication with automatic bearer token acquisition
+2. **Account Key Authentication**: Storage account name + account key
+3. **Connection String Authentication**: Complete Azure connection string
+4. **~/.azure/credentials File**: Shared credentials file supporting both account keys and Service Principal
+
+##### Configuration Keys
+
+**Account Key Authentication:**
+- `spark.indextables.azure.accountName`: Azure storage account name
+- `spark.indextables.azure.accountKey`: Azure storage account key
+- `spark.indextables.azure.connectionString`: Azure connection string (alternative to account name/key)
+
+**OAuth Service Principal Authentication:**
+- `spark.indextables.azure.accountName`: Azure storage account name (required)
+- `spark.indextables.azure.tenantId`: Azure AD tenant ID
+- `spark.indextables.azure.clientId`: Service Principal application (client) ID
+- `spark.indextables.azure.clientSecret`: Service Principal client secret
+- `spark.indextables.azure.bearerToken`: Explicit OAuth bearer token (optional - auto-acquired if not provided)
+
+##### Basic Azure Usage
+
+```scala
+// Session-level Azure configuration (recommended for simplicity)
+spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
+spark.conf.set("spark.indextables.azure.accountKey", "your-account-key")
+
+// Write data using abfss:// scheme (recommended - Spark standard for ADLS Gen2)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Read data
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Per-operation credentials (override session config)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.azure.accountName", "mystorageaccount")
+  .option("spark.indextables.azure.accountKey", "your-account-key")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Alternative: azure:// scheme (simpler URLs, also supported)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("azure://mycontainer/data")
+```
+
+##### OAuth Service Principal (Azure AD) Authentication
+
+```scala
+// Session-level OAuth configuration
+spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
+spark.conf.set("spark.indextables.azure.tenantId", "your-tenant-id")
+spark.conf.set("spark.indextables.azure.clientId", "your-client-id")
+spark.conf.set("spark.indextables.azure.clientSecret", "your-client-secret")
+
+// Write with OAuth (bearer token automatically acquired from Azure AD)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Read with OAuth
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// MERGE SPLITS with OAuth authentication
+spark.sql("MERGE SPLITS 'abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data' TARGET SIZE 100M")
+```
+
+**OAuth Benefits:**
+- Enhanced Security: No storage account keys in code
+- Azure AD Integration: Centralized identity management
+- Role-Based Access Control (RBAC): Fine-grained permissions
+- Audit Trail: All operations logged in Azure AD
+- Enterprise Ready: Integrates with existing Azure AD infrastructure
+
+##### Connection String Authentication
+
+```scala
+// Using Azure connection string (alternative to account name/key)
+val connectionString = "DefaultEndpointsProtocol=https;AccountName=mystorageaccount;AccountKey=your-key;EndpointSuffix=core.windows.net"
+
+spark.conf.set("spark.indextables.azure.connectionString", connectionString)
+
+// Write and read using connection string
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Or pass connection string per-operation
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.azure.connectionString", connectionString)
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+```
+
+##### ~/.azure/credentials File
+
+```ini
+# File: ~/.azure/credentials
+
+# Option 1: Account Key Authentication
+[default]
+storage_account = mystorageaccount
+account_key = your-account-key-here
+
+# Option 2: Service Principal (OAuth) Authentication
+[default]
+storage_account = mystorageaccount
+tenant_id = your-tenant-id
+client_id = your-client-id
+client_secret = your-client-secret
+```
+
+```scala
+// Credentials automatically loaded from file - no configuration needed!
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+```
+
+##### Supported Azure URL Schemes
+
+IndexTables supports all standard Spark Azure URL schemes with automatic normalization:
+
+- ✅ `abfss://container@account.dfs.core.windows.net/path` - **Recommended** - Spark standard for ADLS Gen2 with security
+- ✅ `abfs://container@account.dfs.core.windows.net/path` - Spark standard for ADLS Gen2
+- ✅ `azure://container/path` - Simplified URLs (tantivy4java native format)
+- ✅ `wasbs://container@account.blob.core.windows.net/path` - Spark legacy secure (deprecated, use abfss instead)
+- ✅ `wasb://container@account.blob.core.windows.net/path` - Spark legacy (deprecated, use abfss instead)
+
+**Best Practice**: Use `abfss://` for consistency with Spark conventions and ADLS Gen2 features. All schemes are automatically normalized to `azure://` format internally when passing URLs to tantivy4java.
+
+##### Azure with Partitioned Datasets
+
+```scala
+// Write partitioned data with OAuth
+spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
+spark.conf.set("spark.indextables.azure.tenantId", "your-tenant-id")
+spark.conf.set("spark.indextables.azure.clientId", "your-client-id")
+spark.conf.set("spark.indextables.azure.clientSecret", "your-client-secret")
+
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .partitionBy("date", "hour")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/partitioned-data")
+
+// Read with partition pruning
+val df = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/partitioned-data")
+
+df.filter($"date" === "2024-01-01" && $"hour" === 10).show()
+```
+
+##### Multi-Cloud Operations
+
+```scala
+// Configure both clouds in session
+spark.conf.set("spark.indextables.aws.accessKey", s3AccessKey)
+spark.conf.set("spark.indextables.aws.secretKey", s3SecretKey)
+spark.conf.set("spark.indextables.azure.accountName", azureAccount)
+spark.conf.set("spark.indextables.azure.accountKey", azureKey)
+
+// Write to S3
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("s3://s3-bucket/data")
+
+// Write same data to Azure (using Spark standard abfss:// scheme)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("abfss://azure-container@azureaccount.dfs.core.windows.net/data")
+
+// Read and union from both clouds
+val s3Data = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("s3://s3-bucket/data")
+val azureData = spark.read.format("io.indextables.provider.IndexTablesProvider")
+  .load("abfss://azure-container@azureaccount.dfs.core.windows.net/data")
+
+val combinedDf = s3Data.union(azureData)
+combinedDf.count()
+```
+
+##### Azure Configuration Table
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.azure.accountName` | - | Azure storage account name |
+| `spark.indextables.azure.accountKey` | - | Azure storage account key |
+| `spark.indextables.azure.connectionString` | - | Azure connection string (alternative to account name/key) |
+| `spark.indextables.azure.tenantId` | - | Azure AD tenant ID for OAuth |
+| `spark.indextables.azure.clientId` | - | Service Principal client ID for OAuth |
+| `spark.indextables.azure.clientSecret` | - | Service Principal client secret for OAuth |
+| `spark.indextables.azure.bearerToken` | - | Explicit OAuth bearer token (optional - auto-acquired) |
+| `spark.indextables.azure.endpoint` | - | Custom Azure endpoint (optional, for Azurite or custom endpoints) |
 
 #### Split Cache Configuration
 

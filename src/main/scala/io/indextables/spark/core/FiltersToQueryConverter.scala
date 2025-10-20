@@ -560,7 +560,7 @@ object FiltersToQueryConverter {
   }
 
   private def queryLog(msg: String): Unit =
-    logger.warn(msg)
+    logger.debug(msg)
 
   /**
    * Create a temporary index from schema for parseQuery operations. Uses the same schema so tokenizer configuration

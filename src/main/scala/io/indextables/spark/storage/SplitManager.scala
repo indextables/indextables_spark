@@ -121,8 +121,8 @@ object SplitManager {
     // Determine if we need to use cloud storage
     val protocol = ProtocolBasedIOFactory.determineProtocol(outputPath)
 
-    if (protocol == ProtocolBasedIOFactory.S3Protocol) {
-      // For S3, create the split locally first, then upload
+    if (protocol == ProtocolBasedIOFactory.S3Protocol || protocol == ProtocolBasedIOFactory.AzureProtocol) {
+      // For S3 and Azure, create the split locally first, then upload
       val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
 
       try {
@@ -135,9 +135,9 @@ object SplitManager {
         logger.debug(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
         logger.debug(s"🔍 SPLIT CREATED: $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.error(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.warn(s"✅ SPLIT CREATED WITH fast=true - correct!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
         }
 
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
@@ -163,7 +163,7 @@ object SplitManager {
             // Use traditional method for smaller files
             val splitContent = Files.readAllBytes(splitFile)
             cloudProvider.writeFile(outputPath, splitContent)
-            logger.info(s"Split uploaded: $outputPath (${splitContent.length} bytes)")
+            logger.info(s"✅ Split uploaded to cloud storage: $outputPath (${splitContent.length} bytes)")
           }
         } finally
           cloudProvider.close()
@@ -187,12 +187,12 @@ object SplitManager {
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
         val docMappingJson = metadata.getDocMappingJson()
-        println(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
-        println(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
+        logger.debug(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
+        logger.debug(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          println(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          println(s"✅ SPLIT CREATED WITH fast=true - correct!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
         }
 
         metadata
@@ -252,6 +252,10 @@ case class SplitCacheConfig(
   azureAccountName: Option[String] = None,
   azureAccountKey: Option[String] = None,
   azureConnectionString: Option[String] = None,
+  azureBearerToken: Option[String] = None,
+  azureTenantId: Option[String] = None,
+  azureClientId: Option[String] = None,
+  azureClientSecret: Option[String] = None,
   azureEndpoint: Option[String] = None,
   gcpProjectId: Option[String] = None,
   gcpServiceAccountKey: Option[String] = None,
@@ -321,7 +325,16 @@ case class SplitCacheConfig(
         config = config.withAwsRegion(region)
         logger.info(s"🔧 withAwsRegion returned: $config")
       case None =>
-        logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
+        // Only warn about missing AWS region if AWS credentials are configured (or if Azure/GCP are not configured)
+        val hasAwsCredentials = awsAccessKey.isDefined || awsSecretKey.isDefined
+        val hasAzureCredentials = azureAccountName.isDefined || azureConnectionString.isDefined
+        val hasGcpCredentials = gcpProjectId.isDefined || gcpServiceAccountKey.isDefined
+
+        if (hasAwsCredentials && !hasAzureCredentials && !hasGcpCredentials) {
+          logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
+        } else {
+          logger.debug(s"🔧 AWS region not provided, but using Azure/GCP or no cloud credentials configured")
+        }
     }
 
     awsEndpoint.foreach { endpoint =>
@@ -333,15 +346,49 @@ case class SplitCacheConfig(
       config = config.withAwsPathStyleAccess(pathStyle)
     }
 
-    // Azure configuration
-    (azureAccountName, azureAccountKey) match {
-      case (Some(name), Some(key)) =>
-        config = config.withAzureCredentials(name, key)
-      case _ => // Try connection string
-        azureConnectionString.foreach(connStr => config = config.withAzureConnectionString(connStr))
+    // Azure configuration with detailed verification
+    // Priority: 1) Bearer Token, 2) Account Key, 3) Connection String
+    logger.debug(s"🔍 SplitCacheConfig Azure Verification:")
+    logger.debug(s"  - azureAccountName: ${azureAccountName.getOrElse("None")}")
+    logger.debug(s"  - azureAccountKey: ${azureAccountKey.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureConnectionString: ${azureConnectionString.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureBearerToken: ${azureBearerToken.map(t => s"***${t.takeRight(10)}").getOrElse("None")}")
+    logger.debug(s"  - azureTenantId: ${azureTenantId.getOrElse("None")}")
+    logger.debug(s"  - azureClientId: ${azureClientId.getOrElse("None")}")
+    logger.debug(s"  - azureClientSecret: ${azureClientSecret.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureEndpoint: ${azureEndpoint.getOrElse("None")}")
+
+    // Priority 1: Bearer Token (OAuth)
+    (azureAccountName, azureBearerToken) match {
+      case (Some(name), Some(token)) =>
+        logger.debug(s"✅ Azure OAuth bearer token present - configuring tantivy4java")
+        logger.debug(s"🔧 Calling config.withAzureBearerToken(accountName=$name, bearerToken=***)")
+        config = config.withAzureBearerToken(name, token)
+        logger.debug(s"🔧 withAzureBearerToken returned: $config")
+      case (Some(name), None) =>
+        // Priority 2: Account Key
+        azureAccountKey match {
+          case Some(key) =>
+            logger.debug(s"✅ Azure account key present - configuring tantivy4java")
+            logger.debug(s"🔧 Calling config.withAzureCredentials(accountName=$name, accountKey=***)")
+            config = config.withAzureCredentials(name, key)
+            logger.debug(s"🔧 withAzureCredentials returned: $config")
+          case None =>
+            logger.warn(s"⚠️  Azure account name provided but neither bearer token nor account key is present")
+        }
+      case (None, Some(_)) =>
+        logger.warn(s"⚠️  Azure bearer token provided but ACCOUNT NAME is missing!")
+      case (None, None) =>
+        // Priority 3: Connection String
+        logger.debug(s"⚠️  No Azure account name - checking for connection string")
+        azureConnectionString.foreach { connStr =>
+          logger.debug(s"🔧 Calling config.withAzureConnectionString(connectionString=***)")
+          config = config.withAzureConnectionString(connStr)
+          logger.debug(s"🔧 withAzureConnectionString returned: $config")
+        }
     }
 
-    azureEndpoint.foreach(endpoint => config = config.withAzureEndpoint(endpoint))
+    // Note: Azure endpoint configuration not supported in tantivy4java CacheConfig API
 
     // GCP configuration
     (gcpProjectId, gcpServiceAccountKey) match {
@@ -351,7 +398,7 @@ case class SplitCacheConfig(
         gcpCredentialsFile.foreach(credFile => config = config.withGcpCredentialsFile(credFile))
     }
 
-    gcpEndpoint.foreach(endpoint => config = config.withGcpEndpoint(endpoint))
+    // Note: GCP endpoint configuration not supported in tantivy4java CacheConfig API
 
     logger.info(s"🔧 Final tantivy4java CacheConfig before returning: $config")
     config

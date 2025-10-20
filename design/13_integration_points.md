@@ -48,7 +48,13 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 - **Session token support**: Temporary credentials via STS
 - **Configuration compatibility**: Respects spark.hadoop.fs.s3a.* settings
 
-### 13.3.3 HDFS Integration
+### 13.3.3 Azure Blob Storage Filesystem (New in v2.0)
+- **Azure URL schemes**: abfss://, abfs://, wasbs://, azure:// support
+- **Azure credential chain**: Account key, OAuth Service Principal, connection string
+- **OAuth token refresh**: Automatic bearer token renewal
+- **URL normalization**: Spark schemes normalized to azure:// for tantivy4java
+
+### 13.3.4 HDFS Integration
 - **HDFS client**: Native Hadoop FileSystem API
 - **Distributed storage**: Full support for HDFS clusters
 - **Replication**: Respects HDFS replication settings
@@ -81,15 +87,15 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 - **Exception handling**: Rust panic translation to Java exceptions
 - **Resource cleanup**: Explicit close() calls for native resources
 
-## 13.5 AWS Integration
+## 13.5 Cloud Storage Integration
 
-### 13.5.1 S3 Client
+### 13.5.1 AWS S3 Client
 - **AWS SDK**: AmazonS3 client for object storage
 - **Multipart uploads**: S3 multipart upload API
 - **Streaming downloads**: S3 GetObject with streaming
 - **Retry logic**: SDK retry policy integration
 
-### 13.5.2 Credential Providers
+### 13.5.2 AWS Credential Providers
 - **DefaultAWSCredentialsProviderChain**: Standard provider chain
 - **BasicAWSCredentials**: Explicit access key/secret key
 - **BasicSessionCredentials**: Temporary credentials with session token
@@ -102,12 +108,31 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 - **CompleteMultipartUpload**: Finalize multipart uploads
 - **AbortMultipartUpload**: Cleanup failed uploads
 
-### 13.5.4 Custom Credential Provider Integration (v1.9+)
+### 13.5.4 Custom AWS Credential Provider Integration (v1.9+)
 - **Reflection-based loading**: Dynamic class loading without compile-time dependencies
 - **AWS SDK v1 support**: AWSCredentialsProvider interface
 - **AWS SDK v2 support**: AwsCredentialsProvider interface
 - **URI context**: Table-level URIs passed to providers for caching
 - **Configuration hierarchy**: Full support for DataFrame options, Spark config, Hadoop config
+
+### 13.5.5 Azure Blob Storage Client (New in v2.0)
+- **Azure SDK for Java**: BlobServiceClient for blob operations
+- **OAuth authentication**: Automatic bearer token acquisition and refresh
+- **Account key authentication**: Traditional storage account key support
+- **Connection string support**: Complete connection string authentication
+
+### 13.5.6 Azure Authentication Methods (New in v2.0)
+- **Account Key**: Storage account name + account key
+- **OAuth Service Principal**: Client credentials flow (tenantId, clientId, clientSecret)
+- **Connection String**: Complete Azure connection string
+- **~/.azure/credentials**: Shared credentials file loading
+
+### 13.5.7 Azure Operations (New in v2.0)
+- **Put Blob**: Direct upload via BlobClient.upload()
+- **Get Blob**: Download with streaming support
+- **Delete Blob**: Blob deletion operations
+- **Conditional PUT**: If-None-Match for transaction log atomicity
+- **OAuth token management**: Automatic refresh on expiration
 
 ## 13.6 Delta Lake Compatibility
 
@@ -148,10 +173,12 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 - **Persistent disks**: Custom temp directory configuration
 - **Cluster initialization**: Startup scripts for dependencies
 
-### 13.7.4 Azure HDInsight / Synapse
-- **WASB/ABFS support**: Azure Blob Storage integration
-- **Managed identities**: Azure credential integration
+### 13.7.4 Azure HDInsight / Synapse (New in v2.0)
+- **WASB/ABFS support**: Full Azure Blob Storage integration
+- **OAuth Service Principal**: Enterprise identity integration
+- **Connection string auth**: Simplified credential management
 - **Synapse Spark pools**: Compatibility with serverless Spark
+- **ADLS Gen2**: Native abfss:// scheme support
 
 ## 13.8 Build and Dependency Integration
 
@@ -164,7 +191,8 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 ### 13.8.2 Dependency Management
 - **Spark dependencies**: Provided scope for cluster deployment
 - **tantivy4java**: Platform-specific native libraries
-- **AWS SDK**: Optional dependency based on storage
+- **AWS SDK**: Optional dependency for S3 storage
+- **Azure SDK for Java**: Optional dependency for Azure Blob Storage (v2.0+)
 - **Guava**: Caching and utilities
 
 ### 13.8.3 Native Library Packaging
@@ -237,9 +265,10 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 
 ### 13.12.1 Authentication
 - **AWS IAM**: Role-based S3 access
+- **Azure OAuth**: Service Principal authentication with automatic token refresh
 - **Kerberos**: HDFS authentication
-- **Custom credential providers**: Enterprise identity integration
-- **Session tokens**: Temporary credential support
+- **Custom credential providers**: Enterprise identity integration (AWS)
+- **Session tokens**: Temporary credential support (AWS/Azure)
 
 ### 13.12.2 Authorization
 - **File-level permissions**: Respect storage-level ACLs
@@ -248,10 +277,10 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 - **Row-level security**: (Future) Predicate-based filtering
 
 ### 13.12.3 Encryption
-- **Encryption at rest**: S3 SSE-S3, SSE-KMS support
-- **Encryption in transit**: HTTPS for S3 access
+- **Encryption at rest**: S3 SSE-S3/SSE-KMS, Azure Storage Service Encryption
+- **Encryption in transit**: HTTPS for S3/Azure access
 - **Client-side encryption**: (Future) Application-level encryption
-- **Key management**: AWS KMS integration
+- **Key management**: AWS KMS, Azure Key Vault integration
 
 ## 13.13 Third-Party Tool Integration
 
@@ -298,23 +327,24 @@ IndexTables4Spark integrates with multiple components of the Apache Spark and Ha
 IndexTables4Spark integrates seamlessly with:
 
 ✅ **Apache Spark**: DataSource V2, Catalyst, SQL extensions, RDD/DataFrame APIs
-✅ **Hadoop ecosystem**: Hadoop configuration, S3A, HDFS
+✅ **Hadoop ecosystem**: Hadoop configuration, S3A, Azure Blob Storage, HDFS
 ✅ **tantivy4java**: Core APIs, JNI bindings, native integration
 ✅ **AWS**: S3 client, credential providers, custom provider support (v1.9+)
+✅ **Azure** (v2.0+): Blob Storage client, OAuth Service Principal, connection string, account key auth
 ✅ **Delta Lake**: Compatible transaction log format and ACID semantics
-✅ **Cloud platforms**: Databricks, EMR, Dataproc, HDInsight
+✅ **Cloud platforms**: Databricks, EMR, Dataproc, HDInsight/Synapse
 ✅ **Build tools**: Maven, dependency management, native library packaging
 ✅ **Monitoring**: Spark UI, logging, metrics
 ✅ **Testing**: ScalaTest, Spark test utilities, mocking frameworks
 ✅ **Catalogs**: Hive Metastore, Unity Catalog, AWS Glue
-✅ **Security**: IAM, Kerberos, encryption
+✅ **Security**: IAM, Azure OAuth, Kerberos, encryption
 ✅ **Third-party tools**: Jupyter, Zeppelin, BI tools
 ✅ **Data pipelines**: Airflow, NiFi, dbt
 
 **Key Integration Strengths**:
 - **Native Spark integration** via DataSource V2 API
 - **Minimal external dependencies** for easy deployment
-- **Cloud-native design** optimized for S3 and cloud platforms
-- **Enterprise-ready security** with custom credential provider support
+- **Multi-cloud design** optimized for S3 and Azure Blob Storage
+- **Enterprise-ready security** with custom credential providers (AWS) and OAuth (Azure)
 - **Standard tooling support** for development and operations
 - **Extensibility** through well-defined interfaces

@@ -251,6 +251,45 @@ object MergeSplitsCommand {
   }
 }
 
+/** Serializable wrapper for Azure configuration that can be broadcast across executors. */
+case class SerializableAzureConfig(
+  accountName: Option[String],
+  accountKey: Option[String],
+  connectionString: Option[String],
+  endpoint: Option[String],
+  bearerToken: Option[String],
+  tenantId: Option[String],
+  clientId: Option[String],
+  clientSecret: Option[String]
+) extends Serializable {
+
+  /** Convert to tantivy4java AzureConfig instance. */
+  def toQuickwitSplitAzureConfig(): QuickwitSplit.AzureConfig = {
+    // Priority 1: Bearer Token (OAuth)
+    (accountName, bearerToken) match {
+      case (Some(name), Some(token)) =>
+        // Use bearer token constructor for OAuth authentication
+        QuickwitSplit.AzureConfig.withBearerToken(name, token)
+      case _ =>
+        // Priority 2: Account Key
+        (accountName, accountKey) match {
+          case (Some(name), Some(key)) =>
+            // Use account name and key constructor
+            new QuickwitSplit.AzureConfig(name, key)
+          case _ =>
+            // Priority 3: Connection String
+            connectionString match {
+              case Some(connStr) =>
+                // Use connection string static factory method
+                QuickwitSplit.AzureConfig.fromConnectionString(connStr)
+              case None =>
+                null // No Azure credentials configured
+            }
+        }
+    }
+  }
+}
+
 /** Serializable wrapper for AWS configuration that can be broadcast across executors. */
 case class SerializableAwsConfig(
   accessKey: String,
@@ -499,6 +538,57 @@ class MergeSplitsExecutor(
     }
 
   /**
+   * Extract Azure configuration from SparkSession for tantivy4java merge operations.
+   * Returns a serializable wrapper that can be broadcast across executors.
+   */
+  private def extractAzureConfig(): SerializableAzureConfig =
+    try {
+      val sparkConf  = sparkSession.conf
+      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+
+      // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+      // Helper function to get config from normalized configs
+      def getConfigWithFallback(sparkKey: String): Option[String] = {
+        val result = mergedConfigs.get(sparkKey)
+        logger.debug(s"🔍 Azure Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        result
+      }
+
+      val accountName      = getConfigWithFallback("spark.indextables.azure.accountName")
+      val accountKey       = getConfigWithFallback("spark.indextables.azure.accountKey")
+      val connectionString = getConfigWithFallback("spark.indextables.azure.connectionString")
+      val endpoint         = getConfigWithFallback("spark.indextables.azure.endpoint")
+      val bearerToken      = getConfigWithFallback("spark.indextables.azure.bearerToken")
+      val tenantId         = getConfigWithFallback("spark.indextables.azure.tenantId")
+      val clientId         = getConfigWithFallback("spark.indextables.azure.clientId")
+      val clientSecret     = getConfigWithFallback("spark.indextables.azure.clientSecret")
+
+      logger.info(s"🔍 Creating AzureConfig with: accountName=${accountName.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}")
+      logger.info(s"🔍 Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString.map(_ => "***").getOrElse("None")}, bearerToken=${bearerToken.map(_ => "***").getOrElse("None")}")
+      logger.info(s"🔍 OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId.getOrElse("None")}, clientSecret=${clientSecret.map(_ => "***").getOrElse("None")}")
+
+      SerializableAzureConfig(
+        accountName,
+        accountKey,
+        connectionString,
+        endpoint,
+        bearerToken,
+        tenantId,
+        clientId,
+        clientSecret
+      )
+    } catch {
+      case ex: Exception =>
+        logger.error("Failed to extract Azure config from Spark session", ex)
+        // Return empty config - Azure is optional
+        SerializableAzureConfig(None, None, None, None, None, None, None, None)
+    }
+
+  /**
    * Smart string ordering that handles numeric values correctly. Tries numeric comparison first, falls back to string
    * comparison.
    */
@@ -661,8 +751,9 @@ class MergeSplitsExecutor(
       throw new IllegalStateException(s"Internal error: Found ${singleFileGroups.length} single-file merge groups")
     }
 
-    // Extract AWS configuration early so it's available for all code paths
-    val awsConfig = extractAwsConfig()
+    // Extract AWS and Azure configuration early so it's available for all code paths
+    val awsConfig   = extractAwsConfig()
+    val azureConfig = extractAzureConfig()
 
     if (limitedMergeGroups.isEmpty) {
       logger.info("No splits require merging")
@@ -703,9 +794,10 @@ class MergeSplitsExecutor(
     println(s"🏗️  [DRIVER] Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
     logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
 
-    // Broadcast AWS configuration to executors
-    val broadcastAwsConfig = sparkSession.sparkContext.broadcast(awsConfig)
-    val broadcastTablePath = sparkSession.sparkContext.broadcast(tablePath.toString)
+    // Broadcast AWS and Azure configuration to executors
+    val broadcastAwsConfig   = sparkSession.sparkContext.broadcast(awsConfig)
+    val broadcastAzureConfig = sparkSession.sparkContext.broadcast(azureConfig)
+    val broadcastTablePath   = sparkSession.sparkContext.broadcast(tablePath.toString)
 
     // Process batches with controlled concurrency using Scala parallel collections
     import scala.collection.parallel.ForkJoinTaskSupport
@@ -751,7 +843,7 @@ class MergeSplitsExecutor(
                   mergeGroupsRDD
                     .map(group =>
                       MergeSplitsExecutor
-                        .executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value)
+                        .executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value, broadcastAzureConfig.value)
                     )
                     .setName(s"Merge Results Batch $batchNum")
                     .collect()
@@ -1238,7 +1330,8 @@ class MergeSplitsExecutor(
   private def executeMergeGroupDistributed(
     mergeGroup: MergeGroup,
     tablePathStr: String,
-    awsConfig: SerializableAwsConfig
+    awsConfig: SerializableAwsConfig,
+    azureConfig: SerializableAzureConfig
   ): MergeResult = {
     val startTime = System.currentTimeMillis()
     val logger    = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
@@ -1247,7 +1340,7 @@ class MergeSplitsExecutor(
 
     try {
       // Create merged split using physical merge (executor-friendly version)
-      val mergedSplit = createMergedSplitDistributed(mergeGroup, tablePathStr, awsConfig)
+      val mergedSplit = createMergedSplitDistributed(mergeGroup, tablePathStr, awsConfig, azureConfig)
 
       // Return result for driver to handle transaction operations
       // Note: We don't do transactionLog operations here since those must be done on driver
@@ -1444,7 +1537,8 @@ class MergeSplitsExecutor(
   private def createMergedSplitDistributed(
     mergeGroup: MergeGroup,
     tablePathStr: String,
-    awsConfig: SerializableAwsConfig
+    awsConfig: SerializableAwsConfig,
+    azureConfig: SerializableAzureConfig
   ): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
@@ -1465,8 +1559,24 @@ class MergeSplitsExecutor(
     val mergedPath = s"$partitionPath$uuid.split"
 
     // Create full paths for input splits and output split
-    // Handle S3 paths specially to preserve the s3:// scheme
+    // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
     val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
+    val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
+                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+                      tablePathStr.startsWith("abfss://")
+
+    // Use centralized Azure URL normalization from CloudStorageProviderFactory
+    def normalizeAzureUrl(url: String): String = {
+      import io.indextables.spark.io.CloudStorageProviderFactory
+      import org.apache.spark.sql.util.CaseInsensitiveStringMap
+      import scala.jdk.CollectionConverters._
+
+      CloudStorageProviderFactory.normalizePathForTantivy(
+        url,
+        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
+        new org.apache.hadoop.conf.Configuration()
+      )
+    }
 
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
@@ -1483,6 +1593,22 @@ class MergeSplitsExecutor(
           logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
           fullPath
         }
+      } else if (isAzurePath) {
+        // For Azure paths, normalize to azure:// scheme for tantivy4java
+        if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+            file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+            file.path.startsWith("abfss://")) {
+          // file.path is already a full Azure URL, normalize to azure://
+          val normalized = normalizeAzureUrl(file.path)
+          logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
+          normalized
+        } else {
+          // file.path is relative, construct full URL with normalized scheme
+          val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+          val fullPath = s"$normalizedBaseUri/${file.path}"
+          logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
+          fullPath
+        }
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
@@ -1492,9 +1618,15 @@ class MergeSplitsExecutor(
 
     val outputSplitPath = if (isS3Path) {
       // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
-      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
       val outputPath = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
+      outputPath
+    } else if (isAzurePath) {
+      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
+      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
       // For local/HDFS paths, use Path concatenation
@@ -1530,19 +1662,30 @@ class MergeSplitsExecutor(
       }
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
-    // Create merge configuration with broadcast AWS credentials and temp directory
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid",                        // indexUid
-      "tantivy4spark",                           // sourceId
-      "merge-node",                              // nodeId
-      docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
-      0L,                                        // partitionId
-      java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null),      // tempDirectoryPath
-      awsConfig.heapSize,                               // heapSizeBytes
-      awsConfig.debugEnabled                            // debugEnabled
-    )
+    // Create merge configuration with broadcast AWS and Azure credentials and temp directory
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+      .indexUid("merged-index-uid")
+      .sourceId("tantivy4spark")
+      .nodeId("merge-node")
+      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
+      .partitionId(0L)
+      .deleteQueries(java.util.Collections.emptyList[String]())
+      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePathStr))
+      .debugEnabled(awsConfig.debugEnabled)
+
+    // Add optional Azure configuration if available
+    val azureConf = azureConfig.toQuickwitSplitAzureConfig()
+    if (azureConf != null) {
+      mergeConfigBuilder.azureConfig(azureConf)
+    }
+
+    // Add optional temp directory path if available
+    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
+
+    // Add optional heap size if available
+    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+
+    val mergeConfig = mergeConfigBuilder.build()
 
     // Perform the actual merge using tantivy4java with retry logic for streaming errors and timeouts
     logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
@@ -1679,14 +1822,37 @@ class MergeSplitsExecutor(
     val mergedPath = s"$partitionPath$uuid.split"
 
     // Create full paths for input splits and output split
-    // Handle S3 paths specially to preserve the s3:// scheme
-    val isS3Path = tablePath.toString.startsWith("s3://") || tablePath.toString.startsWith("s3a://")
+    // Handle S3 and Azure paths specially to preserve proper schemes
+    val tablePathStr = tablePath.toString
+    val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
+    val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
+                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+                      tablePathStr.startsWith("abfss://")
+
+    // Use centralized Azure URL normalization from CloudStorageProviderFactory
+    def normalizeAzureUrl(url: String): String = {
+      import io.indextables.spark.io.CloudStorageProviderFactory
+      import org.apache.spark.sql.util.CaseInsensitiveStringMap
+      import scala.jdk.CollectionConverters._
+
+      CloudStorageProviderFactory.normalizePathForTantivy(
+        url,
+        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
+        new org.apache.hadoop.conf.Configuration()
+      )
+    }
 
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
         // For S3 paths, construct the URL directly
-        val normalizedBaseUri = tablePath.toString.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+        val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
         s"$normalizedBaseUri/${file.path}"
+      } else if (isAzurePath) {
+        // For Azure paths, normalize to azure:// scheme for tantivy4java
+        val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+        val fullPath = s"$normalizedBaseUri/${file.path}"
+        logger.debug(s"🔄 [DRIVER] Normalized relative Azure path: ${file.path} -> $fullPath")
+        fullPath
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new Path(tablePath, file.path)
@@ -1696,8 +1862,14 @@ class MergeSplitsExecutor(
 
     val outputSplitPath = if (isS3Path) {
       // For S3 paths, construct the URL directly
-      val baseUri = tablePath.toString.replaceAll("/$", "") // Remove trailing slash if present
+      val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
       s"$baseUri/$mergedPath"
+    } else if (isAzurePath) {
+      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
+      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      logger.debug(s"🔄 [DRIVER] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
+      outputPath
     } else {
       // For local/HDFS paths, use Path concatenation
       new Path(tablePath, mergedPath).toString
@@ -1725,19 +1897,24 @@ class MergeSplitsExecutor(
         else docMappingJson}"
     )
 
-    // Create merge configuration with AWS credentials and temp directory
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid",                        // indexUid
-      "tantivy4spark",                           // sourceId
-      "merge-node",                              // nodeId
-      docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
-      0L,                                        // partitionId
-      java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePath.toString), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null),            // tempDirectoryPath
-      awsConfig.heapSize,                                     // heapSizeBytes
-      awsConfig.debugEnabled                                  // debugEnabled
-    )
+    // Create merge configuration with AWS credentials and temp directory using builder pattern
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+      .indexUid("merged-index-uid")
+      .sourceId("tantivy4spark")
+      .nodeId("merge-node")
+      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
+      .partitionId(0L)
+      .deleteQueries(java.util.Collections.emptyList[String]())
+      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePath.toString))
+      .debugEnabled(awsConfig.debugEnabled)
+
+    // Add optional temp directory path if available
+    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
+
+    // Add optional heap size if available
+    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+
+    val mergeConfig = mergeConfigBuilder.build()
 
     // Perform the actual merge using direct/in-process merge
     println(s"⚙️  [DRIVER] Executing direct merge with ${inputSplitPaths.size()} input paths")
@@ -1766,6 +1943,9 @@ class MergeSplitsExecutor(
     try
       if (isS3Path) {
         println(s"🔍 [DRIVER] S3 merge - cannot easily verify file existence in driver context")
+        println(s"🔍 [DRIVER] Assuming tantivy4java successfully created: $outputSplitPath")
+      } else if (isAzurePath) {
+        println(s"🔍 [DRIVER] Azure merge - cannot easily verify file existence in driver context")
         println(s"🔍 [DRIVER] Assuming tantivy4java successfully created: $outputSplitPath")
       } else {
         val outputFile = new java.io.File(outputSplitPath)
@@ -1859,7 +2039,7 @@ class MergeSplitsExecutor(
     InternalRow.fromSeq(values)
   }
 
-  /** Resolve an expression against a schema to handle UnresolvedAttribute references. */
+  /** Resolve an expression against a schema to handle UnresolvedAttribute references and cast literals to UTF8String. */
   private def resolveExpression(expression: Expression, schema: StructType): Expression =
     expression.transform {
       case unresolvedAttr: org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute =>
@@ -1867,6 +2047,15 @@ class MergeSplitsExecutor(
         val fieldIndex = schema.fieldIndex(fieldName)
         val field      = schema(fieldIndex)
         org.apache.spark.sql.catalyst.expressions.BoundReference(fieldIndex, field.dataType, field.nullable)
+      case literal: org.apache.spark.sql.catalyst.expressions.Literal =>
+        // Cast all literals to UTF8String since partition values are stored as strings
+        import org.apache.spark.sql.types._
+        literal.dataType match {
+          case StringType => literal
+          case _ =>
+            // Convert non-string literals to UTF8String for comparison with partition values
+            org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
+        }
     }
 
   /**
@@ -1944,7 +2133,8 @@ object MergeSplitsExecutor {
   def executeMergeGroupDistributed(
     mergeGroup: MergeGroup,
     tablePathStr: String,
-    awsConfig: SerializableAwsConfig
+    awsConfig: SerializableAwsConfig,
+    azureConfig: SerializableAzureConfig
   ): MergeResult = {
     val startTime = System.currentTimeMillis()
     val logger    = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
@@ -1955,7 +2145,7 @@ object MergeSplitsExecutor {
 
     try {
       // Create merged split using physical merge (executor-friendly version)
-      val mergedSplit = createMergedSplitDistributed(mergeGroup, tablePathStr, awsConfig)
+      val mergedSplit = createMergedSplitDistributed(mergeGroup, tablePathStr, awsConfig, azureConfig)
 
       // Return result for driver to handle transaction operations
       // Note: We don't do transactionLog operations here since those must be done on driver
@@ -1992,7 +2182,8 @@ object MergeSplitsExecutor {
   private def createMergedSplitDistributed(
     mergeGroup: MergeGroup,
     tablePathStr: String,
-    awsConfig: SerializableAwsConfig
+    awsConfig: SerializableAwsConfig,
+    azureConfig: SerializableAzureConfig
   ): MergedSplitInfo = {
     val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
@@ -2030,8 +2221,24 @@ object MergeSplitsExecutor {
     val mergedPath = s"$partitionPath$uuid.split"
 
     // Create full paths for input splits and output split
-    // Handle S3 paths specially to preserve the s3:// scheme
+    // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
     val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
+    val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
+                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+                      tablePathStr.startsWith("abfss://")
+
+    // Use centralized Azure URL normalization from CloudStorageProviderFactory
+    def normalizeAzureUrl(url: String): String = {
+      import io.indextables.spark.io.CloudStorageProviderFactory
+      import org.apache.spark.sql.util.CaseInsensitiveStringMap
+      import scala.jdk.CollectionConverters._
+
+      CloudStorageProviderFactory.normalizePathForTantivy(
+        url,
+        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
+        new org.apache.hadoop.conf.Configuration()
+      )
+    }
 
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
@@ -2048,6 +2255,22 @@ object MergeSplitsExecutor {
           logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
           fullPath
         }
+      } else if (isAzurePath) {
+        // For Azure paths, normalize to azure:// scheme for tantivy4java
+        if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+            file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+            file.path.startsWith("abfss://")) {
+          // file.path is already a full Azure URL, normalize to azure://
+          val normalized = normalizeAzureUrl(file.path)
+          logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
+          normalized
+        } else {
+          // file.path is relative, construct full URL with normalized scheme
+          val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+          val fullPath = s"$normalizedBaseUri/${file.path}"
+          logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
+          fullPath
+        }
       } else {
         // For local/HDFS paths, use Path concatenation
         val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
@@ -2057,9 +2280,15 @@ object MergeSplitsExecutor {
 
     val outputSplitPath = if (isS3Path) {
       // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
-      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
+      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
       val outputPath = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
+      outputPath
+    } else if (isAzurePath) {
+      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
+      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
       // For local/HDFS paths, use Path concatenation
@@ -2095,19 +2324,30 @@ object MergeSplitsExecutor {
       }
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
-    // Create merge configuration with broadcast AWS credentials and temp directory
-    val mergeConfig = new QuickwitSplit.MergeConfig(
-      "merged-index-uid",                        // indexUid
-      "tantivy4spark",                           // sourceId
-      "merge-node",                              // nodeId
-      docMappingJson,                            // docMappingUid - extracted from source splits to preserve fast fields
-      0L,                                        // partitionId
-      java.util.Collections.emptyList[String](), // deleteQueries
-      awsConfig.toQuickwitSplitAwsConfig(tablePathStr), // AWS configuration for S3 access
-      awsConfig.tempDirectoryPath.getOrElse(null),      // tempDirectoryPath
-      awsConfig.heapSize,                               // heapSizeBytes
-      awsConfig.debugEnabled                            // debugEnabled
-    )
+    // Create merge configuration with broadcast AWS and Azure credentials and temp directory
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+      .indexUid("merged-index-uid")
+      .sourceId("tantivy4spark")
+      .nodeId("merge-node")
+      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
+      .partitionId(0L)
+      .deleteQueries(java.util.Collections.emptyList[String]())
+      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePathStr))
+      .debugEnabled(awsConfig.debugEnabled)
+
+    // Add optional Azure configuration if available
+    val azureConf = azureConfig.toQuickwitSplitAzureConfig()
+    if (azureConf != null) {
+      mergeConfigBuilder.azureConfig(azureConf)
+    }
+
+    // Add optional temp directory path if available
+    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
+
+    // Add optional heap size if available
+    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+
+    val mergeConfig = mergeConfigBuilder.build()
 
     // Perform the actual merge using direct/in-process merge
     logger.warn(s"⚙️  [EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
@@ -2141,6 +2381,9 @@ object MergeSplitsExecutor {
     try
       if (isS3Path) {
         println(s"🔍 [EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
+        println(s"🔍 [EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
+      } else if (isAzurePath) {
+        println(s"🔍 [EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
         println(s"🔍 [EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else {
         val outputFile = new java.io.File(outputSplitPath)

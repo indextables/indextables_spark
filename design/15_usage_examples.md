@@ -9,14 +9,32 @@ This section provides comprehensive usage examples for IndexTables4Spark coverin
 ### 15.2.1 Installation and Setup
 ```scala
 // Add dependency to pom.xml or build.sbt
-libraryDependencies += "io.indextables" %% "indextables-spark" % "1.13.0"
+libraryDependencies += "io.indextables" %% "indextables-spark" % "2.0.0"
 
-// Configure Spark session
+// Configure Spark session (AWS S3)
 val spark = SparkSession.builder()
   .appName("IndexTables4Spark Example")
   .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
   .config("spark.indextables.aws.accessKey", "AKIA...")
   .config("spark.indextables.aws.secretKey", "...")
+  .getOrCreate()
+
+// Or configure for Azure Blob Storage
+val spark = SparkSession.builder()
+  .appName("IndexTables4Spark Azure Example")
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .config("spark.indextables.azure.accountName", "mystorageaccount")
+  .config("spark.indextables.azure.accountKey", "your-account-key")
+  .getOrCreate()
+
+// Or configure for Azure with OAuth Service Principal
+val spark = SparkSession.builder()
+  .appName("IndexTables4Spark Azure OAuth Example")
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+  .config("spark.indextables.azure.accountName", "mystorageaccount")
+  .config("spark.indextables.azure.tenantId", "your-tenant-id")
+  .config("spark.indextables.azure.clientId", "your-client-id")
+  .config("spark.indextables.azure.clientSecret", "your-client-secret")
   .getOrCreate()
 ```
 
@@ -29,11 +47,17 @@ val data = Seq(
   ("doc3", "Delta Lake provides ACID transactions", 88)
 ).toDF("id", "content", "score")
 
-// Write to IndexTables4Spark
+// Write to IndexTables4Spark (AWS S3)
 data.write.format("indextables")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
   .save("s3://my-bucket/documents")
+
+// Or write to Azure Blob Storage
+data.write.format("indextables")
+  .option("spark.indextables.indexing.typemap.content", "text")
+  .option("spark.indextables.indexing.fastfields", "score")
+  .save("abfss://container@account.dfs.core.windows.net/documents")
 ```
 
 ### 15.2.3 Basic Read Example

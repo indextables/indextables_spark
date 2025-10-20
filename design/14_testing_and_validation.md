@@ -27,6 +27,7 @@ IndexTables4Spark maintains comprehensive test coverage across all major compone
 | **Auto-sizing** | 28 | ✅ 28/28 | SizeParser, configuration, historical analysis |
 | **Field filtering** | 478 | ✅ 478/478 | String vs text, range filters, data skipping |
 | **Custom credential providers** | 4 | ✅ 4/4 | Real S3 integration, table-level URIs |
+| **Azure integration** | 14 | ✅ 14/14 | OAuth, account key, connection string, MERGE SPLITS |
 
 ## 14.3 Unit Testing
 
@@ -91,6 +92,16 @@ IndexTables4Spark maintains comprehensive test coverage across all major compone
 - **Multipart uploads**: Large files (>100MB)
 - **Parallel uploads**: Multiple threads uploading concurrently
 - **Retry logic**: Simulated S3 failures and recovery
+
+### 14.4.6 Real Azure Integration Tests (New in v2.0)
+- **OAuth Service Principal**: Full write/read cycle with Azure AD authentication
+- **Account key authentication**: Traditional storage account key validation
+- **Connection string**: Complete connection string authentication
+- **URL scheme normalization**: abfss://, wasbs://, azure:// compatibility
+- **MERGE SPLITS with OAuth**: Distributed merge operations with bearer token refresh
+- **~/.azure/credentials file**: Shared credentials file loading
+- **Partition support**: Partitioned writes and reads on Azure
+- **Cross-cloud validation**: Same operations work on both S3 and Azure
 
 ## 14.5 Performance Testing
 
@@ -272,9 +283,13 @@ IndexTables4Spark maintains comprehensive test coverage across all major compone
 
 ### 14.12.1 Authentication Testing
 - **IAM role validation**: AWS role-based S3 access
-- **Explicit credentials**: Access key/secret key
-- **Session tokens**: Temporary credential support
-- **Custom providers**: Enterprise credential provider integration
+- **Explicit credentials**: Access key/secret key (AWS/Azure)
+- **Session tokens**: Temporary credential support (AWS)
+- **Custom providers**: Enterprise credential provider integration (AWS)
+- **Azure OAuth**: Service Principal authentication with bearer token refresh
+- **Azure account key**: Traditional storage account authentication
+- **Azure connection string**: Complete connection string validation
+- **~/.azure/credentials**: Shared credentials file loading
 
 ### 14.12.2 Authorization Testing
 - **File-level permissions**: S3 bucket policies
@@ -285,8 +300,9 @@ IndexTables4Spark maintains comprehensive test coverage across all major compone
 ### 14.12.3 Encryption Testing
 - **SSE-S3**: Server-side encryption with S3-managed keys
 - **SSE-KMS**: Server-side encryption with KMS keys
-- **HTTPS**: Encrypted transport for S3 access
-- **Credential security**: No credential logging
+- **Azure Storage Encryption**: Server-side encryption for Azure Blob Storage
+- **HTTPS**: Encrypted transport for S3/Azure access
+- **Credential security**: No credential logging (AWS/Azure)
 
 ## 14.13 Test Automation
 
@@ -332,7 +348,7 @@ IndexTables4Spark maintains comprehensive test coverage across all major compone
 
 IndexTables4Spark testing ensures production quality through:
 
-✅ **Comprehensive coverage**: 210+ tests across all components (100% passing)
+✅ **Comprehensive coverage**: 224+ tests across all components (100% passing)
 ✅ **Unit testing**: Core components, expressions, configuration, parsing
 ✅ **Integration testing**: End-to-end write/read, transaction log, MERGE SPLITS
 ✅ **Performance testing**: Query speedup, write throughput, caching effectiveness
@@ -341,14 +357,17 @@ IndexTables4Spark testing ensures production quality through:
 ✅ **Regression testing**: Bug fixes, performance, compatibility
 ✅ **Scenario testing**: Bulk loads, incremental updates, query workloads
 ✅ **Concurrency testing**: Multi-tenant, concurrent reads/writes, mixed workloads
-✅ **Platform testing**: Databricks, EMR, local development
-✅ **Security testing**: Authentication, authorization, encryption
+✅ **Platform testing**: Databricks, EMR, Azure HDInsight/Synapse, local development
+✅ **Security testing**: Authentication (AWS/Azure), authorization, encryption
+✅ **Multi-cloud testing**: Real S3 and Azure integration tests with OAuth
 ✅ **Test automation**: CI/CD integration, code coverage, performance regression
 
 **Key Testing Achievements**:
-- **100% pass rate** across all test suites
+- **100% pass rate** across all test suites (224+ tests)
 - **Real S3 integration tests** with comprehensive validation
+- **Real Azure integration tests** with OAuth Service Principal validation (14 tests)
+- **Multi-cloud validation**: Same operations work on both S3 and Azure
 - **Performance benchmarks** validate optimization claims
 - **Edge case coverage** ensures production robustness
 - **Regression protection** prevents breaking changes
-- **Multi-platform validation** ensures broad compatibility
+- **Multi-platform validation** ensures broad compatibility (AWS, Azure, local)

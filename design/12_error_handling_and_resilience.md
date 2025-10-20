@@ -32,11 +32,12 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 
 ## 12.3 Storage Layer Resilience
 
-### 12.3.1 S3 Retry Logic
+### 12.3.1 Cloud Storage Retry Logic (S3/Azure)
 - **Exponential backoff**: 1s, 2s, 4s delays
 - **Maximum retries**: 3 attempts by default
 - **Transient error detection**: Retry only recoverable errors (network, 503, etc.)
 - **Permanent error fast-fail**: Immediate failure for 404, 403, etc.
+- **Azure-specific**: OAuth token refresh on expiration for Service Principal authentication
 
 ### 12.3.2 Split Download Error Handling
 - **Partial download cleanup**: Delete incomplete files
@@ -45,7 +46,8 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 - **User notification**: Clear error messages with file paths
 
 ### 12.3.3 Upload Failure Recovery
-- **Multipart abort**: Clean up failed multipart uploads
+- **Multipart abort** (S3): Clean up failed multipart uploads
+- **Azure retry**: Automatic retry with fresh bearer token if OAuth token expired
 - **Orphan prevention**: Explicit abort calls in exception handlers
 - **Resource cleanup**: Close streams and delete temp files
 - **Transaction rollback**: Don't commit if upload fails
@@ -144,11 +146,12 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 - **Warning logs**: Notify user of fallback behavior
 - **Continued execution**: Don't fail entire job for invalid temp path
 
-### 12.8.3 AWS Credential Errors
+### 12.8.3 Cloud Credential Errors
 - **Early detection**: Validate credentials before starting work
-- **Clear messages**: Specific error for missing/invalid credentials
-- **Provider fallback**: Try default provider chain if custom provider fails
-- **Security**: Never log actual credential values
+- **Clear messages**: Specific error for missing/invalid credentials (AWS/Azure)
+- **AWS provider fallback**: Try default provider chain if custom provider fails
+- **Azure OAuth fallback**: Fall back to account key if OAuth fails
+- **Security**: Never log actual credential values (access keys, secrets, bearer tokens)
 
 ## 12.9 Partitioning Errors
 
@@ -227,8 +230,9 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 ### 12.12.3 Health Checks
 - **Transaction log health**: Verify log is readable and current
 - **Cache health**: Monitor eviction rates and hit rates
-- **Storage health**: S3 connectivity and latency
+- **Storage health**: S3/Azure connectivity and latency
 - **Native library health**: Verify tantivy4java functioning
+- **Azure OAuth health**: Monitor bearer token validity and refresh
 
 ## 12.13 Failure Modes and Recovery
 
@@ -245,10 +249,11 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 - **No data loss**: All state reconstructable from transaction log
 
 ### 12.13.3 Storage Failures
-- **S3 unavailability**: Retry with exponential backoff
+- **Cloud storage unavailability** (S3/Azure): Retry with exponential backoff
 - **Network partitions**: Timeout and retry mechanisms
 - **Permanent failures**: Clear error messages to user
 - **Data durability**: Transaction log ensures no data loss
+- **Azure-specific**: OAuth token refresh on 401 errors
 
 ## 12.14 Testing and Validation
 
@@ -265,7 +270,8 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 - **Memory pressure**: Test eviction and OOM prevention
 
 ### 12.14.3 Integration Testing
-- **Real S3 failures**: Test with actual S3 service issues
+- **Real cloud storage failures**: Test with actual S3/Azure service issues
+- **OAuth token expiration**: Test Azure Service Principal token refresh
 - **Large-scale tests**: Verify behavior at production scale
 - **Multi-tenant scenarios**: Test isolation and resource limits
 - **Long-running tests**: Verify stability over time
@@ -298,7 +304,7 @@ IndexTables4Spark implements comprehensive error handling and resilience mechani
 IndexTables4Spark ensures production reliability through:
 
 ✅ **Transaction log resilience**: ACID guarantees, checkpoint recovery, safe cleanup
-✅ **Storage layer resilience**: S3 retry logic, partial download cleanup, upload failure recovery
+✅ **Storage layer resilience**: S3/Azure retry logic, partial download cleanup, upload failure recovery
 ✅ **Merge resilience**: Skipped files tracking, null indexUID handling, partial completion
 ✅ **Query resilience**: Missing file handling, schema mismatch detection, fallback to Spark
 ✅ **Cache resilience**: Corruption detection, LRU eviction, locality recovery
@@ -307,6 +313,7 @@ IndexTables4Spark ensures production reliability through:
 ✅ **Comprehensive monitoring**: Error logging, metrics, health checks
 ✅ **Graceful degradation**: Performance degrades but correctness preserved
 ✅ **Clear error messages**: User-friendly diagnostics for all failure modes
+✅ **Multi-cloud support**: AWS S3 and Azure Blob Storage with OAuth refresh
 
 **Key Resilience Features**:
 - **Automatic retry mechanisms** with exponential backoff

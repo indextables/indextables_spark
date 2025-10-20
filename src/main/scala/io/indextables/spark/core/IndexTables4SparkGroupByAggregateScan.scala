@@ -61,13 +61,13 @@ class IndexTables4SparkGroupByAggregateScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateScan])
 
-  println(s"🔍 GROUP BY AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
-  pushedFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: Filter: $f"))
-  indexQueryFilters.foreach(f => println(s"🔍 GROUP BY AGGREGATE SCAN: IndexQuery Filter: $f"))
+  logger.debug(s"🔍 GROUP BY AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
+  pushedFilters.foreach(f => logger.debug(s"🔍 GROUP BY AGGREGATE SCAN: Filter: $f"))
+  indexQueryFilters.foreach(f => logger.debug(s"🔍 GROUP BY AGGREGATE SCAN: IndexQuery Filter: $f"))
 
   override def readSchema(): StructType = {
     val resultSchema = createGroupBySchema(aggregation, groupByColumns)
-    println(s"🔍 GROUP BY readSchema(): Returning schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
+    logger.debug(s"🔍 GROUP BY readSchema(): Returning schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
     resultSchema
   }
 
@@ -82,7 +82,7 @@ class IndexTables4SparkGroupByAggregateScan(
       logger.debug("Updated broadcast locality information for GROUP BY aggregate partition planning")
     } catch {
       case ex: Exception =>
-        println(s"❌ [DRIVER-GROUP-BY-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn(s"❌ [DRIVER-GROUP-BY-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information for GROUP BY aggregate", ex)
     }
 
@@ -109,7 +109,7 @@ class IndexTables4SparkGroupByAggregateScan(
   private def createGroupBySchema(aggregation: Aggregation, groupByColumns: Array[String]): StructType = {
     import org.apache.spark.sql.connector.expressions.aggregate._
 
-    logger.info(s"🔍 GROUP BY SCHEMA: Creating schema for GROUP BY on columns: ${groupByColumns.mkString(", ")}")
+    logger.debug(s"🔍 GROUP BY SCHEMA: Creating schema for GROUP BY on columns: ${groupByColumns.mkString(", ")}")
 
     // Start with GROUP BY columns
     logger.info(
@@ -124,11 +124,11 @@ class IndexTables4SparkGroupByAggregateScan(
       // Find the column type from the original schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>
-          logger.info(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}, naming as group_col_$index")
+          logger.debug(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}, naming as group_col_$index")
           StructField(s"group_col_$index", field.dataType, field.nullable)
         case None =>
           // Fallback to string type
-          logger.error(s"🔍 GROUP BY SCHEMA: Field '$columnName' NOT FOUND in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
+          logger.warn(s"🔍 GROUP BY SCHEMA: Field in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
           StructField(s"group_col_$index", StringType, nullable = true)
       }
     }
@@ -173,7 +173,7 @@ class IndexTables4SparkGroupByAggregateScan(
     }
 
     val resultSchema = StructType(groupByFields ++ aggregationFields)
-    logger.info(s"🔍 GROUP BY SCHEMA: Created schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
+    logger.debug(s"🔍 GROUP BY SCHEMA: Created schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
     resultSchema
   }
 
@@ -262,14 +262,14 @@ class IndexTables4SparkGroupByAggregateBatch(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateBatch])
 
-  println(s"🔍 GROUP BY BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"🔍 GROUP BY BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
 
   override def planInputPartitions(): Array[InputPartition] = {
-    logger.info(s"🔍 GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
+    logger.debug(s"🔍 GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
     // Get all splits from transaction log
     val allSplits = transactionLog.listFiles()
-    logger.info(s"🔍 GROUP BY BATCH: Found ${allSplits.length} total splits")
+    logger.debug(s"🔍 GROUP BY BATCH: Found ${allSplits.length} total splits")
 
     // Apply data skipping using the same logic as simple aggregate scan
     // Use the full table schema to ensure proper field type detection for data skipping
@@ -284,7 +284,7 @@ class IndexTables4SparkGroupByAggregateBatch(
       indexQueryFilters
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
-    logger.info(s"🔍 GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
+    logger.debug(s"🔍 GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
 
     // Create one partition per filtered split for distributed GROUP BY processing
     filteredSplits.map { split =>
@@ -302,7 +302,7 @@ class IndexTables4SparkGroupByAggregateBatch(
   }
 
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {
-    logger.info(s"🔍 GROUP BY BATCH: Creating reader factory for GROUP BY aggregation")
+    logger.debug(s"🔍 GROUP BY BATCH: Creating reader factory for GROUP BY aggregation")
 
     new IndexTables4SparkGroupByAggregateReaderFactory(
       sparkSession,
@@ -330,11 +330,11 @@ class IndexTables4SparkGroupByAggregatePartition(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregatePartition])
 
-  logger.info(s"🔍 GROUP BY PARTITION: Created partition for split: ${split.path}")
-  logger.info(s"🔍 GROUP BY PARTITION: Table path: $tablePath")
-  logger.info(s"🔍 GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
-  logger.info(s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
-  logger.info(s"🔍 GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
+  logger.debug(s"🔍 GROUP BY PARTITION: Created partition for split: ${split.path}")
+  logger.debug(s"🔍 GROUP BY PARTITION: Table path: $tablePath")
+  logger.debug(s"🔍 GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
+  logger.debug(s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
+  logger.debug(s"🔍 GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
    * Provide preferred locations for this GROUP BY aggregate partition based on split cache locality. Uses the same
@@ -378,13 +378,13 @@ class IndexTables4SparkGroupByAggregateReaderFactory(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateReaderFactory])
 
-  logger.info(s"🔍 GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"🔍 GROUP BY READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
       case groupByPartition: IndexTables4SparkGroupByAggregatePartition =>
-        logger.info(s"🔍 GROUP BY READER FACTORY: Creating reader for GROUP BY partition")
+        logger.debug(s"🔍 GROUP BY READER FACTORY: Creating reader for GROUP BY partition")
 
         new IndexTables4SparkGroupByAggregateReader(
           groupByPartition,
@@ -435,20 +435,20 @@ class IndexTables4SparkGroupByAggregateReader(
     groupByResults.next()
 
   override def close(): Unit =
-    logger.info(s"🔍 GROUP BY READER: Closing GROUP BY reader")
+    logger.debug(s"🔍 GROUP BY READER: Closing GROUP BY reader")
 
   /** Initialize the GROUP BY aggregation by executing terms aggregation via tantivy4java. */
   private def initialize(): Unit = {
-    logger.info(s"🔍 GROUP BY READER: Initializing GROUP BY aggregation for split: ${partition.split.path}")
+    logger.debug(s"🔍 GROUP BY READER: Initializing GROUP BY aggregation for split: ${partition.split.path}")
 
     try {
       // Execute GROUP BY aggregation using tantivy4java
       val results = executeGroupByAggregation()
       groupByResults = results.iterator
-      logger.info(s"🔍 GROUP BY READER: GROUP BY aggregation completed with ${results.length} groups")
+      logger.debug(s"🔍 GROUP BY READER: GROUP BY aggregation completed with ${results.length} groups")
     } catch {
       case e: Exception =>
-        logger.error(s"🔍 GROUP BY READER: Failed to execute GROUP BY aggregation", e)
+        logger.warn(s"🔍 GROUP BY READER: Failed to execute GROUP BY aggregation", e)
         // Return empty results on failure
         groupByResults = Iterator.empty
     }
@@ -470,16 +470,16 @@ class IndexTables4SparkGroupByAggregateReader(
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
-    logger.info(s"🔍 GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}")
-    logger.info(s"🔍 GROUP BY EXECUTION: Split path: ${partition.split.path}")
-    logger.info(s"🔍 GROUP BY EXECUTION: Aggregation expressions: ${partition.aggregation.aggregateExpressions.length}")
+    logger.debug(s"🔍 GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}")
+    logger.debug(s"🔍 GROUP BY EXECUTION: Split path: ${partition.split.path}")
+    logger.debug(s"🔍 GROUP BY EXECUTION: Aggregation expressions: ${partition.aggregation.aggregateExpressions.length}")
 
     try {
       // Create cache configuration from broadcast config
       val splitCacheConfig = createCacheConfig()
       val cacheManager     = SplitCacheManager.getInstance(splitCacheConfig.toJavaCacheConfig())
 
-      logger.info(s"🔍 GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
+      logger.debug(s"🔍 GROUP BY EXECUTION: Creating searcher for split: ${partition.split.path}")
 
       // Resolve relative path from AddAction against table path using utility
       val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
@@ -487,10 +487,10 @@ class IndexTables4SparkGroupByAggregateReader(
         partition.tablePath.toString
       )
 
-      // Convert s3a:// to s3:// for tantivy4java compatibility
+      // Normalize s3a:// to s3:// for tantivy4java compatibility
       val splitPath = resolvedPath.replace("s3a://", "s3://")
 
-      logger.info(s"🔍 GROUP BY EXECUTION: Resolved split path: $splitPath")
+      logger.debug(s"🔍 GROUP BY EXECUTION: Resolved split path: $splitPath")
 
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
@@ -504,7 +504,7 @@ class IndexTables4SparkGroupByAggregateReader(
           splitCacheConfig
         )
 
-      logger.info(s"🔍 GROUP BY EXECUTION: SplitSearchEngine created successfully")
+      logger.debug(s"🔍 GROUP BY EXECUTION: SplitSearchEngine created successfully")
 
       // Get the searcher from the engine
       val searcher = cacheManager.createSplitSearcher(splitPath, splitMetadata)
@@ -512,17 +512,17 @@ class IndexTables4SparkGroupByAggregateReader(
       // Support both single and multi-column GROUP BY
       if (partition.groupByColumns.length >= 1) {
         val groupByColumns = partition.groupByColumns
-        logger.info(s"🔍 GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
+        logger.debug(s"🔍 GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
 
         val (termsAgg, isMultiDimensional) = if (groupByColumns.length == 1) {
           // Single column GROUP BY - use field directly
           val groupByColumn = groupByColumns(0)
-          logger.info(s"🔍 GROUP BY EXECUTION: Single-dimensional GROUP BY on '$groupByColumn'")
+          logger.debug(s"🔍 GROUP BY EXECUTION: Single-dimensional GROUP BY on '$groupByColumn'")
           (new TermsAggregation("group_by_terms", groupByColumn, 1000, 0), false)
         } else {
           // Multi-column GROUP BY - use new MultiTermsAggregation
-          logger.info(s"🔍 GROUP BY EXECUTION: Multi-dimensional GROUP BY on ${groupByColumns.length} fields: ${groupByColumns.mkString(", ")}")
-          logger.info(s"🔍 GROUP BY EXECUTION: Using native MultiTermsAggregation")
+          logger.debug(s"🔍 GROUP BY EXECUTION: Multi-dimensional GROUP BY on ${groupByColumns.length} fields: ${groupByColumns.mkString(", ")}")
+          logger.debug(s"🔍 GROUP BY EXECUTION: Using native MultiTermsAggregation")
 
           // Create MultiTermsAggregation with the field array
           val multiTermsAgg =
@@ -533,7 +533,7 @@ class IndexTables4SparkGroupByAggregateReader(
           (multiTermsAgg, true)
         }
 
-        logger.info(s"🔍 GROUP BY EXECUTION: Using TermsAggregation for GROUP BY with ${partition.aggregation.aggregateExpressions.length} aggregations")
+        logger.debug(s"🔍 GROUP BY EXECUTION: Using TermsAggregation for GROUP BY with ${partition.aggregation.aggregateExpressions.length} aggregations")
 
         // Add sub-aggregations for each metric aggregation using the new API
         import org.apache.spark.sql.connector.expressions.aggregate._
@@ -542,11 +542,11 @@ class IndexTables4SparkGroupByAggregateReader(
             aggExpr match {
               case _: Count | _: CountStar =>
                 // COUNT is handled via bucket doc count - no sub-aggregation needed
-                logger.info(s"🔍 GROUP BY EXECUTION: COUNT aggregation at index $index will use bucket doc count")
+                logger.debug(s"🔍 GROUP BY EXECUTION: COUNT aggregation at index $index will use bucket doc count")
 
               case sum: Sum =>
                 val fieldName = getFieldName(sum.column)
-                logger.info(s"🔍 GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
+                logger.debug(s"🔍 GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
                     terms.addSubAggregation(
@@ -571,7 +571,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
               case min: Min =>
                 val fieldName = getFieldName(min.column)
-                logger.info(s"🔍 GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
+                logger.debug(s"🔍 GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
                     terms.addSubAggregation(
@@ -587,7 +587,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
               case max: Max =>
                 val fieldName = getFieldName(max.column)
-                logger.info(s"🔍 GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
+                logger.debug(s"🔍 GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
                 termsAgg match {
                   case terms: TermsAggregation =>
                     terms.addSubAggregation(
@@ -607,15 +607,15 @@ class IndexTables4SparkGroupByAggregateReader(
         }
 
         // Merge IndexQuery filters with pushed filters
-        logger.info(s"🔍 GROUP BY EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
-        partition.pushedFilters.foreach(f => logger.info(s"🔍 GROUP BY EXECUTION: Pushed Filter: $f"))
-        partition.indexQueryFilters.foreach(f => logger.info(s"🔍 GROUP BY EXECUTION: IndexQuery Filter: $f"))
+        logger.debug(s"🔍 GROUP BY EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
+        partition.pushedFilters.foreach(f => logger.debug(s"🔍 GROUP BY EXECUTION: Pushed Filter: $f"))
+        partition.indexQueryFilters.foreach(f => logger.debug(s"🔍 GROUP BY EXECUTION: IndexQuery Filter: $f"))
 
         // Combine pushed filters and IndexQuery filters
         val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
 
         val query = if (allFilters.nonEmpty) {
-          logger.info(s"🔍 GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
+          logger.debug(s"🔍 GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
 
           // Get the split field names for schema validation
           val splitFieldNames =
@@ -625,12 +625,12 @@ class IndexTables4SparkGroupByAggregateReader(
               if (schema != null) {
                 Some(schema.getFieldNames().asScala.toSet)
               } else {
-                logger.debug(s"🔍 GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
+                logger.warn(s"🔍 GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
                 None
               }
             } catch {
               case e: Exception =>
-                logger.debug(s"🔍 GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
+                logger.warn(s"🔍 GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
                 None
             }
 
@@ -645,19 +645,19 @@ class IndexTables4SparkGroupByAggregateReader(
             splitFieldNames,
             Some(optionsFromBroadcast)
           )
-          logger.info(s"🔍 GROUP BY EXECUTION: Converted filters to query: ${convertedQuery.getClass.getSimpleName}")
+          logger.debug(s"🔍 GROUP BY EXECUTION: Converted filters to query: ${convertedQuery.getClass.getSimpleName}")
           convertedQuery
         } else {
-          logger.info(s"🔍 GROUP BY EXECUTION: No filters, using match-all query")
+          logger.debug(s"🔍 GROUP BY EXECUTION: No filters, using match-all query")
           new SplitMatchAllQuery()
         }
 
-        logger.info(s"🔍 GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
+        logger.debug(s"🔍 GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
 
         val result = searcher.search(query, 0, "group_by_terms", termsAgg)
 
         if (result.hasAggregations()) {
-          logger.info(s"🔍 GROUP BY EXECUTION: TermsAggregation completed successfully")
+          logger.debug(s"🔍 GROUP BY EXECUTION: TermsAggregation completed successfully")
 
           // Debug: Try to get available aggregation names
           try {
@@ -667,7 +667,7 @@ class IndexTables4SparkGroupByAggregateReader(
             )
           } catch {
             case e: Exception =>
-              logger.info(s"🔍 GROUP BY EXECUTION: Error checking agg_X names: ${e.getMessage}")
+              logger.warn(s"🔍 GROUP BY EXECUTION: Error checking agg_X names: ${e.getMessage}")
           }
 
           // Try the standard name first, then fallback
@@ -678,13 +678,13 @@ class IndexTables4SparkGroupByAggregateReader(
           }
 
           if (aggregationResult == null) {
-            logger.error(s"🔍 GROUP BY EXECUTION: No aggregation result found for 'agg_0' or 'group_by_terms'")
+            logger.debug(s"🔍 GROUP BY EXECUTION: No aggregation result found for 'agg_0' or 'group_by_terms'")
             return Array.empty[InternalRow]
           }
 
           if (isMultiDimensional) {
             // Handle MultiTermsResult for multi-dimensional GROUP BY
-            logger.info(s"🔍 GROUP BY EXECUTION: Processing MultiTermsResult for multi-dimensional GROUP BY")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Processing MultiTermsResult for multi-dimensional GROUP BY")
 
             // The aggregationResult is a TermsResult containing the nested structure
             // We need to wrap it in a MultiTermsResult to flatten the nested buckets
@@ -694,11 +694,11 @@ class IndexTables4SparkGroupByAggregateReader(
             val multiBuckets = multiTermsResult.getBuckets
 
             if (multiBuckets == null) {
-              logger.error(s"🔍 GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
+              logger.debug(s"🔍 GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
               return Array.empty[InternalRow]
             }
 
-            logger.info(s"🔍 GROUP BY EXECUTION: Found ${multiBuckets.size()} multi-dimensional groups")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Found ${multiBuckets.size()} multi-dimensional groups")
 
             // Convert multi-dimensional buckets to InternalRow
             val rows = multiBuckets.asScala
@@ -716,20 +716,20 @@ class IndexTables4SparkGroupByAggregateReader(
                     calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
 
                   val keyString = fieldValues.mkString("|")
-                  logger.info(s"🔍 GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents")
 
                   // Combine multi-dimensional GROUP BY values with aggregation results
                   InternalRow.fromSeq(groupByValues ++ aggregationValues)
                 } catch {
                   case e: Exception =>
-                    logger.error(s"🔍 GROUP BY EXECUTION: Error processing multi-dimensional bucket: ${e.getMessage}", e)
+                    logger.warn(s"🔍 GROUP BY EXECUTION: Error processing multi-dimensional bucket: ${e.getMessage}", e)
                     // Return empty row in case of error
                     InternalRow.empty
                 }
               }
               .toArray
 
-            logger.info(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} multi-dimensional GROUP BY result rows")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} multi-dimensional GROUP BY result rows")
             rows
 
           } else {
@@ -738,11 +738,11 @@ class IndexTables4SparkGroupByAggregateReader(
             val buckets     = termsResult.getBuckets
 
             if (buckets == null) {
-              logger.error(s"🔍 GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
+              logger.debug(s"🔍 GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
               return Array.empty[InternalRow]
             }
 
-            logger.info(s"🔍 GROUP BY EXECUTION: Found ${buckets.size()} groups")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Found ${buckets.size()} groups")
 
             // Convert buckets to InternalRow
             val rows = buckets.asScala
@@ -753,20 +753,20 @@ class IndexTables4SparkGroupByAggregateReader(
                   val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
 
                   val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
-                  logger.info(s"🔍 GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
+                  logger.debug(s"🔍 GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
 
                   // Combine GROUP BY value with aggregation results
                   InternalRow.fromSeq(Seq(groupByValue) ++ aggregationValues)
                 } catch {
                   case e: Exception =>
-                    logger.error(s"🔍 GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
+                    logger.warn(s"🔍 GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
                     // Return empty row in case of error
                     InternalRow.empty
                 }
               }
               .toArray
 
-            logger.info(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
+            logger.debug(s"🔍 GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
             rows
           }
 
@@ -782,7 +782,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
     } catch {
       case e: Exception =>
-        logger.error(s"🔍 GROUP BY EXECUTION: Failed to execute GROUP BY aggregation", e)
+        logger.warn(s"🔍 GROUP BY EXECUTION: Failed to execute GROUP BY aggregation", e)
         throw e
     }
   }
@@ -829,12 +829,12 @@ class IndexTables4SparkGroupByAggregateReader(
           }
         } catch {
           case e: Exception =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Failed to read split metadata from: ${partition.split.path}", e)
+            logger.warn(s"🔍 GROUP BY EXECUTION: Failed to read split metadata from: ${partition.split.path}", e)
             (0L, 1024L) // Minimal fallback
         }
       }
 
-    logger.info(s"🔍 GROUP BY EXECUTION: Using footer offsets: $footerStartOffset-$footerEndOffset for split: ${partition.split.path}")
+    logger.debug(s"🔍 GROUP BY EXECUTION: Using footer offsets: $footerStartOffset-$footerEndOffset for split: ${partition.split.path}")
 
     // Create metadata with real values from the transaction log
     new QuickwitSplit.SplitMetadata(
@@ -887,13 +887,13 @@ class IndexTables4SparkGroupByAggregateReader(
     import org.apache.spark.unsafe.types.UTF8String
 
     if (bucket == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: Bucket is null for field $fieldName")
+      logger.warn(s"🔍 GROUP BY EXECUTION: Bucket is null for field $fieldName")
       return UTF8String.fromString("")
     }
 
     val keyAsString = bucket.getKeyAsString
     if (keyAsString == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: Bucket key is null for field $fieldName")
+      logger.warn(s"🔍 GROUP BY EXECUTION: Bucket key is null for field $fieldName")
       return UTF8String.fromString("")
     }
 
@@ -908,7 +908,7 @@ class IndexTables4SparkGroupByAggregateReader(
           keyAsString.toInt
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Int: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Int: ${e.getMessage}")
             0
         }
       case Some(org.apache.spark.sql.types.LongType) =>
@@ -916,7 +916,7 @@ class IndexTables4SparkGroupByAggregateReader(
           keyAsString.toLong
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Long: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Long: ${e.getMessage}")
             0L
         }
       case Some(org.apache.spark.sql.types.FloatType) =>
@@ -924,7 +924,7 @@ class IndexTables4SparkGroupByAggregateReader(
           keyAsString.toFloat
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Float: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Float: ${e.getMessage}")
             0.0f
         }
       case Some(org.apache.spark.sql.types.DoubleType) =>
@@ -932,7 +932,7 @@ class IndexTables4SparkGroupByAggregateReader(
           keyAsString.toDouble
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Double: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$keyAsString' to Double: ${e.getMessage}")
             0.0
         }
       case _ =>
@@ -951,18 +951,18 @@ class IndexTables4SparkGroupByAggregateReader(
     import org.apache.spark.sql.connector.expressions.aggregate._
 
     if (bucket == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: Bucket is null in calculateAggregationValues")
+      logger.warn(s"🔍 GROUP BY EXECUTION: Bucket is null in calculateAggregationValues")
       return Array(0L)
     }
 
     if (aggregation == null || aggregation.aggregateExpressions == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: Aggregation or aggregateExpressions is null")
+      logger.warn(s"🔍 GROUP BY EXECUTION: Aggregation or aggregateExpressions is null")
       return Array(0L)
     }
 
     aggregation.aggregateExpressions.map { aggExpr =>
       if (aggExpr == null) {
-        logger.error(s"🔍 GROUP BY EXECUTION: Aggregate expression is null")
+        logger.warn(s"🔍 GROUP BY EXECUTION: Aggregate expression is null")
         0L
       } else {
         aggExpr match {
@@ -995,7 +995,7 @@ class IndexTables4SparkGroupByAggregateReader(
           value.toInt
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Int: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Int: ${e.getMessage}")
             0
         }
       case LongType =>
@@ -1003,7 +1003,7 @@ class IndexTables4SparkGroupByAggregateReader(
           value.toLong
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Long: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Long: ${e.getMessage}")
             0L
         }
       case FloatType =>
@@ -1011,7 +1011,7 @@ class IndexTables4SparkGroupByAggregateReader(
           value.toFloat
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Float: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Float: ${e.getMessage}")
             0.0f
         }
       case DoubleType =>
@@ -1019,7 +1019,7 @@ class IndexTables4SparkGroupByAggregateReader(
           value.toDouble
         catch {
           case e: NumberFormatException =>
-            logger.error(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Double: ${e.getMessage}")
+            logger.warn(s"🔍 GROUP BY EXECUTION: Cannot convert '$value' to Double: ${e.getMessage}")
             0.0
         }
       case _ => UTF8String.fromString(value)
@@ -1080,14 +1080,14 @@ class IndexTables4SparkGroupByAggregateReader(
     import org.apache.spark.sql.connector.expressions.aggregate._
 
     if (multiBucket == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: MultiTermsBucket is null in calculateAggregationValuesFromMultiTermsBucket")
+      logger.warn(s"🔍 GROUP BY EXECUTION: MultiTermsBucket is null in calculateAggregationValuesFromMultiTermsBucket")
       return Array(0L)
     }
 
     aggregation.aggregateExpressions.zipWithIndex.map {
       case (aggExpr, index) =>
         if (aggExpr == null) {
-          logger.error(s"🔍 GROUP BY EXECUTION: Aggregate expression is null at index $index")
+          logger.warn(s"🔍 GROUP BY EXECUTION: Aggregate expression is null at index $index")
           0L
         } else {
           aggExpr match {
@@ -1113,12 +1113,12 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
                   java.lang.Long.valueOf(0L)
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
                   java.lang.Long.valueOf(0L)
               }
 
@@ -1152,12 +1152,12 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
                   java.lang.Double.valueOf(0.0)
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
                   java.lang.Double.valueOf(0.0)
               }
 
@@ -1183,12 +1183,12 @@ class IndexTables4SparkGroupByAggregateReader(
                   }
                   result
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
                   java.lang.Double.valueOf(0.0)
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
                   java.lang.Double.valueOf(0.0)
               }
 
@@ -1208,14 +1208,14 @@ class IndexTables4SparkGroupByAggregateReader(
     import org.apache.spark.sql.connector.expressions.aggregate._
 
     if (bucket == null) {
-      logger.error(s"🔍 GROUP BY EXECUTION: Bucket is null in calculateAggregationValuesFromSubAggregations")
+      logger.warn(s"🔍 GROUP BY EXECUTION: Bucket is null in calculateAggregationValuesFromSubAggregations")
       return Array(0L)
     }
 
     aggregation.aggregateExpressions.zipWithIndex.map {
       case (aggExpr, index) =>
         if (aggExpr == null) {
-          logger.error(s"🔍 GROUP BY EXECUTION: Aggregate expression is null at index $index")
+          logger.warn(s"🔍 GROUP BY EXECUTION: Aggregate expression is null at index $index")
           0L
         } else {
           aggExpr match {
@@ -1243,12 +1243,12 @@ class IndexTables4SparkGroupByAggregateReader(
                       sumResult.getSum.toDouble
                   }
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: SUM sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
                   0L
               }
 
@@ -1282,12 +1282,12 @@ class IndexTables4SparkGroupByAggregateReader(
                       minResult.getMin.toDouble
                   }
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: MIN sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
                   0L
               }
 
@@ -1313,12 +1313,12 @@ class IndexTables4SparkGroupByAggregateReader(
                       maxResult.getMax.toDouble
                   }
                 } else {
-                  logger.debug(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: MAX sub-aggregation result is null for index $index")
                   0L
                 }
               } catch {
                 case e: Exception =>
-                  logger.error(s"🔍 GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(s"🔍 GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
                   0L
               }
 
@@ -1336,7 +1336,7 @@ class IndexTables4SparkGroupByAggregateReader(
     if (column.getClass.getSimpleName == "FieldReference") {
       // For FieldReference, toString() returns the field name directly
       val fieldName = column.toString
-      logger.info(s"🔍 FIELD EXTRACTION: Successfully extracted field name '$fieldName' from FieldReference")
+      logger.debug(s"🔍 FIELD EXTRACTION: Successfully extracted field name '$fieldName' from FieldReference")
       fieldName
     } else {
       // Fallback to the existing method

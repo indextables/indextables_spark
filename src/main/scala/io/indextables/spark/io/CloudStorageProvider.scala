@@ -128,6 +128,10 @@ case class CloudStorageConfig(
   azureAccountName: Option[String] = None,
   azureAccountKey: Option[String] = None,
   azureConnectionString: Option[String] = None,
+  azureBearerToken: Option[String] = None,
+  azureTenantId: Option[String] = None,
+  azureClientId: Option[String] = None,
+  azureClientSecret: Option[String] = None,
   azureEndpoint: Option[String] = None,
   azureContainerName: Option[String] = None,
 
@@ -177,7 +181,7 @@ object CloudStorageProviderFactory {
     // For cloud storage, extract configuration from both options and Hadoop/Spark config
     // Also try to get configuration from Spark session if available
     val enrichedHadoopConf = enrichHadoopConfWithSparkConf(hadoopConf)
-    val config             = extractCloudConfig(options, enrichedHadoopConf)
+    val config             = extractCloudConfig(options, enrichedHadoopConf, protocol)
 
     logger.info(s"Creating ${ProtocolBasedIOFactory.protocolName(protocol)} storage provider for path: $path")
 
@@ -189,6 +193,10 @@ object CloudStorageProviderFactory {
             .getOrElse("None")}, secretKey: ${config.awsSecretKey.map(_ => "***").getOrElse("None")}")
         logger.info(s"S3 custom provider - class: ${config.awsCredentialsProviderClass.getOrElse("None")}")
         new S3CloudStorageProvider(config, enrichedHadoopConf, path)
+      case ProtocolBasedIOFactory.AzureProtocol =>
+        logger.info(s"Azure config - endpoint: ${config.azureEndpoint}, accountName: ${config.azureAccountName.getOrElse("None")}")
+        logger.info(s"Azure credentials - accountKey: ${config.azureAccountKey.map(_ => "***").getOrElse("None")}, connectionString: ${config.azureConnectionString.map(_ => "***").getOrElse("None")}")
+        new AzureCloudStorageProvider(config, enrichedHadoopConf, path)
       case ProtocolBasedIOFactory.HDFSProtocol | ProtocolBasedIOFactory.FileProtocol |
           ProtocolBasedIOFactory.LocalProtocol =>
         new HadoopCloudStorageProvider(hadoopConf)
@@ -292,7 +300,7 @@ object CloudStorageProviderFactory {
     }
 
   /** Extract cloud storage configuration from Spark options and Hadoop config */
-  def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration): CloudStorageConfig = {
+  def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration, protocol: ProtocolBasedIOFactory.StorageProtocol): CloudStorageConfig = {
     // Debug logging for configuration extraction
     logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Extracting cloud config from options:")
     options.entrySet().asScala.foreach { entry =>
@@ -371,8 +379,9 @@ object CloudStorageProviderFactory {
       )
     }
 
-    // If credentials are still missing and we're in an executor context, log a warning
-    if (finalAccessKey.isEmpty || finalSecretKey.isEmpty) {
+    // If credentials are still missing and we're using S3 protocol, log a warning
+    // Only warn about AWS credentials when actually using S3 - not for Azure or other providers
+    if ((finalAccessKey.isEmpty || finalSecretKey.isEmpty) && protocol == ProtocolBasedIOFactory.S3Protocol) {
       logger.warn("AWS credentials not found in configuration. S3CloudStorageProvider will fall back to DefaultCredentialsProvider.")
       logger.warn("This usually happens in Spark executor context where SparkSession is not available.")
       // Keep the important warnings visible
@@ -414,7 +423,8 @@ object CloudStorageProviderFactory {
         logger.info(s"  - From environment variables: $regionFromAwsEnv")
         logger.info(s"  - Final region: $finalRegion")
 
-        if (finalRegion.isEmpty) {
+        // Only warn about AWS region when actually using S3 - not for Azure or other providers
+        if (finalRegion.isEmpty && protocol == ProtocolBasedIOFactory.S3Protocol) {
           logger.warn("No AWS region configured! S3CloudStorageProvider will use AWS SDK default region resolution")
           logger.warn("This may cause S3 307 redirect errors if the bucket is in a different region")
         }
@@ -486,12 +496,30 @@ object CloudStorageProviderFactory {
         finalPathStyle
       },
 
-      // Azure configuration
-      azureAccountName = Option(options.get("spark.indextables.azure.accountName")),
-      azureAccountKey = Option(options.get("spark.indextables.azure.accountKey")),
-      azureConnectionString = Option(options.get("spark.indextables.azure.connectionString")),
-      azureEndpoint = Option(options.get("spark.indextables.azure.endpoint")),
-      azureContainerName = Option(options.get("spark.indextables.azure.containerName")),
+      // Azure configuration - prioritize DataFrame options, then Spark conf, then Hadoop config, then environment variables
+      azureAccountName = Option(options.get("spark.indextables.azure.accountName"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.accountName")))
+        .orElse(Option(System.getenv("AZURE_STORAGE_ACCOUNT"))),
+      azureAccountKey = Option(options.get("spark.indextables.azure.accountKey"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.accountKey")))
+        .orElse(Option(System.getenv("AZURE_STORAGE_KEY"))),
+      azureConnectionString = Option(options.get("spark.indextables.azure.connectionString"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.connectionString"))),
+      azureBearerToken = Option(options.get("spark.indextables.azure.bearerToken"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.bearerToken"))),
+      azureTenantId = Option(options.get("spark.indextables.azure.tenantId"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.tenantId")))
+        .orElse(Option(System.getenv("AZURE_TENANT_ID"))),
+      azureClientId = Option(options.get("spark.indextables.azure.clientId"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.clientId")))
+        .orElse(Option(System.getenv("AZURE_CLIENT_ID"))),
+      azureClientSecret = Option(options.get("spark.indextables.azure.clientSecret"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.clientSecret")))
+        .orElse(Option(System.getenv("AZURE_CLIENT_SECRET"))),
+      azureEndpoint = Option(options.get("spark.indextables.azure.endpoint"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.endpoint"))),
+      azureContainerName = Option(options.get("spark.indextables.azure.containerName"))
+        .orElse(Option(hadoopConf.get("spark.indextables.azure.containerName"))),
 
       // GCP configuration
       gcpProjectId = Option(options.get("spark.indextables.gcp.projectId")),
@@ -524,43 +552,73 @@ object CloudStorageProviderFactory {
 
   /**
    * Static method to normalize a path for tantivy4java compatibility without creating a provider instance. This applies
-   * protocol normalization (s3a:// -> s3://) and S3Mock path flattening if needed.
+   * protocol normalization:
+   * - S3: s3a:// and s3n:// -> s3://
+   * - Azure: wasb://, wasbs://, abfs://, abfss:// -> azure://
+   * - S3Mock: applies path flattening if needed
    */
   def normalizePathForTantivy(
     path: String,
     options: CaseInsensitiveStringMap,
     hadoopConf: Configuration
   ): String = {
-    // First normalize protocol (s3a:// -> s3://)
+    // First normalize protocol
     val protocolNormalized = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
+      // S3: s3a:// and s3n:// -> s3://
       path.replaceFirst("^s3[an]://", "s3://")
+    } else if (path.startsWith("wasb://") || path.startsWith("wasbs://") ||
+               path.startsWith("abfs://") || path.startsWith("abfss://")) {
+      // Azure: Normalize Spark Azure URL schemes to tantivy4java's azure:// format
+      // abfss://container@account.dfs.core.windows.net/path -> azure://container/path
+      import java.net.URI
+      val uri = new URI(path)
+
+      // Extract container and path from Spark Azure URL format
+      val (container, blobPath) = if (uri.getUserInfo != null) {
+        // Format: wasb://container@account.blob.core.windows.net/path
+        // or:     abfss://container@account.dfs.core.windows.net/path
+        val containerName = uri.getUserInfo // "container"
+        val pathPart = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
+        (containerName, pathPart)
+      } else {
+        // Fallback: assume container is in host and path is as-is
+        val containerName = uri.getHost
+        val pathPart = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
+        (containerName, pathPart)
+      }
+
+      s"azure://$container/$blobPath"
     } else {
       path
     }
 
-    // Check if we're in S3Mock mode by looking at the endpoint
-    val endpointValue = Option(options.get("spark.indextables.s3.endpoint"))
-      .orElse(Option(options.get("spark.indextables.aws.endpoint")))
-      .orElse(Option(hadoopConf.get("spark.indextables.s3.endpoint")))
-      .orElse(Option(hadoopConf.get("spark.indextables.aws.endpoint")))
-      .orElse(Option(hadoopConf.get("fs.s3a.endpoint")))
+    // Check if we're in S3Mock mode by looking at the endpoint (only applies to S3 paths)
+    if (protocolNormalized.startsWith("s3://")) {
+      val endpointValue = Option(options.get("spark.indextables.s3.endpoint"))
+        .orElse(Option(options.get("spark.indextables.aws.endpoint")))
+        .orElse(Option(hadoopConf.get("spark.indextables.s3.endpoint")))
+        .orElse(Option(hadoopConf.get("spark.indextables.aws.endpoint")))
+        .orElse(Option(hadoopConf.get("fs.s3a.endpoint")))
 
-    val isS3Mock = endpointValue.exists(endpoint => endpoint.contains("localhost") || endpoint.contains("127.0.0.1"))
+      val isS3Mock = endpointValue.exists(endpoint => endpoint.contains("localhost") || endpoint.contains("127.0.0.1"))
 
-    // Apply S3Mock path flattening if needed
-    if (isS3Mock && protocolNormalized.startsWith("s3://")) {
-      val uri    = java.net.URI.create(protocolNormalized)
-      val bucket = uri.getHost
-      val key    = uri.getPath.stripPrefix("/")
+      // Apply S3Mock path flattening if needed
+      if (isS3Mock) {
+        val uri    = java.net.URI.create(protocolNormalized)
+        val bucket = uri.getHost
+        val key    = uri.getPath.stripPrefix("/")
 
-      // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
-      val flattenedKey = if (key.contains("/")) {
-        key.replace("/", "___")
+        // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
+        val flattenedKey = if (key.contains("/")) {
+          key.replace("/", "___")
+        } else {
+          key
+        }
+
+        s"s3://$bucket/$flattenedKey"
       } else {
-        key
+        protocolNormalized
       }
-
-      s"s3://$bucket/$flattenedKey"
     } else {
       protocolNormalized
     }
