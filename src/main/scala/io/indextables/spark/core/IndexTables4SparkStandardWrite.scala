@@ -243,10 +243,9 @@ class IndexTables4SparkStandardWrite(
       }
 
       logger.info(s"Successfully committed ${addActions.length} files")
-    } finally {
+    } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
-    }
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {

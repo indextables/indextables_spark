@@ -31,8 +31,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
-import io.indextables.spark.util.JsonUtil
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
+import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
 /**
@@ -629,7 +629,7 @@ class OptimizedTransactionLog(
       val rawBytes = cloudProvider.readFile(versionFilePath)
       // Decompress if needed (handles both compressed and uncompressed files)
       val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-      val content = new String(decompressedBytes, "UTF-8")
+      val content           = new String(decompressedBytes, "UTF-8")
       logger.debug(s" Read version $version content: '${content.take(100)}...' (${content.length} chars)")
       val actions = parseActionsFromContent(content)
       logger.debug(s" Parsed ${actions.size} actions from version $version")
@@ -677,20 +677,21 @@ class OptimizedTransactionLog(
     writeActions(version, Seq(action))
 
   /**
-   * Get the compression codec based on configuration.
-   * Checks thread-local options first (from write operation), then falls back to table options.
+   * Get the compression codec based on configuration. Checks thread-local options first (from write operation), then
+   * falls back to table options.
    */
   private def getCompressionCodec(): Option[CompressionCodec] = {
     // Get compression config with priority: Thread-local options > Table options
     val effectiveOptions = TransactionLog.getWriteOptions().getOrElse(options)
 
     val compressionEnabled = effectiveOptions.getBoolean("spark.indextables.transaction.compression.enabled", true)
-    val compressionCodec   = Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
-    val compressionLevel   = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+    val compressionCodec =
+      Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+    val compressionLevel = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
 
-    try {
+    try
       CompressionUtils.getCodec(compressionEnabled, compressionCodec, compressionLevel)
-    } catch {
+    catch {
       case e: IllegalArgumentException =>
         logger.warn(s"Invalid compression configuration: ${e.getMessage}. Falling back to no compression.")
         None
@@ -722,7 +723,7 @@ class OptimizedTransactionLog(
     val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
 
     logger.info(
-      s"Writing ${actions.length} actions to version $version${compressionInfo}: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      s"Writing ${actions.length} actions to version $version$compressionInfo: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
     )
 
     // CRITICAL: Use conditional write to prevent overwriting transaction log files
@@ -811,20 +812,21 @@ class OptimizedTransactionLog(
     val allActions = scala.collection.mutable.ListBuffer[Action]()
 
     // Add protocol first
-    try {
+    try
       allActions += getProtocol()
-    } catch {
+    catch {
       case _: Exception => // No protocol found, skip
     }
 
     // Add metadata second
-    val metadata = try {
-      val md = getMetadata()
-      allActions += md
-      Some(md)
-    } catch {
-      case _: Exception => None // No metadata found, skip
-    }
+    val metadata =
+      try {
+        val md = getMetadata()
+        allActions += md
+        Some(md)
+      } catch {
+        case _: Exception => None // No metadata found, skip
+      }
 
     // Apply statistics truncation to add actions before adding to checkpoint
     val truncatedAddActions = applyStatisticsTruncation(addActions, metadata)
@@ -834,8 +836,8 @@ class OptimizedTransactionLog(
   }
 
   /**
-   * Apply statistics truncation to AddActions for checkpoint creation.
-   * Preserves partition column statistics while truncating data column statistics.
+   * Apply statistics truncation to AddActions for checkpoint creation. Preserves partition column statistics while
+   * truncating data column statistics.
    */
   private def applyStatisticsTruncation(
     addActions: Seq[AddAction],
@@ -845,9 +847,9 @@ class OptimizedTransactionLog(
 
     // Get configuration from Spark session and options
     import scala.jdk.CollectionConverters._
-    val sparkConf = spark.conf.getAll
+    val sparkConf  = spark.conf.getAll
     val optionsMap = options.asCaseSensitiveMap().asScala.toMap
-    val config = sparkConf ++ optionsMap
+    val config     = sparkConf ++ optionsMap
 
     // Get partition columns to protect their statistics
     val partitionColumns = metadata.map(_.partitionColumns.toSet).getOrElse(Set.empty[String])
@@ -857,11 +859,13 @@ class OptimizedTransactionLog(
       val originalMaxValues = add.maxValues.getOrElse(Map.empty[String, String])
 
       // Separate partition column stats from data column stats
-      val (partitionMinValues, dataMinValues) = originalMinValues.partition { case (col, _) =>
-        partitionColumns.contains(col)
+      val (partitionMinValues, dataMinValues) = originalMinValues.partition {
+        case (col, _) =>
+          partitionColumns.contains(col)
       }
-      val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition { case (col, _) =>
-        partitionColumns.contains(col)
+      val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition {
+        case (col, _) =>
+          partitionColumns.contains(col)
       }
 
       // Only truncate data column statistics, not partition column statistics

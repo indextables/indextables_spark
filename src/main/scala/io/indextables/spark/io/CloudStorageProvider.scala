@@ -194,8 +194,12 @@ object CloudStorageProviderFactory {
         logger.info(s"S3 custom provider - class: ${config.awsCredentialsProviderClass.getOrElse("None")}")
         new S3CloudStorageProvider(config, enrichedHadoopConf, path)
       case ProtocolBasedIOFactory.AzureProtocol =>
-        logger.info(s"Azure config - endpoint: ${config.azureEndpoint}, accountName: ${config.azureAccountName.getOrElse("None")}")
-        logger.info(s"Azure credentials - accountKey: ${config.azureAccountKey.map(_ => "***").getOrElse("None")}, connectionString: ${config.azureConnectionString.map(_ => "***").getOrElse("None")}")
+        logger.info(
+          s"Azure config - endpoint: ${config.azureEndpoint}, accountName: ${config.azureAccountName.getOrElse("None")}"
+        )
+        logger.info(s"Azure credentials - accountKey: ${config.azureAccountKey
+            .map(_ => "***")
+            .getOrElse("None")}, connectionString: ${config.azureConnectionString.map(_ => "***").getOrElse("None")}")
         new AzureCloudStorageProvider(config, enrichedHadoopConf, path)
       case ProtocolBasedIOFactory.HDFSProtocol | ProtocolBasedIOFactory.FileProtocol |
           ProtocolBasedIOFactory.LocalProtocol =>
@@ -300,7 +304,11 @@ object CloudStorageProviderFactory {
     }
 
   /** Extract cloud storage configuration from Spark options and Hadoop config */
-  def extractCloudConfig(options: CaseInsensitiveStringMap, hadoopConf: Configuration, protocol: ProtocolBasedIOFactory.StorageProtocol): CloudStorageConfig = {
+  def extractCloudConfig(
+    options: CaseInsensitiveStringMap,
+    hadoopConf: Configuration,
+    protocol: ProtocolBasedIOFactory.StorageProtocol
+  ): CloudStorageConfig = {
     // Debug logging for configuration extraction
     logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Extracting cloud config from options:")
     options.entrySet().asScala.foreach { entry =>
@@ -553,9 +561,9 @@ object CloudStorageProviderFactory {
   /**
    * Static method to normalize a path for tantivy4java compatibility without creating a provider instance. This applies
    * protocol normalization:
-   * - S3: s3a:// and s3n:// -> s3://
-   * - Azure: wasb://, wasbs://, abfs://, abfss:// -> azure://
-   * - S3Mock: applies path flattening if needed
+   *   - S3: s3a:// and s3n:// -> s3://
+   *   - Azure: wasb://, wasbs://, abfs://, abfss:// -> azure://
+   *   - S3Mock: applies path flattening if needed
    */
   def normalizePathForTantivy(
     path: String,
@@ -566,8 +574,10 @@ object CloudStorageProviderFactory {
     val protocolNormalized = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
       // S3: s3a:// and s3n:// -> s3://
       path.replaceFirst("^s3[an]://", "s3://")
-    } else if (path.startsWith("wasb://") || path.startsWith("wasbs://") ||
-               path.startsWith("abfs://") || path.startsWith("abfss://")) {
+    } else if (
+      path.startsWith("wasb://") || path.startsWith("wasbs://") ||
+      path.startsWith("abfs://") || path.startsWith("abfss://")
+    ) {
       // Azure: Normalize Spark Azure URL schemes to tantivy4java's azure:// format
       // abfss://container@account.dfs.core.windows.net/path -> azure://container/path
       import java.net.URI
@@ -578,12 +588,12 @@ object CloudStorageProviderFactory {
         // Format: wasb://container@account.blob.core.windows.net/path
         // or:     abfss://container@account.dfs.core.windows.net/path
         val containerName = uri.getUserInfo // "container"
-        val pathPart = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
+        val pathPart      = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
         (containerName, pathPart)
       } else {
         // Fallback: assume container is in host and path is as-is
         val containerName = uri.getHost
-        val pathPart = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
+        val pathPart      = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
         (containerName, pathPart)
       }
 

@@ -23,7 +23,12 @@ import org.apache.spark.sql.catalyst.parser.ParserUtils
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
-import io.indextables.spark.sql.{FlushIndexTablesCacheCommand, InvalidateTransactionLogCacheCommand, MergeSplitsCommand, RepairIndexFilesTransactionLogCommand}
+import io.indextables.spark.sql.{
+  FlushIndexTablesCacheCommand,
+  InvalidateTransactionLogCacheCommand,
+  MergeSplitsCommand,
+  RepairIndexFilesTransactionLogCommand
+}
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
 import org.slf4j.LoggerFactory

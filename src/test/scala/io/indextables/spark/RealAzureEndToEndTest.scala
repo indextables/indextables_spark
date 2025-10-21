@@ -23,27 +23,22 @@ import org.apache.spark.sql.functions._
  * Comprehensive end-to-end integration test for real Azure Blob Storage operations.
  *
  * This test validates the complete IndexTables4Spark workflow with Azure:
- * 1. Write DataFrames to Azure Blob Storage
- * 2. Read DataFrames back from Azure
- * 3. Query with filters and IndexQuery operators
- * 4. Execute MERGE SPLITS operations
- * 5. Validate data integrity throughout
+ *   1. Write DataFrames to Azure Blob Storage 2. Read DataFrames back from Azure 3. Query with filters and IndexQuery
+ *      operators 4. Execute MERGE SPLITS operations 5. Validate data integrity throughout
  *
  * URL Format Support:
- * - azure://container/path (used in tests below)
- * - abfss://container@account.dfs.core.windows.net/path (normalized to azure:// internally)
- * - wasb://, wasbs://, abfs:// (all supported and normalized to azure://)
+ *   - azure://container/path (used in tests below)
+ *   - abfss://container@account.dfs.core.windows.net/path (normalized to azure:// internally)
+ *   - wasb://, wasbs://, abfs:// (all supported and normalized to azure://)
  *
- * Note: All Azure URL formats are automatically normalized to azure:// protocol
- * for tantivy4java compatibility during read operations.
+ * Note: All Azure URL formats are automatically normalized to azure:// protocol for tantivy4java compatibility during
+ * read operations.
  *
  * Prerequisites:
- * - Azure credentials configured via system properties, ~/.azure/credentials, or environment variables
- * - Azure container accessible for testing
+ *   - Azure credentials configured via system properties, ~/.azure/credentials, or environment variables
+ *   - Azure container accessible for testing
  *
- * Set system properties:
- * -Dtest.azure.container=your-test-container
- * -Dtest.azure.storageAccount=yourstorageaccount
+ * Set system properties: -Dtest.azure.container=your-test-container -Dtest.azure.storageAccount=yourstorageaccount
  * -Dtest.azure.accountKey=your-account-key (optional if using ~/.azure/credentials)
  */
 class RealAzureEndToEndTest extends RealAzureTestBase {
@@ -58,9 +53,9 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   }
 
   test("should write and read DataFrame from Azure Blob Storage") {
-    val testId      = generateTestId()
-    val azurePath   = s"azure://$testContainer/test-dataframe-$testId"
-    val testData    = Seq(
+    val testId    = generateTestId()
+    val azurePath = s"azure://$testContainer/test-dataframe-$testId"
+    val testData = Seq(
       ("doc1", "Apache Spark is amazing", 100),
       ("doc2", "Azure Blob Storage integration", 200),
       ("doc3", "IndexTables4Spark with Azure", 300)
@@ -71,7 +66,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     // Write to Azure
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote DataFrame to Azure: $azurePath")
 
@@ -93,7 +89,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   test("should support IndexQuery operations on Azure data") {
     val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/test-indexquery-$testId"
-    val testData  = Seq(
+    val testData = Seq(
       ("doc1", "machine learning with python"),
       ("doc2", "deep learning and neural networks"),
       ("doc3", "python programming language"),
@@ -106,7 +102,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.content", "text")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote DataFrame with text fields to Azure: $azurePath")
 
@@ -128,7 +125,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   test("should support partitioned datasets on Azure") {
     val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/test-partitioned-$testId"
-    val testData  = Seq(
+    val testData = Seq(
       ("2024-01-01", 10, "Morning logs"),
       ("2024-01-01", 11, "Midday logs"),
       ("2024-01-02", 10, "Morning logs day 2"),
@@ -141,7 +138,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("date", "hour")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote partitioned DataFrame to Azure: $azurePath")
 
@@ -173,7 +171,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     // Write first batch
     df1.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     // Append second batch
     df2.write
@@ -207,7 +206,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   test("should support aggregate operations on Azure data") {
     val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/test-aggregates-$testId"
-    val testData  = Seq(
+    val testData = Seq(
       ("product1", 100),
       ("product2", 200),
       ("product3", 300),
@@ -220,7 +219,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote DataFrame with fast fields to Azure: $azurePath")
 
@@ -244,16 +244,16 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
     val azurePath = s"azure://$testContainer/test-large-$testId"
 
     // Create larger dataset
-    val testData = (1 to 1000).map { i =>
-      (s"doc$i", s"content for document $i", i * 10)
-    }
+    val testData = (1 to 1000).map(i => (s"doc$i", s"content for document $i", i * 10))
 
     val df = spark.createDataFrame(testData).toDF("id", "content", "score")
 
     // Write with multiple partitions
-    df.repartition(4).write
+    df.repartition(4)
+      .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote large DataFrame to Azure: $azurePath")
 
@@ -282,7 +282,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
     df1.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Initial write to Azure: $azurePath")
 
@@ -315,7 +316,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   test("should support cross-field search with _indexall") {
     val testId    = generateTestId()
     val azurePath = s"azure://$testContainer/test-indexall-$testId"
-    val testData  = Seq(
+    val testData = Seq(
       ("doc1", "Apache Spark", "Distributed computing"),
       ("doc2", "Azure Cloud", "Microsoft services"),
       ("doc3", "Python Programming", "Data science tools")
@@ -328,7 +329,8 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "text")
       .option("spark.indextables.indexing.typemap.description", "text")
-      .mode("overwrite").save(azurePath)
+      .mode("overwrite")
+      .save(azurePath)
 
     println(s"✅ Wrote DataFrame with multiple text fields to Azure: $azurePath")
 
@@ -350,7 +352,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
     // Use Spark's modern ADLS Gen2 URL format: abfss://
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-abfss-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-abfss-$testId"
 
     val testData = Seq(
       ("doc1", "Gen2 with abfss protocol", 100),
@@ -400,7 +402,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
     // Test append mode with abfss://
     val appendData = Seq(("doc4", "Additional ADLS data", 400))
-    val appendDf = spark.createDataFrame(appendData).toDF("id", "content", "score")
+    val appendDf   = spark.createDataFrame(appendData).toDF("id", "content", "score")
 
     appendDf.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -443,7 +445,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
     // Write using abfss:// scheme
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-mixed-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-mixed-$testId"
 
     val testData = Seq(
       ("doc1", "Written with abfss scheme", 100),
@@ -477,7 +479,7 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
     // Append using azure:// scheme
     val appendData = Seq(("doc3", "Appended with azure scheme", 300))
-    val appendDf = spark.createDataFrame(appendData).toDF("id", "content", "score")
+    val appendDf   = spark.createDataFrame(appendData).toDF("id", "content", "score")
 
     appendDf.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -499,9 +501,9 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
   }
 
   test("should validate abfss:// URL with partitioned datasets") {
-    val testId = generateTestId()
+    val testId      = generateTestId()
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-partitioned-abfss-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-partitioned-abfss-$testId"
 
     val testData = Seq(
       ("2024-01-01", 10, "ADLS partitioned data 1"),
@@ -561,13 +563,13 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
       "❌ OAuth credentials not available - test FAILED. Configure ~/.azure/credentials with Service Principal credentials (tenant_id, client_id, client_secret)"
     )
 
-    val tenantId = getTenantId.get
-    val clientId = getClientId.get
+    val tenantId     = getTenantId.get
+    val clientId     = getClientId.get
     val clientSecret = getClientSecret.get
 
-    val testId = generateTestId()
+    val testId      = generateTestId()
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-explicit-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-explicit-$testId"
 
     val testData = Seq(
       ("doc1", "OAuth authentication test", 100),
@@ -615,9 +617,9 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
       "❌ OAuth credentials not available in ~/.azure/credentials - test FAILED. Add tenant_id, client_id, client_secret to [default] section"
     )
 
-    val testId = generateTestId()
+    val testId      = generateTestId()
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-file-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-file-$testId"
 
     val testData = Seq(
       ("doc1", "OAuth from credentials file", 100),
@@ -655,13 +657,13 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
       "❌ OAuth credentials not available - test FAILED. Configure ~/.azure/credentials with Service Principal credentials (tenant_id, client_id, client_secret)"
     )
 
-    val tenantId = getTenantId.get
-    val clientId = getClientId.get
+    val tenantId     = getTenantId.get
+    val clientId     = getClientId.get
     val clientSecret = getClientSecret.get
 
-    val testId = generateTestId()
+    val testId      = generateTestId()
     val storageAcct = getStorageAccount.getOrElse("devstoreaccount1")
-    val abfssPath = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-merge-$testId"
+    val abfssPath   = s"abfss://$testContainer@$storageAcct.dfs.core.windows.net/test-oauth-merge-$testId"
 
     val testData = Seq(
       ("doc1", "OAuth merge test 1", 100),

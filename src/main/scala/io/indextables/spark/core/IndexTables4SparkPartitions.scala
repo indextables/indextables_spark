@@ -352,7 +352,7 @@ class IndexTables4SparkPartitionReader(
         logger.debug(s"🔍 SPLIT PATH DEBUG:")
         logger.debug(s"  - addAction.path: ${addAction.path}")
         logger.debug(s"  - tablePath: ${tablePath.toString}")
-        logger.debug(s"  - filePath (resolved): ${filePath}")
+        logger.debug(s"  - filePath (resolved): $filePath")
         logger.debug(s"  - actualPath (normalized): $actualPath")
 
         // Footer offset metadata is required for all split reading operations

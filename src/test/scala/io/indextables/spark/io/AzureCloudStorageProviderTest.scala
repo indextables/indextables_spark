@@ -27,16 +27,16 @@ import io.indextables.spark.RealAzureTestBase
  * Unit tests for AzureCloudStorageProvider.
  *
  * These tests validate Azure-specific functionality including:
- * - Configuration extraction from multiple sources
- * - Credential resolution hierarchy
- * - Azure protocol detection
- * - Basic CRUD operations against real Azure Blob Storage
- * - Parallel operations
- * - Error handling
+ *   - Configuration extraction from multiple sources
+ *   - Credential resolution hierarchy
+ *   - Azure protocol detection
+ *   - Basic CRUD operations against real Azure Blob Storage
+ *   - Parallel operations
+ *   - Error handling
  *
  * Prerequisites:
- * - Azure credentials configured via system properties, ~/.azure/credentials, or environment variables
- * - Azure container accessible for testing
+ *   - Azure credentials configured via system properties, ~/.azure/credentials, or environment variables
+ *   - Azure container accessible for testing
  */
 class AzureCloudStorageProviderTest extends RealAzureTestBase {
 
@@ -53,12 +53,8 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
     // Set Azure configuration in Hadoop config (simulating Spark conf)
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
 
@@ -81,19 +77,13 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
     // Set Azure configuration in Hadoop config
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
     hadoopConf.set("spark.indextables.azure.accountKey", "hadoop-key")
 
     // Set different values in DataFrame options (use real credentials for actual test)
     val optionsMap = new java.util.HashMap[String, String]()
-    getStorageAccount.foreach { account =>
-      optionsMap.put("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      optionsMap.put("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => optionsMap.put("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => optionsMap.put("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(optionsMap)
 
@@ -120,16 +110,12 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
   }
 
   test("should write and read file from Azure") {
-    val testPath   = s"azure://$testContainer/test-write-read-${generateTestId()}.txt"
+    val testPath    = s"azure://$testContainer/test-write-read-${generateTestId()}.txt"
     val testContent = "Hello Azure Blob Storage!"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -158,17 +144,13 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
   }
 
   test("should support conditional write (writeFileIfNotExists)") {
-    val testPath   = s"azure://$testContainer/test-conditional-${generateTestId()}.txt"
+    val testPath     = s"azure://$testContainer/test-conditional-${generateTestId()}.txt"
     val testContent1 = "First write"
     val testContent2 = "Second write"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -204,12 +186,8 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val testPath2  = s"azure://$testContainer/$testPrefix/file2.txt"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -241,17 +219,11 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
 
   test("should support parallel read operations") {
     val testPrefix = s"test-parallel-${generateTestId()}"
-    val testPaths = (1 to 3).map { i =>
-      s"azure://$testContainer/$testPrefix/file$i.txt"
-    }
+    val testPaths  = (1 to 3).map(i => s"azure://$testContainer/$testPrefix/file$i.txt")
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -287,17 +259,11 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
 
   test("should support parallel exists operations") {
     val testPrefix = s"test-exists-${generateTestId()}"
-    val testPaths = (1 to 3).map { i =>
-      s"azure://$testContainer/$testPrefix/file$i.txt"
-    }
+    val testPaths  = (1 to 3).map(i => s"azure://$testContainer/$testPrefix/file$i.txt")
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -308,9 +274,7 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
 
     try {
       // Write test files
-      testPaths.foreach { path =>
-        provider.writeFile(path, "Test content".getBytes("UTF-8"))
-      }
+      testPaths.foreach(path => provider.writeFile(path, "Test content".getBytes("UTF-8")))
 
       // Test parallel existence check
       val existsMap = provider.existsParallel(testPaths)
@@ -325,16 +289,12 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
   }
 
   test("should get file info from Azure") {
-    val testPath   = s"azure://$testContainer/test-info-${generateTestId()}.txt"
+    val testPath    = s"azure://$testContainer/test-info-${generateTestId()}.txt"
     val testContent = "File info test content"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -365,12 +325,8 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val nonExistentPath = s"azure://$testContainer/non-existent-${generateTestId()}.txt"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -390,22 +346,17 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
       provider.deleteFile(nonExistentPath) shouldBe false
 
       println("✅ Successfully handled non-existent files gracefully")
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("should support range reads") {
-    val testPath   = s"azure://$testContainer/test-range-${generateTestId()}.txt"
+    val testPath    = s"azure://$testContainer/test-range-${generateTestId()}.txt"
     val testContent = "0123456789ABCDEFGHIJ" // 20 bytes
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -434,12 +385,8 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val azurePath = s"azure://$testContainer/splits/test.split"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    getStorageAccount.foreach { account =>
-      hadoopConf.set("spark.indextables.azure.accountName", account)
-    }
-    getAccountKey.foreach { key =>
-      hadoopConf.set("spark.indextables.azure.accountKey", key)
-    }
+    getStorageAccount.foreach(account => hadoopConf.set("spark.indextables.azure.accountName", account))
+    getAccountKey.foreach(key => hadoopConf.set("spark.indextables.azure.accountKey", key))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(
@@ -454,9 +401,8 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
       normalized shouldBe azurePath
 
       println("✅ Successfully normalized Azure paths for tantivy")
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("should support connection string authentication") {
@@ -467,9 +413,7 @@ class AzureCloudStorageProviderTest extends RealAzureTestBase {
     val testPath = s"azure://$testContainer/test-connstring-${generateTestId()}.txt"
 
     val hadoopConf = spark.sparkContext.hadoopConfiguration
-    connString.foreach { cs =>
-      hadoopConf.set("spark.indextables.azure.connectionString", cs)
-    }
+    connString.foreach(cs => hadoopConf.set("spark.indextables.azure.connectionString", cs))
 
     val options = new CaseInsensitiveStringMap(JCollections.emptyMap())
     val provider = CloudStorageProviderFactory.createProvider(

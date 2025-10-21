@@ -3,10 +3,11 @@ package io.indextables.spark.transaction.compression
 /**
  * Utilities for reading/writing compressed transaction log files.
  *
- * Provides automatic compression detection and transparent compression/decompression
- * for transaction log and checkpoint files.
+ * Provides automatic compression detection and transparent compression/decompression for transaction log and checkpoint
+ * files.
  */
 object CompressionUtils {
+
   /** Magic byte indicating compressed file format */
   val MAGIC_BYTE: Byte = 0x01
 
@@ -18,10 +19,14 @@ object CompressionUtils {
   /**
    * Read transaction log file with automatic compression detection.
    *
-   * @param data Raw file bytes
-   * @return Decompressed JSON bytes
-   * @throws IllegalArgumentException if file is empty or compressed format is invalid
-   * @throws UnsupportedOperationException if compression codec is unknown
+   * @param data
+   *   Raw file bytes
+   * @return
+   *   Decompressed JSON bytes
+   * @throws IllegalArgumentException
+   *   if file is empty or compressed format is invalid
+   * @throws UnsupportedOperationException
+   *   if compression codec is unknown
    */
   def readTransactionFile(data: Array[Byte]): Array[Byte] = {
     if (data.isEmpty) {
@@ -39,12 +44,11 @@ object CompressionUtils {
 
       val codecByte = data(1)
       val codec = codecs.getOrElse(
-        codecByte, {
-          throw new UnsupportedOperationException(
-            s"Unknown compression codec: 0x${Integer.toHexString(codecByte & 0xFF)}. " +
-              s"Supported codecs: ${codecs.keys.map(b => s"0x${Integer.toHexString(b & 0xFF)}").mkString(", ")}"
-          )
-        }
+        codecByte,
+        throw new UnsupportedOperationException(
+          s"Unknown compression codec: 0x${Integer.toHexString(codecByte & 0xff)}. " +
+            s"Supported codecs: ${codecs.keys.map(b => s"0x${Integer.toHexString(b & 0xff)}").mkString(", ")}"
+        )
       )
 
       // Decompress data (skip magic byte + codec byte header)
@@ -60,11 +64,14 @@ object CompressionUtils {
   /**
    * Write transaction log file with optional compression.
    *
-   * @param jsonData JSON bytes to write
-   * @param codec Optional compression codec (None = uncompressed)
-   * @return File bytes with compression headers if applicable
+   * @param jsonData
+   *   JSON bytes to write
+   * @param codec
+   *   Optional compression codec (None = uncompressed)
+   * @return
+   *   File bytes with compression headers if applicable
    */
-  def writeTransactionFile(jsonData: Array[Byte], codec: Option[CompressionCodec]): Array[Byte] = {
+  def writeTransactionFile(jsonData: Array[Byte], codec: Option[CompressionCodec]): Array[Byte] =
     codec match {
       case Some(c) =>
         // Compress data
@@ -81,22 +88,26 @@ object CompressionUtils {
         // Uncompressed legacy format
         jsonData
     }
-  }
 
   /**
    * Get codec from configuration.
    *
-   * @param compressionEnabled Whether compression is enabled
-   * @param codecName Codec name ("gzip", "none")
-   * @param gzipLevel GZIP compression level (0-9)
-   * @return Optional compression codec
-   * @throws IllegalArgumentException if codec name is unknown
+   * @param compressionEnabled
+   *   Whether compression is enabled
+   * @param codecName
+   *   Codec name ("gzip", "none")
+   * @param gzipLevel
+   *   GZIP compression level (0-9)
+   * @return
+   *   Optional compression codec
+   * @throws IllegalArgumentException
+   *   if codec name is unknown
    */
   def getCodec(
-      compressionEnabled: Boolean,
-      codecName: String,
-      gzipLevel: Int = 6
-  ): Option[CompressionCodec] = {
+    compressionEnabled: Boolean,
+    codecName: String,
+    gzipLevel: Int = 6
+  ): Option[CompressionCodec] =
     if (!compressionEnabled || codecName.equalsIgnoreCase("none")) {
       None
     } else if (codecName.equalsIgnoreCase("gzip")) {
@@ -106,29 +117,30 @@ object CompressionUtils {
         s"Unknown compression codec: $codecName (supported: gzip, none)"
       )
     }
-  }
 
   /**
    * Check if file data is compressed.
    *
-   * @param data File bytes
-   * @return true if file is compressed (starts with magic byte)
+   * @param data
+   *   File bytes
+   * @return
+   *   true if file is compressed (starts with magic byte)
    */
-  def isCompressed(data: Array[Byte]): Boolean = {
+  def isCompressed(data: Array[Byte]): Boolean =
     data.nonEmpty && data(0) == MAGIC_BYTE
-  }
 
   /**
    * Get compression codec from file data.
    *
-   * @param data File bytes
-   * @return Optional compression codec if file is compressed
+   * @param data
+   *   File bytes
+   * @return
+   *   Optional compression codec if file is compressed
    */
-  def detectCodec(data: Array[Byte]): Option[CompressionCodec] = {
+  def detectCodec(data: Array[Byte]): Option[CompressionCodec] =
     if (isCompressed(data) && data.length >= 2) {
       codecs.get(data(1))
     } else {
       None
     }
-  }
 }

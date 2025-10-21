@@ -120,7 +120,7 @@ class BatchTransactionLogTest extends TestBase {
 
             // Read the batch transaction file and verify it contains multiple ADD entries
             val batchTransactionFile = new Path(transactionLogPath, "00000000000000000001.json")
-            val rawBytes = cloudProvider.readFile(batchTransactionFile.toString)
+            val rawBytes             = cloudProvider.readFile(batchTransactionFile.toString)
             // Decompress if needed (handles both compressed and uncompressed files)
             val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
             val content = new String(decompressedBytes, "UTF-8")

@@ -4,26 +4,26 @@ import java.io.File
 
 import scala.util.Random
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{SaveMode, SparkSession}
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterAll
 
 class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAndAfterAll {
 
   @transient var spark: SparkSession = _
-  val testDir             = s"/tmp/compressed_transaction_test_${Random.nextInt(10000)}"
+  val testDir                        = s"/tmp/compressed_transaction_test_${Random.nextInt(10000)}"
 
-  override def beforeAll(): Unit = {
+  override def beforeAll(): Unit =
     spark = SparkSession
       .builder()
       .master("local[2]")
       .appName("CompressedTransactionLogIntegrationTest")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
-  }
 
   override def afterAll(): Unit = {
     if (spark != null) {
@@ -72,7 +72,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     )
 
     try {
-      val files = provider.listFiles(transactionLogPath.toString)
+      val files     = provider.listFiles(transactionLogPath.toString)
       val jsonFiles = files.map(_.path).filter(_.endsWith(".json")).filterNot(_.contains("checkpoint"))
 
       assert(jsonFiles.nonEmpty, "Should have transaction log files")
@@ -87,8 +87,10 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
         // Verify we can decompress
         val decompressed = CompressionUtils.readTransactionFile(rawBytes)
         val content      = new String(decompressed, "UTF-8")
-        assert(content.contains("protocol") || content.contains("metaData") || content.contains("add"),
-          s"Decompressed content should be valid transaction log JSON")
+        assert(
+          content.contains("protocol") || content.contains("metaData") || content.contains("add"),
+          s"Decompressed content should be valid transaction log JSON"
+        )
       }
 
       // Verify we can read the table back
@@ -96,9 +98,8 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
       assert(loaded.count() == 3)
       assert(loaded.columns.toSeq.toSet == Set("id", "content", "score"))
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("transaction logs remain uncompressed when compression is disabled") {
@@ -128,7 +129,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     )
 
     try {
-      val files = provider.listFiles(transactionLogPath.toString)
+      val files     = provider.listFiles(transactionLogPath.toString)
       val jsonFiles = files.map(_.path).filter(_.endsWith(".json")).filterNot(_.contains("checkpoint"))
 
       assert(jsonFiles.nonEmpty, "Should have transaction log files")
@@ -146,9 +147,8 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
       val loaded = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       assert(loaded.count() == 2)
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("checkpoints are compressed when compression is enabled") {
@@ -196,7 +196,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     )
 
     try {
-      val files = provider.listFiles(transactionLogPath.toString)
+      val files           = provider.listFiles(transactionLogPath.toString)
       val checkpointFiles = files.map(_.path).filter(_.contains(".checkpoint.json"))
 
       if (checkpointFiles.nonEmpty) {
@@ -209,8 +209,10 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
           // Verify we can decompress
           val decompressed = CompressionUtils.readTransactionFile(rawBytes)
           val content      = new String(decompressed, "UTF-8")
-          assert(content.contains("add") || content.contains("protocol") || content.contains("metaData"),
-            "Decompressed checkpoint should contain valid actions")
+          assert(
+            content.contains("add") || content.contains("protocol") || content.contains("metaData"),
+            "Decompressed checkpoint should contain valid actions"
+          )
         }
       }
 
@@ -218,9 +220,8 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
       val loaded = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       assert(loaded.count() == 3)
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("can read table with mixed compressed and uncompressed transaction logs") {
@@ -262,14 +263,14 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     )
 
     try {
-      val files = provider.listFiles(transactionLogPath.toString)
+      val files     = provider.listFiles(transactionLogPath.toString)
       val jsonFiles = files.map(_.path).filter(_.endsWith(".json")).filterNot(_.contains("checkpoint")).sorted
 
       var foundCompressed   = false
       var foundUncompressed = false
 
       jsonFiles.foreach { file =>
-        val rawBytes    = provider.readFile(file)
+        val rawBytes     = provider.readFile(file)
         val isCompressed = CompressionUtils.isCompressed(rawBytes)
 
         if (isCompressed) foundCompressed = true
@@ -286,9 +287,8 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
       val ids = loaded.select("id").collect().toSeq.map(_.getString(0)).sorted
       assert(ids.sameElements(Seq("id1", "id2", "id3")))
 
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   test("compression provides measurable space savings") {
@@ -299,9 +299,9 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     import sparkSession.implicits._
 
     // Create identical data for both tables
-    val df = (1 until 51).map { i =>
-      (s"id_$i", s"content_with_repeated_text_pattern_$i", i * 100)
-    }.toDF("id", "content", "score")
+    val df = (1 until 51)
+      .map(i => (s"id_$i", s"content_with_repeated_text_pattern_$i", i * 100))
+      .toDF("id", "content", "score")
 
     // Write WITH compression
     df.write
@@ -328,19 +328,16 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
 
       try {
         val files = provider.listFiles(transactionLogPath.toString)
-        files.map(_.path).filter(_.endsWith(".json")).map { file =>
-          provider.readFile(file).length.toLong
-        }.sum
-      } finally {
+        files.map(_.path).filter(_.endsWith(".json")).map(file => provider.readFile(file).length.toLong).sum
+      } finally
         provider.close()
-      }
     }
 
     val compressedSize   = getTransactionLogSize(compressedTablePath)
     val uncompressedSize = getTransactionLogSize(uncompressedTablePath)
 
     val compressionRatio = uncompressedSize.toDouble / compressedSize
-    println(s"Transaction log compression: ${uncompressedSize} bytes -> ${compressedSize} bytes (${compressionRatio}x)")
+    println(s"Transaction log compression: $uncompressedSize bytes -> $compressedSize bytes (${compressionRatio}x)")
 
     // With repeated JSON patterns, we should get at least 1.5x compression
     assert(compressionRatio > 1.5, s"Expected at least 1.5x compression, got ${compressionRatio}x")

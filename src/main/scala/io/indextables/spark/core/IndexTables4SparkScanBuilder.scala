@@ -134,15 +134,17 @@ class IndexTables4SparkScanBuilder(
     // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
     if (canUseTransactionLogGroupByCount(aggregation, groupByColumns)) {
       val hasAggregations = aggregation.aggregateExpressions().nonEmpty
-      logger.info(s"Using transaction log optimization for partition-only GROUP BY COUNT, hasAggregations=$hasAggregations")
+      logger.info(
+        s"Using transaction log optimization for partition-only GROUP BY COUNT, hasAggregations=$hasAggregations"
+      )
       new TransactionLogCountScan(
         sparkSession,
         transactionLog,
         _pushedFilters,
         options,
         config,
-        Some(groupByColumns),  // Pass GROUP BY columns for grouped aggregation
-        hasAggregations        // Indicate if this has aggregations or is just DISTINCT
+        Some(groupByColumns), // Pass GROUP BY columns for grouped aggregation
+        hasAggregations       // Indicate if this has aggregations or is just DISTINCT
       )
     } else {
       // Regular GROUP BY scan using tantivy aggregations
@@ -873,19 +875,27 @@ class IndexTables4SparkScanBuilder(
                 logger.info(
                   s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
                 )
-                logger.debug(s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY")
+                logger.debug(
+                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                )
                 false
               }
             case DateType | TimestampType =>
               if (isFast) {
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY")
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY")
+                logger.debug(
+                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                )
+                logger.debug(
+                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                )
                 true
               } else {
                 logger.info(
                   s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
                 )
-                logger.debug(s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY")
+                logger.debug(
+                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                )
                 false
               }
             case _ =>

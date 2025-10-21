@@ -35,9 +35,9 @@ import org.scalatest.matchers.should.Matchers
  * real Azure Blob Storage using standard Azure credentials.
  *
  * Credentials are loaded from multiple sources with the following priority:
- * 1. System properties: test.azure.storageAccount, test.azure.accountKey, test.azure.container
- * 2. ~/.azure/credentials file (matches tantivy4java pattern)
- * 3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+ *   1. System properties: test.azure.storageAccount, test.azure.accountKey, test.azure.container 2.
+ *      ~/.azure/credentials file (matches tantivy4java pattern) 3. Environment variables: AZURE_STORAGE_ACCOUNT,
+ *      AZURE_STORAGE_KEY
  *
  * Unlike TestBase, this class does NOT set any Azurite mock endpoints or configurations that would interfere with real
  * Azure Blob Storage connections.
@@ -82,7 +82,7 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
         return
       }
 
-      val lines           = Files.readAllLines(credentialsPath).asScala
+      val lines            = Files.readAllLines(credentialsPath).asScala
       var inDefaultSection = false
 
       for (line <- lines) {
@@ -111,7 +111,7 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
 
       val hasAccountKey = azureStorageAccount.isDefined && azureAccountKey.isDefined
       val hasOAuth = azureStorageAccount.isDefined && azureTenantId.isDefined &&
-                     azureClientId.isDefined && azureClientSecret.isDefined
+        azureClientId.isDefined && azureClientSecret.isDefined
 
       if (hasAccountKey) {
         println("✅ Loaded Azure account key credentials from ~/.azure/credentials")
@@ -128,8 +128,8 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
     }
 
   /**
-   * Get effective storage account from multiple sources: 1. System property 2. ~/.azure/credentials file 3.
-   * Environment variable
+   * Get effective storage account from multiple sources: 1. System property 2. ~/.azure/credentials file 3. Environment
+   * variable
    */
   protected def getStorageAccount: Option[String] =
     storageAccount
@@ -145,9 +145,7 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
       .orElse(azureAccountKey)
       .orElse(Option(System.getenv("AZURE_STORAGE_KEY")))
 
-  /**
-   * Get effective connection string from environment variable (if set)
-   */
+  /** Get effective connection string from environment variable (if set) */
   protected def getConnectionString: Option[String] =
     Option(System.getenv("AZURE_STORAGE_CONNECTION_STRING"))
 
@@ -178,9 +176,7 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
       .orElse(azureClientSecret)
       .orElse(Option(System.getenv("AZURE_CLIENT_SECRET")))
 
-  /**
-   * Check if OAuth Service Principal credentials are available
-   */
+  /** Check if OAuth Service Principal credentials are available */
   protected def hasOAuthCredentials(): Boolean =
     getTenantId.isDefined && getClientId.isDefined && getClientSecret.isDefined
 
@@ -251,17 +247,11 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
     // Configure Azure credentials if available
-    getStorageAccount.foreach { account =>
-      builder.config("spark.indextables.azure.accountName", account)
-    }
+    getStorageAccount.foreach(account => builder.config("spark.indextables.azure.accountName", account))
 
-    getAccountKey.foreach { key =>
-      builder.config("spark.indextables.azure.accountKey", key)
-    }
+    getAccountKey.foreach(key => builder.config("spark.indextables.azure.accountKey", key))
 
-    getConnectionString.foreach { connStr =>
-      builder.config("spark.indextables.azure.connectionString", connStr)
-    }
+    getConnectionString.foreach(connStr => builder.config("spark.indextables.azure.connectionString", connStr))
 
     spark = builder.getOrCreate()
 

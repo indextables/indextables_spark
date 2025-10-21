@@ -373,8 +373,8 @@ class IndexTables4SparkScan(
             maxVals.get(attribute) match {
               case Some(max) =>
                 val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
-                val valueStr = convertedValue.toString
-                val maxStr = convertedMax.toString
+                val valueStr                          = convertedValue.toString
+                val maxStr                            = convertedMax.toString
                 // Skip if max < filterValue (all values in file are too small)
                 // BUT don't skip if filterValue starts with max (truncated max means actual value could be >= filterValue)
                 // Example: max="aaa" (truncated), filterValue="aaab" - actual could be "aaac" which is >= "aaab"
@@ -385,8 +385,8 @@ class IndexTables4SparkScan(
             minVals.get(attribute) match {
               case Some(min) =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                val valueStr = convertedValue.toString
-                val minStr = convertedMin.toString
+                val valueStr                          = convertedValue.toString
+                val minStr                            = convertedMin.toString
                 // Skip if min > filterValue (all values in file are too large)
                 // BUT don't skip if filterValue starts with min (truncated min means actual value could be <= filterValue)
                 // Example: min="bbb" (truncated), filterValue="bbbc" - actual could be "bbba" which is <= "bbbc"

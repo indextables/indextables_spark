@@ -22,18 +22,19 @@ import java.net.URI
 import java.nio.file.{Files, Paths}
 import java.util.concurrent.{CompletableFuture, Executors}
 
+import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
-import scala.collection.mutable.ArrayBuffer
 
-import com.azure.core.http.rest.PagedIterable
+import org.apache.hadoop.conf.Configuration
+
 import com.azure.core.credential.{AccessToken, TokenCredential, TokenRequestContext}
+import com.azure.core.http.rest.PagedIterable
 import com.azure.identity.{ClientSecretCredentialBuilder, DefaultAzureCredentialBuilder}
 import com.azure.storage.blob.{BlobClient, BlobContainerClient, BlobServiceClient, BlobServiceClientBuilder}
 import com.azure.storage.blob.models.{BlobItem, BlobItemProperties, BlobRequestConditions, BlobStorageException}
 import com.azure.storage.blob.specialized.BlockBlobClient
 import com.azure.storage.common.StorageSharedKeyCredential
-import org.apache.hadoop.conf.Configuration
 import org.slf4j.LoggerFactory
 
 /**
@@ -65,18 +66,17 @@ class AzureCloudStorageProvider(
   private val isAzurite = config.azureEndpoint.exists(e => e.contains("localhost") || e.contains("127.0.0.1"))
 
   /**
-   * Parse Azure URI to extract container and blob path
-   * Supports multiple URL schemes:
-   * - azure://container/path (tantivy4java native)
-   * - wasb://container@account.blob.core.windows.net/path (Spark legacy)
-   * - wasbs://container@account.blob.core.windows.net/path (Spark legacy secure)
-   * - abfs://container@account.dfs.core.windows.net/path (Spark modern)
-   * - abfss://container@account.dfs.core.windows.net/path (Spark modern secure)
+   * Parse Azure URI to extract container and blob path Supports multiple URL schemes:
+   *   - azure://container/path (tantivy4java native)
+   *   - wasb://container@account.blob.core.windows.net/path (Spark legacy)
+   *   - wasbs://container@account.blob.core.windows.net/path (Spark legacy secure)
+   *   - abfs://container@account.dfs.core.windows.net/path (Spark modern)
+   *   - abfss://container@account.dfs.core.windows.net/path (Spark modern secure)
    *
    * Returns (containerName, blobPath)
    */
   private def parseAzureUri(path: String): (String, String) = {
-    val uri = new URI(path)
+    val uri    = new URI(path)
     val scheme = uri.getScheme
 
     // Validate supported Azure schemes
@@ -97,8 +97,10 @@ class AzureCloudStorageProvider(
         // wasb://container@account.blob.core.windows.net/path
         // abfs://container@account.dfs.core.windows.net/path
         val authority = uri.getAuthority
-        require(authority != null && authority.contains("@"),
-          s"Invalid $scheme URI - expected format: $scheme://container@account.blob.core.windows.net/path")
+        require(
+          authority != null && authority.contains("@"),
+          s"Invalid $scheme URI - expected format: $scheme://container@account.blob.core.windows.net/path"
+        )
 
         val container = authority.split("@")(0)
         require(container.nonEmpty, s"Invalid $scheme URI - missing container: $path")
@@ -111,8 +113,8 @@ class AzureCloudStorageProvider(
   }
 
   /**
-   * Credentials loaded from ~/.azure/credentials file
-   * Supports both account key and Service Principal (OAuth) credentials
+   * Credentials loaded from ~/.azure/credentials file Supports both account key and Service Principal (OAuth)
+   * credentials
    */
   case class AzureCredentialsFromFile(
     accountName: Option[String],
@@ -122,16 +124,12 @@ class AzureCloudStorageProvider(
     clientSecret: Option[String])
 
   /**
-   * Load Azure credentials from ~/.azure/credentials file (matches tantivy4java pattern)
-   * Supports both account key authentication and Service Principal (OAuth) authentication
+   * Load Azure credentials from ~/.azure/credentials file (matches tantivy4java pattern) Supports both account key
+   * authentication and Service Principal (OAuth) authentication
    *
-   * File format:
-   * [default]
-   * storage_account = mystorageaccount
-   * account_key = your-account-key-here      # For account key auth
-   * tenant_id = your-tenant-id                # For Service Principal auth
-   * client_id = your-client-id                # For Service Principal auth
-   * client_secret = your-client-secret        # For Service Principal auth
+   * File format: [default] storage_account = mystorageaccount account_key = your-account-key-here # For account key
+   * auth tenant_id = your-tenant-id # For Service Principal auth client_id = your-client-id # For Service Principal
+   * auth client_secret = your-client-secret # For Service Principal auth
    */
   private def loadAzureCredentialsFromFile(): AzureCredentialsFromFile =
     try {
@@ -192,10 +190,12 @@ class AzureCloudStorageProvider(
         AzureCredentialsFromFile(None, None, None, None, None)
     }
 
-  /**
-   * Acquire OAuth bearer token using Service Principal credentials
-   */
-  private def acquireBearerToken(tenantId: String, clientId: String, clientSecret: String): Option[String] =
+  /** Acquire OAuth bearer token using Service Principal credentials */
+  private def acquireBearerToken(
+    tenantId: String,
+    clientId: String,
+    clientSecret: String
+  ): Option[String] =
     try {
       logger.info("Acquiring OAuth bearer token using Service Principal credentials...")
       val credential = new ClientSecretCredentialBuilder()
@@ -256,9 +256,11 @@ class AzureCloudStorageProvider(
         // Priority 2: Bearer token (OAuth)
         val bearerTokenOpt = config.azureBearerToken.orElse {
           // Try to acquire token using Service Principal credentials
-          (config.azureTenantId.orElse(fileCredsOpt.tenantId),
-           config.azureClientId.orElse(fileCredsOpt.clientId),
-           config.azureClientSecret.orElse(fileCredsOpt.clientSecret)) match {
+          (
+            config.azureTenantId.orElse(fileCredsOpt.tenantId),
+            config.azureClientId.orElse(fileCredsOpt.clientId),
+            config.azureClientSecret.orElse(fileCredsOpt.clientSecret)
+          ) match {
             case (Some(tenantId), Some(clientId), Some(clientSecret)) =>
               acquireBearerToken(tenantId, clientId, clientSecret)
             case _ => None
@@ -298,18 +300,16 @@ class AzureCloudStorageProvider(
     builder.buildClient()
   }
 
-  /**
-   * Get or create a container client for the given container name
-   */
+  /** Get or create a container client for the given container name */
   private def getContainerClient(containerName: String): BlobContainerClient = {
     val containerClient = blobServiceClient.getBlobContainerClient(containerName)
 
     // Create container if it doesn't exist (for Azurite and development)
     if (!containerClient.exists()) {
       logger.info(s"Creating Azure container: $containerName")
-      try {
+      try
         containerClient.create()
-      } catch {
+      catch {
         case ex: BlobStorageException if ex.getStatusCode == 409 =>
           // Container already exists (race condition)
           logger.debug(s"Container $containerName already exists")
@@ -322,9 +322,7 @@ class AzureCloudStorageProvider(
     containerClient
   }
 
-  /**
-   * Get blob client for a given path
-   */
+  /** Get blob client for a given path */
   private def getBlobClient(path: String): BlobClient = {
     val (container, blobPath) = parseAzureUri(path)
     val containerClient       = getContainerClient(container)
@@ -401,14 +399,18 @@ class AzureCloudStorageProvider(
     }
 
   override def readFile(path: String): Array[Byte] = {
-    val blobClient = getBlobClient(path)
+    val blobClient   = getBlobClient(path)
     val outputStream = new ByteArrayOutputStream()
     blobClient.download(outputStream)
     outputStream.toByteArray
   }
 
-  override def readRange(path: String, offset: Long, length: Long): Array[Byte] = {
-    val blobClient = getBlobClient(path)
+  override def readRange(
+    path: String,
+    offset: Long,
+    length: Long
+  ): Array[Byte] = {
+    val blobClient   = getBlobClient(path)
     val outputStream = new ByteArrayOutputStream()
 
     // Azure SDK uses BlobRange for range reads
@@ -424,7 +426,7 @@ class AzureCloudStorageProvider(
     blobClient.openInputStream()
   }
 
-  override def createOutputStream(path: String): OutputStream = {
+  override def createOutputStream(path: String): OutputStream =
     // Azure doesn't support direct output stream - use a buffered approach
     new ByteArrayOutputStream() {
       override def close(): Unit = {
@@ -433,10 +435,9 @@ class AzureCloudStorageProvider(
         writeFile(path, content)
       }
     }
-  }
 
   override def writeFile(path: String, content: Array[Byte]): Unit = {
-    val blobClient = getBlobClient(path)
+    val blobClient  = getBlobClient(path)
     val inputStream = new ByteArrayInputStream(content)
     blobClient.upload(inputStream, content.length, true) // overwrite = true
   }
@@ -452,7 +453,7 @@ class AzureCloudStorageProvider(
       } else {
         // Upload with "If-None-Match: *" condition for atomic create-if-not-exists
         val inputStream = new ByteArrayInputStream(content)
-        val conditions = new BlobRequestConditions().setIfNoneMatch("*")
+        val conditions  = new BlobRequestConditions().setIfNoneMatch("*")
 
         try {
           blobClient.uploadWithResponse(inputStream, content.length, null, null, null, null, conditions, null, null)
@@ -486,13 +487,12 @@ class AzureCloudStorageProvider(
       case None =>
         // Unknown content length - buffer in memory (could be improved with block blob staged upload)
         val buffer = new ByteArrayOutputStream()
-        val bytes = new Array[Byte](8192)
-        var count = 0
-        while ({ count = inputStream.read(bytes); count != -1 }) {
+        val bytes  = new Array[Byte](8192)
+        var count  = 0
+        while ({ count = inputStream.read(bytes); count != -1 })
           buffer.write(bytes, 0, count)
-        }
 
-        val content = buffer.toByteArray
+        val content    = buffer.toByteArray
         val byteStream = new ByteArrayInputStream(content)
         blobClient.upload(byteStream, content.length, true)
     }
@@ -512,11 +512,10 @@ class AzureCloudStorageProvider(
         false
     }
 
-  override def createDirectory(path: String): Boolean = {
+  override def createDirectory(path: String): Boolean =
     // Azure Blob Storage doesn't have directories - they are virtual
     // Return true as a no-op
     true
-  }
 
   override def readFilesParallel(paths: Seq[String]): Map[String, Array[Byte]] = {
     import scala.concurrent.{Await, ExecutionContext, Future}
@@ -552,7 +551,7 @@ class AzureCloudStorageProvider(
 
   override def normalizePathForTantivy(path: String): String = {
     // Normalize all Spark Azure schemes (wasb, wasbs, abfs, abfss) to tantivy4java's azure:// scheme
-    val uri = new URI(path)
+    val uri    = new URI(path)
     val scheme = uri.getScheme
 
     scheme match {
@@ -573,8 +572,7 @@ class AzureCloudStorageProvider(
     }
   }
 
-  override def close(): Unit = {
+  override def close(): Unit =
     executor.shutdown()
-    // Azure BlobServiceClient doesn't need explicit close
-  }
+  // Azure BlobServiceClient doesn't need explicit close
 }

@@ -1578,7 +1578,7 @@ class IndexTables4SparkTable(
       key: String,
       value: String,
       expectedType: String
-    ): Unit = {
+    ): Unit =
       try
         expectedType match {
           case "Long" =>
@@ -1591,7 +1591,6 @@ class IndexTables4SparkTable(
         case e: NumberFormatException =>
           throw e
       }
-    }
 
     // Validate ALL configurations that might be numeric
     logger.debug(s"🔍 newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
@@ -1605,7 +1604,7 @@ class IndexTables4SparkTable(
           case k if k.contains("targetrecordspersplit") =>
             validateNumericConfig(key, value, "Long")
           case _ =>
-            // No validation needed
+          // No validation needed
         }
     }
 

@@ -19,21 +19,20 @@ package io.indextables.spark.transaction
 
 import java.io.File
 
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.funsuite.AnyFunSuite
-
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.util.JsonUtil
 import io.indextables.spark.transaction.compression.CompressionUtils
+import io.indextables.spark.util.JsonUtil
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Test suite to verify that checkpoint creation applies statistics truncation.
  *
- * This ensures that checkpoints created from old transaction files with long
- * statistics will have those statistics truncated, preventing checkpoint bloat.
+ * This ensures that checkpoints created from old transaction files with long statistics will have those statistics
+ * truncated, preventing checkpoint bloat.
  */
 class CheckpointStatisticsTruncationTest
     extends AnyFunSuite
@@ -85,16 +84,16 @@ class CheckpointStatisticsTruncationTest
       finalData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
-        .option("spark.indextables.checkpoint.interval", "1") // Create checkpoint immediately
-        .option("spark.indextables.stats.truncation.enabled", "true") // Ensure truncation enabled
+        .option("spark.indextables.checkpoint.interval", "1")          // Create checkpoint immediately
+        .option("spark.indextables.stats.truncation.enabled", "true")  // Ensure truncation enabled
         .option("spark.indextables.stats.truncation.maxLength", "256") // Use default threshold
         .mode("append")
         .save(tablePath)
 
       // Read the checkpoint file
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs                 = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val transactionLogPath = new Path(tablePath, "_transaction_log")
-      val files = fs.listStatus(transactionLogPath)
+      val files              = fs.listStatus(transactionLogPath)
 
       // Find the checkpoint file (should be the highest version .checkpoint.json)
       val checkpointFiles = files
@@ -112,13 +111,13 @@ class CheckpointStatisticsTruncationTest
       // Decompress if needed (handles both compressed and uncompressed files)
       val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
       val checkpointContent = new String(decompressedBytes, "UTF-8")
-      val checkpointLines = checkpointContent.split("\n").filter(_.nonEmpty)
+      val checkpointLines   = checkpointContent.split("\n").filter(_.nonEmpty)
 
       println(s"Checkpoint has ${checkpointLines.length} lines")
 
       // Parse each line and check AddActions for statistics
-      var addActionCount = 0
-      var addActionsWithStats = 0
+      var addActionCount          = 0
+      var addActionsWithStats     = 0
       var addActionsWithLongStats = 0
 
       checkpointLines.foreach { line =>
@@ -157,8 +156,10 @@ class CheckpointStatisticsTruncationTest
       println(s"  AddActions with long statistics (>256 chars): $addActionsWithLongStats")
 
       // The key assertion: checkpoint should NOT have long statistics
-      assert(addActionsWithLongStats === 0,
-        s"Checkpoint should have truncated long statistics, but found $addActionsWithLongStats AddActions with stats > 256 characters")
+      assert(
+        addActionsWithLongStats === 0,
+        s"Checkpoint should have truncated long statistics, but found $addActionsWithLongStats AddActions with stats > 256 characters"
+      )
 
       println("✅ Checkpoint successfully truncated all long statistics")
     }
@@ -173,7 +174,7 @@ class CheckpointStatisticsTruncationTest
 
       // Create partition value and a data column with long value
       val partitionValue = "2024-01-01"
-      val longDataValue = "x" * 300 // This will have stats truncated
+      val longDataValue  = "x" * 300 // This will have stats truncated
       val data = Seq(
         (partitionValue, "doc1", longDataValue, 100),
         (partitionValue, "doc2", longDataValue + "y", 200)
@@ -191,9 +192,9 @@ class CheckpointStatisticsTruncationTest
         .save(tablePath)
 
       // Read checkpoint
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs                 = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val transactionLogPath = new Path(tablePath, "_transaction_log")
-      val files = fs.listStatus(transactionLogPath)
+      val files              = fs.listStatus(transactionLogPath)
 
       val checkpointFiles = files
         .filter(_.getPath.getName.endsWith(".checkpoint.json"))
@@ -205,12 +206,12 @@ class CheckpointStatisticsTruncationTest
       val rawBytes2 = org.apache.hadoop.io.IOUtils.readFullyToByteArray(fs.open(checkpointFiles.head.getPath))
       // Decompress if needed (handles both compressed and uncompressed files)
       val decompressedBytes2 = CompressionUtils.readTransactionFile(rawBytes2)
-      val checkpointContent = new String(decompressedBytes2, "UTF-8")
-      val checkpointLines = checkpointContent.split("\n").filter(_.nonEmpty)
+      val checkpointContent  = new String(decompressedBytes2, "UTF-8")
+      val checkpointLines    = checkpointContent.split("\n").filter(_.nonEmpty)
 
       var partitionStatsFound = false
-      var dataStatsFound = false
-      var dataStatsLong = false
+      var dataStatsFound      = false
+      var dataStatsLong       = false
 
       checkpointLines.foreach { line =>
         val json = JsonUtil.mapper.readTree(line)

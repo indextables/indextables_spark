@@ -124,7 +124,7 @@ class CompressionUtilsTest extends AnyFunSuite {
 
   test("handle unsupported compression codec") {
     // Create file with unsupported codec byte
-    val fakeData = Array[Byte](CompressionUtils.MAGIC_BYTE, 0xFF.toByte) ++ Array.fill(100)(0.toByte)
+    val fakeData = Array[Byte](CompressionUtils.MAGIC_BYTE, 0xff.toByte) ++ Array.fill(100)(0.toByte)
 
     val exception = intercept[UnsupportedOperationException] {
       CompressionUtils.readTransactionFile(fakeData)
@@ -159,9 +159,10 @@ class CompressionUtilsTest extends AnyFunSuite {
 
   test("compression provides space savings") {
     // Typical transaction log JSON repeated to ensure compression effectiveness
-    val transaction = """{"add":{"path":"s3://bucket/table/part-00001.split","partitionValues":{"date":"2024-01-01","hour":"10"},"size":104857600,"modificationTime":1704067200000,"dataChange":true}}
+    val transaction =
+      """{"add":{"path":"s3://bucket/table/part-00001.split","partitionValues":{"date":"2024-01-01","hour":"10"},"size":104857600,"modificationTime":1704067200000,"dataChange":true}}
 """
-    val original    = (transaction * 20).getBytes("UTF-8") // Repeat to get better compression
+    val original = (transaction * 20).getBytes("UTF-8") // Repeat to get better compression
 
     val codec      = new GzipCompressionCodec(6)
     val compressed = CompressionUtils.writeTransactionFile(original, Some(codec))

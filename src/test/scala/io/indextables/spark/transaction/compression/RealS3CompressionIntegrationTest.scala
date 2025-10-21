@@ -23,8 +23,9 @@ import java.util.{Properties, UUID}
 
 import scala.util.Using
 
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql.functions._
+
+import org.apache.hadoop.fs.{FileSystem, Path}
 
 import io.indextables.spark.RealS3TestBase
 
@@ -141,9 +142,7 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     )
   }
 
-  /**
-   * Clean up test data from S3. Note: Cleanup is skipped for now since we're using unique paths.
-   */
+  /** Clean up test data from S3. Note: Cleanup is skipped for now since we're using unique paths. */
   private def cleanupTestData(): Unit =
     try
       // Skip cleanup since we're using unique random paths to avoid conflicts
@@ -156,8 +155,10 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
   /**
    * Read a file from S3 using Hadoop FileSystem API.
    *
-   * @param s3Path Full S3 path (s3a://bucket/path/to/file)
-   * @return File contents as byte array
+   * @param s3Path
+   *   Full S3 path (s3a://bucket/path/to/file)
+   * @return
+   *   File contents as byte array
    */
   private def readS3File(s3Path: String): Array[Byte] = {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
@@ -169,16 +170,17 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
       val buffer = new Array[Byte](inputStream.available())
       inputStream.readFully(buffer)
       buffer
-    } finally {
+    } finally
       inputStream.close()
-    }
   }
 
   /**
    * List files in S3 directory.
    *
-   * @param s3Path Full S3 path to directory
-   * @return List of file paths
+   * @param s3Path
+   *   Full S3 path to directory
+   * @return
+   *   List of file paths
    */
   private def listS3Files(s3Path: String): Seq[String] = {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
@@ -269,7 +271,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
       fileBytes(1) shouldBe 0x01.toByte // GZIP codec byte
 
       println(
-        s"✅ Transaction file $transactionFile is compressed (magic bytes: 0x${Integer.toHexString(fileBytes(0) & 0xFF)} 0x${Integer.toHexString(fileBytes(1) & 0xFF)})"
+        s"✅ Transaction file $transactionFile is compressed (magic bytes: 0x${Integer
+            .toHexString(fileBytes(0) & 0xff)} 0x${Integer.toHexString(fileBytes(1) & 0xff)})"
       )
 
       // Verify the file can be decompressed
@@ -494,7 +497,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
       checkpointBytes(1) shouldBe 0x01.toByte // GZIP codec byte
 
       println(
-        s"✅ Checkpoint file is compressed (magic bytes: 0x${Integer.toHexString(checkpointBytes(0) & 0xFF)} 0x${Integer.toHexString(checkpointBytes(1) & 0xFF)})"
+        s"✅ Checkpoint file is compressed (magic bytes: 0x${Integer.toHexString(checkpointBytes(0) & 0xff)} 0x${Integer
+            .toHexString(checkpointBytes(1) & 0xff)})"
       )
 
       // Verify the checkpoint file can be decompressed
@@ -648,8 +652,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     jsonFiles.size should be >= 2
 
     // Check 00000000000000000000.json (first append - creates table)
-    val file0Path  = s"$transactionLogPath/${jsonFiles(0)}"
-    val file0Bytes = readS3File(file0Path)
+    val file0Path       = s"$transactionLogPath/${jsonFiles(0)}"
+    val file0Bytes      = readS3File(file0Path)
     val file0Compressed = CompressionUtils.isCompressed(file0Bytes)
 
     println(s"🔍 ${jsonFiles(0)}: ${if (file0Compressed) "COMPRESSED ✓" else "UNCOMPRESSED ✗"}")
@@ -659,8 +663,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     }
 
     // Check 00000000000000000001.json (second append)
-    val file1Path  = s"$transactionLogPath/${jsonFiles(1)}"
-    val file1Bytes = readS3File(file1Path)
+    val file1Path       = s"$transactionLogPath/${jsonFiles(1)}"
+    val file1Bytes      = readS3File(file1Path)
     val file1Compressed = CompressionUtils.isCompressed(file1Bytes)
 
     println(s"🔍 ${jsonFiles(1)}: ${if (file1Compressed) "COMPRESSED ✓" else "UNCOMPRESSED ✗"}")
@@ -693,8 +697,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     println(s"✍️  Write 1: Creating table WITH compression options...")
 
     val writeOptionsWithCompression = getWriteOptions() ++ Map(
-      "spark.indextables.transaction.compression.enabled" -> "true",
-      "spark.indextables.transaction.compression.codec" -> "gzip",
+      "spark.indextables.transaction.compression.enabled"    -> "true",
+      "spark.indextables.transaction.compression.codec"      -> "gzip",
       "spark.indextables.transaction.compression.gzip.level" -> "6"
     )
 
@@ -719,7 +723,7 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     println(s"✍️  Write 2: Appending WITHOUT explicit compression options...")
     println(s"   (This should use compression settings from metadata)")
 
-    val writeOptionsWithoutCompression = getWriteOptions()  // Only AWS credentials, no compression config
+    val writeOptionsWithoutCompression = getWriteOptions() // Only AWS credentials, no compression config
 
     data2.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -744,8 +748,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     jsonFiles.size should be >= 2
 
     // Check 00.json (first write with compression options)
-    val file0Path  = s"$transactionLogPath/${jsonFiles(0)}"
-    val file0Bytes = readS3File(file0Path)
+    val file0Path       = s"$transactionLogPath/${jsonFiles(0)}"
+    val file0Bytes      = readS3File(file0Path)
     val file0Compressed = CompressionUtils.isCompressed(file0Bytes)
 
     println(s"")
@@ -757,8 +761,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     }
 
     // Check 01.json (second write WITHOUT compression options)
-    val file1Path  = s"$transactionLogPath/${jsonFiles(1)}"
-    val file1Bytes = readS3File(file1Path)
+    val file1Path       = s"$transactionLogPath/${jsonFiles(1)}"
+    val file1Bytes      = readS3File(file1Path)
     val file1Compressed = CompressionUtils.isCompressed(file1Bytes)
 
     println(s"")
@@ -780,7 +784,7 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
       println(s"❌ BUG CONFIRMED: Second transaction is NOT compressed (compression NOT persisted in metadata)")
     }
 
-    file1Compressed shouldBe true  // This will FAIL until bug is fixed
+    file1Compressed shouldBe true // This will FAIL until bug is fixed
   }
 
   test("Real S3: PARALLEL WRITE BUG - Large batch triggers uncompressed parallel write path") {
@@ -831,8 +835,8 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
     jsonFiles should not be empty
 
     // Check first transaction file
-    val file0Path  = s"$transactionLogPath/${jsonFiles(0)}"
-    val file0Bytes = readS3File(file0Path)
+    val file0Path       = s"$transactionLogPath/${jsonFiles(0)}"
+    val file0Bytes      = readS3File(file0Path)
     val file0Compressed = CompressionUtils.isCompressed(file0Bytes)
 
     println(s"")

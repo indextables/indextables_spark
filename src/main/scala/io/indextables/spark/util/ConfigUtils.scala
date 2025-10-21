@@ -148,33 +148,57 @@ object ConfigUtils {
   /**
    * Get a boolean configuration value from the config map with a default value.
    *
-   * @param config Configuration map
-   * @param key Configuration key
-   * @param defaultValue Default value if key not found
-   * @return Boolean value
+   * @param config
+   *   Configuration map
+   * @param key
+   *   Configuration key
+   * @param defaultValue
+   *   Default value if key not found
+   * @return
+   *   Boolean value
    */
-  def getBoolean(config: Map[String, String], key: String, defaultValue: Boolean): Boolean =
+  def getBoolean(
+    config: Map[String, String],
+    key: String,
+    defaultValue: Boolean
+  ): Boolean =
     config.get(key).map(_.toBoolean).getOrElse(defaultValue)
 
   /**
    * Get an integer configuration value from the config map with a default value.
    *
-   * @param config Configuration map
-   * @param key Configuration key
-   * @param defaultValue Default value if key not found
-   * @return Integer value
+   * @param config
+   *   Configuration map
+   * @param key
+   *   Configuration key
+   * @param defaultValue
+   *   Default value if key not found
+   * @return
+   *   Integer value
    */
-  def getInt(config: Map[String, String], key: String, defaultValue: Int): Int =
+  def getInt(
+    config: Map[String, String],
+    key: String,
+    defaultValue: Int
+  ): Int =
     config.get(key).map(_.toInt).getOrElse(defaultValue)
 
   /**
    * Get a string configuration value from the config map with a default value.
    *
-   * @param config Configuration map
-   * @param key Configuration key
-   * @param defaultValue Default value if key not found
-   * @return String value
+   * @param config
+   *   Configuration map
+   * @param key
+   *   Configuration key
+   * @param defaultValue
+   *   Default value if key not found
+   * @return
+   *   String value
    */
-  def getString(config: Map[String, String], key: String, defaultValue: String): String =
+  def getString(
+    config: Map[String, String],
+    key: String,
+    defaultValue: String
+  ): String =
     config.getOrElse(key, defaultValue)
 }

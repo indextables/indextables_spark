@@ -17,23 +17,24 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
-
 import java.nio.file.Files
 
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterAll
+
 /**
- * Test to verify that COUNT(*) queries use transaction log optimization
- * and return correct results regardless of query execution mode.
+ * Test to verify that COUNT(*) queries use transaction log optimization and return correct results regardless of query
+ * execution mode.
  *
- * This addresses GitHub issue #15: COUNT queries on Databricks should use
- * transaction log metadata instead of full table scans.
+ * This addresses GitHub issue #15: COUNT queries on Databricks should use transaction log metadata instead of full
+ * table scans.
  */
 class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfterAll {
 
   var spark: SparkSession = _
-  var testDir: String = _
+  var testDir: String     = _
 
   override def beforeAll(): Unit = {
     // Create a new SparkSession for testing
@@ -48,18 +49,17 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
     testDir = Files.createTempDirectory("count_optimization_test").toString
   }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     if (spark != null) {
       spark.stop()
     }
-  }
 
   test("COUNT(*) should use transaction log optimization and return correct count") {
     val tablePath = s"$testDir/count_test_table"
 
     // Write test data - 10,000 rows
     val testData = (1 to 10000).map(i => (i, s"value_$i", i * 2))
-    val df = spark.createDataFrame(testData).toDF("id", "name", "amount")
+    val df       = spark.createDataFrame(testData).toDF("id", "name", "amount")
 
     println(s"Writing 10,000 rows to $tablePath")
     df.write
@@ -84,7 +84,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write 5,000 rows
     val testData = (1 to 5000).map(i => (i, s"record_$i"))
-    spark.createDataFrame(testData).toDF("id", "name")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "name")
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -104,7 +106,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write 7,500 rows
     val testData = (1 to 7500).map(i => (i, s"item_$i"))
-    spark.createDataFrame(testData).toDF("id", "description")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "description")
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -118,7 +122,7 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Execute SQL COUNT
     val result = spark.sql("SELECT COUNT(*) as cnt FROM test_table")
-    val count = result.collect()(0).getLong(0)
+    val count  = result.collect()(0).getLong(0)
 
     assert(count == 7500, s"Expected 7500, got $count")
   }
@@ -128,7 +132,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write data across multiple partitions to create multiple splits
     val testData = (1 to 10000).map(i => (i, s"data_$i", i % 100))
-    spark.createDataFrame(testData).toDF("id", "data", "partition_col")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "data", "partition_col")
       .repartition(10) // Force multiple splits
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -152,7 +158,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write 10,000 rows
     val testData = (1 to 10000).map(i => (i, s"record_$i"))
-    spark.createDataFrame(testData).toDF("id", "name")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "name")
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -165,7 +173,7 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
     // Apply LIMIT before COUNT - this simulates Databricks interactive query behavior
     println("\n=== Testing COUNT with LIMIT 10 ===")
     val limitedDf = df.limit(10)
-    val count = limitedDf.count()
+    val count     = limitedDf.count()
 
     // COUNT should return 10 (the limited subset), NOT 10000
     // This is the correct Spark behavior - LIMIT is applied before COUNT
@@ -178,7 +186,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write 10,000 rows
     val testData = (1 to 10000).map(i => (i, s"item_$i"))
-    spark.createDataFrame(testData).toDF("id", "description")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "description")
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -207,7 +217,9 @@ class CountTransactionLogOptimizationTest extends AnyFunSuite with BeforeAndAfte
 
     // Write 10,000 rows
     val testData = (1 to 10000).map(i => (i, s"value_$i"))
-    spark.createDataFrame(testData).toDF("id", "value")
+    spark
+      .createDataFrame(testData)
+      .toDF("id", "value")
       .write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")

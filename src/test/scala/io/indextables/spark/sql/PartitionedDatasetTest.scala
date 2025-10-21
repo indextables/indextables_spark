@@ -27,8 +27,8 @@ import scala.util.Random
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.transaction.compression.CompressionUtils
+import io.indextables.spark.TestBase
 import org.apache.commons.io.FileUtils
 
 class PartitionedDatasetTest extends TestBase {
@@ -474,7 +474,7 @@ class PartitionedDatasetTest extends TestBase {
       val rawBytes = Files.readAllBytes(file.toPath)
       // Decompress if needed (handles both compressed and uncompressed files)
       val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-      val content = new String(decompressedBytes, "UTF-8")
+      val content           = new String(decompressedBytes, "UTF-8")
       content.contains("partitionBy") || content.contains("load_date") || content.contains("load_hour")
     }
 

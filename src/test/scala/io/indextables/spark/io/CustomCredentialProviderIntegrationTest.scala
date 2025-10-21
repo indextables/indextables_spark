@@ -64,7 +64,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
     // Test CloudStorageConfig extraction
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     config.awsCredentialsProviderClass shouldBe Some(classOf[TestV1CredentialProvider].getName)
@@ -93,7 +94,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
 
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     config.awsCredentialsProviderClass shouldBe Some(classOf[TestV2CredentialProvider].getName)
@@ -120,7 +122,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
 
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     config.awsCredentialsProviderClass shouldBe Some(classOf[TestDualCredentialProvider].getName)
@@ -151,7 +154,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
 
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     // Options should take precedence
@@ -177,7 +181,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
     val hadoopConf = new Configuration()
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     config.awsCredentialsProviderClass shouldBe Some("com.nonexistent.Provider")
@@ -201,7 +206,8 @@ class CustomCredentialProviderIntegrationTest extends TestBase {
     val hadoopConf = new Configuration()
     val optionsMap = new CaseInsensitiveStringMap(options.asJava)
 
-    val config = CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
+    val config =
+      CloudStorageProviderFactory.extractCloudConfig(optionsMap, hadoopConf, ProtocolBasedIOFactory.S3Protocol)
 
     config should not be null
     config.awsCredentialsProviderClass shouldBe Some("com.nonexistent.Provider")

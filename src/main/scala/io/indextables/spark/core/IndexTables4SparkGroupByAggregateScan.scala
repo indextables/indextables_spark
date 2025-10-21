@@ -120,17 +120,20 @@ class IndexTables4SparkGroupByAggregateScan(
 
     // IMPORTANT: Spark expects GROUP BY columns to be named group_col_0, group_col_1, etc.
     // See org.apache.spark.sql.execution.datasources.v2.V2ScanRelationPushDown lines 413-421
-    val groupByFields = groupByColumns.zipWithIndex.map { case (columnName, index) =>
-      // Find the column type from the original schema
-      schema.fields.find(_.name == columnName) match {
-        case Some(field) =>
-          logger.debug(s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}, naming as group_col_$index")
-          StructField(s"group_col_$index", field.dataType, field.nullable)
-        case None =>
-          // Fallback to string type
-          logger.warn(s"🔍 GROUP BY SCHEMA: Field in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
-          StructField(s"group_col_$index", StringType, nullable = true)
-      }
+    val groupByFields = groupByColumns.zipWithIndex.map {
+      case (columnName, index) =>
+        // Find the column type from the original schema
+        schema.fields.find(_.name == columnName) match {
+          case Some(field) =>
+            logger.debug(
+              s"🔍 GROUP BY SCHEMA: Found field '$columnName' with type ${field.dataType}, naming as group_col_$index"
+            )
+            StructField(s"group_col_$index", field.dataType, field.nullable)
+          case None =>
+            // Fallback to string type
+            logger.warn(s"🔍 GROUP BY SCHEMA: Field in schema! Falling back to StringType. Available fields: ${schema.fields.map(_.name).mkString(", ")}")
+            StructField(s"group_col_$index", StringType, nullable = true)
+        }
     }
 
     // Add aggregation result columns
@@ -333,7 +336,9 @@ class IndexTables4SparkGroupByAggregatePartition(
   logger.debug(s"🔍 GROUP BY PARTITION: Created partition for split: ${split.path}")
   logger.debug(s"🔍 GROUP BY PARTITION: Table path: $tablePath")
   logger.debug(s"🔍 GROUP BY PARTITION: GROUP BY columns: ${groupByColumns.mkString(", ")}")
-  logger.debug(s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
+  logger.debug(
+    s"🔍 GROUP BY PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}"
+  )
   logger.debug(s"🔍 GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**

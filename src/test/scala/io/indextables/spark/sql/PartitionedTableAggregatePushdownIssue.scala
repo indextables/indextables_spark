@@ -19,24 +19,21 @@ package io.indextables.spark.sql
 
 import java.io.File
 
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
-import org.scalatest.funsuite.AnyFunSuite
-
-import io.indextables.spark.TestBase
 
 /**
  * Test suite demonstrating aggregate pushdown failures with partitioned tables.
  *
- * BUG: When using V2 DataSource API with partitioned tables, distinct().collect()
- * triggers aggregate pushdown that fails with:
- * "The data source returns unexpected number of columns"
+ * BUG: When using V2 DataSource API with partitioned tables, distinct().collect() triggers aggregate pushdown that
+ * fails with: "The data source returns unexpected number of columns"
  *
- * This test suite will FAIL until the aggregate pushdown implementation is fixed
- * to properly handle partition columns.
+ * This test suite will FAIL until the aggregate pushdown implementation is fixed to properly handle partition columns.
  *
- * Expected behavior: distinct().collect() should work on partitioned tables just
- * like it does on non-partitioned tables.
+ * Expected behavior: distinct().collect() should work on partitioned tables just like it does on non-partitioned
+ * tables.
  */
 class PartitionedTableAggregatePushdownIssue
     extends AnyFunSuite
@@ -90,8 +87,7 @@ class PartitionedTableAggregatePushdownIssue
 
       // If we get here, the bug is fixed!
       println(s"✅ SUCCESS: distinct().collect() returned ${distinctPartitions.length} rows")
-      assert(distinctPartitions.length === 4,
-        s"Expected 4 unique partitions, got ${distinctPartitions.length}")
+      assert(distinctPartitions.length === 4, s"Expected 4 unique partitions, got ${distinctPartitions.length}")
 
       // Verify all expected partitions are present
       val partitionSet = distinctPartitions.map(r => (r.getString(0), r.getInt(1))).toSet
@@ -101,8 +97,10 @@ class PartitionedTableAggregatePushdownIssue
         ("2024-01-02", 10),
         ("2024-01-02", 11)
       )
-      assert(partitionSet === expectedPartitions,
-        s"Partition values don't match. Expected: $expectedPartitions, Got: $partitionSet")
+      assert(
+        partitionSet === expectedPartitions,
+        s"Partition values don't match. Expected: $expectedPartitions, Got: $partitionSet"
+      )
 
       println("=" * 80)
       println("BUG IS FIXED: distinct().collect() now works on partitioned tables!")
@@ -156,8 +154,7 @@ class PartitionedTableAggregatePushdownIssue
 
       // If we get here, the bug is fixed!
       println(s"✅ SUCCESS: distinct().count() returned $distinctCount")
-      assert(distinctCount === 4,
-        s"Expected 4 unique partitions, got $distinctCount")
+      assert(distinctCount === 4, s"Expected 4 unique partitions, got $distinctCount")
 
       println("=" * 80)
       println("BUG IS FIXED: distinct().count() now works on partitioned tables!")

@@ -78,16 +78,19 @@ class TransactionLogCheckpoint(
 
   // Compression configuration
   private val compressionEnabled = options.getBoolean("spark.indextables.checkpoint.compression.enabled", true)
-  private val compressionCodec   = Option(options.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
-  private val compressionLevel   = options.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+  private val compressionCodec = Option(options.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+  private val compressionLevel = options.getInt("spark.indextables.transaction.compression.gzip.level", 6)
 
-  private val codec: Option[CompressionCodec] = try {
-    if (compressionEnabled) CompressionUtils.getCodec(true, compressionCodec, compressionLevel) else None
-  } catch {
-    case e: IllegalArgumentException =>
-      logger.warn(s"Invalid compression configuration for checkpoint: ${e.getMessage}. Falling back to no compression.")
-      None
-  }
+  private val codec: Option[CompressionCodec] =
+    try
+      if (compressionEnabled) CompressionUtils.getCodec(true, compressionCodec, compressionLevel) else None
+    catch {
+      case e: IllegalArgumentException =>
+        logger.warn(
+          s"Invalid compression configuration for checkpoint: ${e.getMessage}. Falling back to no compression."
+        )
+        None
+    }
 
   private val executor                      = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
   implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
@@ -151,7 +154,9 @@ class TransactionLogCheckpoint(
 
       writeLastCheckpointFile(checkpointInfo)
 
-      logger.info(s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions${compressionInfo}")
+      logger.info(
+        s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$compressionInfo"
+      )
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint for version $currentVersion", e)

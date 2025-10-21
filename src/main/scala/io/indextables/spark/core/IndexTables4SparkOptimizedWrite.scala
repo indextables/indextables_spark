@@ -501,10 +501,9 @@ class IndexTables4SparkOptimizedWrite(
         case e: Exception =>
           logger.warn(s"Could not calculate total row count: ${e.getMessage}")
       }
-    } finally {
+    } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
-    }
   }
 
   override def abort(messages: Array[WriterCommitMessage]): Unit = {

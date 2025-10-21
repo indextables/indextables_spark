@@ -260,11 +260,11 @@ case class SerializableAzureConfig(
   bearerToken: Option[String],
   tenantId: Option[String],
   clientId: Option[String],
-  clientSecret: Option[String]
-) extends Serializable {
+  clientSecret: Option[String])
+    extends Serializable {
 
   /** Convert to tantivy4java AzureConfig instance. */
-  def toQuickwitSplitAzureConfig(): QuickwitSplit.AzureConfig = {
+  def toQuickwitSplitAzureConfig(): QuickwitSplit.AzureConfig =
     // Priority 1: Bearer Token (OAuth)
     (accountName, bearerToken) match {
       case (Some(name), Some(token)) =>
@@ -287,7 +287,6 @@ case class SerializableAzureConfig(
             }
         }
     }
-  }
 }
 
 /** Serializable wrapper for AWS configuration that can be broadcast across executors. */
@@ -538,8 +537,8 @@ class MergeSplitsExecutor(
     }
 
   /**
-   * Extract Azure configuration from SparkSession for tantivy4java merge operations.
-   * Returns a serializable wrapper that can be broadcast across executors.
+   * Extract Azure configuration from SparkSession for tantivy4java merge operations. Returns a serializable wrapper
+   * that can be broadcast across executors.
    */
   private def extractAzureConfig(): SerializableAzureConfig =
     try {
@@ -568,8 +567,13 @@ class MergeSplitsExecutor(
       val clientSecret     = getConfigWithFallback("spark.indextables.azure.clientSecret")
 
       logger.info(s"🔍 Creating AzureConfig with: accountName=${accountName.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}")
-      logger.info(s"🔍 Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString.map(_ => "***").getOrElse("None")}, bearerToken=${bearerToken.map(_ => "***").getOrElse("None")}")
-      logger.info(s"🔍 OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId.getOrElse("None")}, clientSecret=${clientSecret.map(_ => "***").getOrElse("None")}")
+      logger.info(
+        s"🔍 Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString
+            .map(_ => "***")
+            .getOrElse("None")}, bearerToken=${bearerToken.map(_ => "***").getOrElse("None")}"
+      )
+      logger.info(s"🔍 OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId
+          .getOrElse("None")}, clientSecret=${clientSecret.map(_ => "***").getOrElse("None")}")
 
       SerializableAzureConfig(
         accountName,
@@ -843,7 +847,12 @@ class MergeSplitsExecutor(
                   mergeGroupsRDD
                     .map(group =>
                       MergeSplitsExecutor
-                        .executeMergeGroupDistributed(group, broadcastTablePath.value, broadcastAwsConfig.value, broadcastAzureConfig.value)
+                        .executeMergeGroupDistributed(
+                          group,
+                          broadcastTablePath.value,
+                          broadcastAwsConfig.value,
+                          broadcastAzureConfig.value
+                        )
                     )
                     .setName(s"Merge Results Batch $batchNum")
                     .collect()
@@ -1562,8 +1571,8 @@ class MergeSplitsExecutor(
     // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
     val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
     val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
-                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
-                      tablePathStr.startsWith("abfss://")
+      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+      tablePathStr.startsWith("abfss://")
 
     // Use centralized Azure URL normalization from CloudStorageProviderFactory
     def normalizeAzureUrl(url: String): String = {
@@ -1595,9 +1604,11 @@ class MergeSplitsExecutor(
         }
       } else if (isAzurePath) {
         // For Azure paths, normalize to azure:// scheme for tantivy4java
-        if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
-            file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
-            file.path.startsWith("abfss://")) {
+        if (
+          file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+          file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+          file.path.startsWith("abfss://")
+        ) {
           // file.path is already a full Azure URL, normalize to azure://
           val normalized = normalizeAzureUrl(file.path)
           logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
@@ -1605,7 +1616,7 @@ class MergeSplitsExecutor(
         } else {
           // file.path is relative, construct full URL with normalized scheme
           val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-          val fullPath = s"$normalizedBaseUri/${file.path}"
+          val fullPath          = s"$normalizedBaseUri/${file.path}"
           logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
           fullPath
         }
@@ -1619,13 +1630,13 @@ class MergeSplitsExecutor(
     val outputSplitPath = if (isS3Path) {
       // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
       val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      val outputPath        = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else if (isAzurePath) {
       // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
       val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      val outputPath        = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
@@ -1663,7 +1674,8 @@ class MergeSplitsExecutor(
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
     // Create merge configuration with broadcast AWS and Azure credentials and temp directory
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig
+      .builder()
       .indexUid("merged-index-uid")
       .sourceId("tantivy4spark")
       .nodeId("merge-node")
@@ -1824,10 +1836,10 @@ class MergeSplitsExecutor(
     // Create full paths for input splits and output split
     // Handle S3 and Azure paths specially to preserve proper schemes
     val tablePathStr = tablePath.toString
-    val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
+    val isS3Path     = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
     val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
-                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
-                      tablePathStr.startsWith("abfss://")
+      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+      tablePathStr.startsWith("abfss://")
 
     // Use centralized Azure URL normalization from CloudStorageProviderFactory
     def normalizeAzureUrl(url: String): String = {
@@ -1850,7 +1862,7 @@ class MergeSplitsExecutor(
       } else if (isAzurePath) {
         // For Azure paths, normalize to azure:// scheme for tantivy4java
         val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-        val fullPath = s"$normalizedBaseUri/${file.path}"
+        val fullPath          = s"$normalizedBaseUri/${file.path}"
         logger.debug(s"🔄 [DRIVER] Normalized relative Azure path: ${file.path} -> $fullPath")
         fullPath
       } else {
@@ -1867,7 +1879,7 @@ class MergeSplitsExecutor(
     } else if (isAzurePath) {
       // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
       val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      val outputPath        = s"$normalizedBaseUri/$mergedPath"
       logger.debug(s"🔄 [DRIVER] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
@@ -1898,7 +1910,8 @@ class MergeSplitsExecutor(
     )
 
     // Create merge configuration with AWS credentials and temp directory using builder pattern
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig
+      .builder()
       .indexUid("merged-index-uid")
       .sourceId("tantivy4spark")
       .nodeId("merge-node")
@@ -2039,7 +2052,9 @@ class MergeSplitsExecutor(
     InternalRow.fromSeq(values)
   }
 
-  /** Resolve an expression against a schema to handle UnresolvedAttribute references and cast literals to UTF8String. */
+  /**
+   * Resolve an expression against a schema to handle UnresolvedAttribute references and cast literals to UTF8String.
+   */
   private def resolveExpression(expression: Expression, schema: StructType): Expression =
     expression.transform {
       case unresolvedAttr: org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute =>
@@ -2052,7 +2067,7 @@ class MergeSplitsExecutor(
         import org.apache.spark.sql.types._
         literal.dataType match {
           case StringType => literal
-          case _ =>
+          case _          =>
             // Convert non-string literals to UTF8String for comparison with partition values
             org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
         }
@@ -2224,8 +2239,8 @@ object MergeSplitsExecutor {
     // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
     val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
     val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
-                      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
-                      tablePathStr.startsWith("abfss://")
+      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
+      tablePathStr.startsWith("abfss://")
 
     // Use centralized Azure URL normalization from CloudStorageProviderFactory
     def normalizeAzureUrl(url: String): String = {
@@ -2257,9 +2272,11 @@ object MergeSplitsExecutor {
         }
       } else if (isAzurePath) {
         // For Azure paths, normalize to azure:// scheme for tantivy4java
-        if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
-            file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
-            file.path.startsWith("abfss://")) {
+        if (
+          file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+          file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+          file.path.startsWith("abfss://")
+        ) {
           // file.path is already a full Azure URL, normalize to azure://
           val normalized = normalizeAzureUrl(file.path)
           logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
@@ -2267,7 +2284,7 @@ object MergeSplitsExecutor {
         } else {
           // file.path is relative, construct full URL with normalized scheme
           val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-          val fullPath = s"$normalizedBaseUri/${file.path}"
+          val fullPath          = s"$normalizedBaseUri/${file.path}"
           logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
           fullPath
         }
@@ -2281,13 +2298,13 @@ object MergeSplitsExecutor {
     val outputSplitPath = if (isS3Path) {
       // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
       val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      val outputPath        = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else if (isAzurePath) {
       // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
       val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath = s"$normalizedBaseUri/$mergedPath"
+      val outputPath        = s"$normalizedBaseUri/$mergedPath"
       logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
@@ -2325,7 +2342,8 @@ object MergeSplitsExecutor {
     logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
     // Create merge configuration with broadcast AWS and Azure credentials and temp directory
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig.builder()
+    val mergeConfigBuilder = QuickwitSplit.MergeConfig
+      .builder()
       .indexUid("merged-index-uid")
       .sourceId("tantivy4spark")
       .nodeId("merge-node")

@@ -38,17 +38,14 @@ object TransactionLog {
   // This allows writes to pass their DataFrameWriter options (including compression settings) to TransactionLog
   private val writeOptions = new ThreadLocal[Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]]()
 
-  def setWriteOptions(options: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit = {
+  def setWriteOptions(options: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit =
     writeOptions.set(Some(options))
-  }
 
-  def clearWriteOptions(): Unit = {
+  def clearWriteOptions(): Unit =
     writeOptions.remove()
-  }
 
-  def getWriteOptions(): Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = {
+  def getWriteOptions(): Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] =
     Option(writeOptions.get()).flatten
-  }
 }
 
 class TransactionLog(
@@ -98,12 +95,13 @@ class TransactionLog(
     val effectiveOptions = TransactionLog.getWriteOptions().getOrElse(options)
 
     val compressionEnabled = effectiveOptions.getBoolean("spark.indextables.transaction.compression.enabled", true)
-    val compressionCodec   = Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
-    val compressionLevel   = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
+    val compressionCodec =
+      Option(effectiveOptions.get("spark.indextables.transaction.compression.codec")).getOrElse("gzip")
+    val compressionLevel = effectiveOptions.getInt("spark.indextables.transaction.compression.gzip.level", 6)
 
-    try {
+    try
       CompressionUtils.getCodec(compressionEnabled, compressionCodec, compressionLevel)
-    } catch {
+    catch {
       case e: IllegalArgumentException =>
         logger.warn(s"Invalid compression configuration: ${e.getMessage}. Falling back to no compression.")
         None
@@ -421,7 +419,7 @@ class TransactionLog(
     cache.foreach(_.invalidateVersionDependentCaches())
 
     logger.info(
-      s"Written ${actions.length} actions to version $version${compressionInfo}: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      s"Written ${actions.length} actions to version $version$compressionInfo: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
     )
 
     // Check if we should create a checkpoint
@@ -486,8 +484,8 @@ class TransactionLog(
   }
 
   /**
-   * Apply statistics truncation to AddActions for checkpoint creation.
-   * Preserves partition column statistics while truncating data column statistics.
+   * Apply statistics truncation to AddActions for checkpoint creation. Preserves partition column statistics while
+   * truncating data column statistics.
    */
   private def applyStatisticsTruncation(
     addActions: Seq[AddAction],
@@ -497,9 +495,9 @@ class TransactionLog(
 
     // Get configuration from Spark session and options
     import scala.jdk.CollectionConverters._
-    val sparkConf = spark.conf.getAll
+    val sparkConf  = spark.conf.getAll
     val optionsMap = options.asCaseSensitiveMap().asScala.toMap
-    val config = sparkConf ++ optionsMap
+    val config     = sparkConf ++ optionsMap
 
     // Get partition columns to protect their statistics
     val partitionColumns = metadata.map(_.partitionColumns.toSet).getOrElse(Set.empty[String])
@@ -509,11 +507,13 @@ class TransactionLog(
       val originalMaxValues = add.maxValues.getOrElse(Map.empty[String, String])
 
       // Separate partition column stats from data column stats
-      val (partitionMinValues, dataMinValues) = originalMinValues.partition { case (col, _) =>
-        partitionColumns.contains(col)
+      val (partitionMinValues, dataMinValues) = originalMinValues.partition {
+        case (col, _) =>
+          partitionColumns.contains(col)
       }
-      val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition { case (col, _) =>
-        partitionColumns.contains(col)
+      val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition {
+        case (col, _) =>
+          partitionColumns.contains(col)
       }
 
       // Only truncate data column statistics, not partition column statistics
@@ -807,10 +807,10 @@ class TransactionLog(
 
         Try {
           // Read raw bytes and decompress if needed
-          val rawBytes        = cloudProvider.readFile(versionFilePath)
+          val rawBytes          = cloudProvider.readFile(versionFilePath)
           val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-          val content         = new String(decompressedBytes, "UTF-8")
-          val lines           = content.split("\n").filter(_.nonEmpty)
+          val content           = new String(decompressedBytes, "UTF-8")
+          val lines             = content.split("\n").filter(_.nonEmpty)
 
           lines.map { line =>
             val jsonNode = JsonUtil.mapper.readTree(line)
