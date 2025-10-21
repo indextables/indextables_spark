@@ -70,7 +70,7 @@ class IndexTables4SparkScan(
       logger.debug("Updated broadcast locality information for partition planning")
     } catch {
       case ex: Exception =>
-        println(s"❌ [DRIVER-SCAN] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn(s"❌ [DRIVER-SCAN] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information", ex)
     }
 
@@ -174,7 +174,7 @@ class IndexTables4SparkScan(
       s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
     )
     filters.foreach { f =>
-      println(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
+      logger.debug(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
       logger.debug(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
     }
 
@@ -184,22 +184,22 @@ class IndexTables4SparkScan(
     }
 
     val partitionColumns = transactionLog.getPartitionColumns()
-    println(s"🔍 DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
+    logger.debug(s"🔍 DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
     val initialCount = addActions.length
 
     // Debug: Print AddAction details
     addActions.zipWithIndex.foreach {
       case (action, index) =>
-        println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - path: ${action.path}")
-        println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - partitionValues: ${action.partitionValues}")
+        logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - path: ${action.path}")
+        logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - partitionValues: ${action.partitionValues}")
         action.numRecords.foreach { numRecs =>
-          println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - numRecords: $numRecs")
+          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - numRecords: $numRecs")
         }
         action.minValues.foreach { minVals =>
-          println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - minValues: $minVals")
+          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - minValues: $minVals")
         }
         action.maxValues.foreach { maxVals =>
-          println(s"🔍 DATA SKIPPING DEBUG: AddAction $index - maxValues: $maxVals")
+          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - maxValues: $maxVals")
         }
     }
 
@@ -284,19 +284,19 @@ class IndexTables4SparkScan(
   private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
     import org.apache.spark.sql.sources._
 
-    println(s"🔍 canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
-    filters.foreach(f => println(s"🔍 canFileMatchFilters: Filter: $f"))
+    logger.debug(s"🔍 canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
+    filters.foreach(f => logger.debug(s"🔍 canFileMatchFilters: Filter: $f"))
 
     // If no min/max values available, conservatively keep the file
     if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
-      println(s"🔍 canFileMatchFilters: No min/max values, keeping file")
+      logger.debug(s"🔍 canFileMatchFilters: No min/max values, keeping file")
       return true
     }
 
     // A file can match only if ALL filters can potentially match
     // Filters at this level are combined with AND logic by Spark
     val result = filters.forall(filter => canFilterMatchFile(addAction, filter))
-    println(s"🔍 canFileMatchFilters: Result for file ${addAction.path}: $result")
+    logger.debug(s"🔍 canFileMatchFilters: Result for file ${addAction.path}: $result")
     result
   }
 
@@ -373,8 +373,8 @@ class IndexTables4SparkScan(
             maxVals.get(attribute) match {
               case Some(max) =>
                 val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
-                val valueStr = convertedValue.toString
-                val maxStr = convertedMax.toString
+                val valueStr                          = convertedValue.toString
+                val maxStr                            = convertedMax.toString
                 // Skip if max < filterValue (all values in file are too small)
                 // BUT don't skip if filterValue starts with max (truncated max means actual value could be >= filterValue)
                 // Example: max="aaa" (truncated), filterValue="aaab" - actual could be "aaac" which is >= "aaab"
@@ -385,8 +385,8 @@ class IndexTables4SparkScan(
             minVals.get(attribute) match {
               case Some(min) =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                val valueStr = convertedValue.toString
-                val minStr = convertedMin.toString
+                val valueStr                          = convertedValue.toString
+                val minStr                            = convertedMin.toString
                 // Skip if min > filterValue (all values in file are too large)
                 // BUT don't skip if filterValue starts with min (truncated min means actual value could be <= filterValue)
                 // Example: min="bbb" (truncated), filterValue="bbbc" - actual could be "bbba" which is <= "bbbc"
@@ -452,8 +452,8 @@ class IndexTables4SparkScan(
     // Find the field data type in the schema
     val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
 
-    // logger.info(s"🔍 TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
-    // logger.info(s"🔍 TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
+    // logger.debug(s"🔍 TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
+    // logger.debug(s"🔍 TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
 
     fieldType match {
       case Some(DateType) =>
@@ -492,7 +492,7 @@ class IndexTables4SparkScan(
 
           val minDays = minValue.toInt
           val maxDays = maxValue.toInt
-          // logger.info(s"🔍 DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
+          // logger.debug(s"🔍 DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
           (
             filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
             minDays.asInstanceOf[Comparable[Any]],
@@ -513,12 +513,12 @@ class IndexTables4SparkScan(
 
       case Some(IntegerType) =>
         // Convert integer values for proper numeric comparison
-        logger.info(s"🔍 INTEGER CONVERSION: Processing IntegerType field $attribute")
+        logger.debug(s"🔍 INTEGER CONVERSION: Processing IntegerType field $attribute")
         try {
           val filterInt = filterValue.toString.toInt
           val minInt    = minValue.toInt
           val maxInt    = maxValue.toInt
-          logger.info(s"🔍 INTEGER CONVERSION RESULT: filterInt=$filterInt, minInt=$minInt, maxInt=$maxInt")
+          logger.debug(s"🔍 INTEGER CONVERSION RESULT: filterInt=$filterInt, minInt=$minInt, maxInt=$maxInt")
           (
             filterInt.asInstanceOf[Comparable[Any]],
             minInt.asInstanceOf[Comparable[Any]],
@@ -536,12 +536,12 @@ class IndexTables4SparkScan(
 
       case Some(LongType) =>
         // Convert long values for proper numeric comparison
-        logger.info(s"🔍 LONG CONVERSION: Processing LongType field $attribute")
+        logger.debug(s"🔍 LONG CONVERSION: Processing LongType field $attribute")
         try {
           val filterLong = filterValue.toString.toLong
           val minLong    = minValue.toLong
           val maxLong    = maxValue.toLong
-          logger.info(s"🔍 LONG CONVERSION RESULT: filterLong=$filterLong, minLong=$minLong, maxLong=$maxLong")
+          logger.debug(s"🔍 LONG CONVERSION RESULT: filterLong=$filterLong, minLong=$minLong, maxLong=$maxLong")
           (
             filterLong.asInstanceOf[Comparable[Any]],
             minLong.asInstanceOf[Comparable[Any]],
@@ -559,12 +559,12 @@ class IndexTables4SparkScan(
 
       case Some(FloatType) =>
         // Convert float values for proper numeric comparison
-        logger.info(s"🔍 FLOAT CONVERSION: Processing FloatType field $attribute")
+        logger.debug(s"🔍 FLOAT CONVERSION: Processing FloatType field $attribute")
         try {
           val filterFloat = filterValue.toString.toFloat
           val minFloat    = minValue.toFloat
           val maxFloat    = maxValue.toFloat
-          logger.info(s"🔍 FLOAT CONVERSION RESULT: filterFloat=$filterFloat, minFloat=$minFloat, maxFloat=$maxFloat")
+          logger.debug(s"🔍 FLOAT CONVERSION RESULT: filterFloat=$filterFloat, minFloat=$minFloat, maxFloat=$maxFloat")
           (
             filterFloat.asInstanceOf[Comparable[Any]],
             minFloat.asInstanceOf[Comparable[Any]],
@@ -582,7 +582,7 @@ class IndexTables4SparkScan(
 
       case Some(DoubleType) =>
         // Convert double values for proper numeric comparison
-        logger.info(s"🔍 DOUBLE CONVERSION: Processing DoubleType field $attribute")
+        logger.debug(s"🔍 DOUBLE CONVERSION: Processing DoubleType field $attribute")
         try {
           val filterDouble = filterValue.toString.toDouble
           val minDouble    = minValue.toDouble
@@ -607,7 +607,7 @@ class IndexTables4SparkScan(
 
       case _ =>
         // For other data types (strings, etc.), use string comparison
-        logger.info(s"🔍 STRING CONVERSION: Using string comparison for $attribute")
+        logger.debug(s"🔍 STRING CONVERSION: Using string comparison for $attribute")
         (
           filterValue.toString.asInstanceOf[Comparable[Any]],
           minValue.asInstanceOf[Comparable[Any]],

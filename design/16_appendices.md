@@ -94,6 +94,19 @@ This section provides supplementary reference material including configuration p
 | `spark.indextables.aws.sessionToken` | String | (optional) | - | AWS session token |
 | `spark.indextables.aws.credentialsProviderClass` | String | (optional) | FQN | Custom credential provider class |
 
+### 16.2.10 Azure Credential Configuration (New in v2.0)
+
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| `spark.indextables.azure.accountName` | String | (required for Azure) | - | Azure storage account name |
+| `spark.indextables.azure.accountKey` | String | (optional) | - | Azure storage account key |
+| `spark.indextables.azure.connectionString` | String | (optional) | - | Azure connection string |
+| `spark.indextables.azure.tenantId` | String | (optional) | - | Azure AD tenant ID for OAuth |
+| `spark.indextables.azure.clientId` | String | (optional) | - | Service Principal client ID |
+| `spark.indextables.azure.clientSecret` | String | (optional) | - | Service Principal client secret |
+| `spark.indextables.azure.bearerToken` | String | (optional) | - | Explicit OAuth bearer token |
+| `spark.indextables.azure.endpoint` | String | (optional) | - | Custom Azure endpoint |
+
 ## 16.3 SQL Command Reference
 
 ### 16.3.1 MERGE SPLITS Command
@@ -120,6 +133,7 @@ MERGE SPLITS 's3://bucket/my-table';
 MERGE SPLITS my_table WHERE date = '2024-01-01';
 MERGE SPLITS my_table TARGET SIZE 100M;
 MERGE SPLITS 's3://bucket/my-table' TARGET SIZE 500M MAX GROUPS 10;
+MERGE SPLITS 'abfss://container@account.dfs.core.windows.net/my-table' TARGET SIZE 100M;
 ```
 
 ### 16.3.2 FLUSH CACHE Command
@@ -246,6 +260,10 @@ WHERE _indexall indexquery 'title:spark OR content:dataframe';
 **Error**: `AWS credentials required for S3 storage`
 - **Cause**: Missing AWS access key/secret key
 - **Solution**: Set `spark.indextables.aws.accessKey` and `spark.indextables.aws.secretKey`
+
+**Error**: `Azure credentials required for Azure Blob Storage`
+- **Cause**: Missing Azure account name/key or OAuth credentials
+- **Solution**: Set `spark.indextables.azure.accountName` and either `accountKey`, `connectionString`, or OAuth credentials (tenantId, clientId, clientSecret)
 
 **Error**: `Invalid value for spark.indextables.indexWriter.batchSize: -100`
 - **Cause**: Negative configuration value

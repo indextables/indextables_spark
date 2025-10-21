@@ -17,20 +17,19 @@
 
 package io.indextables.spark.core
 
+import io.indextables.spark.util.StatisticsTruncation
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-
-import io.indextables.spark.util.StatisticsTruncation
 
 class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
   test("statistics truncation should drop long string values by default") {
     val minValues = Map(
-      "id" -> "doc1",
+      "id"        -> "doc1",
       "long_text" -> ("x" * 500) // Exceeds 256 character limit
     )
     val maxValues = Map(
-      "id" -> "doc999",
+      "id"        -> "doc999",
       "long_text" -> ("y" * 500)
     )
 
@@ -128,16 +127,16 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
   test("statistics truncation should handle mixed short and long values") {
     val minValues = Map(
-      "id" -> "doc1",
-      "title" -> "Short Title",
+      "id"      -> "doc1",
+      "title"   -> "Short Title",
       "content" -> ("x" * 1000),
-      "score" -> "100"
+      "score"   -> "100"
     )
     val maxValues = Map(
-      "id" -> "doc999",
-      "title" -> "Another Short Title",
+      "id"      -> "doc999",
+      "title"   -> "Another Short Title",
       "content" -> ("y" * 1000),
-      "score" -> "999"
+      "score"   -> "999"
     )
 
     val config = Map.empty[String, String]
@@ -159,12 +158,12 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
   test("statistics truncation should respect exactly 256 character threshold") {
     val minValues = Map(
-      "exactly_256" -> ("x" * 256),  // Exactly at threshold
-      "one_more" -> ("x" * 257)      // One over threshold
+      "exactly_256" -> ("x" * 256), // Exactly at threshold
+      "one_more"    -> ("x" * 257)  // One over threshold
     )
     val maxValues = Map(
       "exactly_256" -> ("y" * 256),
-      "one_more" -> ("y" * 257)
+      "one_more"    -> ("y" * 257)
     )
 
     val config = Map.empty[String, String]
@@ -243,15 +242,15 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
   test("statistics truncation should preserve numeric string values under threshold") {
     val minValues = Map(
-      "id" -> "1",
-      "score" -> "100",
-      "timestamp" -> "1234567890",
+      "id"          -> "1",
+      "score"       -> "100",
+      "timestamp"   -> "1234567890",
       "description" -> ("x" * 500) // Long text
     )
     val maxValues = Map(
-      "id" -> "999",
-      "score" -> "9999",
-      "timestamp" -> "9999999999",
+      "id"          -> "999",
+      "score"       -> "9999",
+      "timestamp"   -> "9999999999",
       "description" -> ("y" * 500)
     )
 

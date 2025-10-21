@@ -26,16 +26,16 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.TestBase
 
 /**
- * Comprehensive test suite validating that repaired transaction logs are functionally equivalent
- * to original logs and that tables remain fully readable after replacement.
+ * Comprehensive test suite validating that repaired transaction logs are functionally equivalent to original logs and
+ * that tables remain fully readable after replacement.
  *
  * Test Coverage:
- * - Basic repair & replace tests
- * - Missing split file handling
- * - Checkpoint reconstruction
- * - Partition preservation
- * - Multiple transaction consolidation
- * - Edge cases & error handling
+ *   - Basic repair & replace tests
+ *   - Missing split file handling
+ *   - Checkpoint reconstruction
+ *   - Partition preservation
+ *   - Multiple transaction consolidation
+ *   - Edge cases & error handling
  */
 class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
 
@@ -44,7 +44,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create table with sample data
@@ -63,7 +63,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       // 2. Read original table and collect results
       val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val originalResults = originalDf.orderBy("id").collect()
-      val originalCount = originalDf.count()
+      val originalCount   = originalDf.count()
 
       // 3. Run repair command
       val repairResult = spark
@@ -81,7 +81,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       assert(validSplits > 0)
 
       // 5. Replace original transaction log with repaired version
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
 
@@ -93,16 +93,17 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       // 6. Read table with repaired transaction log
       val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val repairedResults = repairedDf.orderBy("id").collect()
-      val repairedCount = repairedDf.count()
+      val repairedCount   = repairedDf.count()
 
       // 7. Validate results are identical
       assert(repairedCount === originalCount)
       assert(repairedResults.length === originalResults.length)
 
-      repairedResults.zip(originalResults).foreach { case (repaired, original) =>
-        assert(repaired.getAs[String]("id") === original.getAs[String]("id"))
-        assert(repaired.getAs[String]("content") === original.getAs[String]("content"))
-        assert(repaired.getAs[Int]("score") === original.getAs[Int]("score"))
+      repairedResults.zip(originalResults).foreach {
+        case (repaired, original) =>
+          assert(repaired.getAs[String]("id") === original.getAs[String]("id"))
+          assert(repaired.getAs[String]("content") === original.getAs[String]("content"))
+          assert(repaired.getAs[Int]("score") === original.getAs[Int]("score"))
       }
 
       // 8. Validate transaction log structure (no checkpoint needed for consolidated log)
@@ -115,7 +116,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create table with multiple splits
@@ -123,14 +124,17 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
         .map(i => (s"doc$i", s"content $i", i))
         .toDF("id", "content", "score")
 
-      data.repartition(5).write
+      data
+        .repartition(5)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.fastfields", "score")
         .mode("overwrite")
         .save(tablePath)
 
       // 2. Read original count
-      val originalCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
+      val originalCount =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
       assert(originalCount === 100)
 
       // 3. Delete 2 split files to simulate missing files
@@ -167,13 +171,13 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       // 6. Replace transaction log
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
-      val backupPath = new Path(tempDir, "_transaction_log_backup")
+      val backupPath      = new Path(tempDir, "_transaction_log_backup")
 
       fs.rename(originalLogPath, backupPath)
       fs.rename(repairedLogPath, originalLogPath)
 
       // 7. Read table with repaired transaction log (should succeed)
-      val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val repairedDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val repairedCount = repairedDf.count()
 
       // 8. Validate reduced count (fewer documents due to missing splits)
@@ -196,7 +200,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create initial table
@@ -216,13 +220,13 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       data3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
 
       // 4. Verify original table has 3 documents
-      val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val originalDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val originalCount = originalDf.count()
       assert(originalCount === 3)
       val originalResults = originalDf.orderBy("id").collect()
 
       // 5. Check transaction log has multiple files
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val txnFiles = fs
         .listStatus(originalLogPath)
@@ -244,9 +248,12 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
       assert(fs.exists(repairedLogPath), s"Repaired transaction log should exist at: $repairedLogPath")
 
-      val repairedFiles = fs.listStatus(repairedLogPath)
+      val repairedFiles    = fs.listStatus(repairedLogPath)
       val repairedTxnFiles = repairedFiles.filter(_.getPath.getName.matches("\\d{20}\\.json"))
-      assert(repairedTxnFiles.length === 2, s"Should have exactly 2 transaction files (metadata + adds), found ${repairedTxnFiles.length}")
+      assert(
+        repairedTxnFiles.length === 2,
+        s"Should have exactly 2 transaction files (metadata + adds), found ${repairedTxnFiles.length}"
+      )
 
       // No checkpoint needed for consolidated transaction log with only 2 files
 
@@ -256,7 +263,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       fs.rename(repairedLogPath, originalLogPath)
 
       // 9. Read table with consolidated transaction log
-      val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val repairedDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val repairedCount = repairedDf.count()
       val repairedResults = repairedDf.orderBy("id").collect()
 
@@ -264,10 +271,11 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       assert(repairedCount === originalCount)
       assert(repairedResults.length === 3)
 
-      repairedResults.zip(originalResults).foreach { case (repaired, original) =>
-        assert(repaired.getAs[String]("id") === original.getAs[String]("id"))
-        assert(repaired.getAs[String]("content") === original.getAs[String]("content"))
-        assert(repaired.getAs[Int]("score") === original.getAs[Int]("score"))
+      repairedResults.zip(originalResults).foreach {
+        case (repaired, original) =>
+          assert(repaired.getAs[String]("id") === original.getAs[String]("id"))
+          assert(repaired.getAs[String]("content") === original.getAs[String]("content"))
+          assert(repaired.getAs[Int]("score") === original.getAs[Int]("score"))
       }
     }
   }
@@ -277,7 +285,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       println(s"🧪 TEST STEP 1: Creating partitioned table at $tablePath")
@@ -310,9 +318,12 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       // Note: distinct().collect() triggers aggregate pushdown issues with partitioned tables
       // Use collect() and manual deduplication as workaround
       val originalAllPartitionsRaw = originalDf.select("load_date", "load_hour").collect()
-      val originalAllPartitions = originalAllPartitionsRaw.map(r => (r.getString(0), r.getInt(1))).distinct
+      val originalAllPartitions    = originalAllPartitionsRaw.map(r => (r.getString(0), r.getInt(1))).distinct
       println(s"🧪 TEST STEP 2.5: Found ${originalAllPartitions.length} partitions in original table")
-      assert(originalAllPartitions.length === 4, s"Original table should have 4 partition combinations, got ${originalAllPartitions.length}")
+      assert(
+        originalAllPartitions.length === 4,
+        s"Original table should have 4 partition combinations, got ${originalAllPartitions.length}"
+      )
       println(s"🧪 TEST STEP 2.5: ✅ Original partition accessibility validated")
 
       println(s"🧪 TEST STEP 3: Running REPAIR command")
@@ -330,29 +341,31 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
 
       println(s"🧪 TEST STEP 4: Validating repaired transaction log structure")
       // 4. Validate repaired transaction log structure
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
 
       // Verify protocol and metadata are preserved
-      val originalV0Path = new Path(originalLogPath, "00000000000000000000.json")
+      val originalV0Path    = new Path(originalLogPath, "00000000000000000000.json")
       val originalV0Content = scala.io.Source.fromInputStream(fs.open(originalV0Path)).mkString
-      val repairedV0Path = new Path(repairedLogPath, "00000000000000000000.json")
+      val repairedV0Path    = new Path(repairedLogPath, "00000000000000000000.json")
       val repairedV0Content = scala.io.Source.fromInputStream(fs.open(repairedV0Path)).mkString
 
       assert(originalV0Content == repairedV0Content, "Protocol and metadata should be identical")
 
       // Verify add actions are preserved (same count)
-      val originalV1Path = new Path(originalLogPath, "00000000000000000001.json")
+      val originalV1Path    = new Path(originalLogPath, "00000000000000000001.json")
       val originalV1Content = scala.io.Source.fromInputStream(fs.open(originalV1Path)).mkString
-      val originalV1Lines = originalV1Content.split("\n").filter(_.nonEmpty)
+      val originalV1Lines   = originalV1Content.split("\n").filter(_.nonEmpty)
 
-      val repairedV1Path = new Path(repairedLogPath, "00000000000000000001.json")
+      val repairedV1Path    = new Path(repairedLogPath, "00000000000000000001.json")
       val repairedV1Content = scala.io.Source.fromInputStream(fs.open(repairedV1Path)).mkString
-      val repairedV1Lines = repairedV1Content.split("\n").filter(_.nonEmpty)
+      val repairedV1Lines   = repairedV1Content.split("\n").filter(_.nonEmpty)
 
-      assert(originalV1Lines.length == repairedV1Lines.length,
-        s"Add actions count mismatch: original=${originalV1Lines.length}, repaired=${repairedV1Lines.length}")
+      assert(
+        originalV1Lines.length == repairedV1Lines.length,
+        s"Add actions count mismatch: original=${originalV1Lines.length}, repaired=${repairedV1Lines.length}"
+      )
 
       println(s"🧪 TEST STEP 4: ✅ Transaction log structure validated")
 
@@ -387,7 +400,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       // Note: distinct().collect() triggers aggregate pushdown issues with partitioned tables
       // Use collect() and manual deduplication as workaround
       val allPartitionsRaw = repairedDf.select("load_date", "load_hour").collect()
-      val allPartitions = allPartitionsRaw.map(r => (r.getString(0), r.getInt(1))).distinct
+      val allPartitions    = allPartitionsRaw.map(r => (r.getString(0), r.getInt(1))).distinct
       assert(allPartitions.length === 4, "Should have 4 partition combinations")
       println(s"🧪 TEST STEP 8: ✅ All 4 partitions accessible")
 
@@ -403,7 +416,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create initial table
@@ -426,7 +439,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       data3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // 4. Verify only new data is visible
-      val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val originalDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val originalCount = originalDf.count()
       assert(originalCount === 2)
 
@@ -446,16 +459,16 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       assert(validSplits === 2, "Should only include splits from overwrite, not old splits")
 
       // 6. Replace transaction log
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
-      val backupPath = new Path(tempDir, "_transaction_log_backup")
+      val backupPath      = new Path(tempDir, "_transaction_log_backup")
 
       fs.rename(originalLogPath, backupPath)
       fs.rename(repairedLogPath, originalLogPath)
 
       // 7. Read table with repaired transaction log
-      val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val repairedDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val repairedCount = repairedDf.count()
       assert(repairedCount === 2)
 
@@ -474,7 +487,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create table with text fields
@@ -513,10 +526,10 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       assert(repairResult(0).getAs[String]("status") === "SUCCESS")
 
       // 4. Replace transaction log
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
-      val backupPath = new Path(tempDir, "_transaction_log_backup")
+      val backupPath      = new Path(tempDir, "_transaction_log_backup")
 
       fs.rename(originalLogPath, backupPath)
       fs.rename(repairedLogPath, originalLogPath)
@@ -559,7 +572,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create table with numeric fast field
@@ -577,10 +590,10 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
         .save(tablePath)
 
       // 2. Test aggregations on original table
-      val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val originalDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val originalCount = originalDf.count()
-      val originalSum = originalDf.agg(sum("score")).collect()(0).getLong(0)
-      val originalAvg = originalDf.agg(avg("score")).collect()(0).getDouble(0)
+      val originalSum   = originalDf.agg(sum("score")).collect()(0).getLong(0)
+      val originalAvg   = originalDf.agg(avg("score")).collect()(0).getDouble(0)
 
       assert(originalCount === 4)
       assert(originalSum === 1000)
@@ -597,19 +610,19 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       assert(repairResult(0).getAs[String]("status") === "SUCCESS")
 
       // 4. Replace transaction log
-      val fs = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(tablePath).getFileSystem(spark.sessionState.newHadoopConf())
       val originalLogPath = new Path(tablePath, "_transaction_log")
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
-      val backupPath = new Path(tempDir, "_transaction_log_backup")
+      val backupPath      = new Path(tempDir, "_transaction_log_backup")
 
       fs.rename(originalLogPath, backupPath)
       fs.rename(repairedLogPath, originalLogPath)
 
       // 5. Test aggregations on repaired table
-      val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      val repairedDf    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val repairedCount = repairedDf.count()
-      val repairedSum = repairedDf.agg(sum("score")).collect()(0).getLong(0)
-      val repairedAvg = repairedDf.agg(avg("score")).collect()(0).getDouble(0)
+      val repairedSum   = repairedDf.agg(sum("score")).collect()(0).getLong(0)
+      val repairedAvg   = repairedDf.agg(avg("score")).collect()(0).getDouble(0)
 
       assert(repairedCount === originalCount)
       assert(repairedSum === originalSum)
@@ -639,7 +652,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
     import sparkImplicits._
 
     withTempPath { tempDir =>
-      val tablePath = new File(tempDir, "test_table").getAbsolutePath
+      val tablePath    = new File(tempDir, "test_table").getAbsolutePath
       val repairedPath = new File(tempDir, "test_table_repaired").getAbsolutePath
 
       // 1. Create original table
@@ -647,13 +660,13 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
       data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // 2. Create existing target directory with content
-      val fs = new Path(repairedPath).getFileSystem(spark.sessionState.newHadoopConf())
+      val fs              = new Path(repairedPath).getFileSystem(spark.sessionState.newHadoopConf())
       val repairedLogPath = new Path(repairedPath, "_transaction_log")
       fs.mkdirs(repairedLogPath)
 
       // Write dummy file to make directory non-empty
       val dummyFile = new Path(repairedLogPath, "dummy.txt")
-      val out = fs.create(dummyFile)
+      val out       = fs.create(dummyFile)
       out.writeBytes("dummy content")
       out.close()
 
@@ -677,7 +690,7 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
   test("repair should handle missing source transaction log gracefully") {
     withTempPath { tempDir =>
       val nonExistentPath = new File(tempDir, "does_not_exist").getAbsolutePath
-      val repairedPath = new File(tempDir, "repaired").getAbsolutePath
+      val repairedPath    = new File(tempDir, "repaired").getAbsolutePath
 
       // Attempt repair on non-existent source
       val result = spark
@@ -696,10 +709,11 @@ class RepairIndexFilesTransactionLogReplacementSuite extends TestBase {
 
   test("SQL command parsing should work via extension") {
     // Test that our SQL extension can parse the command
-    val sqlText = "REPAIR INDEXFILES TRANSACTION LOG 's3://bucket/table/_transaction_log' AT LOCATION 's3://bucket/table/_transaction_log_repaired'"
+    val sqlText =
+      "REPAIR INDEXFILES TRANSACTION LOG 's3://bucket/table/_transaction_log' AT LOCATION 's3://bucket/table/_transaction_log_repaired'"
 
     // This test verifies that the parser can handle the command
-    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+    val parser     = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
     val parsedPlan = parser.parsePlan(sqlText)
 
     assert(parsedPlan.isInstanceOf[RepairIndexFilesTransactionLogCommand])

@@ -34,26 +34,23 @@ import io.indextables.spark.util.{JsonUtil, StatisticsTruncation}
 import org.slf4j.LoggerFactory
 
 /**
- * SQL command to repair corrupted or problematic transaction logs by reading the existing log,
- * validating split files, and writing a clean transaction log with metadata and checkpoint to a new location.
+ * SQL command to repair corrupted or problematic transaction logs by reading the existing log, validating split files,
+ * and writing a clean transaction log with metadata and checkpoint to a new location.
  *
  * This is a read-only repair operation that never modifies or deletes source files.
  *
- * Syntax:
- *   REPAIR INDEXFILES TRANSACTION LOG 's3://bucket/table/_transaction_log'
- *   AT LOCATION 's3://bucket/table/_transaction_log_repaired'
+ * Syntax: REPAIR INDEXFILES TRANSACTION LOG 's3://bucket/table/_transaction_log' AT LOCATION
+ * 's3://bucket/table/_transaction_log_repaired'
  *
  * Use Cases:
- *   1. Corrupted checkpoint recovery: Rebuild checkpoint from valid transaction files
- *   2. Orphaned file cleanup: Create clean log excluding splits that no longer exist
- *   3. Transaction log optimization: Consolidate fragmented transaction history
- *   4. Migration scenarios: Prepare clean transaction log for table relocation
- *   5. Audit and validation: Generate validated transaction log with integrity checks
+ *   1. Corrupted checkpoint recovery: Rebuild checkpoint from valid transaction files 2. Orphaned file cleanup: Create
+ *      clean log excluding splits that no longer exist 3. Transaction log optimization: Consolidate fragmented
+ *      transaction history 4. Migration scenarios: Prepare clean transaction log for table relocation 5. Audit and
+ *      validation: Generate validated transaction log with integrity checks
  *
- * Statistics Truncation Integration:
- *   The repair process automatically applies statistics truncation (if enabled) to optimize
- *   transaction log size. This can reduce transaction log size by up to 98% for tables with
- *   long text fields. See DATA_SKIPPING_STATS_TRUNCATION_DESIGN.md for details.
+ * Statistics Truncation Integration: The repair process automatically applies statistics truncation (if enabled) to
+ * optimize transaction log size. This can reduce transaction log size by up to 98% for tables with long text fields.
+ * See DATA_SKIPPING_STATS_TRUNCATION_DESIGN.md for details.
  */
 case class RepairIndexFilesTransactionLogCommand(
   sourcePath: String,
@@ -80,7 +77,7 @@ case class RepairIndexFilesTransactionLogCommand(
     try {
       // Phase 1: Read & Validate Source Transaction Log
       logger.info("Phase 1 - Reading source transaction log")
-      val hadoopConf = sparkSession.sessionState.newHadoopConf()
+      val hadoopConf    = sparkSession.sessionState.newHadoopConf()
       val sourceLogPath = new Path(sourcePath)
       val targetLogPath = new Path(targetPath)
 
@@ -169,8 +166,8 @@ case class RepairIndexFilesTransactionLogCommand(
             exists
           }
 
-          val totalSplits = visibleSplits.length
-          val validSplits = validatedSplits.length
+          val totalSplits   = visibleSplits.length
+          val validSplits   = validatedSplits.length
           val missingSplits = totalSplits - validSplits
 
           logger.info(s"Validation complete: total=$totalSplits, valid=$validSplits, missing=$missingSplits")
@@ -199,11 +196,11 @@ case class RepairIndexFilesTransactionLogCommand(
           try {
             // Write protocol + metadata transaction (version 00000000000000000000.json - 20 digits)
             // Both actions must be in the first transaction file as newline-delimited JSON
-            val version0Path = new Path(targetLogPath, "00000000000000000000.json")
+            val version0Path    = new Path(targetLogPath, "00000000000000000000.json")
             val wrappedProtocol = Map("protocol" -> protocolAction)
             val wrappedMetadata = Map("metaData" -> metadataAction)
-            val protocolJson = JsonUtil.mapper.writeValueAsString(wrappedProtocol)
-            val metadataJson = JsonUtil.mapper.writeValueAsString(wrappedMetadata)
+            val protocolJson    = JsonUtil.mapper.writeValueAsString(wrappedProtocol)
+            val metadataJson    = JsonUtil.mapper.writeValueAsString(wrappedMetadata)
             val version0Content = protocolJson + "\n" + metadataJson + "\n"
             logger.info(s"Writing protocol + metadata to: $version0Path")
             logger.debug(s"Protocol + Metadata JSON length: ${version0Content.length} bytes")
@@ -219,11 +216,13 @@ case class RepairIndexFilesTransactionLogCommand(
               val originalMaxValues = split.maxValues.getOrElse(Map.empty[String, String])
 
               // Separate partition column stats from data column stats
-              val (partitionMinValues, dataMinValues) = originalMinValues.partition { case (col, _) =>
-                partitionColumnSet.contains(col)
+              val (partitionMinValues, dataMinValues) = originalMinValues.partition {
+                case (col, _) =>
+                  partitionColumnSet.contains(col)
               }
-              val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition { case (col, _) =>
-                partitionColumnSet.contains(col)
+              val (partitionMaxValues, dataMaxValues) = originalMaxValues.partition {
+                case (col, _) =>
+                  partitionColumnSet.contains(col)
               }
 
               // Only truncate data column statistics, not partition column statistics
@@ -244,11 +243,11 @@ case class RepairIndexFilesTransactionLogCommand(
             }
 
             // Write add actions as newline-delimited JSON
-            val version1Path = new Path(targetLogPath, "00000000000000000001.json")
+            val version1Path      = new Path(targetLogPath, "00000000000000000001.json")
             val addActionsContent = new StringBuilder()
             addActionsWithTruncatedStats.foreach { action =>
               val wrappedAction = Map("add" -> action)
-              val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
+              val actionJson    = JsonUtil.mapper.writeValueAsString(wrappedAction)
               addActionsContent.append(actionJson).append("\n")
 
               // Debug: Log partition values for partitioned tables
@@ -256,7 +255,7 @@ case class RepairIndexFilesTransactionLogCommand(
                 logger.debug(s"AddAction for ${action.path} has partitionValues: ${action.partitionValues}")
               }
             }
-            logger.info(s"Writing ${validSplits} add actions to: $version1Path")
+            logger.info(s"Writing $validSplits add actions to: $version1Path")
             logger.debug(s"Add actions JSON length: ${addActionsContent.length} bytes")
             targetCloudProvider.writeFile(version1Path.toString, addActionsContent.toString.getBytes("UTF-8"))
             logger.info("Successfully wrote add actions file")
@@ -278,15 +277,12 @@ case class RepairIndexFilesTransactionLogCommand(
                 "SUCCESS"
               )
             )
-          } finally {
+          } finally
             targetCloudProvider.close()
-          }
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
     } catch {
       case e: FileNotFoundException =>
         val errorMsg = s"Source transaction log not found: ${e.getMessage}"

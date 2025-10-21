@@ -39,7 +39,7 @@ class TransactionLogCountScan(
   transactionLog: TransactionLog,
   pushedFilters: Array[Filter],
   options: CaseInsensitiveStringMap,
-  config: Map[String, String],                 // Direct config instead of broadcast
+  config: Map[String, String],                  // Direct config instead of broadcast
   groupByColumns: Option[Array[String]] = None, // GROUP BY columns (if any)
   hasAggregations: Boolean = true               // Whether this is COUNT or just DISTINCT (GROUP BY without agg)
 ) extends Scan {
@@ -52,8 +52,9 @@ class TransactionLogCountScan(
         // GROUP BY: Return schema with GROUP BY columns + optional count column
         // IMPORTANT: Spark expects GROUP BY columns to be named group_col_0, group_col_1, etc.
         // See org.apache.spark.sql.execution.datasources.v2.V2ScanRelationPushDown lines 94-102 (Spark 3.5.3)
-        val groupByFields = cols.zipWithIndex.map { case (col, idx) =>
-          StructField(s"group_col_$idx", StringType, nullable = true)
+        val groupByFields = cols.zipWithIndex.map {
+          case (col, idx) =>
+            StructField(s"group_col_$idx", StringType, nullable = true)
         }
 
         if (hasAggregations) {
@@ -68,12 +69,20 @@ class TransactionLogCountScan(
         // Simple COUNT: Return schema with a single count column
         StructType(Seq(StructField("count", LongType, nullable = false)))
     }
-    println(s"🔍 TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
+    logger.debug(s"🔍 TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
     schema
   }
 
   override def toBatch: Batch =
-    new TransactionLogCountBatch(sparkSession, transactionLog, pushedFilters, options, config, groupByColumns, hasAggregations)
+    new TransactionLogCountBatch(
+      sparkSession,
+      transactionLog,
+      pushedFilters,
+      options,
+      config,
+      groupByColumns,
+      hasAggregations
+    )
 
   override def description(): String = {
     val groupByDesc = groupByColumns.map(cols => s", groupBy=[${cols.mkString(", ")}]").getOrElse("")

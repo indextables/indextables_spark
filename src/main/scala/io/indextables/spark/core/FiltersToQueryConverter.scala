@@ -560,7 +560,7 @@ object FiltersToQueryConverter {
   }
 
   private def queryLog(msg: String): Unit =
-    logger.warn(msg)
+    logger.debug(msg)
 
   /**
    * Create a temporary index from schema for parseQuery operations. Uses the same schema so tokenizer configuration
@@ -1380,7 +1380,7 @@ object FiltersToQueryConverter {
         // Parse the custom IndexQueryAll using the split searcher with ALL fields
         // Get all field names from the schema to search across all fields
         import scala.collection.JavaConverters._
-        val allFieldNames = schema.getFieldNames  // Already returns java.util.List[String]
+        val allFieldNames = schema.getFieldNames // Already returns java.util.List[String]
         queryLog(s"Converting IndexQueryAllFilter to search across ${allFieldNames.size()} fields: ${allFieldNames.asScala.mkString(", ")}")
         Some(splitSearchEngine.parseQuery(queryString, allFieldNames))
 

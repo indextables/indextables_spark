@@ -27,11 +27,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
+import io.indextables.spark.transaction.compression.CompressionUtils
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
-
-import io.indextables.spark.transaction.compression.CompressionUtils
 
 class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll with BeforeAndAfterEach {
 
@@ -218,7 +217,7 @@ class OptimizedTransactionLogTest extends AnyFunSuite with BeforeAndAfterAll wit
           val rawBytes = Files.readAllBytes(file.toPath)
           // Decompress if needed (handles both compressed and uncompressed files)
           val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-          val content = new String(decompressedBytes, "UTF-8").split("\n").toList.filter(_.nonEmpty)
+          val content           = new String(decompressedBytes, "UTF-8").split("\n").toList.filter(_.nonEmpty)
           println(s"Version 2 content (${content.size} lines):")
           content.foreach(line => println(s"  $line"))
         }

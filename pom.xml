@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.3.0_spark_3.5.3</version>
+    <version>0.3.1_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>Tantivy4Spark</name>
@@ -164,11 +164,26 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
+        <!-- Version 0.25.0+ required for Azure support -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.24.1</version>
+            <version>0.25.0</version>
             <classifier>${platform.classifier}</classifier>
+        </dependency>
+
+        <!-- Azure Storage SDK for Azure Blob Storage support -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-storage-blob</artifactId>
+            <version>12.25.0</version>
+        </dependency>
+
+        <!-- Azure Identity SDK for authentication -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-identity</artifactId>
+            <version>1.11.0</version>
         </dependency>
 
         <!-- Logging -->

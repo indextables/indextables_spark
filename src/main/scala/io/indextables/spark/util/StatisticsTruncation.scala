@@ -22,11 +22,11 @@ import org.slf4j.LoggerFactory
 /**
  * Utility object for truncating statistics for columns with excessively long values.
  *
- * This prevents transaction log bloat by automatically truncating min/max statistics for columns
- * with values exceeding a configurable threshold (default: 64 characters).
+ * This prevents transaction log bloat by automatically truncating min/max statistics for columns with values exceeding
+ * a configurable threshold (default: 64 characters).
  *
- * Note: Statistics are truncated to the configured threshold. On read, min statistics use >= comparison
- * while max statistics use <= OR startsWith comparison to ensure correctness.
+ * Note: Statistics are truncated to the configured threshold. On read, min statistics use >= comparison while max
+ * statistics use <= OR startsWith comparison to ensure correctness.
  */
 object StatisticsTruncation {
 
@@ -35,10 +35,14 @@ object StatisticsTruncation {
   /**
    * Truncates statistics for columns with excessively long values.
    *
-   * @param minValues Map of column names to minimum values
-   * @param maxValues Map of column names to maximum values
-   * @param config Configuration map
-   * @return Tuple of (truncated minValues, truncated maxValues)
+   * @param minValues
+   *   Map of column names to minimum values
+   * @param maxValues
+   *   Map of column names to maximum values
+   * @param config
+   *   Configuration map
+   * @return
+   *   Tuple of (truncated minValues, truncated maxValues)
    */
   def truncateStatistics(
     minValues: Map[String, String],
@@ -63,12 +67,14 @@ object StatisticsTruncation {
     )
 
     // Find columns that need truncation (checking both min and max values)
-    val minValuesToTruncate = minValues.filter { case (colName, value) =>
-      value != null && value.length > maxLength
+    val minValuesToTruncate = minValues.filter {
+      case (colName, value) =>
+        value != null && value.length > maxLength
     }.keySet
 
-    val maxValuesToTruncate = maxValues.filter { case (colName, value) =>
-      value != null && value.length > maxLength
+    val maxValuesToTruncate = maxValues.filter {
+      case (colName, value) =>
+        value != null && value.length > maxLength
     }.keySet
 
     val columnsToTruncate = minValuesToTruncate ++ maxValuesToTruncate
@@ -81,25 +87,29 @@ object StatisticsTruncation {
     columnsToTruncate.foreach { colName =>
       val minLen = minValues.get(colName).map(_.length).getOrElse(0)
       val maxLen = maxValues.get(colName).map(_.length).getOrElse(0)
-      logger.info(s"Truncating statistics for column '$colName' due to excessive value length " +
-                  s"(min: $minLen chars, max: $maxLen chars, truncating to: $maxLength)")
+      logger.info(
+        s"Truncating statistics for column '$colName' due to excessive value length " +
+          s"(min: $minLen chars, max: $maxLen chars, truncating to: $maxLength)"
+      )
     }
 
     // Truncate statistics for columns with long values
-    val truncatedMinValues = minValues.map { case (colName, value) =>
-      if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
-        (colName, value.substring(0, maxLength))
-      } else {
-        (colName, value)
-      }
+    val truncatedMinValues = minValues.map {
+      case (colName, value) =>
+        if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
+          (colName, value.substring(0, maxLength))
+        } else {
+          (colName, value)
+        }
     }
 
-    val truncatedMaxValues = maxValues.map { case (colName, value) =>
-      if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
-        (colName, value.substring(0, maxLength))
-      } else {
-        (colName, value)
-      }
+    val truncatedMaxValues = maxValues.map {
+      case (colName, value) =>
+        if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
+          (colName, value.substring(0, maxLength))
+        } else {
+          (colName, value)
+        }
     }
 
     (truncatedMinValues, truncatedMaxValues)

@@ -94,7 +94,8 @@ IndexTables4Spark uses an **immutable split-based architecture** inspired by Apa
 A split is a self-contained, immutable Tantivy index stored as a single `.split` file:
 
 ```
-s3://my-bucket/my-table/
+s3://my-bucket/my-table/                           # AWS S3 example
+abfss://container@account.dfs.core.windows.net/    # Azure ADLS Gen2 example
 ├── _transaction_log/
 │   ├── 00000000000000000000.json       # Transaction log files
 │   ├── 00000000000000000001.json
@@ -108,14 +109,14 @@ s3://my-bucket/my-table/
 **Split Characteristics:**
 - **Immutable**: Once written, never modified (copy-on-write semantics)
 - **Self-contained**: Complete Tantivy index with schema, documents, and search structures
-- **Portable**: Can be cached locally, uploaded to S3, or stored on HDFS
+- **Portable**: Can be cached locally, uploaded to S3/Azure, or stored on HDFS
 - **Independently searchable**: Each split can be queried in parallel
 
 **Benefits:**
 - **Horizontal scalability**: Each Spark partition processes one or more splits
 - **Efficient caching**: Splits can be cached on executor local disks
 - **Simple compaction**: Merge small splits into larger ones without rewriting entire table
-- **Cloud storage friendly**: Large files optimize S3/blob storage performance
+- **Multi-cloud storage friendly**: Large files optimize S3/Azure Blob Storage performance
 
 ### 1.2.3 Transaction Log Pattern (Delta Lake-Inspired)
 
@@ -517,13 +518,13 @@ IndexTables4Spark is guided by several key design principles:
 
 ### 1.5.5 Cloud-First Storage
 
-**Principle:** Design for cloud object storage (S3, Azure Blob, GCS) as the primary storage tier.
+**Principle:** Design for cloud object storage (S3, Azure Blob Storage, GCS) as the primary storage tier.
 
 **Examples:**
-- **Large split files**: Optimize S3 upload performance
+- **Large split files**: Optimize S3/Azure upload performance
 - **Parallel streaming uploads**: Multi-threaded uploads for large files
-- **Retry logic**: Handle transient S3 failures
-- **Session token support**: Support temporary AWS credentials
+- **Retry logic**: Handle transient S3/Azure failures
+- **Multi-cloud authentication**: Support AWS credentials, Azure OAuth, and custom providers
 
 **Rationale:** Modern data infrastructure is cloud-based; optimize for that reality.
 

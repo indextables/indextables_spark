@@ -121,8 +121,8 @@ object SplitManager {
     // Determine if we need to use cloud storage
     val protocol = ProtocolBasedIOFactory.determineProtocol(outputPath)
 
-    if (protocol == ProtocolBasedIOFactory.S3Protocol) {
-      // For S3, create the split locally first, then upload
+    if (protocol == ProtocolBasedIOFactory.S3Protocol || protocol == ProtocolBasedIOFactory.AzureProtocol) {
+      // For S3 and Azure, create the split locally first, then upload
       val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
 
       try {
@@ -135,9 +135,9 @@ object SplitManager {
         logger.debug(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
         logger.debug(s"🔍 SPLIT CREATED: $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.error(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.warn(s"✅ SPLIT CREATED WITH fast=true - correct!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
         }
 
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
@@ -163,7 +163,7 @@ object SplitManager {
             // Use traditional method for smaller files
             val splitContent = Files.readAllBytes(splitFile)
             cloudProvider.writeFile(outputPath, splitContent)
-            logger.info(s"Split uploaded: $outputPath (${splitContent.length} bytes)")
+            logger.info(s"✅ Split uploaded to cloud storage: $outputPath (${splitContent.length} bytes)")
           }
         } finally
           cloudProvider.close()
@@ -187,12 +187,12 @@ object SplitManager {
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
         val docMappingJson = metadata.getDocMappingJson()
-        println(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
-        println(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
+        logger.debug(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
+        logger.debug(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          println(s"❌ SPLIT CREATED WITH fast=false! This is the bug!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          println(s"✅ SPLIT CREATED WITH fast=true - correct!")
+          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
         }
 
         metadata
@@ -252,6 +252,10 @@ case class SplitCacheConfig(
   azureAccountName: Option[String] = None,
   azureAccountKey: Option[String] = None,
   azureConnectionString: Option[String] = None,
+  azureBearerToken: Option[String] = None,
+  azureTenantId: Option[String] = None,
+  azureClientId: Option[String] = None,
+  azureClientSecret: Option[String] = None,
   azureEndpoint: Option[String] = None,
   gcpProjectId: Option[String] = None,
   gcpServiceAccountKey: Option[String] = None,
@@ -321,7 +325,16 @@ case class SplitCacheConfig(
         config = config.withAwsRegion(region)
         logger.info(s"🔧 withAwsRegion returned: $config")
       case None =>
-        logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
+        // Only warn about missing AWS region if AWS credentials are configured (or if Azure/GCP are not configured)
+        val hasAwsCredentials   = awsAccessKey.isDefined || awsSecretKey.isDefined
+        val hasAzureCredentials = azureAccountName.isDefined || azureConnectionString.isDefined
+        val hasGcpCredentials   = gcpProjectId.isDefined || gcpServiceAccountKey.isDefined
+
+        if (hasAwsCredentials && !hasAzureCredentials && !hasGcpCredentials) {
+          logger.warn(s"⚠️  AWS region not provided - this may cause 'A region must be set when sending requests to S3' error in tantivy4java")
+        } else {
+          logger.debug(s"🔧 AWS region not provided, but using Azure/GCP or no cloud credentials configured")
+        }
     }
 
     awsEndpoint.foreach { endpoint =>
@@ -333,15 +346,49 @@ case class SplitCacheConfig(
       config = config.withAwsPathStyleAccess(pathStyle)
     }
 
-    // Azure configuration
-    (azureAccountName, azureAccountKey) match {
-      case (Some(name), Some(key)) =>
-        config = config.withAzureCredentials(name, key)
-      case _ => // Try connection string
-        azureConnectionString.foreach(connStr => config = config.withAzureConnectionString(connStr))
+    // Azure configuration with detailed verification
+    // Priority: 1) Bearer Token, 2) Account Key, 3) Connection String
+    logger.debug(s"🔍 SplitCacheConfig Azure Verification:")
+    logger.debug(s"  - azureAccountName: ${azureAccountName.getOrElse("None")}")
+    logger.debug(s"  - azureAccountKey: ${azureAccountKey.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureConnectionString: ${azureConnectionString.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureBearerToken: ${azureBearerToken.map(t => s"***${t.takeRight(10)}").getOrElse("None")}")
+    logger.debug(s"  - azureTenantId: ${azureTenantId.getOrElse("None")}")
+    logger.debug(s"  - azureClientId: ${azureClientId.getOrElse("None")}")
+    logger.debug(s"  - azureClientSecret: ${azureClientSecret.map(_ => "***").getOrElse("None")}")
+    logger.debug(s"  - azureEndpoint: ${azureEndpoint.getOrElse("None")}")
+
+    // Priority 1: Bearer Token (OAuth)
+    (azureAccountName, azureBearerToken) match {
+      case (Some(name), Some(token)) =>
+        logger.debug(s"✅ Azure OAuth bearer token present - configuring tantivy4java")
+        logger.debug(s"🔧 Calling config.withAzureBearerToken(accountName=$name, bearerToken=***)")
+        config = config.withAzureBearerToken(name, token)
+        logger.debug(s"🔧 withAzureBearerToken returned: $config")
+      case (Some(name), None) =>
+        // Priority 2: Account Key
+        azureAccountKey match {
+          case Some(key) =>
+            logger.debug(s"✅ Azure account key present - configuring tantivy4java")
+            logger.debug(s"🔧 Calling config.withAzureCredentials(accountName=$name, accountKey=***)")
+            config = config.withAzureCredentials(name, key)
+            logger.debug(s"🔧 withAzureCredentials returned: $config")
+          case None =>
+            logger.warn(s"⚠️  Azure account name provided but neither bearer token nor account key is present")
+        }
+      case (None, Some(_)) =>
+        logger.warn(s"⚠️  Azure bearer token provided but ACCOUNT NAME is missing!")
+      case (None, None) =>
+        // Priority 3: Connection String
+        logger.debug(s"⚠️  No Azure account name - checking for connection string")
+        azureConnectionString.foreach { connStr =>
+          logger.debug(s"🔧 Calling config.withAzureConnectionString(connectionString=***)")
+          config = config.withAzureConnectionString(connStr)
+          logger.debug(s"🔧 withAzureConnectionString returned: $config")
+        }
     }
 
-    azureEndpoint.foreach(endpoint => config = config.withAzureEndpoint(endpoint))
+    // Note: Azure endpoint configuration not supported in tantivy4java CacheConfig API
 
     // GCP configuration
     (gcpProjectId, gcpServiceAccountKey) match {
@@ -351,7 +398,7 @@ case class SplitCacheConfig(
         gcpCredentialsFile.foreach(credFile => config = config.withGcpCredentialsFile(credFile))
     }
 
-    gcpEndpoint.foreach(endpoint => config = config.withGcpEndpoint(endpoint))
+    // Note: GCP endpoint configuration not supported in tantivy4java CacheConfig API
 
     logger.info(s"🔧 Final tantivy4java CacheConfig before returning: $config")
     config
@@ -447,22 +494,21 @@ object SplitLocationRegistry {
 /**
  * Global manager for split cache instances - thin wrapper around tantivy4java's SplitCacheManager.
  *
- * This object provides a Spark-friendly interface to tantivy4java's native caching system.
- * It translates Spark configuration to Java configuration and delegates to tantivy4java's
- * singleton cache manager, which already handles credential-aware caching internally.
+ * This object provides a Spark-friendly interface to tantivy4java's native caching system. It translates Spark
+ * configuration to Java configuration and delegates to tantivy4java's singleton cache manager, which already handles
+ * credential-aware caching internally.
  *
  * Key design decisions:
- * - No separate cache map maintained at Scala level (delegates to tantivy4java)
- * - Credential rotation is handled automatically by tantivy4java's comprehensive cache key
- * - Session token changes result in different cache keys, creating new cache instances automatically
- * - Provides Scala-friendly APIs that return case classes for Spark integration
+ *   - No separate cache map maintained at Scala level (delegates to tantivy4java)
+ *   - Credential rotation is handled automatically by tantivy4java's comprehensive cache key
+ *   - Session token changes result in different cache keys, creating new cache instances automatically
+ *   - Provides Scala-friendly APIs that return case classes for Spark integration
  *
  * How credential rotation works:
- * 1. User refreshes AWS credentials (new session token)
- * 2. New credentials passed to SplitCacheConfig
- * 3. tantivy4java's CacheConfig.getCacheKey() generates key including session token
- * 4. Different session token → Different cache key → New cache instance created
- * 5. Old cache instance remains until explicitly closed or GC'd via shutdown hook
+ *   1. User refreshes AWS credentials (new session token) 2. New credentials passed to SplitCacheConfig 3.
+ *      tantivy4java's CacheConfig.getCacheKey() generates key including session token 4. Different session token →
+ *      Different cache key → New cache instance created 5. Old cache instance remains until explicitly closed or GC'd
+ *      via shutdown hook
  */
 object GlobalSplitCacheManager {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -470,14 +516,12 @@ object GlobalSplitCacheManager {
   /**
    * Get or create a global split cache manager.
    *
-   * This method delegates to tantivy4java's SplitCacheManager.getInstance(), which maintains
-   * its own singleton cache with credential-aware cache keys. When credentials change (including
-   * session token rotation), tantivy4java automatically creates a new cache instance with the
-   * new credentials.
+   * This method delegates to tantivy4java's SplitCacheManager.getInstance(), which maintains its own singleton cache
+   * with credential-aware cache keys. When credentials change (including session token rotation), tantivy4java
+   * automatically creates a new cache instance with the new credentials.
    *
-   * The session token value itself is included in tantivy4java's cache key generation,
-   * ensuring that credential changes result in new cache instances without any explicit
-   * timestamp tracking.
+   * The session token value itself is included in tantivy4java's cache key generation, ensuring that credential changes
+   * result in new cache instances without any explicit timestamp tracking.
    */
   def getInstance(config: SplitCacheConfig): SplitCacheManager = {
     logger.debug(s"GlobalSplitCacheManager.getInstance called with cacheName: ${config.cacheName}")
@@ -502,9 +546,9 @@ object GlobalSplitCacheManager {
     import scala.jdk.CollectionConverters._
     val instances = SplitCacheManager.getAllInstances().asScala
     instances.values.foreach { manager =>
-      try {
+      try
         manager.close()
-      } catch {
+      catch {
         case e: Exception =>
           logger.warn("Error closing cache manager", e)
       }
@@ -512,14 +556,14 @@ object GlobalSplitCacheManager {
   }
 
   /**
-   * Flush all global split cache managers. This will close all cache managers managed by tantivy4java.
-   * Returns the number of cache managers that were flushed.
+   * Flush all global split cache managers. This will close all cache managers managed by tantivy4java. Returns the
+   * number of cache managers that were flushed.
    *
    * Note: After flushing, tantivy4java's shutdown hook will clean up the instances map.
    */
   def flushAllCaches(): SplitCacheFlushResult = {
     import scala.jdk.CollectionConverters._
-    val instances = SplitCacheManager.getAllInstances().asScala
+    val instances    = SplitCacheManager.getAllInstances().asScala
     val flushedCount = instances.size
 
     logger.info(s"Flushing all split cache managers ($flushedCount managers)")
@@ -545,10 +589,14 @@ object GlobalSplitCacheManager {
    */
   def getGlobalStats(): Map[String, SplitCacheManager.GlobalCacheStats] = {
     import scala.jdk.CollectionConverters._
-    SplitCacheManager.getAllInstances().asScala.map {
-      case (cacheKey, manager) =>
-        cacheKey -> manager.getGlobalCacheStats()
-    }.toMap
+    SplitCacheManager
+      .getAllInstances()
+      .asScala
+      .map {
+        case (cacheKey, manager) =>
+          cacheKey -> manager.getGlobalCacheStats()
+      }
+      .toMap
   }
 
   /**
@@ -564,16 +612,16 @@ object GlobalSplitCacheManager {
   /**
    * Invalidate cache managers with stale credentials.
    *
-   * This method closes all tantivy4java cache instances, forcing a fresh cache creation
-   * on next access with current credentials. This is useful when you know credentials have
-   * been rotated and want to immediately invalidate all old cache instances rather than
-   * waiting for them to be garbage collected.
+   * This method closes all tantivy4java cache instances, forcing a fresh cache creation on next access with current
+   * credentials. This is useful when you know credentials have been rotated and want to immediately invalidate all old
+   * cache instances rather than waiting for them to be garbage collected.
    *
-   * Note: In normal operation, you don't need to call this - tantivy4java automatically
-   * creates new cache instances when credentials change (different session token = different
-   * cache key). This method is primarily for explicit cleanup scenarios.
+   * Note: In normal operation, you don't need to call this - tantivy4java automatically creates new cache instances
+   * when credentials change (different session token = different cache key). This method is primarily for explicit
+   * cleanup scenarios.
    *
-   * @return Number of cache managers that were invalidated
+   * @return
+   *   Number of cache managers that were invalidated
    */
   def invalidateAllCredentialCaches(): Int = {
     logger.info("Invalidating all credential-based cache managers")
@@ -590,9 +638,9 @@ object GlobalSplitCacheManager {
     import scala.jdk.CollectionConverters._
     val instances = SplitCacheManager.getAllInstances().asScala
     instances.values.foreach { manager =>
-      try {
+      try
         manager.close()
-      } catch {
+      catch {
         case e: Exception =>
           logger.warn("Error closing cache manager during clear", e)
       }

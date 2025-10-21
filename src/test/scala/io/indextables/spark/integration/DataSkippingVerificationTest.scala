@@ -224,7 +224,10 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val scan       = createScanWithFilters(Array(filter))
     val partitions = scan.planInputPartitions()
 
-    assert(partitions.length == 1, s"Should NOT skip file when filterValue starts with truncated max, got ${partitions.length} partitions")
+    assert(
+      partitions.length == 1,
+      s"Should NOT skip file when filterValue starts with truncated max, got ${partitions.length} partitions"
+    )
     println("✅ Truncated max test passed: GreaterThanOrEqual correctly did NOT skip when filterValue starts with max")
   }
 
@@ -245,8 +248,13 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val scan       = createScanWithFilters(Array(filter))
     val partitions = scan.planInputPartitions()
 
-    assert(partitions.length == 0, s"Should skip file when max < filterValue and filterValue does NOT start with max, got ${partitions.length} partitions")
-    println("✅ Truncated max skip test passed: GreaterThanOrEqual correctly skipped when filterValue does NOT start with max")
+    assert(
+      partitions.length == 0,
+      s"Should skip file when max < filterValue and filterValue does NOT start with max, got ${partitions.length} partitions"
+    )
+    println(
+      "✅ Truncated max skip test passed: GreaterThanOrEqual correctly skipped when filterValue does NOT start with max"
+    )
   }
 
   test("data skipping with truncated statistics - LessThanOrEqual should not skip when filterValue starts with truncated min") {
@@ -266,7 +274,10 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val scan       = createScanWithFilters(Array(filter))
     val partitions = scan.planInputPartitions()
 
-    assert(partitions.length == 1, s"Should NOT skip file when filterValue starts with truncated min, got ${partitions.length} partitions")
+    assert(
+      partitions.length == 1,
+      s"Should NOT skip file when filterValue starts with truncated min, got ${partitions.length} partitions"
+    )
     println("✅ Truncated min test passed: LessThanOrEqual correctly did NOT skip when filterValue starts with min")
   }
 
@@ -287,8 +298,13 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
     val scan       = createScanWithFilters(Array(filter))
     val partitions = scan.planInputPartitions()
 
-    assert(partitions.length == 0, s"Should skip file when min > filterValue and filterValue does NOT start with min, got ${partitions.length} partitions")
-    println("✅ Truncated min skip test passed: LessThanOrEqual correctly skipped when filterValue does NOT start with min")
+    assert(
+      partitions.length == 0,
+      s"Should skip file when min > filterValue and filterValue does NOT start with min, got ${partitions.length} partitions"
+    )
+    println(
+      "✅ Truncated min skip test passed: LessThanOrEqual correctly skipped when filterValue does NOT start with min"
+    )
   }
 
   test("data skipping with truncated statistics - complex scenarios") {
@@ -325,7 +341,8 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     // Should include file2 (because filterValue starts with max) and file3
     assert(partitions1.length >= 2, s"Expected at least 2 partitions (file2 and file3), got ${partitions1.length}")
-    val paths1 = partitions1.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val paths1 =
+      partitions1.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(paths1.exists(_.contains("file2")), "Should include file2 (truncated max with matching prefix)")
     assert(paths1.exists(_.contains("file3")), "Should include file3")
 
@@ -336,7 +353,8 @@ class DataSkippingVerificationTest extends TestBase with BeforeAndAfterEach {
 
     // Should include file1 and file2 (because filterValue starts with min)
     assert(partitions2.length >= 2, s"Expected at least 2 partitions (file1 and file2), got ${partitions2.length}")
-    val paths2 = partitions2.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
+    val paths2 =
+      partitions2.map(_.asInstanceOf[io.indextables.spark.core.IndexTables4SparkInputPartition].addAction.path)
     assert(paths2.exists(_.contains("file1")), "Should include file1")
     assert(paths2.exists(_.contains("file2")), "Should include file2 (truncated min with matching prefix)")
 

@@ -49,15 +49,15 @@ class IndexTables4SparkSimpleAggregateScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateScan])
 
-  println(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
-  pushedFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: Filter: $f"))
-  indexQueryFilters.foreach(f => println(s"🔍 SIMPLE AGGREGATE SCAN: IndexQuery Filter: $f"))
+  logger.debug(s"🔍 SIMPLE AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
+  pushedFilters.foreach(f => logger.debug(s"🔍 SIMPLE AGGREGATE SCAN: Filter: $f"))
+  indexQueryFilters.foreach(f => logger.debug(s"🔍 SIMPLE AGGREGATE SCAN: IndexQuery Filter: $f"))
 
   override def readSchema(): StructType =
     createSimpleAggregateSchema(aggregation)
 
   override def toBatch: Batch = {
-    println(s"🔍 SIMPLE AGGREGATE SCAN: toBatch() called, creating batch")
+    logger.debug(s"🔍 SIMPLE AGGREGATE SCAN: toBatch() called, creating batch")
 
     // Update broadcast locality information before partition planning
     // This helps ensure preferred locations are accurate for aggregate operations
@@ -69,7 +69,7 @@ class IndexTables4SparkSimpleAggregateScan(
       logger.debug("Updated broadcast locality information for simple aggregate partition planning")
     } catch {
       case ex: Exception =>
-        println(s"❌ [DRIVER-SIMPLE-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
+        logger.warn(s"❌ [DRIVER-SIMPLE-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information for simple aggregate", ex)
     }
 
@@ -133,7 +133,7 @@ class IndexTables4SparkSimpleAggregateScan(
     }
 
     val resultSchema = StructType(aggregationFields)
-    logger.info(s"🔍 SIMPLE AGGREGATE SCHEMA: Created schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
+    logger.debug(s"🔍 SIMPLE AGGREGATE SCHEMA: Created schema with ${resultSchema.fields.length} fields: ${resultSchema.fieldNames.mkString(", ")}")
     resultSchema
   }
 
@@ -214,14 +214,14 @@ class IndexTables4SparkSimpleAggregateBatch(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateBatch])
 
-  println(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"🔍 SIMPLE AGGREGATE BATCH: Created batch with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
 
   override def planInputPartitions(): Array[InputPartition] = {
-    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
+    logger.debug(s"🔍 SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
 
     // Get all splits from transaction log
     val allSplits = transactionLog.listFiles()
-    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Found ${allSplits.length} total splits")
+    logger.debug(s"🔍 SIMPLE AGGREGATE BATCH: Found ${allSplits.length} total splits")
 
     // Apply data skipping using the same logic as regular scan by creating a helper scan instance
     // Use the full table schema to ensure proper field type detection for data skipping
@@ -236,7 +236,7 @@ class IndexTables4SparkSimpleAggregateBatch(
       indexQueryFilters
     )
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
-    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
+    logger.debug(s"🔍 SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
 
     // Create one partition per filtered split for distributed aggregation processing
     filteredSplits.map { split =>
@@ -253,7 +253,7 @@ class IndexTables4SparkSimpleAggregateBatch(
   }
 
   override def createReaderFactory(): org.apache.spark.sql.connector.read.PartitionReaderFactory = {
-    logger.info(s"🔍 SIMPLE AGGREGATE BATCH: Creating reader factory for simple aggregation")
+    logger.debug(s"🔍 SIMPLE AGGREGATE BATCH: Creating reader factory for simple aggregation")
 
     new IndexTables4SparkSimpleAggregateReaderFactory(
       sparkSession,
@@ -278,12 +278,12 @@ class IndexTables4SparkSimpleAggregatePartition(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregatePartition])
 
-  logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Created partition for split: ${split.path}")
-  logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: Table path: $tablePath")
+  logger.debug(s"🔍 SIMPLE AGGREGATE PARTITION: Created partition for split: ${split.path}")
+  logger.debug(s"🔍 SIMPLE AGGREGATE PARTITION: Table path: $tablePath")
   logger.info(
     s"🔍 SIMPLE AGGREGATE PARTITION: Aggregations: ${aggregation.aggregateExpressions.map(_.toString).mkString(", ")}"
   )
-  logger.info(s"🔍 SIMPLE AGGREGATE PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
+  logger.debug(s"🔍 SIMPLE AGGREGATE PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
    * Provide preferred locations for this aggregate partition based on split cache locality. Uses the same
@@ -325,13 +325,13 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregateReaderFactory])
 
-  logger.info(s"🔍 SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
+  logger.debug(s"🔍 SIMPLE AGGREGATE READER FACTORY: Created with ${indexQueryFilters.length} IndexQuery filters")
 
   override def createReader(partition: org.apache.spark.sql.connector.read.InputPartition)
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
       case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
-        logger.info(s"🔍 SIMPLE AGGREGATE READER FACTORY: Creating reader for simple aggregate partition")
+        logger.debug(s"🔍 SIMPLE AGGREGATE READER FACTORY: Creating reader for simple aggregate partition")
 
         new IndexTables4SparkSimpleAggregateReader(
           simpleAggPartition,
@@ -370,20 +370,20 @@ class IndexTables4SparkSimpleAggregateReader(
     aggregateResults.next()
 
   override def close(): Unit =
-    logger.info(s"🔍 SIMPLE AGGREGATE READER: Closing simple aggregate reader")
+    logger.debug(s"🔍 SIMPLE AGGREGATE READER: Closing simple aggregate reader")
 
   /** Initialize the simple aggregation by executing aggregation via tantivy4java. */
   private def initialize(): Unit = {
-    logger.info(s"🔍 SIMPLE AGGREGATE READER: Initializing simple aggregation for split: ${partition.split.path}")
+    logger.debug(s"🔍 SIMPLE AGGREGATE READER: Initializing simple aggregation for split: ${partition.split.path}")
 
     try {
       // Execute simple aggregation using tantivy4java
       val results = executeSimpleAggregation()
       aggregateResults = results.iterator
-      logger.info(s"🔍 SIMPLE AGGREGATE READER: Simple aggregation completed with ${results.length} result(s)")
+      logger.debug(s"🔍 SIMPLE AGGREGATE READER: Simple aggregation completed with ${results.length} result(s)")
     } catch {
       case e: Exception =>
-        logger.error(s"🔍 SIMPLE AGGREGATE READER: Failed to execute simple aggregation", e)
+        logger.debug(s"🔍 SIMPLE AGGREGATE READER: Failed to execute simple aggregation", e)
         // Return empty results on failure
         aggregateResults = Iterator.empty
     }
@@ -404,8 +404,8 @@ class IndexTables4SparkSimpleAggregateReader(
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
-    logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Starting simple aggregation")
-    logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
+    logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Starting simple aggregation")
+    logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
     logger.info(
       s"🔍 SIMPLE AGGREGATE EXECUTION: Aggregation expressions: ${partition.aggregation.aggregateExpressions.length}"
     )
@@ -417,11 +417,11 @@ class IndexTables4SparkSimpleAggregateReader(
         Some(partition.tablePath.toString)
       )
 
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Creating searcher for split: ${partition.split.path}")
-      logger.info(s"🔍 PATH DEBUG: partition.split.path = '${partition.split.path}'")
-      logger.info(s"🔍 PATH DEBUG: partition.tablePath = '${partition.tablePath}'")
-      logger.info(s"🔍 PATH DEBUG: startsWith('/') = ${partition.split.path.startsWith("/")}")
-      logger.info(s"🔍 PATH DEBUG: contains('://') = ${partition.split.path.contains("://")}")
+      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Creating searcher for split: ${partition.split.path}")
+      logger.debug(s"🔍 PATH DEBUG: partition.split.path = '${partition.split.path}'")
+      logger.debug(s"🔍 PATH DEBUG: partition.tablePath = '${partition.tablePath}'")
+      logger.debug(s"🔍 PATH DEBUG: startsWith('/') = ${partition.split.path.startsWith("/")}")
+      logger.debug(s"🔍 PATH DEBUG: contains('://') = ${partition.split.path.contains("://")}")
 
       // Resolve relative path from AddAction against table path using utility
       val resolvedPath = PathResolutionUtils.resolveSplitPathAsString(
@@ -429,13 +429,13 @@ class IndexTables4SparkSimpleAggregateReader(
         partition.tablePath.toString
       )
 
-      logger.info(s"🔍 PATH DEBUG: resolvedPath = '$resolvedPath'")
+      logger.debug(s"🔍 PATH DEBUG: resolvedPath = '$resolvedPath'")
 
-      // Convert s3a:// to s3:// for tantivy4java compatibility
+      // Normalize s3a:// to s3:// for tantivy4java compatibility
       val splitPath = resolvedPath.replace("s3a://", "s3://")
 
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")
-      logger.info(s"🔍 PATH DEBUG: final splitPath = '$splitPath'")
+      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")
+      logger.debug(s"🔍 PATH DEBUG: final splitPath = '$splitPath'")
 
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
@@ -451,7 +451,7 @@ class IndexTables4SparkSimpleAggregateReader(
       // Get the internal searcher for aggregation operations
       val searcher = splitSearchEngine.getSplitSearcher()
 
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Searcher created successfully")
+      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Searcher created successfully")
 
       // Get schema field names for filter validation
       val splitSchema = splitSearchEngine.getSchema()
@@ -468,9 +468,9 @@ class IndexTables4SparkSimpleAggregateReader(
         }
 
       // Merge IndexQuery filters with pushed filters
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
-      partition.pushedFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Pushed Filter: $f"))
-      partition.indexQueryFilters.foreach(f => logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: IndexQuery Filter: $f"))
+      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
+      partition.pushedFilters.foreach(f => logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Pushed Filter: $f"))
+      partition.indexQueryFilters.foreach(f => logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: IndexQuery Filter: $f"))
 
       // Combine pushed filters and IndexQuery filters
       val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
@@ -487,7 +487,7 @@ class IndexTables4SparkSimpleAggregateReader(
             Some(splitFieldNames),
             Some(optionsFromConfig)
           )
-          logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery with schema validation: ${validatedQuery.getClass.getSimpleName}")
+          logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery with schema validation: ${validatedQuery.getClass.getSimpleName}")
           validatedQuery
         } else {
           val fallbackQuery = FiltersToQueryConverter.convertToSplitQuery(
@@ -496,12 +496,12 @@ class IndexTables4SparkSimpleAggregateReader(
             None,
             Some(optionsFromConfig)
           )
-          logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery without schema validation: ${fallbackQuery.getClass.getSimpleName}")
+          logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Created SplitQuery without schema validation: ${fallbackQuery.getClass.getSimpleName}")
           fallbackQuery
         }
         queryObj
       } else {
-        logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: No filters, using match-all query")
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No filters, using match-all query")
         new SplitMatchAllQuery()
       }
 
@@ -514,10 +514,10 @@ class IndexTables4SparkSimpleAggregateReader(
           aggExpr match {
             case _: Count | _: CountStar =>
               // For COUNT, execute query with filters applied
-              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing COUNT aggregation with filters")
+              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing COUNT aggregation with filters")
               val result = searcher.search(splitQuery, Int.MaxValue)
               val count  = result.getHits().size()
-              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT result: $count")
+              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT result: $count")
               aggregationResults += count.toLong
 
             case sum: Sum =>
@@ -552,7 +552,7 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _                      => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
                 aggregationResults += sumValue
               } else {
                 logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
@@ -612,7 +612,7 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _           => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
                 aggregationResults += minValue
               } else {
                 logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
@@ -664,7 +664,7 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _           => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
                 aggregationResults += maxValue
               } else {
                 logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
@@ -687,12 +687,12 @@ class IndexTables4SparkSimpleAggregateReader(
 
       // Create a single row with all aggregation results
       val row = InternalRow.fromSeq(aggregationResults.toSeq)
-      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Generated result row with ${aggregationResults.length} values")
+      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Generated result row with ${aggregationResults.length} values")
       Array(row)
 
     } catch {
       case e: Exception =>
-        logger.error(s"🔍 SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation", e)
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation", e)
         e.printStackTrace()
         Array.empty[InternalRow]
     }
@@ -732,7 +732,7 @@ class IndexTables4SparkSimpleAggregateReader(
         }
       }
 
-    logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Using footer offsets: $footerStartOffset-$footerEndOffset for split: ${partition.split.path}")
+    logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Using footer offsets: $footerStartOffset-$footerEndOffset for split: ${partition.split.path}")
 
     // Create metadata with real values from the transaction log
     new QuickwitSplit.SplitMetadata(
@@ -773,7 +773,7 @@ class IndexTables4SparkSimpleAggregateReader(
     if (column.getClass.getSimpleName == "FieldReference") {
       // For FieldReference, toString() returns the field name directly
       val fieldName = column.toString
-      logger.info(s"🔍 FIELD EXTRACTION: Successfully extracted field name '$fieldName' from FieldReference")
+      logger.debug(s"🔍 FIELD EXTRACTION: Successfully extracted field name '$fieldName' from FieldReference")
       fieldName
     } else {
       // Fallback to the existing method

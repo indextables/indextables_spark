@@ -22,6 +22,7 @@ object ProtocolBasedIOFactory {
   // Supported storage protocols
   sealed trait StorageProtocol
   case object S3Protocol    extends StorageProtocol
+  case object AzureProtocol extends StorageProtocol
   case object HDFSProtocol  extends StorageProtocol
   case object LocalProtocol extends StorageProtocol
   case object FileProtocol  extends StorageProtocol
@@ -30,6 +31,12 @@ object ProtocolBasedIOFactory {
   def determineProtocol(path: String): StorageProtocol =
     if (path.startsWith("s3://") || path.startsWith("s3a://") || path.startsWith("s3n://")) {
       S3Protocol
+    } else if (
+      path.startsWith("azure://") ||
+      path.startsWith("wasb://") || path.startsWith("wasbs://") ||
+      path.startsWith("abfs://") || path.startsWith("abfss://")
+    ) {
+      AzureProtocol
     } else if (path.startsWith("hdfs://")) {
       HDFSProtocol
     } else if (path.startsWith("file://")) {
@@ -41,6 +48,7 @@ object ProtocolBasedIOFactory {
   /** Get protocol name as string for logging */
   def protocolName(protocol: StorageProtocol): String = protocol match {
     case S3Protocol    => "s3"
+    case AzureProtocol => "azure"
     case HDFSProtocol  => "hdfs"
     case FileProtocol  => "file"
     case LocalProtocol => "local"
@@ -49,6 +57,7 @@ object ProtocolBasedIOFactory {
   /** Check if protocol supports advanced optimizations */
   def supportsAdvancedOptimizations(protocol: StorageProtocol): Boolean = protocol match {
     case S3Protocol    => true  // S3 multipart uploads, transfer acceleration, etc.
+    case AzureProtocol => true  // Azure multipart uploads, block blobs, etc.
     case HDFSProtocol  => true  // Block placement, data locality, erasure coding, etc.
     case FileProtocol  => false // Standard file I/O
     case LocalProtocol => false // Standard file I/O
@@ -57,6 +66,7 @@ object ProtocolBasedIOFactory {
   /** Get recommended buffer size for protocol */
   def getOptimalBufferSize(protocol: StorageProtocol): Int = protocol match {
     case S3Protocol    => 16 * 1024 * 1024  // 16MB - optimal for S3 multipart uploads
+    case AzureProtocol => 16 * 1024 * 1024  // 16MB - optimal for Azure block blobs
     case HDFSProtocol  => 128 * 1024 * 1024 // 128MB - HDFS block size alignment
     case FileProtocol  => 4 * 1024 * 1024   // 4MB - balance memory and I/O efficiency
     case LocalProtocol => 1024 * 1024       // 1MB - conservative for local disk
@@ -65,6 +75,7 @@ object ProtocolBasedIOFactory {
   /** Get compression recommendation for protocol */
   def getCompressionRecommendation(protocol: StorageProtocol): Option[String] = protocol match {
     case S3Protocol    => Some("gzip")   // Good compression ratio for network transfer
+    case AzureProtocol => Some("gzip")   // Good compression ratio for network transfer
     case HDFSProtocol  => Some("snappy") // Fast compression/decompression for big data
     case FileProtocol  => None           // Let filesystem handle compression
     case LocalProtocol => None           // No compression for local development/testing
@@ -91,6 +102,12 @@ object ProtocolBasedIOFactory {
           "s3.multipart.size"      -> options.getOrElse("s3.multipart.size", (16 * 1024 * 1024).toString),
           "s3.max.connections"     -> options.getOrElse("s3.max.connections", "50"),
           "s3.connection.timeout"  -> options.getOrElse("s3.connection.timeout", "10000")
+        )
+      case AzureProtocol =>
+        Map(
+          "azure.block.size"         -> options.getOrElse("azure.block.size", (16 * 1024 * 1024).toString),
+          "azure.max.connections"    -> options.getOrElse("azure.max.connections", "50"),
+          "azure.connection.timeout" -> options.getOrElse("azure.connection.timeout", "10000")
         )
       case HDFSProtocol =>
         Map(

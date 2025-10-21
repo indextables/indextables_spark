@@ -2,13 +2,13 @@
 
 ## 8.1 Overview
 
-IndexTables4Spark implements a sophisticated multi-tier storage and caching architecture designed to optimize performance for both S3 and local filesystem storage. The system balances the competing demands of:
+IndexTables4Spark implements a sophisticated multi-tier storage and caching architecture designed to optimize performance for multi-cloud object storage (AWS S3 and Azure Blob Storage) and local filesystem storage. The system balances the competing demands of:
 
-- **Remote storage durability** (S3 as source of truth)
+- **Remote storage durability** (S3/Azure as source of truth)
 - **Local performance** (JVM-wide split caching)
 - **Memory efficiency** (bounded cache with LRU eviction)
 - **Distributed coordination** (broadcast locality tracking)
-- **Cost optimization** (minimal S3 API calls)
+- **Cost optimization** (minimal cloud storage API calls)
 
 The storage layer handles split files in QuickwitSplit format, managing their lifecycle from creation through upload, download, caching, and eventual eviction. The caching system provides JVM-wide sharing of downloaded splits across concurrent Spark tasks, dramatically reducing redundant S3 retrieval.
 
@@ -18,7 +18,10 @@ The storage layer handles split files in QuickwitSplit format, managing their li
 |-----------|---------------|----------|
 | **SplitCacheManager** | JVM-wide LRU cache for downloaded splits | `io.indextables.spark.cache.SplitCacheManager` |
 | **BroadcastSplitLocalityManager** | Cluster-wide cache locality tracking | `io.indextables.spark.cache.BroadcastSplitLocalityManager` |
-| **S3OptimizedReader** | S3-specific storage with retry logic | `io.indextables.spark.storage.S3OptimizedReader` |
+| **CloudStorageProviderFactory** | Multi-cloud storage abstraction layer | `io.indextables.spark.io.CloudStorageProviderFactory` |
+| **S3CloudStorageProvider** | AWS S3 storage with retry logic | `io.indextables.spark.io.S3CloudStorageProvider` |
+| **AzureCloudStorageProvider** | Azure Blob Storage with OAuth support | `io.indextables.spark.io.AzureCloudStorageProvider` |
+| **S3OptimizedReader** | S3-specific storage (legacy) | `io.indextables.spark.storage.S3OptimizedReader` |
 | **StandardFileReader** | Local/HDFS filesystem storage | `io.indextables.spark.storage.StandardFileReader` |
 | **S3Uploader** | Parallel streaming multipart uploads | `io.indextables.spark.storage.S3Uploader` |
 | **QuickwitSplit** | Immutable split file format | tantivy4java library |
@@ -50,9 +53,10 @@ The storage layer handles split files in QuickwitSplit format, managing their li
                                        ▼
                         ┌──────────────────────────┐
                         │    Remote Storage        │
-                        │  - S3 (primary)          │
-                        │  - HDFS (alternative)    │
-                        │  - Local FS (dev/test)   │
+                        │  - AWS S3               │
+                        │  - Azure Blob Storage   │
+                        │  - HDFS (alternative)   │
+                        │  - Local FS (dev/test)  │
                         └──────────────────────────┘
 ```
 

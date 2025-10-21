@@ -573,9 +573,11 @@ spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "48")  // 48 h
 spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "1")  // 1 hour
 ```
 
-### 10.5.9 AWS Credential Configuration
+### 10.5.9 Cloud Storage Credential Configuration
 
-Controls AWS credential resolution:
+#### AWS Credential Configuration
+
+Controls AWS credential resolution for S3 storage:
 
 | Configuration Key | Type | Default | Description |
 |------------------|------|---------|-------------|
@@ -603,6 +605,64 @@ df.write.format("indextables")
 // Custom credential provider (v1.9+)
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
   "com.example.CustomCredentialProvider")
+```
+
+#### Azure Credential Configuration
+
+**New in v2.0**: Controls Azure authentication for Azure Blob Storage (tested and validated):
+
+| Configuration Key | Type | Default | Description |
+|------------------|------|---------|-------------|
+| `spark.indextables.azure.accountName` | String | (required for Azure) | Azure storage account name |
+| `spark.indextables.azure.accountKey` | String | (optional) | Azure storage account key |
+| `spark.indextables.azure.connectionString` | String | (optional) | Azure connection string (alternative to account name/key) |
+| `spark.indextables.azure.tenantId` | String | (optional) | Azure AD tenant ID for OAuth Service Principal |
+| `spark.indextables.azure.clientId` | String | (optional) | Service Principal application (client) ID for OAuth |
+| `spark.indextables.azure.clientSecret` | String | (optional) | Service Principal client secret for OAuth |
+| `spark.indextables.azure.bearerToken` | String | (optional) | Explicit OAuth bearer token (auto-acquired if not provided) |
+| `spark.indextables.azure.endpoint` | String | (optional) | Custom Azure endpoint (for Azurite or custom endpoints) |
+
+**Authentication Methods** (all tested with passing integration tests):
+1. **Account Key Authentication**: Storage account name + account key
+2. **OAuth Service Principal (Client Credentials)**: Automatic bearer token acquisition from Azure AD
+3. **Connection String Authentication**: Complete Azure connection string
+4. **~/.azure/credentials File**: Shared credentials file supporting both account keys and Service Principal
+
+**Examples**:
+
+```scala
+// Account Key Authentication
+df.write.format("indextables")
+  .option("spark.indextables.azure.accountName", "mystorageaccount")
+  .option("spark.indextables.azure.accountKey", "your-account-key")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// OAuth Service Principal Authentication (v2.0+)
+spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
+spark.conf.set("spark.indextables.azure.tenantId", "your-tenant-id")
+spark.conf.set("spark.indextables.azure.clientId", "your-client-id")
+spark.conf.set("spark.indextables.azure.clientSecret", "your-client-secret")
+
+df.write.format("indextables")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Connection String Authentication
+df.write.format("indextables")
+  .option("spark.indextables.azure.connectionString",
+    "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+
+// Credentials from ~/.azure/credentials file (automatic)
+df.write.format("indextables")
+  .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
+```
+
+**Supported Azure URL Schemes** (all automatically normalized to `azure://` for tantivy4java):
+- `abfss://` - Recommended (Spark standard for ADLS Gen2)
+- `abfs://` - Spark standard for ADLS Gen2
+- `azure://` - Simplified URLs (tantivy4java native)
+- `wasbs://` - Spark legacy secure (deprecated)
+- `wasb://` - Spark legacy (deprecated)
 ```
 
 ## 10.6 Configuration Patterns

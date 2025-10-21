@@ -5,10 +5,10 @@ import java.io.{InputStream, OutputStream}
 /**
  * Abstraction for compression codecs used in transaction logs.
  *
- * Provides both stream-based and byte array-based compression/decompression
- * to support different use cases efficiently.
+ * Provides both stream-based and byte array-based compression/decompression to support different use cases efficiently.
  */
 trait CompressionCodec {
+
   /** Codec identifier byte (0x01 for GZIP, etc.) */
   def codecByte: Byte
 
