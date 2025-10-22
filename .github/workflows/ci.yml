@@ -2,9 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
   pull_request:
-    branches: [main, develop]
 
 env:
   MAVEN_OPTS: -Xmx2g -XX:MaxMetaspaceSize=512m
