@@ -1,0 +1,151 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  MAVEN_OPTS: -Xmx2g -XX:MaxMetaspaceSize=512m
+  JAVA_VERSION: "11"
+  JAVA_DISTRIBUTION: "temurin"
+  SPARK_VERSION: "3.5.3"
+  SCALA_VERSION: "2.12"
+
+jobs:
+  code-quality:
+    name: Code Quality & Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: "maven"
+
+      - name: Check code formatting
+        run: mvn spotless:check
+
+      - name: Install Coursier
+        run: |
+          curl -fL https://github.com/coursier/launchers/raw/master/cs-x86_64-pc-linux.gz | gzip -d > cs
+          chmod +x cs
+          sudo mv cs /usr/local/bin/cs
+
+      - name: Run Scalafix checks
+        run: mvn exec:exec@scalafix-check
+
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: "maven"
+
+      - name: Compile project
+        run: mvn clean compile -DskipTests
+
+      - name: Run tests
+        run: mvn test
+        env:
+          SPARK_LOCAL_DIRS: ${{ runner.temp }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.platform }}
+          path: |
+            target/surefire-reports/
+            target/test-reports/
+          retention-days: 7
+
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    needs: [code-quality]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: "maven"
+
+      - name: Run tests with coverage
+        run: mvn clean scoverage:report
+        env:
+          SPARK_LOCAL_DIRS: ${{ runner.temp }}
+
+      - name: Check coverage threshold
+        run: mvn scoverage:check
+        continue-on-error: true
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: target/scoverage-report/
+          retention-days: 30
+
+  build-artifacts:
+    name: Build Artifacts (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    needs: [build-and-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: "maven"
+
+      - name: Build and package
+        run: mvn clean package -DskipTests -Dplatform.classifier=${{ matrix.platform }}
+
+      - name: Upload shaded JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: indextables-spark-${{ matrix.platform }}-shaded
+          path: target/*-${{ matrix.platform }}-shaded.jar
+          retention-days: 30
+
+      - name: Upload assembly JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: indextables-spark-${{ matrix.platform }}-assembly
+          path: target/*-${{ matrix.platform }}-jar-with-dependencies.jar
+          retention-days: 30
