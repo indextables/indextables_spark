@@ -179,11 +179,11 @@
             <version>12.25.0</version>
         </dependency>
 
-        <!-- Azure Identity SDK for authentication -->
+        <!-- Azure Identity SDK for authentication (patched for CVE-2024-35255, compatible with Spark/Netty) -->
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-identity</artifactId>
-            <version>1.13.2</version>
+            <version>1.12.2</version>
         </dependency>
 
         <!-- Logging -->
