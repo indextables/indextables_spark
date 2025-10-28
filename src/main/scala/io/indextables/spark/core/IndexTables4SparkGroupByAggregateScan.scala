@@ -76,13 +76,11 @@ class IndexTables4SparkGroupByAggregateScan(
     // This helps ensure preferred locations are accurate for GROUP BY operations
     try {
       val sparkContext = sparkSession.sparkContext
-      println(s"🔄 [DRIVER-GROUP-BY-AGG] Updating broadcast locality before partition planning")
+      logger.info("Updating broadcast locality before GROUP BY aggregate partition planning")
       io.indextables.spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      println(s"🔄 [DRIVER-GROUP-BY-AGG] Broadcast locality update completed")
-      logger.debug("Updated broadcast locality information for GROUP BY aggregate partition planning")
+      logger.info("Broadcast locality update completed for GROUP BY aggregate scan")
     } catch {
       case ex: Exception =>
-        logger.warn(s"❌ [DRIVER-GROUP-BY-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information for GROUP BY aggregate", ex)
     }
 

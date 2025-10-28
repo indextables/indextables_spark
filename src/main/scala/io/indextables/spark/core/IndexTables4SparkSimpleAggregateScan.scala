@@ -63,13 +63,11 @@ class IndexTables4SparkSimpleAggregateScan(
     // This helps ensure preferred locations are accurate for aggregate operations
     try {
       val sparkContext = sparkSession.sparkContext
-      println(s"🔄 [DRIVER-SIMPLE-AGG] Updating broadcast locality before partition planning")
+      logger.info("Updating broadcast locality before simple aggregate partition planning")
       io.indextables.spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      println(s"🔄 [DRIVER-SIMPLE-AGG] Broadcast locality update completed")
-      logger.debug("Updated broadcast locality information for simple aggregate partition planning")
+      logger.info("Broadcast locality update completed for simple aggregate scan")
     } catch {
       case ex: Exception =>
-        logger.warn(s"❌ [DRIVER-SIMPLE-AGG] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information for simple aggregate", ex)
     }
 
