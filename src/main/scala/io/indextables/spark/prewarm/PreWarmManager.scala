@@ -315,11 +315,7 @@ object PreWarmManager {
     val filePath = addAction.path
 
     // Normalize path for tantivy4java compatibility
-    val actualPath = if (filePath.startsWith("s3a://") || filePath.startsWith("s3n://")) {
-      filePath.replaceFirst("^s3[an]://", "s3://")
-    } else {
-      filePath
-    }
+    val actualPath = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(filePath)
 
     // Footer offset metadata is required for all split reading operations
     if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {

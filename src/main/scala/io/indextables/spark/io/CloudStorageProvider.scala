@@ -324,59 +324,52 @@ object CloudStorageProviderFactory {
         hadoopConf.get("spark.hadoop.fs.s3a.access.key")
       ).map(_.take(4) + "...").getOrElse("None")}")
 
-    // Trace credential extraction step by step
-    val accessKeyFromOptions           = Option(options.get("spark.indextables.aws.accessKey"))
-    val accessKeyFromHadoopTantivy     = Option(hadoopConf.get("spark.indextables.aws.accessKey"))
-    val accessKeyFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.accessKey"))
-    val accessKeyFromHadoopS3a         = Option(hadoopConf.get("spark.hadoop.fs.s3a.access.key"))
-    val accessKeyFromS3a               = Option(hadoopConf.get("fs.s3a.access.key"))
-
-    logger.info(s"Access key extraction:")
-    logger.info(s"  - From options: ${accessKeyFromOptions.map(_.take(4) + "...").getOrElse("None")}")
-    logger.info(
-      s"  - From hadoop tantivy config: ${accessKeyFromHadoopTantivy.map(_.take(4) + "...").getOrElse("None")}"
+    // Use ConfigurationResolver for AWS credential extraction
+    val awsSources = Seq(
+      io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+      io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.aws"),
+      io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.hadoop.fs.s3a"),
+      io.indextables.spark.util.HadoopConfigSource(hadoopConf, "fs.s3a")
     )
-    logger.info(
-      s"  - From hadoop indextables config: ${accessKeyFromHadoopIndexTables.map(_.take(4) + "...").getOrElse("None")}"
+
+    val finalAccessKey = Option(options.get("spark.indextables.aws.accessKey"))
+      .orElse(
+        io.indextables.spark.util.ConfigurationResolver.resolveString(
+          "accessKey",
+          awsSources,
+          logMask = true
+        )
+      )
+
+    val finalSecretKey = Option(options.get("spark.indextables.aws.secretKey"))
+      .orElse(
+        io.indextables.spark.util.ConfigurationResolver.resolveString(
+          "secretKey",
+          awsSources,
+          logMask = true
+        )
+      )
+
+    // Session token uses slightly different key names
+    val sessionTokenSources = Seq(
+      io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+      io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.aws"),
+      io.indextables.spark.util.HadoopConfigSource(hadoopConf, "fs.s3a")
     )
-    logger.info(s"  - From hadoop s3a config: ${accessKeyFromHadoopS3a.map(_.take(4) + "...").getOrElse("None")}")
-    logger.info(s"  - From s3a config: ${accessKeyFromS3a.map(_.take(4) + "...").getOrElse("None")}")
 
-    val secretKeyFromOptions           = Option(options.get("spark.indextables.aws.secretKey"))
-    val secretKeyFromHadoopTantivy     = Option(hadoopConf.get("spark.indextables.aws.secretKey"))
-    val secretKeyFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.secretKey"))
-    val secretKeyFromHadoopS3a         = Option(hadoopConf.get("spark.hadoop.fs.s3a.secret.key"))
-    val secretKeyFromS3a               = Option(hadoopConf.get("fs.s3a.secret.key"))
-
-    logger.info(s"Secret key extraction:")
-    logger.info(s"  - From options: ${secretKeyFromOptions.map(_ => "***")}")
-    logger.info(s"  - From hadoop tantivy config: ${secretKeyFromHadoopTantivy.map(_ => "***")}")
-    logger.info(s"  - From hadoop indextables config: ${secretKeyFromHadoopIndexTables.map(_ => "***")}")
-    logger.info(s"  - From hadoop s3a config: ${secretKeyFromHadoopS3a.map(_ => "***")}")
-    logger.info(s"  - From s3a config: ${secretKeyFromS3a.map(_ => "***")}")
-
-    val finalAccessKey = accessKeyFromOptions
-      .orElse(accessKeyFromHadoopTantivy)
-      .orElse(accessKeyFromHadoopIndexTables)
-      .orElse(accessKeyFromHadoopS3a)
-      .orElse(accessKeyFromS3a)
-
-    val finalSecretKey = secretKeyFromOptions
-      .orElse(secretKeyFromHadoopTantivy)
-      .orElse(secretKeyFromHadoopIndexTables)
-      .orElse(secretKeyFromHadoopS3a)
-      .orElse(secretKeyFromS3a)
-
-    // Extract session token from all possible sources
-    val sessionTokenFromOptions           = Option(options.get("spark.indextables.aws.sessionToken"))
-    val sessionTokenFromHadoopTantivy     = Option(hadoopConf.get("spark.indextables.aws.sessionToken"))
-    val sessionTokenFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.sessionToken"))
-    val sessionTokenFromS3a               = Option(hadoopConf.get("fs.s3a.session.token"))
-
-    val finalSessionToken = sessionTokenFromOptions
-      .orElse(sessionTokenFromHadoopTantivy)
-      .orElse(sessionTokenFromHadoopIndexTables)
-      .orElse(sessionTokenFromS3a)
+    val finalSessionToken = Option(options.get("spark.indextables.aws.sessionToken"))
+      .orElse(
+        io.indextables.spark.util.ConfigurationResolver
+          .resolveString(
+            "sessionToken",
+            sessionTokenSources,
+            logMask = true
+          )
+      )
+      .orElse(
+        // Also check fs.s3a.session.token (different key name)
+        Option(hadoopConf.get("fs.s3a.session.token"))
+      )
 
     logger.info(s"Final credentials: accessKey=${finalAccessKey.map(_.take(4) + "...")}, secretKey=${finalSecretKey
         .map(_ => "***")}, sessionToken=${finalSessionToken.map(_ => "***")}")
@@ -408,28 +401,32 @@ object CloudStorageProviderFactory {
         .orElse(Option(hadoopConf.get("spark.indextables.aws.credentialsProviderClass")))
         .orElse(Option(hadoopConf.get("spark.indextables.aws.credentialsProviderClass"))),
       awsRegion = {
-        val regionFromOptions           = Option(options.get("spark.indextables.aws.region"))
-        val regionFromHadoopTantivy     = Option(hadoopConf.get("spark.indextables.aws.region"))
-        val regionFromHadoopIndexTables = Option(hadoopConf.get("spark.indextables.aws.region"))
-        val regionFromHadoopS3a         = Option(hadoopConf.get("fs.s3a.endpoint.region"))
-        val regionFromSystemProp        = Option(System.getProperty("aws.region"))
-        val regionFromAwsEnv = Option(System.getenv("AWS_DEFAULT_REGION")).orElse(Option(System.getenv("AWS_REGION")))
+        // Region resolution with extended sources (system properties and environment)
+        val finalRegion = Option(options.get("spark.indextables.aws.region"))
+          .orElse(
+            io.indextables.spark.util.ConfigurationResolver
+              .resolveString(
+                "region",
+                awsSources,
+                logMask = false
+              )
+          )
+          .orElse(
+            Option(hadoopConf.get("fs.s3a.endpoint.region"))
+          )
+          .orElse(
+            Option(System.getProperty("aws.region"))
+          )
+          .orElse(
+            Option(System.getenv("AWS_DEFAULT_REGION"))
+          )
+          .orElse(
+            Option(System.getenv("AWS_REGION"))
+          )
 
-        val finalRegion = regionFromOptions
-          .orElse(regionFromHadoopTantivy)
-          .orElse(regionFromHadoopIndexTables)
-          .orElse(regionFromHadoopS3a)
-          .orElse(regionFromSystemProp)
-          .orElse(regionFromAwsEnv)
-
-        logger.info(s"🔍 REGION RESOLUTION PRIORITY:")
-        logger.info(s"  - From options: $regionFromOptions")
-        logger.info(s"  - From Hadoop Tantivy config: $regionFromHadoopTantivy")
-        logger.info(s"  - From Hadoop IndexTables config: $regionFromHadoopIndexTables")
-        logger.info(s"  - From Hadoop S3a config: $regionFromHadoopS3a")
-        logger.info(s"  - From system properties: $regionFromSystemProp")
-        logger.info(s"  - From environment variables: $regionFromAwsEnv")
-        logger.info(s"  - Final region: $finalRegion")
+        if (logger.isInfoEnabled) {
+          logger.info(s"🔍 AWS Region resolved: $finalRegion")
+        }
 
         // Only warn about AWS region when actually using S3 - not for Azure or other providers
         if (finalRegion.isEmpty && protocol == ProtocolBasedIOFactory.S3Protocol) {
@@ -504,30 +501,100 @@ object CloudStorageProviderFactory {
         finalPathStyle
       },
 
-      // Azure configuration - prioritize DataFrame options, then Spark conf, then Hadoop config, then environment variables
-      azureAccountName = Option(options.get("spark.indextables.azure.accountName"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.accountName")))
-        .orElse(Option(System.getenv("AZURE_STORAGE_ACCOUNT"))),
-      azureAccountKey = Option(options.get("spark.indextables.azure.accountKey"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.accountKey")))
-        .orElse(Option(System.getenv("AZURE_STORAGE_KEY"))),
-      azureConnectionString = Option(options.get("spark.indextables.azure.connectionString"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.connectionString"))),
-      azureBearerToken = Option(options.get("spark.indextables.azure.bearerToken"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.bearerToken"))),
-      azureTenantId = Option(options.get("spark.indextables.azure.tenantId"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.tenantId")))
+      // Azure configuration - use ConfigurationResolver with environment variable fallbacks
+      azureAccountName = {
+        val azureSources = Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure"),
+          io.indextables.spark.util.EnvironmentConfigSource()
+        )
+        io.indextables.spark.util.ConfigurationResolver
+          .resolveString(
+            "accountName",
+            azureSources,
+            logMask = false
+          )
+          .orElse(Option(System.getenv("AZURE_STORAGE_ACCOUNT")))
+      },
+      azureAccountKey = {
+        val azureSources = Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure"),
+          io.indextables.spark.util.EnvironmentConfigSource()
+        )
+        io.indextables.spark.util.ConfigurationResolver
+          .resolveString(
+            "accountKey",
+            azureSources,
+            logMask = true
+          )
+          .orElse(Option(System.getenv("AZURE_STORAGE_KEY")))
+      },
+      azureConnectionString = io.indextables.spark.util.ConfigurationResolver.resolveString(
+        "connectionString",
+        Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure")
+        ),
+        logMask = true
+      ),
+      azureBearerToken = io.indextables.spark.util.ConfigurationResolver.resolveString(
+        "bearerToken",
+        Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure")
+        ),
+        logMask = true
+      ),
+      azureTenantId = io.indextables.spark.util.ConfigurationResolver
+        .resolveString(
+          "tenantId",
+          Seq(
+            io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+            io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure"),
+            io.indextables.spark.util.EnvironmentConfigSource()
+          ),
+          logMask = false
+        )
         .orElse(Option(System.getenv("AZURE_TENANT_ID"))),
-      azureClientId = Option(options.get("spark.indextables.azure.clientId"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.clientId")))
+      azureClientId = io.indextables.spark.util.ConfigurationResolver
+        .resolveString(
+          "clientId",
+          Seq(
+            io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+            io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure"),
+            io.indextables.spark.util.EnvironmentConfigSource()
+          ),
+          logMask = false
+        )
         .orElse(Option(System.getenv("AZURE_CLIENT_ID"))),
-      azureClientSecret = Option(options.get("spark.indextables.azure.clientSecret"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.clientSecret")))
+      azureClientSecret = io.indextables.spark.util.ConfigurationResolver
+        .resolveString(
+          "clientSecret",
+          Seq(
+            io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+            io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure"),
+            io.indextables.spark.util.EnvironmentConfigSource()
+          ),
+          logMask = true
+        )
         .orElse(Option(System.getenv("AZURE_CLIENT_SECRET"))),
-      azureEndpoint = Option(options.get("spark.indextables.azure.endpoint"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.endpoint"))),
-      azureContainerName = Option(options.get("spark.indextables.azure.containerName"))
-        .orElse(Option(hadoopConf.get("spark.indextables.azure.containerName"))),
+      azureEndpoint = io.indextables.spark.util.ConfigurationResolver.resolveString(
+        "endpoint",
+        Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure")
+        ),
+        logMask = false
+      ),
+      azureContainerName = io.indextables.spark.util.ConfigurationResolver.resolveString(
+        "containerName",
+        Seq(
+          io.indextables.spark.util.OptionsConfigSource(options.asScala.asJava),
+          io.indextables.spark.util.HadoopConfigSource(hadoopConf, "spark.indextables.azure")
+        ),
+        logMask = false
+      ),
 
       // GCP configuration
       gcpProjectId = Option(options.get("spark.indextables.gcp.projectId")),
@@ -570,37 +637,8 @@ object CloudStorageProviderFactory {
     options: CaseInsensitiveStringMap,
     hadoopConf: Configuration
   ): String = {
-    // First normalize protocol
-    val protocolNormalized = if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
-      // S3: s3a:// and s3n:// -> s3://
-      path.replaceFirst("^s3[an]://", "s3://")
-    } else if (
-      path.startsWith("wasb://") || path.startsWith("wasbs://") ||
-      path.startsWith("abfs://") || path.startsWith("abfss://")
-    ) {
-      // Azure: Normalize Spark Azure URL schemes to tantivy4java's azure:// format
-      // abfss://container@account.dfs.core.windows.net/path -> azure://container/path
-      import java.net.URI
-      val uri = new URI(path)
-
-      // Extract container and path from Spark Azure URL format
-      val (container, blobPath) = if (uri.getUserInfo != null) {
-        // Format: wasb://container@account.blob.core.windows.net/path
-        // or:     abfss://container@account.dfs.core.windows.net/path
-        val containerName = uri.getUserInfo // "container"
-        val pathPart      = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
-        (containerName, pathPart)
-      } else {
-        // Fallback: assume container is in host and path is as-is
-        val containerName = uri.getHost
-        val pathPart      = if (uri.getPath.startsWith("/")) uri.getPath.substring(1) else uri.getPath
-        (containerName, pathPart)
-      }
-
-      s"azure://$container/$blobPath"
-    } else {
-      path
-    }
+    // First normalize protocol using centralized utility
+    val protocolNormalized = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(path)
 
     // Check if we're in S3Mock mode by looking at the endpoint (only applies to S3 paths)
     if (protocolNormalized.startsWith("s3://")) {

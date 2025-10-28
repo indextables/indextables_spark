@@ -196,7 +196,7 @@ class IndexTables4SparkGroupByAggregateScan(
     val fieldName = if (column.getClass.getSimpleName == "FieldReference") {
       column.toString
     } else {
-      extractFieldNameFromExpression(column)
+      io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
     }
 
     // Look up field type in schema
@@ -218,8 +218,8 @@ class IndexTables4SparkGroupByAggregateScan(
       // For FieldReference, toString() returns the field name directly
       column.toString
     } else {
-      // Fallback to the existing method
-      extractFieldNameFromExpression(column)
+      // Fallback to ExpressionUtils
+      io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
     }
 
     schema.fields.find(_.name == fieldName) match {
@@ -227,25 +227,6 @@ class IndexTables4SparkGroupByAggregateScan(
       case None =>
         logger.warn(s"Could not find field '$fieldName' in schema, defaulting to LongType")
         LongType
-    }
-  }
-
-  /** Extract field name from expression. */
-  private def extractFieldNameFromExpression(expression: org.apache.spark.sql.connector.expressions.Expression)
-    : String = {
-    // Use toString and try to extract field name
-    val exprStr = expression.toString
-    if (exprStr.startsWith("FieldReference(")) {
-      val pattern = """FieldReference\(([^)]+)\)""".r
-      pattern.findFirstMatchIn(exprStr) match {
-        case Some(m) => m.group(1)
-        case None =>
-          logger.warn(s"Could not extract field name from expression: $expression")
-          "unknown_field"
-      }
-    } else {
-      logger.warn(s"Unsupported expression type for field extraction: $expression")
-      "unknown_field"
     }
   }
 }
@@ -811,78 +792,11 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Create SplitMetadata from the existing split information. */
-  private def createSplitMetadataFromSplit(): QuickwitSplit.SplitMetadata = {
-    // Extract metadata from the split path or transaction log
-    val splitId = partition.split.path.split("/").last.replace(".split", "")
-
-    // Get the real metadata from the transaction log split entry
-    val addAction = partition.split
-
-    // Use the real footer ranges from the split if available
-    val (footerStartOffset, footerEndOffset) =
-      if (addAction.footerStartOffset.isDefined && addAction.footerEndOffset.isDefined) {
-        (addAction.footerStartOffset.get, addAction.footerEndOffset.get)
-      } else {
-        // Fallback: try to read the split metadata from the file
-        try {
-          val splitMetadata = QuickwitSplit.readSplitMetadata(partition.split.path)
-          if (splitMetadata != null && splitMetadata.hasFooterOffsets()) {
-            (splitMetadata.getFooterStartOffset(), splitMetadata.getFooterEndOffset())
-          } else {
-            logger.debug(s"🔍 GROUP BY EXECUTION: No footer offsets available for split: ${partition.split.path}")
-            (0L, 1024L) // Minimal fallback
-          }
-        } catch {
-          case e: Exception =>
-            logger.warn(s"🔍 GROUP BY EXECUTION: Failed to read split metadata from: ${partition.split.path}", e)
-            (0L, 1024L) // Minimal fallback
-        }
-      }
-
-    logger.debug(s"🔍 GROUP BY EXECUTION: Using footer offsets: $footerStartOffset-$footerEndOffset for split: ${partition.split.path}")
-
-    // Create metadata with real values from the transaction log
-    new QuickwitSplit.SplitMetadata(
-      splitId,                               // splitId
-      "tantivy4spark-index",                 // indexUid (default, AddAction doesn't have this field)
-      0L,                                    // partitionId (default, AddAction doesn't have this field)
-      "tantivy4spark-source",                // sourceId (default, AddAction doesn't have this field)
-      "tantivy4spark-node",                  // nodeId (default, AddAction doesn't have this field)
-      addAction.numRecords.getOrElse(1000L), // numDocs from transaction (using numRecords field)
-      addAction.size,                        // uncompressedSizeBytes from transaction (using size field)
-      null,                                  // timeRangeStart (AddAction doesn't have this field)
-      null,                                  // timeRangeEnd (AddAction doesn't have this field)
-      addAction.modificationTime / 1000,     // createTimestamp (using modificationTime)
-      "Mature",                              // maturity (default, AddAction doesn't have this field)
-      addAction.tags.getOrElse(Map.empty[String, String]).keySet.asJava, // tags (convert from Map keys)
-      footerStartOffset,                                                 // footerStartOffset - REAL VALUE
-      footerEndOffset,                                                   // footerEndOffset - REAL VALUE
-      0L,                                       // deleteOpstamp (default, AddAction doesn't have this field)
-      0,                                        // numMergeOps (default, AddAction doesn't have this field)
-      "doc-mapping-uid",                        // docMappingUid (default, AddAction doesn't have this field)
-      addAction.docMappingJson.orNull,          // docMappingJson - REAL VALUE from AddAction
-      java.util.Collections.emptyList[String]() // skippedSplits
+  private def createSplitMetadataFromSplit(): QuickwitSplit.SplitMetadata =
+    io.indextables.spark.util.SplitMetadataFactory.fromAddAction(
+      partition.split,
+      partition.tablePath.toString
     )
-  }
-
-  /** Extract field name from Spark expression. */
-  private def extractFieldNameFromExpression(expression: org.apache.spark.sql.connector.expressions.Expression)
-    : String = {
-    // Use toString and try to extract field name
-    val exprStr = expression.toString
-    if (exprStr.startsWith("FieldReference(")) {
-      val pattern = """FieldReference\(([^)]+)\)""".r
-      pattern.findFirstMatchIn(exprStr) match {
-        case Some(m) => m.group(1)
-        case None =>
-          logger.warn(s"Could not extract field name from expression: $expression")
-          "unknown_field"
-      }
-    } else {
-      logger.warn(s"Unsupported expression type for field extraction: $expression")
-      "unknown_field"
-    }
-  }
 
   /** Convert bucket key to appropriate Spark value. */
   private def convertBucketKeyToSpark(
@@ -1344,8 +1258,8 @@ class IndexTables4SparkGroupByAggregateReader(
       logger.debug(s"🔍 FIELD EXTRACTION: Successfully extracted field name '$fieldName' from FieldReference")
       fieldName
     } else {
-      // Fallback to the existing method
-      val fieldName = extractFieldNameFromExpression(column)
+      // Fallback to ExpressionUtils
+      val fieldName = io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
       if (fieldName == "unknown_field") {
         throw new UnsupportedOperationException(s"Complex column expressions not supported for aggregation: $column")
       }

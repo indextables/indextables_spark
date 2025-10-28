@@ -549,28 +549,9 @@ class AzureCloudStorageProvider(
 
   override def getProviderType: String = "Azure"
 
-  override def normalizePathForTantivy(path: String): String = {
+  override def normalizePathForTantivy(path: String): String =
     // Normalize all Spark Azure schemes (wasb, wasbs, abfs, abfss) to tantivy4java's azure:// scheme
-    val uri    = new URI(path)
-    val scheme = uri.getScheme
-
-    scheme match {
-      case "azure" =>
-        // Already in tantivy4java format - pass through unchanged
-        path
-
-      case "wasb" | "wasbs" | "abfs" | "abfss" =>
-        // Convert Spark Azure schemes to tantivy4java format
-        // wasb://container@account.blob.core.windows.net/path -> azure://container/path
-        val (container, blobPath) = parseAzureUri(path)
-        s"azure://$container/$blobPath"
-
-      case _ =>
-        // Should not happen (validated in parseAzureUri), but pass through as-is
-        logger.debug(s"Unexpected URI scheme for Azure normalization: $scheme")
-        path
-    }
-  }
+    io.indextables.spark.util.ProtocolNormalizer.normalizeAzureProtocol(path)
 
   override def close(): Unit =
     executor.shutdown()

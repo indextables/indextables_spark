@@ -43,7 +43,7 @@ class OptimizedTransactionLog(
   tablePath: Path,
   spark: SparkSession,
   options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
-    extends AutoCloseable {
+    extends TransactionLogInterface {
 
   private val logger = LoggerFactory.getLogger(classOf[OptimizedTransactionLog])
 
@@ -133,8 +133,11 @@ class OptimizedTransactionLog(
     // Note: Thread pools are managed globally and not closed here
   }
 
-  /** Initialize transaction log with schema */
-  def initialize(schema: StructType, partitionColumns: Seq[String] = Seq.empty): Unit = {
+  /** Initialize transaction log with schema (single parameter version for interface compatibility) */
+  def initialize(schema: StructType): Unit = initialize(schema, Seq.empty)
+
+  /** Initialize transaction log with schema and partition columns */
+  def initialize(schema: StructType, partitionColumns: Seq[String]): Unit = {
     val version0Path = new Path(transactionLogPath, "00000000000000000000.json").toString
 
     // Check if already initialized by looking for version 0 file
@@ -326,6 +329,14 @@ class OptimizedTransactionLog(
     logger.debug(s" Returning ${cached.size} files from listFilesOptimized")
     cached
   }
+
+  /** Get schema from metadata (for interface compatibility) */
+  def getSchema(): Option[StructType] =
+    Try {
+      val metadata = getMetadata()
+      import org.apache.spark.sql.types.DataType
+      DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+    }.toOption
 
   /** Get metadata with enhanced caching */
   def getMetadata(): MetadataAction =
