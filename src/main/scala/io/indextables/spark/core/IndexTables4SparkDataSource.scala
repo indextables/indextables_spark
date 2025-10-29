@@ -1024,10 +1024,8 @@ class IndexTables4SparkRelation(
       // Normalize s3a:// URLs to s3:// for tantivy4java compatibility
       val normalizedTablePath = if (path.startsWith("file:")) {
         path // Keep file URIs as-is for tantivy4java
-      } else if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
-        path.replaceFirst("^s3[an]://", "s3://")
       } else {
-        path
+        io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(path)
       }
       val tablePath = new Path(normalizedTablePath)
 
@@ -1260,10 +1258,8 @@ class IndexTables4SparkRelation(
       // Normalize s3a:// URLs to s3:// for tantivy4java compatibility
       val normalizedTablePath = if (path.startsWith("file:")) {
         path // Keep file URIs as-is for tantivy4java
-      } else if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
-        path.replaceFirst("^s3[an]://", "s3://")
       } else {
-        path
+        io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(path)
       }
       val tablePath = new Path(normalizedTablePath)
 

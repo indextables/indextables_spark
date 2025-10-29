@@ -19,14 +19,19 @@ package io.indextables.spark.util
 
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions._
+import org.apache.spark.sql.connector.expressions.Expression
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
+import org.slf4j.LoggerFactory
 
 object ExpressionUtils {
+
+  private val logger                = LoggerFactory.getLogger(getClass)
+  private val fieldReferencePattern = """FieldReference\(([^)]+)\)""".r
 
   /**
    * Convert Catalyst expressions to IndexQueryFilter for pushdown. This is used during filter pushdown to convert
@@ -35,7 +40,7 @@ object ExpressionUtils {
    * Note: Since Filter is sealed in Spark, IndexQueryFilter doesn't extend Filter. Instead, it's a separate case class
    * that contains the filter information.
    */
-  def expressionToIndexQueryFilter(expr: Expression): Option[IndexQueryFilter] =
+  def expressionToIndexQueryFilter(expr: org.apache.spark.sql.catalyst.expressions.Expression): Option[IndexQueryFilter] =
     expr match {
       case IndexQueryExpression(left, right) =>
         for {
@@ -58,7 +63,8 @@ object ExpressionUtils {
    * Convert Catalyst expressions to IndexQueryAllFilter for pushdown. This is used during filter pushdown to convert
    * IndexQueryAllExpression to IndexQueryAllFilter.
    */
-  def expressionToIndexQueryAllFilter(expr: Expression): Option[IndexQueryAllFilter] =
+  def expressionToIndexQueryAllFilter(expr: org.apache.spark.sql.catalyst.expressions.Expression)
+    : Option[IndexQueryAllFilter] =
     expr match {
       case IndexQueryAllExpression(child) =>
         extractStringLiteral(child).map(IndexQueryAllFilter.apply)
@@ -75,7 +81,7 @@ object ExpressionUtils {
   }
 
   /** Extract column name from various expression types. */
-  def extractColumnName(expr: Expression): Option[String] =
+  def extractColumnName(expr: org.apache.spark.sql.catalyst.expressions.Expression): Option[String] =
     expr match {
       case attr: AttributeReference       => Some(attr.name)
       case UnresolvedAttribute(nameParts) => Some(nameParts.mkString("."))
@@ -83,7 +89,7 @@ object ExpressionUtils {
     }
 
   /** Extract string literal value from expressions. */
-  def extractStringLiteral(expr: Expression): Option[String] =
+  def extractStringLiteral(expr: org.apache.spark.sql.catalyst.expressions.Expression): Option[String] =
     expr match {
       case Literal(value: UTF8String, StringType) => Some(value.toString)
       case Literal(value: String, StringType)     => Some(value)
@@ -91,7 +97,7 @@ object ExpressionUtils {
     }
 
   /** Check if an expression is a valid IndexQueryExpression that can be pushed down. */
-  def isValidIndexQuery(expr: Expression): Boolean =
+  def isValidIndexQuery(expr: org.apache.spark.sql.catalyst.expressions.Expression): Boolean =
     expr match {
       case iq: IndexQueryExpression    => iq.canPushDown
       case iq: IndexQueryAllExpression => iq.canPushDown
@@ -102,7 +108,8 @@ object ExpressionUtils {
    * Extract all IndexQuery expressions from a complex expression tree. Returns both IndexQueryExpression and
    * IndexQueryAllExpression instances. Useful for analyzing complex WHERE clauses with multiple indexquery operators.
    */
-  def extractIndexQueries(expr: Expression): Seq[Expression] =
+  def extractIndexQueries(expr: org.apache.spark.sql.catalyst.expressions.Expression)
+    : Seq[org.apache.spark.sql.catalyst.expressions.Expression] =
     expr match {
       case iq: IndexQueryExpression    => Seq(iq)
       case iq: IndexQueryAllExpression => Seq(iq)
@@ -116,7 +123,7 @@ object ExpressionUtils {
    * Extract only IndexQueryExpression instances from a complex expression tree. Maintains backward compatibility for
    * existing code.
    */
-  def extractIndexQueryExpressions(expr: Expression): Seq[IndexQueryExpression] =
+  def extractIndexQueryExpressions(expr: org.apache.spark.sql.catalyst.expressions.Expression): Seq[IndexQueryExpression] =
     expr match {
       case iq: IndexQueryExpression => Seq(iq)
       case And(left, right)         => extractIndexQueryExpressions(left) ++ extractIndexQueryExpressions(right)
@@ -126,7 +133,8 @@ object ExpressionUtils {
     }
 
   /** Extract only IndexQueryAllExpression instances from a complex expression tree. */
-  def extractIndexQueryAllExpressions(expr: Expression): Seq[IndexQueryAllExpression] =
+  def extractIndexQueryAllExpressions(expr: org.apache.spark.sql.catalyst.expressions.Expression)
+    : Seq[IndexQueryAllExpression] =
     expr match {
       case iq: IndexQueryAllExpression => Seq(iq)
       case And(left, right) => extractIndexQueryAllExpressions(left) ++ extractIndexQueryAllExpressions(right)
@@ -163,4 +171,44 @@ object ExpressionUtils {
 
     queryCheck
   }
+
+  /**
+   * Extracts field name from a Spark SQL V2 connector expression.
+   *
+   * Currently supports FieldReference expressions. Returns "unknown_field" for unsupported expression types.
+   *
+   * @param expression
+   *   The Spark SQL connector expression
+   * @return
+   *   Extracted field name, or "unknown_field" if extraction fails
+   */
+  def extractFieldName(expression: Expression): String = {
+    val exprStr = expression.toString
+
+    if (exprStr.startsWith("FieldReference(")) {
+      fieldReferencePattern.findFirstMatchIn(exprStr) match {
+        case Some(m) =>
+          val fieldName = m.group(1)
+          logger.debug(s"Extracted field name from expression: $fieldName")
+          fieldName
+        case None =>
+          logger.warn(s"Could not extract field name from FieldReference expression: $expression")
+          "unknown_field"
+      }
+    } else {
+      logger.warn(s"Unsupported expression type for field extraction: $expression")
+      "unknown_field"
+    }
+  }
+
+  /**
+   * Extracts field names from multiple V2 connector expressions.
+   *
+   * @param expressions
+   *   Sequence of Spark SQL connector expressions
+   * @return
+   *   Sequence of extracted field names
+   */
+  def extractFieldNames(expressions: Seq[Expression]): Seq[String] =
+    expressions.map(extractFieldName)
 }

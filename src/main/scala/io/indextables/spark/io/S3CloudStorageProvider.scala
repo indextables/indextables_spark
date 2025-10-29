@@ -82,11 +82,7 @@ class S3CloudStorageProvider(
   // Convert s3a:// URLs to s3:// for tantivy4java compatibility
   // tantivy4java only understands s3:// protocol, not s3a:// or s3n://
   private def normalizeProtocolForTantivy(path: String): String =
-    if (path.startsWith("s3a://") || path.startsWith("s3n://")) {
-      path.replaceFirst("^s3[an]://", "s3://")
-    } else {
-      path
-    }
+    io.indextables.spark.util.ProtocolNormalizer.normalizeS3Protocol(path)
 
   // Convert nested paths to flat structure: path/to/file.txt -> path___to___file.txt
   private def flattenPathForS3Mock(key: String): String =

@@ -187,114 +187,11 @@ class IndexTables4SparkPartitionReader(
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized                           = false
 
-  private def createCacheConfig(): SplitCacheConfig = {
-    logger.debug(s"🔍 ENTERING createCacheConfig - parsing configuration values...")
-
-    // Access the broadcast configuration in executor
-    val broadcasted = config
-
-    // Helper function to mask sensitive credential fields
-    def maskSensitiveValue(key: String, value: String): String = {
-      val lowerKey = key.toLowerCase
-      if (lowerKey.contains("sessiontoken") || lowerKey.contains("secretkey") || lowerKey.contains("accountkey")) {
-        "***REDACTED***"
-      } else {
-        value
-      }
-    }
-
-    // Debug: Log broadcast configuration received in executor
-    logger.debug(s"🔍 PartitionReader received ${broadcasted.size} broadcast configs")
-    broadcasted.foreach {
-      case (k, v) =>
-        val safeValue   = Option(v).getOrElse("null")
-        val maskedValue = maskSensitiveValue(k, safeValue)
-        logger.debug(s"🔍 Broadcast config: $k -> $maskedValue")
-    }
-
-    // Helper function to get config from broadcast with defaults
-    def getBroadcastConfig(configKey: String, default: String = ""): String = {
-      val value       = broadcasted.getOrElse(configKey, default)
-      val safeValue   = Option(value).getOrElse(default)
-      val maskedValue = maskSensitiveValue(configKey, Option(safeValue).getOrElse("null"))
-      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
-      safeValue
-    }
-
-    def getBroadcastConfigOption(configKey: String): Option[String] = {
-      // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-      val value       = broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
-      val maskedValue = value.map(v => maskSensitiveValue(configKey, v)).getOrElse("None")
-      logger.debug(s"🔍 PartitionReader broadcast config for $configKey: $maskedValue")
-      value
-    }
-
-    val cacheConfig = SplitCacheConfig(
-      cacheName = {
-        val configName = getBroadcastConfig("spark.indextables.cache.name", "")
-        if (configName.trim().nonEmpty) {
-          configName.trim()
-        } else {
-          // Use table path as cache name for table-specific caching
-          val safeTablePath = Option(tablePath).map(_.toString).getOrElse("unknown")
-          s"tantivy4spark-${safeTablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
-        }
-      },
-      maxCacheSize = {
-        val value = getBroadcastConfig("spark.indextables.cache.maxSize", "200000000")
-        try
-          value.toLong
-        catch {
-          case e: NumberFormatException =>
-            logger.error(s"Invalid numeric value for spark.indextables.cache.maxSize: '$value'")
-            throw e
-        }
-      },
-      maxConcurrentLoads = {
-        val value = getBroadcastConfig("spark.indextables.cache.maxConcurrentLoads", "8")
-        try
-          value.toInt
-        catch {
-          case e: NumberFormatException =>
-            logger.error(s"Invalid numeric value for spark.indextables.cache.maxConcurrentLoads: '$value'")
-            throw e
-        }
-      },
-      enableQueryCache = getBroadcastConfig("spark.indextables.cache.queryCache", "true").toBoolean,
-      splitCachePath = getBroadcastConfigOption("spark.indextables.cache.directoryPath")
-        .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultCachePath()),
-      // AWS configuration from broadcast
-      awsAccessKey = getBroadcastConfigOption("spark.indextables.aws.accessKey"),
-      awsSecretKey = getBroadcastConfigOption("spark.indextables.aws.secretKey"),
-      awsSessionToken = getBroadcastConfigOption("spark.indextables.aws.sessionToken"),
-      awsRegion = getBroadcastConfigOption("spark.indextables.aws.region"),
-      awsEndpoint = getBroadcastConfigOption("spark.indextables.s3.endpoint"),
-      awsPathStyleAccess = getBroadcastConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toBoolean),
-      // Azure configuration from broadcast
-      azureAccountName = getBroadcastConfigOption("spark.indextables.azure.accountName"),
-      azureAccountKey = getBroadcastConfigOption("spark.indextables.azure.accountKey"),
-      azureConnectionString = getBroadcastConfigOption("spark.indextables.azure.connectionString"),
-      azureBearerToken = getBroadcastConfigOption("spark.indextables.azure.bearerToken"),
-      azureTenantId = getBroadcastConfigOption("spark.indextables.azure.tenantId"),
-      azureClientId = getBroadcastConfigOption("spark.indextables.azure.clientId"),
-      azureClientSecret = getBroadcastConfigOption("spark.indextables.azure.clientSecret"),
-      azureEndpoint = getBroadcastConfigOption("spark.indextables.azure.endpoint"),
-      // GCP configuration from broadcast
-      gcpProjectId = getBroadcastConfigOption("spark.indextables.gcp.projectId"),
-      gcpServiceAccountKey = getBroadcastConfigOption("spark.indextables.gcp.serviceAccountKey"),
-      gcpCredentialsFile = getBroadcastConfigOption("spark.indextables.gcp.credentialsFile"),
-      gcpEndpoint = getBroadcastConfigOption("spark.indextables.gcp.endpoint")
+  private def createCacheConfig(): SplitCacheConfig =
+    io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
+      config,
+      Some(tablePath.toString)
     )
-
-    // Debug: Log final cache configuration
-    logger.debug(s"🔍 Created SplitCacheConfig with AWS region: ${cacheConfig.awsRegion.getOrElse("None")}")
-    logger.debug(s"🔍 Created SplitCacheConfig with AWS endpoint: ${cacheConfig.awsEndpoint.getOrElse("None")}")
-    logger.debug(
-      s"🔍 Created SplitCacheConfig with AWS pathStyleAccess: ${cacheConfig.awsPathStyleAccess.getOrElse("None")}"
-    )
-
-    cacheConfig
-  }
 
   private def initialize(): Unit = {
     if (!initialized) {
@@ -582,13 +479,9 @@ class IndexTables4SparkDataWriter(
 
   // Normalize table path for consistent S3 protocol handling (s3a:// -> s3://)
   private val normalizedTablePath = {
-    val pathStr = tablePath.toString
-    if (pathStr.startsWith("s3a://") || pathStr.startsWith("s3n://")) {
-      val normalizedStr = pathStr.replaceFirst("^s3[an]://", "s3://")
-      new Path(normalizedStr)
-    } else {
-      tablePath
-    }
+    val pathStr       = tablePath.toString
+    val normalizedStr = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(pathStr)
+    new Path(normalizedStr)
   }
 
   // Debug: Log options and hadoop config available in executor

@@ -52,7 +52,7 @@ class TransactionLog(
   tablePath: Path,
   spark: SparkSession,
   options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
-    extends AutoCloseable {
+    extends TransactionLogInterface {
 
   // Check if this is being used directly instead of through the factory
   private val allowDirectUsage = options.getBoolean("spark.indextables.transaction.allowDirectUsage", false)
@@ -161,7 +161,7 @@ class TransactionLog(
       )
     }
 
-  def addFile(addAction: AddAction): Long = {
+  override def addFile(addAction: AddAction): Long = {
     // Legacy Hadoop implementation
     val version = getNextVersion()
     writeAction(version, addAction)
@@ -368,7 +368,7 @@ class TransactionLog(
    * @return
    *   The new version number
    */
-  def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
+  override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
     val version = getNextVersion()
     val actions = removeActions ++ addActions
     writeActions(version, actions)
