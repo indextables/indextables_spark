@@ -259,13 +259,15 @@ Initial refactoring session documentation:
 3. **Test utilities**: Extract common test patterns
 4. **Documentation generation**: Automated API docs
 
-### Recent Additions (2025-10-28)
+### Recent Additions (2025-10-28/29)
 
 **NEW:** MergeSplitsCommand refactoring completed
 - See [MERGE_SPLITS_COMMAND_REDUNDANCY_ANALYSIS.md](MERGE_SPLITS_COMMAND_REDUNDANCY_ANALYSIS.md) for detailed analysis
 - See [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) for implementation summary
-- **Result**: Additional 730 lines removed (28.4% reduction in MergeSplitsCommand.scala)
-- **Status**: ✅ Compilation successful, 10/11 tests passing
+- See [METHOD_VERIFICATION_REPORT.md](METHOD_VERIFICATION_REPORT.md) for comprehensive method verification
+- See [TEST_REGRESSION_FIX.md](TEST_REGRESSION_FIX.md) for test regression resolution
+- **Result**: Additional 794 lines removed (31% reduction in MergeSplitsCommand.scala)
+- **Status**: ✅ Compilation successful, **15/15 tests passing** (including all MergeSplitsPartitionTest and MergeSplitsCommandTest)
 
 ### Maintenance
 1. **Regular audits**: Quarterly code duplication checks

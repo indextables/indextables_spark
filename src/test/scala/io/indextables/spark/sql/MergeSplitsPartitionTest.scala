@@ -334,7 +334,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MergeSplitsExecutor should validate partition consistency in createMergedSplit") {
-    import io.indextables.spark.sql.{MergeSplitsExecutor, MergeGroup}
+    import io.indextables.spark.sql.{MergeSplitsExecutor, MergeGroup, SerializableAwsConfig, SerializableAzureConfig}
 
     logger.info("Testing createMergedSplit partition validation")
 
@@ -362,27 +362,29 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       )
     )
 
-    // Create executor
-    val executor = new MergeSplitsExecutor(
-      spark,
-      transactionLog,
-      new Path(tempTablePath),
-      Seq.empty,
-      5L * 1024L * 1024L * 1024L, // 5GB
-      None,
-      false
-    )
+    // Create empty configs for test
+    val awsConfig = SerializableAwsConfig("", "", None, "us-east-1", None, false, None, None, java.lang.Long.valueOf(1073741824L), false)
+    val azureConfig = SerializableAzureConfig(None, None, None, None, None, None, None, None)
 
-    // Use reflection to access private createMergedSplit method
-    val createMergedSplitMethod = classOf[MergeSplitsExecutor].getDeclaredMethod(
-      "createMergedSplit",
-      classOf[MergeGroup]
+    // Use reflection to access private createMergedSplitDistributed method from companion object
+    val createMergedSplitMethod = MergeSplitsExecutor.getClass.getDeclaredMethod(
+      "createMergedSplitDistributed",
+      classOf[MergeGroup],
+      classOf[String],
+      classOf[SerializableAwsConfig],
+      classOf[SerializableAzureConfig]
     )
     createMergedSplitMethod.setAccessible(true)
 
     // This should throw an IllegalStateException due to cross-partition validation
     val exception = intercept[java.lang.reflect.InvocationTargetException] {
-      createMergedSplitMethod.invoke(executor, invalidMergeGroup)
+      createMergedSplitMethod.invoke(
+        MergeSplitsExecutor,
+        invalidMergeGroup,
+        tempTablePath,
+        awsConfig,
+        azureConfig
+      )
     }
 
     val cause = exception.getCause
