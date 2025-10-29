@@ -224,6 +224,41 @@ case class MergeSplitsCommand(
 object MergeSplitsCommand {
 
   /**
+   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
+   * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
+   */
+  def retryOnStreamingError[T](operation: () => T, operationDesc: String, logger: org.slf4j.Logger): T = {
+    val maxAttempts                     = 3
+    var attempt                         = 1
+    var lastException: RuntimeException = null
+
+    while (attempt <= maxAttempts)
+      try {
+        if (attempt > 1) {
+          logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
+        }
+        return operation()
+      } catch {
+        case e: RuntimeException
+            if e.getMessage != null &&
+              (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
+          lastException = e
+          logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
+          if (attempt == maxAttempts) {
+            logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
+            throw e
+          }
+          attempt += 1
+        case e: Exception =>
+          // Non-retryable errors are propagated immediately
+          throw e
+      }
+
+    // This should never be reached, but for completeness
+    throw lastException
+  }
+
+  /**
    * Alternate constructor that converts a provided path or table identifier into the correct child LogicalPlan node.
    */
   def apply(
@@ -371,42 +406,6 @@ case class SerializableAwsConfig(
   }
 
   /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
-   * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
-   */
-  private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
-    val logger                          = LoggerFactory.getLogger(this.getClass)
-    val maxAttempts                     = 3
-    var attempt                         = 1
-    var lastException: RuntimeException = null
-
-    while (attempt <= maxAttempts)
-      try {
-        if (attempt > 1) {
-          logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
-        }
-        return operation()
-      } catch {
-        case e: RuntimeException
-            if e.getMessage != null &&
-              (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
-          lastException = e
-          logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
-          if (attempt == maxAttempts) {
-            logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
-            throw e
-          }
-          attempt += 1
-        case e: Exception =>
-          // Non-retryable errors are propagated immediately
-          throw e
-      }
-
-    // This should never be reached, but for completeness
-    throw lastException
-  }
-
-  /**
    * Execute merge operation using direct/in-process merge. Returns the result as SerializableSplitMetadata for
    * consistency.
    */
@@ -415,10 +414,12 @@ case class SerializableAwsConfig(
     outputSplitPath: String,
     mergeConfig: QuickwitSplit.MergeConfig
   ): SerializableSplitMetadata = {
+    val logger = LoggerFactory.getLogger(this.getClass)
     // Direct merging using QuickwitSplit.mergeSplits with retry logic for streaming errors and timeouts
-    val metadata = retryOnStreamingError(
+    val metadata = MergeSplitsCommand.retryOnStreamingError(
       () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
-      s"execute merge ${inputSplitPaths.size()} splits to $outputSplitPath"
+      s"execute merge ${inputSplitPaths.size()} splits to $outputSplitPath",
+      logger
     )
     SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
   }
@@ -483,12 +484,6 @@ class MergeSplitsExecutor(
       val debugEnabled =
         getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
 
-      println(s"🔍 [DRIVER] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
-      println(s"🔍 [DRIVER] AWS credentials: accessKey=${accessKey
-          .map(k => s"${k.take(4)}***")
-          .getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
-      println(s"🔍 [DRIVER] Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
-      println(s"🔍 [DRIVER] Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
       logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(
         s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}"
@@ -624,11 +619,6 @@ class MergeSplitsExecutor(
     val metadata = transactionLog.getMetadata()
 
     // DEBUG: Log the metadata details
-    println(s"🔍 MERGE DEBUG: Retrieved metadata from transaction log:")
-    println(s"🔍 MERGE DEBUG:   Metadata ID: ${metadata.id}")
-    println(s"🔍 MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
-    println(s"🔍 MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
-    println(s"🔍 MERGE DEBUG:   Configuration: ${metadata.configuration}")
     logger.info(s"🔍 MERGE DEBUG: Retrieved metadata from transaction log:")
     logger.info(s"🔍 MERGE DEBUG:   Metadata ID: ${metadata.id}")
     logger.info(s"🔍 MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
@@ -639,7 +629,6 @@ class MergeSplitsExecutor(
       metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
     )
 
-    println(s"🔍 MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
     logger.info(s"🔍 MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
 
     // If no partition columns are defined in metadata, skip partition validation
@@ -795,7 +784,6 @@ class MergeSplitsExecutor(
     }
 
     // Execute batches concurrently with controlled parallelism
-    println(s"🏗️  [DRIVER] Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
     logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
 
     // Broadcast AWS and Azure configuration to executors
@@ -827,7 +815,6 @@ class MergeSplitsExecutor(
               val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
 
               logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, $totalSizeGB%.2f GB")
-              println(s"🔄 [DRIVER] Starting batch $batchNum/${batches.length}: ${batch.length} merge groups")
 
               // Set descriptive names for Spark UI
               val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
@@ -861,7 +848,6 @@ class MergeSplitsExecutor(
 
               val batchElapsed = System.currentTimeMillis() - batchStartTime
               logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
-              println(s"✅ [DRIVER] Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
 
               // Now handle transaction log operations on driver (these cannot be distributed)
               logger.info(
@@ -1117,21 +1103,18 @@ class MergeSplitsExecutor(
               if (batchAddActions.nonEmpty || batchRemoveActions.nonEmpty) {
                 val txnStartTime = System.currentTimeMillis()
                 logger.info(s"[Batch $batchNum] Committing batch transaction with ${batchRemoveActions.length} removes and ${batchAddActions.length} adds")
-                println(s"💾 [DRIVER] Batch $batchNum: Committing ${batchRemoveActions.length} removes, ${batchAddActions.length} adds")
 
                 val version = transactionLog.commitMergeSplits(batchRemoveActions, batchAddActions)
                 transactionLog.invalidateCache() // Ensure cache is updated
 
                 val txnElapsed = System.currentTimeMillis() - txnStartTime
                 logger.info(s"[Batch $batchNum] Transaction log updated at version $version in ${txnElapsed}ms")
-                println(s"✅ [DRIVER] Batch $batchNum: Transaction committed at version $version in ${txnElapsed}ms")
               } else {
                 logger.info(s"[Batch $batchNum] No transaction actions to commit")
               }
 
               val batchTotalTime = System.currentTimeMillis() - batchStartTime
               logger.info(s"[Batch $batchNum] Total batch time (merge + transaction): ${batchTotalTime}ms")
-              println(s"⏱️  [DRIVER] Batch $batchNum: Completed in ${batchTotalTime}ms")
 
               successfulBatchCount += 1
 
@@ -1143,7 +1126,6 @@ class MergeSplitsExecutor(
                 failedBatchCount += 1
                 val batchNum = batchIdx + 1
                 logger.error(s"[Batch $batchNum] Failed to process batch", ex)
-                println(s"❌ [DRIVER] Batch $batchNum: Failed with error: ${ex.getMessage}")
                 Seq.empty // Return empty sequence for failed batches
             }
         }.toList
@@ -1332,650 +1314,9 @@ class MergeSplitsExecutor(
     groups.toSeq
   }
 
-  /**
-   * Execute merge for a single group of splits in executor context. This version is designed to run on Spark executors
-   * and handles serialization properly.
-   */
-  private def executeMergeGroupDistributed(
-    mergeGroup: MergeGroup,
-    tablePathStr: String,
-    awsConfig: SerializableAwsConfig,
-    azureConfig: SerializableAzureConfig
-  ): MergeResult = {
-    val startTime = System.currentTimeMillis()
-    val logger    = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
-    logger.info(s"[EXECUTOR] Merging ${mergeGroup.files.length} splits in partition ${mergeGroup.partitionValues}")
 
-    try {
-      // Create merged split using physical merge (executor-friendly version)
-      val mergedSplit = createMergedSplitDistributed(mergeGroup, tablePathStr, awsConfig, azureConfig)
 
-      // Return result for driver to handle transaction operations
-      // Note: We don't do transactionLog operations here since those must be done on driver
-      val originalSize = mergeGroup.files.map(_.size).sum
-      val mergedSize   = mergedSplit.size
-      val mergedFiles  = mergeGroup.files.length
-
-      logger.info(
-        s"[EXECUTOR] Successfully merged $mergedFiles files ($originalSize bytes) into 1 split ($mergedSize bytes)"
-      )
-
-      MergeResult(
-        mergeGroup = mergeGroup,
-        mergedSplitInfo = mergedSplit,
-        mergedFiles = mergedFiles,
-        originalSize = originalSize,
-        mergedSize = mergedSize,
-        executionTimeMs = System.currentTimeMillis() - startTime
-      )
-    } catch {
-      case ex: Exception =>
-        logger.error(s"[EXECUTOR] Failed to merge group in partition ${mergeGroup.partitionValues}", ex)
-        throw ex
-    }
-  }
-
-  /**
-   * Execute merge for a single group of splits. Uses atomic REMOVE+ADD transaction operations like Delta Lake OPTIMIZE.
-   */
-  private def executeMergeGroup(mergeGroup: MergeGroup): MergeResult = {
-    val startTime = System.currentTimeMillis()
-
-    logger.info(s"Merging ${mergeGroup.files.length} splits in partition ${mergeGroup.partitionValues}")
-
-    try {
-      // Create merged split using SplitManager
-      val mergedSplit = createMergedSplit(mergeGroup)
-
-      // Prepare transaction actions (REMOVE + ADD pattern from Delta Lake)
-      val removeActions = mergeGroup.files.map { file =>
-        RemoveAction(
-          path = file.path,
-          deletionTimestamp = Some(startTime),
-          dataChange = false, // This is compaction, not data change
-          extendedFileMetadata = Some(true),
-          partitionValues = Some(file.partitionValues),
-          size = Some(file.size),
-          tags = file.tags
-        )
-      }
-
-      // Merge statistics from input files without reading file contents
-      val (mergedMinValues, mergedMaxValues, mergedNumRecords) = mergeStatistics(mergeGroup.files)
-
-      // Extract ALL metadata from merged split for complete pipeline coverage
-      val mergedMetadata = mergedSplit.metadata
-      val (
-        footerStartOffset,
-        footerEndOffset,
-        hotcacheStartOffset,
-        hotcacheLength,
-        hasFooterOffsets,
-        timeRangeStart,
-        timeRangeEnd,
-        splitTags,
-        deleteOpstamp,
-        numMergeOps,
-        docMappingJson,
-        uncompressedSizeBytes,
-        numDocs
-      ) =
-        if (mergedMetadata != null) {
-          val timeStart = Option(mergedMetadata.getTimeRangeStart()).map(_.toString)
-          val timeEnd   = Option(mergedMetadata.getTimeRangeEnd()).map(_.toString)
-          val tags = Option(mergedMetadata.getTags()).filter(!_.isEmpty).map { tagSet =>
-            import scala.jdk.CollectionConverters._
-            tagSet.asScala.toSet
-          }
-          val docMapping = Option(mergedMetadata.getDocMappingJson())
-
-          if (mergedMetadata.hasFooterOffsets) {
-            (
-              Some(mergedMetadata.getFooterStartOffset()),
-              Some(mergedMetadata.getFooterEndOffset()),
-              None, // hotcacheStartOffset - deprecated, use footer offsets instead
-              None, // hotcacheLength - deprecated, use footer offsets instead
-              true,
-              timeStart,
-              timeEnd,
-              tags,
-              Some(mergedMetadata.getDeleteOpstamp()),
-              Some(mergedMetadata.getNumMergeOps()),
-              docMapping,
-              Some(mergedMetadata.getUncompressedSizeBytes()),
-              Some(mergedMetadata.getNumDocs())
-            )
-          } else {
-            (
-              None,
-              None,
-              None,
-              None,
-              false,
-              timeStart,
-              timeEnd,
-              tags,
-              Some(mergedMetadata.getDeleteOpstamp()),
-              Some(mergedMetadata.getNumMergeOps()),
-              docMapping,
-              Some(mergedMetadata.getUncompressedSizeBytes()),
-              Some(mergedMetadata.getNumDocs())
-            )
-          }
-        } else {
-          (None, None, None, None, false, None, None, None, None, None, None, None, None)
-        }
-
-      val addAction = AddAction(
-        path = mergedSplit.path,
-        partitionValues = mergeGroup.partitionValues,
-        size = mergedSplit.size,
-        modificationTime = startTime,
-        dataChange = false, // This is compaction, not data change
-        stats = None,       // Statistics are stored in minValues/maxValues/numRecords fields
-        tags = Some(
-          Map(
-            "operation"           -> "optimize", // Delta Lake standard operation name
-            "operationParameters" -> "merge_splits",
-            "merged_files_count"  -> mergeGroup.files.length.toString,
-            "merged_from"         -> mergeGroup.files.map(_.path).mkString(","),
-            "target_size"         -> targetSize.toString
-          )
-        ),
-        minValues = mergedMinValues,
-        maxValues = mergedMaxValues,
-        numRecords = numDocs.orElse(mergedNumRecords), // Prefer tantivy4java metadata over aggregated stats
-        // Footer offset optimization metadata preserved from merge operation
-        footerStartOffset = footerStartOffset,
-        footerEndOffset = footerEndOffset,
-        hotcacheStartOffset = hotcacheStartOffset,
-        hotcacheLength = hotcacheLength,
-        hasFooterOffsets = hasFooterOffsets,
-        // Complete tantivy4java SplitMetadata fields preserved from merge
-        timeRangeStart = timeRangeStart,
-        timeRangeEnd = timeRangeEnd,
-        splitTags = splitTags,
-        deleteOpstamp = deleteOpstamp,
-        numMergeOps = numMergeOps,
-        docMappingJson = docMappingJson,
-        uncompressedSizeBytes = uncompressedSizeBytes
-      )
-
-      // Commit atomic REMOVE+ADD transaction using the new method
-      val version = transactionLog.commitMergeSplits(removeActions, Seq(addAction))
-
-      // Log footer offset optimization status for merged split
-      if (hasFooterOffsets) {
-        logger.info(
-          s"🚀 MERGE FOOTER OPTIMIZATION: Merged split preserves footer offsets for 87% network traffic reduction"
-        )
-        logger.debug(s"   Merged ${mergeGroup.files.length} splits with footer optimization preserved")
-      } else {
-        logger.debug(s"📁 STANDARD MERGE: Merged split created without footer offset optimization")
-      }
-
-      // Invalidate cache after transaction log update to ensure fresh file listing
-      transactionLog.invalidateCache()
-
-      logger.info(s"Successfully committed atomic REMOVE+ADD merge operation at version $version")
-
-      val originalSize = mergeGroup.files.map(_.size).sum
-      logger.info(s"Successfully merged ${mergeGroup.files.length} files into ${mergedSplit.path}")
-
-      MergeResult(
-        mergeGroup = mergeGroup,
-        mergedSplitInfo = mergedSplit,
-        mergedFiles = mergeGroup.files.length,
-        originalSize = originalSize,
-        mergedSize = mergedSplit.size,
-        executionTimeMs = System.currentTimeMillis() - startTime
-      )
-
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Failed to merge group in partition ${mergeGroup.partitionValues}", ex)
-        throw ex
-    }
-  }
-
-  /**
-   * Create a new merged split in executor context using tantivy4java. This version uses broadcast configuration
-   * parameters for executor-safe operation.
-   */
-  private def createMergedSplitDistributed(
-    mergeGroup: MergeGroup,
-    tablePathStr: String,
-    awsConfig: SerializableAwsConfig,
-    azureConfig: SerializableAzureConfig
-  ): MergedSplitInfo = {
-    val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
-
-    // Validate group has at least 2 files (required by tantivy4java)
-    if (mergeGroup.files.length < 2) {
-      throw new IllegalArgumentException(
-        s"Cannot merge group with ${mergeGroup.files.length} files - at least 2 required"
-      )
-    }
-
-    // Generate new split path with UUID for uniqueness
-    val uuid = java.util.UUID.randomUUID().toString
-    val partitionPath =
-      if (mergeGroup.partitionValues.isEmpty) ""
-      else {
-        mergeGroup.partitionValues.map { case (k, v) => s"$k=$v" }.mkString("/") + "/"
-      }
-    val mergedPath = s"$partitionPath$uuid.split"
-
-    // Create full paths for input splits and output split
-    // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
-    val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
-    val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
-      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
-      tablePathStr.startsWith("abfss://")
-
-    // Use centralized Azure URL normalization from CloudStorageProviderFactory
-    def normalizeAzureUrl(url: String): String = {
-      import io.indextables.spark.io.CloudStorageProviderFactory
-      import org.apache.spark.sql.util.CaseInsensitiveStringMap
-      import scala.jdk.CollectionConverters._
-
-      CloudStorageProviderFactory.normalizePathForTantivy(
-        url,
-        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
-        new org.apache.hadoop.conf.Configuration()
-      )
-    }
-
-    val inputSplitPaths = mergeGroup.files.map { file =>
-      if (isS3Path) {
-        // For S3 paths, handle cases where file.path might already be a full S3 URL
-        if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
-          // file.path is already a full S3 URL, just normalize the scheme
-          val normalized = file.path.replaceFirst("^s3a://", "s3://")
-          logger.warn(s"🔄 [EXECUTOR] Normalized full S3 path: ${file.path} -> $normalized")
-          normalized
-        } else {
-          // file.path is relative, construct full URL with normalized scheme
-          val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-          val fullPath          = s"$normalizedBaseUri/${file.path}"
-          logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
-          fullPath
-        }
-      } else if (isAzurePath) {
-        // For Azure paths, normalize to azure:// scheme for tantivy4java
-        if (
-          file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
-          file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
-          file.path.startsWith("abfss://")
-        ) {
-          // file.path is already a full Azure URL, normalize to azure://
-          val normalized = normalizeAzureUrl(file.path)
-          logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
-          normalized
-        } else {
-          // file.path is relative, construct full URL with normalized scheme
-          val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-          val fullPath          = s"$normalizedBaseUri/${file.path}"
-          logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
-          fullPath
-        }
-      } else {
-        // For local/HDFS paths, use Path concatenation
-        val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
-        fullPath.toString
-      }
-    }.asJava
-
-    val outputSplitPath = if (isS3Path) {
-      // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
-      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-      val outputPath        = s"$normalizedBaseUri/$mergedPath"
-      logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
-      outputPath
-    } else if (isAzurePath) {
-      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
-      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath        = s"$normalizedBaseUri/$mergedPath"
-      logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
-      outputPath
-    } else {
-      // For local/HDFS paths, use Path concatenation
-      new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toString
-    }
-
-    logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
-    logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-
-    logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
-
-    // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
-    logger.debug(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
-    mergeGroup.files.zipWithIndex.foreach {
-      case (file, idx) =>
-        file.docMappingJson match {
-          case Some(json) =>
-            logger.debug(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
-            logger.debug(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
-          case None =>
-            logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
-        }
-    }
-
-    // Extract docMappingJson from first file to preserve fast fields configuration
-    val docMappingJson = mergeGroup.files.headOption
-      .flatMap(_.docMappingJson)
-      .getOrElse {
-        val errorMsg =
-          "[EXECUTOR] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
-        logger.error(errorMsg)
-        throw new IllegalStateException(errorMsg)
-      }
-    logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
-
-    // Create merge configuration with broadcast AWS and Azure credentials and temp directory
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig
-      .builder()
-      .indexUid("merged-index-uid")
-      .sourceId("tantivy4spark")
-      .nodeId("merge-node")
-      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
-      .partitionId(0L)
-      .deleteQueries(java.util.Collections.emptyList[String]())
-      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePathStr))
-      .debugEnabled(awsConfig.debugEnabled)
-
-    // Add optional Azure configuration if available
-    val azureConf = azureConfig.toQuickwitSplitAzureConfig()
-    if (azureConf != null) {
-      mergeConfigBuilder.azureConfig(azureConf)
-    }
-
-    // Add optional temp directory path if available
-    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
-
-    // Add optional heap size if available
-    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
-
-    val mergeConfig = mergeConfigBuilder.build()
-
-    // Perform the actual merge using tantivy4java with retry logic for streaming errors and timeouts
-    logger.info(s"[EXECUTOR] Calling QuickwitSplit.mergeSplits() with ${inputSplitPaths.size()} input paths")
-    val metadata = retryOnStreamingError(
-      () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
-      s"merge splits ${inputSplitPaths.size()} files to $outputSplitPath"
-    )
-
-    logger.info(s"[EXECUTOR] Successfully merged splits: ${metadata.getNumDocs} documents, ${metadata.getUncompressedSizeBytes} bytes")
-    logger.debug(s"[EXECUTOR] Merge metadata: split_id=${metadata.getSplitId}, merge_ops=${metadata.getNumMergeOps}")
-
-    MergedSplitInfo(
-      mergedPath,
-      metadata.getUncompressedSizeBytes,
-      SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
-    )
-  }
-
-  /**
-   * Extract AWS configuration in executor context. Uses system properties and environment variables since SparkSession
-   * may not be available.
-   */
-  private def extractAwsConfigFromExecutor(): QuickwitSplit.AwsConfig = {
-    val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
-
-    try {
-      // Try to get from system properties first (these would be set by broadcast variables)
-      def getConfig(key: String): Option[String] =
-        Option(System.getProperty(key)).orElse(Option(System.getenv(key)))
-
-      val accessKey    = getConfig("spark.indextables.aws.accessKey")
-      val secretKey    = getConfig("spark.indextables.aws.secretKey")
-      val sessionToken = getConfig("spark.indextables.aws.sessionToken")
-      val region       = getConfig("spark.indextables.aws.region")
-      val endpoint     = getConfig("spark.indextables.s3.endpoint")
-      val pathStyleAccess = getConfig("spark.indextables.s3.pathStyleAccess")
-        .map(_.toLowerCase == "true")
-        .getOrElse(false)
-
-      logger.info(s"[EXECUTOR] Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
-      logger.info(s"[EXECUTOR] AWS credentials: accessKey=${accessKey
-          .map(k => s"${k.take(4)}***")
-          .getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}")
-
-      // Create AwsConfig with the extracted credentials
-      new QuickwitSplit.AwsConfig(
-        accessKey.getOrElse(""),
-        secretKey.getOrElse(""),
-        sessionToken.orNull, // Can be null for permanent credentials
-        region.getOrElse("us-east-1"),
-        endpoint.orNull, // Can be null for default AWS endpoint
-        pathStyleAccess
-      )
-    } catch {
-      case ex: Exception =>
-        logger.warn("[EXECUTOR] Failed to extract AWS config in executor context, using empty config", ex)
-        // Return empty config that will use default AWS credential chain
-        new QuickwitSplit.AwsConfig("", "", null, "us-east-1", null, false)
-    }
-  }
-
-  /**
-   * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
-   * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
-   */
-  private def retryOnStreamingError[T](operation: () => T, operationDesc: String): T = {
-    val maxAttempts                     = 3
-    var attempt                         = 1
-    var lastException: RuntimeException = null
-
-    while (attempt <= maxAttempts)
-      try {
-        if (attempt > 1) {
-          logger.warn(s"Retrying $operationDesc (attempt $attempt of $maxAttempts)")
-        }
-        return operation()
-      } catch {
-        case e: RuntimeException
-            if e.getMessage != null &&
-              (e.getMessage.contains("streaming error") || e.getMessage.contains("timed out")) =>
-          lastException = e
-          logger.warn(s"Caught retryable error on attempt $attempt of $maxAttempts for $operationDesc: ${e.getMessage}")
-          if (attempt == maxAttempts) {
-            logger.error(s"All $maxAttempts attempts failed for $operationDesc, propagating exception")
-            throw e
-          }
-          attempt += 1
-        case e: Exception =>
-          // Non-retryable errors are propagated immediately
-          throw e
-      }
-
-    // This should never be reached, but for completeness
-    throw lastException
-  }
-
-  /**
-   * Create a new merged split by physically merging split files using tantivy4java. This uses
-   * QuickwitSplit.mergeSplits() API for actual merge implementation. For testing with mock data, it falls back to
-   * size-based simulation.
-   */
-  private def createMergedSplit(mergeGroup: MergeGroup): MergedSplitInfo = {
-    // Validate group has at least 2 files (required by tantivy4java)
-    if (mergeGroup.files.length < 2) {
-      throw new IllegalArgumentException(
-        s"Cannot merge group with ${mergeGroup.files.length} files - at least 2 required"
-      )
-    }
-
-    // CRITICAL: Validate all files in the merge group are from the same partition
-    val groupPartitionValues = mergeGroup.partitionValues
-    val invalidFiles         = mergeGroup.files.filterNot(_.partitionValues == groupPartitionValues)
-    if (invalidFiles.nonEmpty) {
-      val errorMsg =
-        s"Cross-partition merge detected! Group expects partition $groupPartitionValues but found files from different partitions:\n" +
-          invalidFiles.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n") +
-          s"\nAll files in group:\n" +
-          mergeGroup.files.map(f => s"  - ${f.path}: ${f.partitionValues}").mkString("\n")
-      logger.error(errorMsg)
-      throw new IllegalStateException(errorMsg)
-    }
-
-    logger.info(
-      s"✅ Partition validation passed: All ${mergeGroup.files.length} files belong to partition $groupPartitionValues"
-    )
-
-    // Generate new split path with UUID for uniqueness
-    val uuid = java.util.UUID.randomUUID().toString
-    val partitionPath =
-      if (mergeGroup.partitionValues.isEmpty) ""
-      else {
-        mergeGroup.partitionValues.map { case (k, v) => s"$k=$v" }.mkString("/") + "/"
-      }
-    val mergedPath = s"$partitionPath$uuid.split"
-
-    // Create full paths for input splits and output split
-    // Handle S3 and Azure paths specially to preserve proper schemes
-    val tablePathStr = tablePath.toString
-    val isS3Path     = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
-    val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
-      tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
-      tablePathStr.startsWith("abfss://")
-
-    // Use centralized Azure URL normalization from CloudStorageProviderFactory
-    def normalizeAzureUrl(url: String): String = {
-      import io.indextables.spark.io.CloudStorageProviderFactory
-      import org.apache.spark.sql.util.CaseInsensitiveStringMap
-      import scala.jdk.CollectionConverters._
-
-      CloudStorageProviderFactory.normalizePathForTantivy(
-        url,
-        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
-        new org.apache.hadoop.conf.Configuration()
-      )
-    }
-
-    val inputSplitPaths = mergeGroup.files.map { file =>
-      if (isS3Path) {
-        // For S3 paths, construct the URL directly
-        val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "") // Normalize s3a:// to s3:// and remove trailing slash
-        s"$normalizedBaseUri/${file.path}"
-      } else if (isAzurePath) {
-        // For Azure paths, normalize to azure:// scheme for tantivy4java
-        val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-        val fullPath          = s"$normalizedBaseUri/${file.path}"
-        logger.debug(s"🔄 [DRIVER] Normalized relative Azure path: ${file.path} -> $fullPath")
-        fullPath
-      } else {
-        // For local/HDFS paths, use Path concatenation
-        val fullPath = new Path(tablePath, file.path)
-        fullPath.toString
-      }
-    }.asJava
-
-    val outputSplitPath = if (isS3Path) {
-      // For S3 paths, construct the URL directly
-      val baseUri = tablePathStr.replaceAll("/$", "") // Remove trailing slash if present
-      s"$baseUri/$mergedPath"
-    } else if (isAzurePath) {
-      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
-      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath        = s"$normalizedBaseUri/$mergedPath"
-      logger.debug(s"🔄 [DRIVER] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
-      outputPath
-    } else {
-      // For local/HDFS paths, use Path concatenation
-      new Path(tablePath, mergedPath).toString
-    }
-
-    logger.info(s"Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
-    logger.debug(s"Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-
-    logger.info("Attempting to merge splits using Tantivy4Java merge functionality")
-
-    // Extract AWS configuration from SparkSession
-    val awsConfig = extractAwsConfig()
-
-    // Extract docMappingJson from first file to preserve fast fields configuration
-    val docMappingJson = mergeGroup.files.headOption
-      .flatMap(_.docMappingJson)
-      .getOrElse {
-        val errorMsg =
-          "[DRIVER] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
-        logger.error(errorMsg)
-        throw new IllegalStateException(errorMsg)
-      }
-    logger.info(
-      s"[DRIVER] Using docMappingJson from source splits: ${if (docMappingJson.length > 100) docMappingJson.take(100) + "..."
-        else docMappingJson}"
-    )
-
-    // Create merge configuration with AWS credentials and temp directory using builder pattern
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig
-      .builder()
-      .indexUid("merged-index-uid")
-      .sourceId("tantivy4spark")
-      .nodeId("merge-node")
-      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
-      .partitionId(0L)
-      .deleteQueries(java.util.Collections.emptyList[String]())
-      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePath.toString))
-      .debugEnabled(awsConfig.debugEnabled)
-
-    // Add optional temp directory path if available
-    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
-
-    // Add optional heap size if available
-    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
-
-    val mergeConfig = mergeConfigBuilder.build()
-
-    // Perform the actual merge using direct/in-process merge
-    println(s"⚙️  [DRIVER] Executing direct merge with ${inputSplitPaths.size()} input paths")
-    println(s"📁 [DRIVER] Output path: $outputSplitPath")
-    println(s"📁 [DRIVER] Relative path for transaction log: $mergedPath")
-    logger.info(s"Executing direct merge with ${inputSplitPaths.size()} input paths")
-
-    val serializedMetadata =
-      try
-        awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
-      catch {
-        case ex: Exception =>
-          println(s"💥 [DRIVER] CRITICAL: Direct merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}")
-          logger.error(s"[DRIVER] Direct merge failed", ex)
-          ex.printStackTrace()
-          throw new RuntimeException(s"Direct merge operation failed: ${ex.getMessage}", ex)
-      }
-
-    println(s"📊 [DRIVER] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
-    logger.info(s"Successfully merged splits: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
-    logger.debug(
-      s"Merge metadata: split_id=${serializedMetadata.getSplitId}, merge_ops=${serializedMetadata.getNumMergeOps}"
-    )
-
-    // CRITICAL: Verify the merged file actually exists at the expected location
-    try
-      if (isS3Path) {
-        println(s"🔍 [DRIVER] S3 merge - cannot easily verify file existence in driver context")
-        println(s"🔍 [DRIVER] Assuming tantivy4java successfully created: $outputSplitPath")
-      } else if (isAzurePath) {
-        println(s"🔍 [DRIVER] Azure merge - cannot easily verify file existence in driver context")
-        println(s"🔍 [DRIVER] Assuming tantivy4java successfully created: $outputSplitPath")
-      } else {
-        val outputFile = new java.io.File(outputSplitPath)
-        val exists     = outputFile.exists()
-        println(s"🔍 [DRIVER] File verification: $outputSplitPath exists = $exists")
-        if (!exists) {
-          throw new RuntimeException(s"CRITICAL: Merged file was not created at expected location: $outputSplitPath")
-        }
-      }
-    catch {
-      case ex: Exception =>
-        println(s"⚠️  [DRIVER] File existence check failed: ${ex.getMessage}")
-        logger.warn(s"[DRIVER] File existence check failed", ex)
-    }
-
-    MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
-  }
 
   /**
    * Apply partition predicates to filter which partitions should be processed. Follows Delta Lake pattern of parsing
@@ -2072,74 +1413,26 @@ class MergeSplitsExecutor(
             org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
         }
     }
-
-  /**
-   * Aggregate min values from multiple files by taking the minimum of each field. This preserves data skipping
-   * statistics without reading file contents.
-   */
-  private def aggregateMinValues(files: Seq[AddAction]): Option[Map[String, String]] = {
-    val allMinValues = files.flatMap(_.minValues.getOrElse(Map.empty))
-    if (allMinValues.nonEmpty) {
-      // Group by field name and take the minimum value for each field
-      val mergedStats = allMinValues.groupBy(_._1).map {
-        case (fieldName, fieldValues) =>
-          val minValue = fieldValues.map(_._2).min(smartStringOrdering)
-          fieldName -> minValue
-      }
-      Some(mergedStats)
-    } else None
-  }
-
-  /**
-   * Aggregate max values from multiple files by taking the maximum of each field. This preserves data skipping
-   * statistics without reading file contents.
-   */
-  private def aggregateMaxValues(files: Seq[AddAction]): Option[Map[String, String]] = {
-    val allMaxValues = files.flatMap(_.maxValues.getOrElse(Map.empty))
-    if (allMaxValues.nonEmpty) {
-      // Group by field name and take the maximum value for each field
-      val mergedStats = allMaxValues.groupBy(_._1).map {
-        case (fieldName, fieldValues) =>
-          val maxValue = fieldValues.map(_._2).max(smartStringOrdering)
-          fieldName -> maxValue
-      }
-      Some(mergedStats)
-    } else None
-  }
-
-  /** Aggregate record counts by summing across all files. This maintains accurate row count statistics. */
-  private def aggregateNumRecords(files: Seq[AddAction]): Option[Long] = {
-    val allRecords = files.flatMap(_.numRecords)
-    if (allRecords.nonEmpty) {
-      Some(allRecords.sum)
-    } else {
-      None
-    }
-  }
-
-  /**
-   * Merge statistics from multiple files without reading file contents. This is critical for maintaining Delta
-   * Lake-style data skipping performance.
-   */
-  private def mergeStatistics(files: Seq[AddAction])
-    : (Option[Map[String, String]], Option[Map[String, String]], Option[Long]) = {
-    logger.debug(s"Merging statistics from ${files.length} files")
-
-    val minValues  = aggregateMinValues(files)
-    val maxValues  = aggregateMaxValues(files)
-    val numRecords = aggregateNumRecords(files)
-
-    logger.debug(
-      s"Merged statistics: ${numRecords.getOrElse("unknown")} records, " +
-        s"${minValues.map(_.size).getOrElse(0)} min values, ${maxValues.map(_.size).getOrElse(0)} max values"
-    )
-
-    (minValues, maxValues, numRecords)
-  }
 }
 
 /** Companion object for MergeSplitsExecutor with static methods for distributed execution. */
 object MergeSplitsExecutor {
+
+  /**
+   * Normalize Azure URLs to the azure:// scheme that tantivy4java expects.
+   * Handles wasb://, wasbs://, abfs://, abfss:// and converts them to azure://.
+   */
+  private def normalizeAzureUrl(url: String): String = {
+    import io.indextables.spark.io.CloudStorageProviderFactory
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+
+    CloudStorageProviderFactory.normalizePathForTantivy(
+      url,
+      new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
+      new org.apache.hadoop.conf.Configuration()
+    )
+  }
 
   /**
    * Execute merge for a single group of splits in executor context. This static method is designed to run on Spark
@@ -2154,8 +1447,6 @@ object MergeSplitsExecutor {
     val startTime = System.currentTimeMillis()
     val logger    = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
-    // Use println to ensure visibility in test output
-    println(s"🚀 [EXECUTOR] Merging ${mergeGroup.files.length} splits in partition ${mergeGroup.partitionValues}")
     logger.info(s"[EXECUTOR] Merging ${mergeGroup.files.length} splits in partition ${mergeGroup.partitionValues}")
 
     try {
@@ -2168,9 +1459,6 @@ object MergeSplitsExecutor {
       val mergedSize   = mergedSplit.size
       val mergedFiles  = mergeGroup.files.length
 
-      println(
-        s"✅ [EXECUTOR] Successfully merged $mergedFiles files ($originalSize bytes) into 1 split ($mergedSize bytes)"
-      )
       logger.info(
         s"[EXECUTOR] Successfully merged $mergedFiles files ($originalSize bytes) into 1 split ($mergedSize bytes)"
       )
@@ -2241,19 +1529,6 @@ object MergeSplitsExecutor {
     val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
       tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
       tablePathStr.startsWith("abfss://")
-
-    // Use centralized Azure URL normalization from CloudStorageProviderFactory
-    def normalizeAzureUrl(url: String): String = {
-      import io.indextables.spark.io.CloudStorageProviderFactory
-      import org.apache.spark.sql.util.CaseInsensitiveStringMap
-      import scala.jdk.CollectionConverters._
-
-      CloudStorageProviderFactory.normalizePathForTantivy(
-        url,
-        new CaseInsensitiveStringMap(Map.empty[String, String].asJava),
-        new org.apache.hadoop.conf.Configuration()
-      )
-    }
 
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
@@ -2391,7 +1666,6 @@ object MergeSplitsExecutor {
           throw new RuntimeException(s"Direct merge operation failed: ${ex.getMessage}", ex)
       }
 
-    println(s"📊 [EXECUTOR] Physical merge completed: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
     logger.info(s"[EXECUTOR] Successfully merged splits: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
     logger.debug(s"[EXECUTOR] Merge metadata: split_id=${serializedMetadata.getSplitId}, merge_ops=${serializedMetadata.getNumMergeOps}")
 

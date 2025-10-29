@@ -254,10 +254,18 @@ Initial refactoring session documentation:
 3. ✅ Update team documentation
 
 ### Future Refactoring Opportunities
-1. **Additional consolidation**: MergeSplitsCommand protocol normalization
+1. ✅ **Additional consolidation**: MergeSplitsCommand protocol normalization - COMPLETED
 2. **Cache optimization**: Further cache configuration consolidation
 3. **Test utilities**: Extract common test patterns
 4. **Documentation generation**: Automated API docs
+
+### Recent Additions (2025-10-28)
+
+**NEW:** MergeSplitsCommand refactoring completed
+- See [MERGE_SPLITS_COMMAND_REDUNDANCY_ANALYSIS.md](MERGE_SPLITS_COMMAND_REDUNDANCY_ANALYSIS.md) for detailed analysis
+- See [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) for implementation summary
+- **Result**: Additional 730 lines removed (28.4% reduction in MergeSplitsCommand.scala)
+- **Status**: ✅ Compilation successful, 10/11 tests passing
 
 ### Maintenance
 1. **Regular audits**: Quarterly code duplication checks
