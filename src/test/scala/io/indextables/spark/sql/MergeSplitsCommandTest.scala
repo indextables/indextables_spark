@@ -342,7 +342,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MERGE SPLITS should correctly construct S3 paths for input and output splits") {
-    import io.indextables.spark.sql.{MergeSplitsExecutor, MergeGroup, MergedSplitInfo}
+    import io.indextables.spark.sql.{MergeSplitsExecutor, MergeGroup, MergedSplitInfo, SerializableAwsConfig, SerializableAzureConfig}
     import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
     import org.apache.hadoop.fs.Path
     import java.lang.reflect.Method
@@ -350,17 +350,6 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     // Create a mock executor to test path construction
     val s3TablePath        = new Path("s3://test-bucket/test-table")
     val mockTransactionLog = TransactionLogFactory.create(s3TablePath, spark)
-
-    // Create executor instance
-    val executor = new MergeSplitsExecutor(
-      spark,
-      mockTransactionLog,
-      s3TablePath,
-      Seq.empty,
-      5L * 1024L * 1024L * 1024L, // 5GB
-      None,                       // maxGroups
-      false
-    )
 
     // Create test merge group with S3 paths
     val testFiles = Seq(
@@ -385,16 +374,29 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
       files = testFiles
     )
 
-    // Use reflection to access private createMergedSplit method
-    val createMergedSplitMethod = classOf[MergeSplitsExecutor].getDeclaredMethod(
-      "createMergedSplit",
-      classOf[MergeGroup]
+    // Create empty configs for test
+    val awsConfig = SerializableAwsConfig("", "", None, "us-east-1", None, false, None, None, java.lang.Long.valueOf(1073741824L), false)
+    val azureConfig = SerializableAzureConfig(None, None, None, None, None, None, None, None)
+
+    // Use reflection to access private createMergedSplitDistributed method from companion object
+    val createMergedSplitMethod = MergeSplitsExecutor.getClass.getDeclaredMethod(
+      "createMergedSplitDistributed",
+      classOf[MergeGroup],
+      classOf[String],
+      classOf[SerializableAwsConfig],
+      classOf[SerializableAzureConfig]
     )
     createMergedSplitMethod.setAccessible(true)
 
     try {
       // This will fail because files don't exist, but we can catch and verify the paths
-      val result = createMergedSplitMethod.invoke(executor, mergeGroup)
+      val result = createMergedSplitMethod.invoke(
+        MergeSplitsExecutor,
+        mergeGroup,
+        s3TablePath.toString,
+        awsConfig,
+        azureConfig
+      )
       // If it succeeds (mock environment), verify the result
       assert(result.isInstanceOf[MergedSplitInfo], "Should return MergedSplitInfo")
     } catch {
