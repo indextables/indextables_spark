@@ -28,6 +28,7 @@ import org.apache.spark.sql.types.StructType
 
 import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
 import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Tantivy}
+import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import org.slf4j.LoggerFactory
 
 /**
@@ -162,6 +163,12 @@ object TantivyDirectInterface {
       val retrievedFastFields = finalTantivyOptions.getFastFields
       logger.debug(s"🔍 FINAL OPTIONS DEBUG: getFastFields() returned: ${retrievedFastFields.mkString(", ")}")
 
+      // Create JSON field mapper for automatic JSON field detection
+      val jsonFieldMapper = new SparkSchemaToTantivyMapper(finalTantivyOptions)
+
+      // Validate JSON field configuration before building schema
+      jsonFieldMapper.validateJsonFieldConfiguration(sparkSchema)
+
       sparkSchema.fields.foreach { field =>
         val fieldName      = field.name
         val fieldType      = field.dataType
@@ -181,28 +188,35 @@ object TantivyDirectInterface {
 
         logger.debug(s"🔍 BUILDER CALL DEBUG: Field $fieldName: stored=$stored, indexed=$indexed, fast=$fast")
 
-        fieldType match {
-          case org.apache.spark.sql.types.StringType =>
-            // Default to "string" (raw tokenizer for exact matching). Only explicit "text" config uses default tokenizer.
-            val fieldTypeOverride = indexingConfig.fieldType.getOrElse("string")
+        // Check if this field should use JSON field type
+        val shouldUseJson = jsonFieldMapper.shouldUseJsonField(field)
 
-            // Store-only fields: tantivy4java now properly supports store-only string fields
-            // after the "keyword" type bug was fixed in the schema conversion logic
-            fieldTypeOverride match {
-              case "string" =>
-                logger.debug(s"🔍 CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
-                builder.addStringField(fieldName, stored, indexed, fast)
-              case "text" =>
-                val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
-                builder.addTextField(fieldName, stored, fast, tokenizer, "position")
-              case "json" =>
-                val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
-                builder.addJsonField(fieldName, stored, tokenizer, "position")
-              case other =>
-                throw new IllegalArgumentException(
-                  s"Unsupported field type override for field $fieldName: $other. Supported types: string, text, json"
-                )
-            }
+        if (shouldUseJson) {
+          // Use JSON field for Struct, Array, or explicitly configured StringType
+          logger.debug(s"🔍 CALLING addJsonField: name=$fieldName (detected as JSON field)")
+          val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
+          builder.addJsonField(fieldName, stored, tokenizer, "position")
+        } else {
+          // Handle non-JSON fields normally
+          fieldType match {
+            case org.apache.spark.sql.types.StringType =>
+              // Default to "string" (raw tokenizer for exact matching). Only explicit "text" config uses default tokenizer.
+              val fieldTypeOverride = indexingConfig.fieldType.getOrElse("string")
+
+              // Store-only fields: tantivy4java now properly supports store-only string fields
+              // after the "keyword" type bug was fixed in the schema conversion logic
+              fieldTypeOverride match {
+                case "string" =>
+                  logger.debug(s"🔍 CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
+                  builder.addStringField(fieldName, stored, indexed, fast)
+                case "text" =>
+                  val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
+                  builder.addTextField(fieldName, stored, fast, tokenizer, "position")
+                case other =>
+                  throw new IllegalArgumentException(
+                    s"Unsupported field type override for field $fieldName: $other. Supported types: string, text"
+                  )
+              }
           case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
             logger.debug(s"🔍 CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
             builder.addIntegerField(fieldName, stored, indexed, fast)
@@ -212,14 +226,20 @@ object TantivyDirectInterface {
             builder.addBooleanField(fieldName, stored, indexed, fast)
           case org.apache.spark.sql.types.BinaryType =>
             builder.addBytesField(fieldName, stored, indexed, fast, "position")
-          case org.apache.spark.sql.types.TimestampType =>
-            builder.addIntegerField(fieldName, stored, indexed, fast) // Store as microseconds since epoch
-          case org.apache.spark.sql.types.DateType =>
-            builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
-          case _ =>
-            throw new UnsupportedOperationException(
-              s"Unsupported field type for field $fieldName: $fieldType. IndexTables4Spark does not support complex types like arrays, maps, or structs."
-            )
+            case org.apache.spark.sql.types.TimestampType =>
+              builder.addIntegerField(fieldName, stored, indexed, fast) // Store as microseconds since epoch
+            case org.apache.spark.sql.types.DateType =>
+              builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
+            case org.apache.spark.sql.types.StructType(_) | org.apache.spark.sql.types.ArrayType(_, _) =>
+              // This should have been caught by shouldUseJsonField check above
+              throw new IllegalStateException(
+                s"Field $fieldName has complex type $fieldType but was not mapped to JSON field. This is a bug."
+              )
+            case _ =>
+              throw new UnsupportedOperationException(
+                s"Unsupported field type for field $fieldName: $fieldType"
+              )
+          }
         }
       }
 
@@ -246,6 +266,11 @@ class TantivyDirectInterface(
 
   // Initialize tantivy4java library only once
   TantivyDirectInterface.ensureInitialized()
+
+  // Create JSON field mapper and converter for handling complex types
+  private val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(options)
+  private val jsonFieldMapper = new SparkSchemaToTantivyMapper(tantivyOptions)
+  private val jsonConverter = new SparkToTantivyConverter(schema, jsonFieldMapper)
 
   // Validate indexing configuration against existing table if provided
   if (existingDocMappingJson.isDefined) {
@@ -641,83 +666,181 @@ class TantivyDirectInterface(
     fieldName: String,
     value: Any,
     dataType: org.apache.spark.sql.types.DataType
-  ): Unit =
-    dataType match {
-      case org.apache.spark.sql.types.StringType =>
-        val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
-        if (fieldName == "title") { // Debug logging for title field
-          logger.debug(s"Adding title field: '$str'")
-        }
-        document.addText(fieldName, str)
-      case org.apache.spark.sql.types.LongType =>
-        document.addInteger(fieldName, value.asInstanceOf[Long])
-      case org.apache.spark.sql.types.IntegerType =>
-        document.addInteger(fieldName, value.asInstanceOf[Int].toLong)
-      case org.apache.spark.sql.types.DoubleType =>
-        document.addFloat(fieldName, value.asInstanceOf[Double])
-      case org.apache.spark.sql.types.FloatType =>
-        document.addFloat(fieldName, value.asInstanceOf[Float].toDouble)
-      case org.apache.spark.sql.types.BooleanType =>
-        document.addBoolean(fieldName, value.asInstanceOf[Boolean])
-      case org.apache.spark.sql.types.BinaryType =>
-        document.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
-      case org.apache.spark.sql.types.TimestampType =>
-        // Spark uses microseconds internally, but we store as milliseconds for efficiency
-        val microseconds = value.asInstanceOf[Long]
-        val milliseconds = microseconds / 1000L
-        document.addInteger(fieldName, milliseconds)
-      case org.apache.spark.sql.types.DateType =>
-        // Convert days since epoch to LocalDateTime for proper date storage
-        import java.time.LocalDateTime
-        import java.time.LocalDate
-        val daysSinceEpoch = value.asInstanceOf[Int]
-        val epochDate      = LocalDate.of(1970, 1, 1)
-        val localDate      = epochDate.plusDays(daysSinceEpoch.toLong)
-        val localDateTime  = localDate.atStartOfDay()
-        document.addDate(fieldName, localDateTime)
-      case _ =>
-        logger.warn(s"Unsupported field type for $fieldName: $dataType")
+  ): Unit = {
+    // Check if this is a JSON field
+    val sparkField = org.apache.spark.sql.types.StructField(fieldName, dataType)
+    if (jsonFieldMapper.shouldUseJsonField(sparkField)) {
+      // Handle JSON fields (Struct, Array, or explicitly configured StringType)
+      logger.debug(s"Adding JSON field: $fieldName (type: $dataType)")
+
+      dataType match {
+        case st: org.apache.spark.sql.types.StructType =>
+          // Value is an InternalRow for struct types
+          val internalRow = value.asInstanceOf[org.apache.spark.sql.catalyst.InternalRow]
+
+          // Convert InternalRow to generic Row for easier processing
+          val genericRow = org.apache.spark.sql.Row.fromSeq(
+            st.fields.zipWithIndex.map { case (field, idx) =>
+              internalRow.get(idx, field.dataType)
+            }
+          )
+
+          val jsonMap = jsonConverter.structToJsonMap(genericRow, st)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(jsonMap)
+          document.addJson(fieldName, jsonString)
+
+        case at: org.apache.spark.sql.types.ArrayType =>
+          // Convert to Scala Seq
+          val arrayData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+          val seq = (0 until arrayData.numElements()).map { i =>
+            arrayData.get(i, at.elementType)
+          }
+
+          val jsonList = jsonConverter.arrayToJsonList(seq, at)
+          // Wrap array in object with "_values" key
+          val wrappedMap = jsonConverter.wrapArrayInObject(jsonList)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(wrappedMap)
+          document.addJson(fieldName, jsonString)
+
+        case org.apache.spark.sql.types.StringType if jsonFieldMapper.getFieldType(fieldName) == "json" =>
+          // Parse JSON string - it's already a string, just pass it through
+          val jsonString = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+          document.addJson(fieldName, jsonString)
+
+        case other =>
+          logger.warn(s"JSON field $fieldName has unexpected type: $other")
+      }
+    } else {
+      // Handle regular fields
+      dataType match {
+        case org.apache.spark.sql.types.StringType =>
+          val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+          if (fieldName == "title") { // Debug logging for title field
+            logger.debug(s"Adding title field: '$str'")
+          }
+          document.addText(fieldName, str)
+        case org.apache.spark.sql.types.LongType =>
+          document.addInteger(fieldName, value.asInstanceOf[Long])
+        case org.apache.spark.sql.types.IntegerType =>
+          document.addInteger(fieldName, value.asInstanceOf[Int].toLong)
+        case org.apache.spark.sql.types.DoubleType =>
+          document.addFloat(fieldName, value.asInstanceOf[Double])
+        case org.apache.spark.sql.types.FloatType =>
+          document.addFloat(fieldName, value.asInstanceOf[Float].toDouble)
+        case org.apache.spark.sql.types.BooleanType =>
+          document.addBoolean(fieldName, value.asInstanceOf[Boolean])
+        case org.apache.spark.sql.types.BinaryType =>
+          document.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
+        case org.apache.spark.sql.types.TimestampType =>
+          // Spark uses microseconds internally, but we store as milliseconds for efficiency
+          val microseconds = value.asInstanceOf[Long]
+          val milliseconds = microseconds / 1000L
+          document.addInteger(fieldName, milliseconds)
+        case org.apache.spark.sql.types.DateType =>
+          // Convert days since epoch to LocalDateTime for proper date storage
+          import java.time.LocalDateTime
+          import java.time.LocalDate
+          val daysSinceEpoch = value.asInstanceOf[Int]
+          val epochDate      = LocalDate.of(1970, 1, 1)
+          val localDate      = epochDate.plusDays(daysSinceEpoch.toLong)
+          val localDateTime  = localDate.atStartOfDay()
+          document.addDate(fieldName, localDateTime)
+        case _ =>
+          logger.warn(s"Unsupported field type for $fieldName: $dataType")
+      }
     }
+  }
 
   private def addFieldToBatchDocument(
     batchDocument: BatchDocument,
     fieldName: String,
     value: Any,
     dataType: org.apache.spark.sql.types.DataType
-  ): Unit =
-    dataType match {
-      case org.apache.spark.sql.types.StringType =>
-        val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
-        batchDocument.addText(fieldName, str)
-      case org.apache.spark.sql.types.LongType =>
-        batchDocument.addInteger(fieldName, value.asInstanceOf[Long])
-      case org.apache.spark.sql.types.IntegerType =>
-        batchDocument.addInteger(fieldName, value.asInstanceOf[Int].toLong)
-      case org.apache.spark.sql.types.DoubleType =>
-        batchDocument.addFloat(fieldName, value.asInstanceOf[Double])
-      case org.apache.spark.sql.types.FloatType =>
-        batchDocument.addFloat(fieldName, value.asInstanceOf[Float].toDouble)
-      case org.apache.spark.sql.types.BooleanType =>
-        batchDocument.addBoolean(fieldName, value.asInstanceOf[Boolean])
-      case org.apache.spark.sql.types.BinaryType =>
-        batchDocument.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
-      case org.apache.spark.sql.types.TimestampType =>
-        // Spark uses microseconds internally, but we store as milliseconds for efficiency
-        val microseconds = value.asInstanceOf[Long]
-        val milliseconds = microseconds / 1000L
-        batchDocument.addInteger(fieldName, milliseconds)
-      case org.apache.spark.sql.types.DateType =>
-        // Convert days since epoch to LocalDateTime for proper date storage
-        import java.time.LocalDateTime
-        import java.time.LocalDate
-        val daysSinceEpoch = value.asInstanceOf[Int]
-        val epochDate      = LocalDate.of(1970, 1, 1)
-        val localDate      = epochDate.plusDays(daysSinceEpoch.toLong)
-        val localDateTime  = localDate.atStartOfDay()
-        batchDocument.addDate(fieldName, localDateTime)
-      case _ =>
-        logger.warn(s"Unsupported field type for $fieldName: $dataType")
+  ): Unit = {
+    // Check if this is a JSON field
+    val sparkField = org.apache.spark.sql.types.StructField(fieldName, dataType)
+    if (jsonFieldMapper.shouldUseJsonField(sparkField)) {
+      // Handle JSON fields (Struct, Array, or explicitly configured StringType)
+      logger.debug(s"Adding JSON field to batch: $fieldName (type: $dataType)")
+
+      dataType match {
+        case st: org.apache.spark.sql.types.StructType =>
+          // Value is an InternalRow for struct types
+          val internalRow = value.asInstanceOf[org.apache.spark.sql.catalyst.InternalRow]
+
+          // Convert InternalRow to generic Row for easier processing
+          val genericRow = org.apache.spark.sql.Row.fromSeq(
+            st.fields.zipWithIndex.map { case (field, idx) =>
+              internalRow.get(idx, field.dataType)
+            }
+          )
+
+          val jsonMap = jsonConverter.structToJsonMap(genericRow, st)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(jsonMap)
+          batchDocument.addJson(fieldName, jsonString)
+
+        case at: org.apache.spark.sql.types.ArrayType =>
+          // Convert to Scala Seq
+          val arrayData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+          val seq = (0 until arrayData.numElements()).map { i =>
+            arrayData.get(i, at.elementType)
+          }
+
+          val jsonList = jsonConverter.arrayToJsonList(seq, at)
+          // Wrap array in object with "_values" key
+          val wrappedMap = jsonConverter.wrapArrayInObject(jsonList)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(wrappedMap)
+          batchDocument.addJson(fieldName, jsonString)
+
+        case org.apache.spark.sql.types.StringType if jsonFieldMapper.getFieldType(fieldName) == "json" =>
+          // Parse JSON string - it's already a string, just pass it through
+          val jsonString = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+          batchDocument.addJson(fieldName, jsonString)
+
+        case other =>
+          logger.warn(s"JSON field $fieldName has unexpected type: $other")
+      }
+    } else {
+      // Handle regular fields
+      dataType match {
+        case org.apache.spark.sql.types.StringType =>
+          val str = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
+          batchDocument.addText(fieldName, str)
+        case org.apache.spark.sql.types.LongType =>
+          batchDocument.addInteger(fieldName, value.asInstanceOf[Long])
+        case org.apache.spark.sql.types.IntegerType =>
+          batchDocument.addInteger(fieldName, value.asInstanceOf[Int].toLong)
+        case org.apache.spark.sql.types.DoubleType =>
+          batchDocument.addFloat(fieldName, value.asInstanceOf[Double])
+        case org.apache.spark.sql.types.FloatType =>
+          batchDocument.addFloat(fieldName, value.asInstanceOf[Float].toDouble)
+        case org.apache.spark.sql.types.BooleanType =>
+          batchDocument.addBoolean(fieldName, value.asInstanceOf[Boolean])
+        case org.apache.spark.sql.types.BinaryType =>
+          batchDocument.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
+        case org.apache.spark.sql.types.TimestampType =>
+          // Spark uses microseconds internally, but we store as milliseconds for efficiency
+          val microseconds = value.asInstanceOf[Long]
+          val milliseconds = microseconds / 1000L
+          batchDocument.addInteger(fieldName, milliseconds)
+        case org.apache.spark.sql.types.DateType =>
+          // Convert days since epoch to LocalDateTime for proper date storage
+          import java.time.LocalDateTime
+          import java.time.LocalDate
+          val daysSinceEpoch = value.asInstanceOf[Int]
+          val epochDate      = LocalDate.of(1970, 1, 1)
+          val localDate      = epochDate.plusDays(daysSinceEpoch.toLong)
+          val localDateTime  = localDate.atStartOfDay()
+          batchDocument.addDate(fieldName, localDateTime)
+        case _ =>
+          logger.warn(s"Unsupported field type for $fieldName: $dataType")
+      }
     }
+  }
 
   def addDocuments(rows: Iterator[InternalRow]): Unit =
     rows.foreach(addDocument)

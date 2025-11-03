@@ -419,12 +419,16 @@ class IndexTables4SparkSimpleAggregateReader(
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
 
+      // Create IndexTables4SparkOptions from config map for JSON field support
+      val options = Some(IndexTables4SparkOptions(partition.config))
+
       // Create SplitSearchEngine for filter conversion and schema access
       val splitSearchEngine = io.indextables.spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
         partition.schema,
         splitPath,
         splitMetadata,
-        cacheConfig
+        cacheConfig,
+        options
       )
 
       // Get the internal searcher for aggregation operations
