@@ -29,6 +29,7 @@ import scala.jdk.CollectionConverters._
  * Handles conversion of:
  *   - Java Map[String, Object] → Spark Row (StructType)
  *   - Java List[Object] → Spark Seq (ArrayType)
+ *   - Java Map[String, Object] → Spark Map (MapType)
  *   - JSON objects → JSON strings (for StringType with "json" config)
  *   - Recursive nested structures
  */
@@ -82,6 +83,33 @@ class TantivyToSparkConverter(
   }
 
   /**
+   * Converts a Java Map to a Spark MapData for MapType.
+   *
+   * @param jsonMap Java Map from tantivy4java JSON field
+   * @param mapType Target Spark MapType
+   * @return Spark MapData
+   */
+  def jsonMapToMapData(
+    jsonMap: java.util.Map[String, Object],
+    mapType: MapType
+  ): org.apache.spark.sql.catalyst.util.MapData = {
+    // Use entrySet() to maintain key-value pairing
+    val entries = jsonMap.entrySet().asScala.toSeq
+
+    val keys = entries.map { entry =>
+      // Convert string key back to the original key type
+      convertFromJsonValue(entry.getKey, mapType.keyType)
+    }.toArray
+
+    val values = entries.map { entry =>
+      convertFromJsonValue(entry.getValue, mapType.valueType)
+    }.toArray
+
+    logger.debug(s"Converted JSON map to MapData with ${keys.length} entries")
+    org.apache.spark.sql.catalyst.util.ArrayBasedMapData(keys, values)
+  }
+
+  /**
    * Recursively converts a JSON value to a Spark type.
    *
    * @param jsonValue Java Object from JSON
@@ -100,6 +128,9 @@ class TantivyToSparkConverter(
       case at: ArrayType =>
         jsonListToArray(jsonValue.asInstanceOf[java.util.List[Object]], at)
 
+      case mt: MapType =>
+        jsonMapToMapData(jsonValue.asInstanceOf[java.util.Map[String, Object]], mt)
+
       case StringType =>
         // Convert to UTF8String for Spark's internal format
         val stringValue = jsonValue match {
@@ -109,16 +140,32 @@ class TantivyToSparkConverter(
         org.apache.spark.unsafe.types.UTF8String.fromString(stringValue)
 
       case IntegerType =>
-        jsonValue.asInstanceOf[Number].intValue()
+        jsonValue match {
+          case n: Number => n.intValue()
+          case s: String => s.toInt
+          case _ => jsonValue.toString.toInt
+        }
 
       case LongType =>
-        jsonValue.asInstanceOf[Number].longValue()
+        jsonValue match {
+          case n: Number => n.longValue()
+          case s: String => s.toLong
+          case _ => jsonValue.toString.toLong
+        }
 
       case FloatType =>
-        jsonValue.asInstanceOf[Number].floatValue()
+        jsonValue match {
+          case n: Number => n.floatValue()
+          case s: String => s.toFloat
+          case _ => jsonValue.toString.toFloat
+        }
 
       case DoubleType =>
-        jsonValue.asInstanceOf[Number].doubleValue()
+        jsonValue match {
+          case n: Number => n.doubleValue()
+          case s: String => s.toDouble
+          case _ => jsonValue.toString.toDouble
+        }
 
       case BooleanType =>
         jsonValue match {
@@ -185,6 +232,10 @@ class TantivyToSparkConverter(
         } else {
           jsonListToArray(jsonList.asInstanceOf[java.util.List[Object]], at)
         }
+
+      case mt: MapType =>
+        // Maps are stored directly as JSON objects
+        jsonMapToMapData(jsonMap, mt)
 
       case StringType if schemaMapper.getFieldType(field.name) == "json" =>
         // JSON string type - return as UTF8String for Spark internal format

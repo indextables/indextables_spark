@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory
  * Determines if a Spark field should be mapped to a JSON field based on:
  *   - StructType fields (automatic)
  *   - ArrayType fields (automatic)
+ *   - MapType fields (automatic)
  *   - StringType fields with explicit "json" type configuration
  */
 class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
@@ -47,6 +48,9 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
         true
       case _: ArrayType =>
         logger.debug(s"Field '${field.name}' is ArrayType - using JSON field")
+        true
+      case _: MapType =>
+        logger.debug(s"Field '${field.name}' is MapType - using JSON field")
         true
       case StringType if getFieldType(field.name) == "json" =>
         logger.debug(s"Field '${field.name}' is StringType with 'json' configuration - using JSON field")
@@ -80,7 +84,7 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
 
   /**
    * Validates that JSON fields are properly configured.
-   * For Struct and Array types, ensures no conflicting type mappings exist.
+   * For Struct, Array, and Map types, ensures no conflicting type mappings exist.
    *
    * @param schema Spark schema to validate
    * @throws IllegalArgumentException if validation fails
@@ -88,13 +92,13 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
   def validateJsonFieldConfiguration(schema: StructType): Unit = {
     schema.fields.foreach { field =>
       field.dataType match {
-        case _: StructType | _: ArrayType =>
+        case _: StructType | _: ArrayType | _: MapType =>
           // These should automatically use JSON fields
           val configuredType = fieldTypeMapping.get(field.name)
           if (configuredType.isDefined && configuredType.get != "json") {
             throw new IllegalArgumentException(
               s"Field '${field.name}' has type ${field.dataType} but is configured as '${configuredType.get}'. " +
-              s"Struct and Array types must use 'json' type or have no explicit type configuration."
+              s"Struct, Array, and Map types must use 'json' type or have no explicit type configuration."
             )
           }
         case StringType =>
@@ -112,7 +116,7 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
           if (configuredType.contains("json")) {
             throw new IllegalArgumentException(
               s"Field '${field.name}' has type ${field.dataType} but is configured as 'json'. " +
-              s"Only StructType, ArrayType, and StringType can use 'json' type."
+              s"Only StructType, ArrayType, MapType, and StringType can use 'json' type."
             )
           }
       }

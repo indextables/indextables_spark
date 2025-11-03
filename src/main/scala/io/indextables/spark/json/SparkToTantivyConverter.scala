@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory
  * Handles conversion of:
  *   - Spark StructType → Java Map[String, Object]
  *   - Spark ArrayType → Java List[Object]
+ *   - Spark MapType → Java Map[String, Object]
  *   - JSON string parsing → Java Map[String, Object]
  *   - Recursive nested structures
  */
@@ -86,6 +87,31 @@ class SparkToTantivyConverter(
   }
 
   /**
+   * Converts a Spark MapType to a Java Map for tantivy4java JSON field.
+   *
+   * @param value Spark Map value
+   * @param mapType Schema of the map
+   * @return Java Map representing the JSON object
+   */
+  def mapToJsonMap(value: Any, mapType: MapType): java.util.Map[String, Object] = {
+    val sparkMap = value.asInstanceOf[scala.collection.Map[_, _]]
+    val javaMap = new java.util.HashMap[String, Object]()
+
+    sparkMap.foreach { case (key, mapValue) =>
+      if (mapValue != null) {
+        // Convert key to string (Spark maps can have non-string keys)
+        val keyString = convertToJsonValue(key, mapType.keyType).toString
+        val jsonValue = convertToJsonValue(mapValue, mapType.valueType)
+        logger.debug(s"  Adding map entry '$keyString' = $jsonValue (${jsonValue.getClass.getName})")
+        javaMap.put(keyString, jsonValue)
+      }
+    }
+
+    logger.debug(s"Converted map to JSON map with ${javaMap.size()} entries")
+    javaMap
+  }
+
+  /**
    * Recursively converts a Spark value to a Java object suitable for JSON serialization.
    *
    * @param value Spark value
@@ -99,6 +125,9 @@ class SparkToTantivyConverter(
 
       case at: ArrayType =>
         arrayToJsonList(value, at)
+
+      case mt: MapType =>
+        mapToJsonMap(value, mt)
 
       case StringType =>
         // Handle both UTF8String (from InternalRow) and regular String

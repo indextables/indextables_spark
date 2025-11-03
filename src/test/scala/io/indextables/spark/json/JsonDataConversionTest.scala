@@ -351,4 +351,196 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
       converter.parseJsonString(jsonString, config)
     }
   }
+
+  // MapType conversion tests
+
+  test("mapToJsonMap converts simple string map") {
+    val mapType = MapType(StringType, StringType)
+    val sparkMap = Map("color" -> "red", "size" -> "large", "category" -> "clothing")
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
+
+    jsonMap.get("color") shouldBe "red"
+    jsonMap.get("size") shouldBe "large"
+    jsonMap.get("category") shouldBe "clothing"
+    jsonMap.size() shouldBe 3
+  }
+
+  test("mapToJsonMap converts integer key-value map") {
+    val mapType = MapType(IntegerType, IntegerType)
+    val sparkMap = Map(1 -> 100, 2 -> 200, 3 -> 300)
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
+
+    // Keys are converted to strings in JSON
+    jsonMap.get("1") shouldBe 100
+    jsonMap.get("2") shouldBe 200
+    jsonMap.get("3") shouldBe 300
+    jsonMap.size() shouldBe 3
+  }
+
+  test("mapToJsonMap handles mixed-type map") {
+    val mapType = MapType(StringType, IntegerType)
+    val sparkMap = Map("count" -> 42, "total" -> 1000, "errors" -> 0)
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
+
+    jsonMap.get("count") shouldBe 42
+    jsonMap.get("total") shouldBe 1000
+    jsonMap.get("errors") shouldBe 0
+    jsonMap.size() shouldBe 3
+  }
+
+  test("mapToJsonMap handles nested struct values") {
+    val valueSchema = StructType(Seq(
+      StructField("city", StringType),
+      StructField("zip", StringType)
+    ))
+    val mapType = MapType(StringType, valueSchema)
+    val sparkMap = Map(
+      "home" -> Row("NYC", "10001"),
+      "work" -> Row("SF", "94102")
+    )
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
+
+    val homeAddr = jsonMap.get("home").asInstanceOf[java.util.Map[String, Object]]
+    homeAddr.get("city") shouldBe "NYC"
+    homeAddr.get("zip") shouldBe "10001"
+
+    val workAddr = jsonMap.get("work").asInstanceOf[java.util.Map[String, Object]]
+    workAddr.get("city") shouldBe "SF"
+    workAddr.get("zip") shouldBe "94102"
+  }
+
+  test("mapToJsonMap handles null values") {
+    val mapType = MapType(StringType, IntegerType)
+    val sparkMap = scala.collection.Map("count" -> 42, "total" -> null)
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
+
+    jsonMap.get("count") shouldBe 42
+    // Null values are filtered out during conversion
+    jsonMap.size() shouldBe 1
+  }
+
+  test("jsonMapToMapData converts simple string map") {
+    val mapType = MapType(StringType, StringType)
+
+    val jsonMap = new java.util.HashMap[String, Object]()
+    jsonMap.put("color", "red")
+    jsonMap.put("size", "large")
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new TantivyToSparkConverter(schema, mapper)
+
+    val mapData = converter.jsonMapToMapData(jsonMap, mapType)
+
+    mapData.numElements() shouldBe 2
+    // Verify map contains expected keys and values
+    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val values = mapData.valueArray().toSeq[Any](mapType.valueType)
+
+    keys.map(_.toString) should contain allOf ("color", "size")
+    values.map(_.toString) should contain allOf ("red", "large")
+  }
+
+  test("jsonMapToMapData converts integer-valued map") {
+    val mapType = MapType(StringType, IntegerType)
+
+    val jsonMap = new java.util.HashMap[String, Object]()
+    jsonMap.put("count", Integer.valueOf(42))
+    jsonMap.put("total", Integer.valueOf(1000))
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new TantivyToSparkConverter(schema, mapper)
+
+    val mapData = converter.jsonMapToMapData(jsonMap, mapType)
+
+    mapData.numElements() shouldBe 2
+    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val values = mapData.valueArray().toSeq[Any](mapType.valueType)
+
+    keys.map(_.toString) should contain allOf ("count", "total")
+    values should contain allOf (42, 1000)
+  }
+
+  test("convertToJsonValue handles MapType recursively") {
+    val mapType = MapType(StringType, IntegerType)
+    val sparkMap = Map("count" -> 42, "total" -> 1000)
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new SparkToTantivyConverter(schema, mapper)
+
+    val jsonValue = converter.convertToJsonValue(sparkMap, mapType)
+
+    jsonValue.isInstanceOf[java.util.Map[_, _]] shouldBe true
+    val jsonMap = jsonValue.asInstanceOf[java.util.Map[String, Object]]
+    jsonMap.get("count") shouldBe 42
+    jsonMap.get("total") shouldBe 1000
+  }
+
+  test("convertFromJsonValue handles MapType recursively") {
+    val mapType = MapType(StringType, IntegerType)
+
+    val jsonMap = new java.util.HashMap[String, Object]()
+    jsonMap.put("count", Integer.valueOf(42))
+    jsonMap.put("total", Integer.valueOf(1000))
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val converter = new TantivyToSparkConverter(schema, mapper)
+
+    val mapData = converter.convertFromJsonValue(jsonMap, mapType)
+
+    mapData.isInstanceOf[org.apache.spark.sql.catalyst.util.MapData] shouldBe true
+    mapData.asInstanceOf[org.apache.spark.sql.catalyst.util.MapData].numElements() shouldBe 2
+  }
+
+  test("roundtrip Map conversion maintains data integrity") {
+    val mapType = MapType(StringType, StringType)
+    val originalMap = Map("color" -> "red", "size" -> "large", "category" -> "clothing")
+
+    val schema = StructType(Seq.empty)
+    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val writeConverter = new SparkToTantivyConverter(schema, mapper)
+    val readConverter = new TantivyToSparkConverter(schema, mapper)
+
+    // Convert to JSON map
+    val jsonMap = writeConverter.mapToJsonMap(originalMap, mapType)
+
+    // Convert back to MapData
+    val mapData = readConverter.jsonMapToMapData(jsonMap, mapType)
+
+    // Verify data integrity
+    mapData.numElements() shouldBe 3
+    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val values = mapData.valueArray().toSeq[Any](mapType.valueType)
+
+    keys.map(_.toString) should contain allOf ("color", "size", "category")
+    values.map(_.toString) should contain allOf ("red", "large", "clothing")
+  }
 }

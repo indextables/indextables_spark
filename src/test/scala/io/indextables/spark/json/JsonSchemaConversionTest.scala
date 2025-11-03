@@ -255,4 +255,77 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
+
+  // MapType schema tests
+
+  test("shouldUseJsonField returns true for MapType") {
+    val options = createOptions()
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val mapField = StructField("attributes", MapType(StringType, StringType))
+    mapper.shouldUseJsonField(mapField) shouldBe true
+  }
+
+  test("shouldUseJsonField returns true for MapType with integer values") {
+    val options = createOptions()
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val mapField = StructField("counters", MapType(StringType, IntegerType))
+    mapper.shouldUseJsonField(mapField) shouldBe true
+  }
+
+  test("shouldUseJsonField returns true for MapType with nested values") {
+    val options = createOptions()
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val valueSchema = StructType(Seq(
+      StructField("city", StringType),
+      StructField("zip", StringType)
+    ))
+    val mapField = StructField("addresses", MapType(StringType, valueSchema))
+    mapper.shouldUseJsonField(mapField) shouldBe true
+  }
+
+  test("validateJsonFieldConfiguration accepts MapType") {
+    val options = createOptions()
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val schema = StructType(Seq(
+      StructField("id", IntegerType),
+      StructField("attributes", MapType(StringType, StringType))
+    ))
+
+    noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
+  }
+
+  test("validateJsonFieldConfiguration rejects MapType with conflicting type config") {
+    val options = createOptions(Map(
+      "spark.indextables.indexing.typemap.attributes" -> "text"
+    ))
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val schema = StructType(Seq(
+      StructField("attributes", MapType(StringType, StringType))
+    ))
+
+    an[IllegalArgumentException] should be thrownBy {
+      mapper.validateJsonFieldConfiguration(schema)
+    }
+  }
+
+  test("validateJsonFieldConfiguration handles map with struct values") {
+    val options = createOptions()
+    val mapper = new SparkSchemaToTantivyMapper(options)
+
+    val addressSchema = StructType(Seq(
+      StructField("city", StringType),
+      StructField("zip", StringType)
+    ))
+
+    val schema = StructType(Seq(
+      StructField("addresses", MapType(StringType, addressSchema))
+    ))
+
+    noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
+  }
 }

@@ -704,6 +704,20 @@ class TantivyDirectInterface(
           val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(wrappedMap)
           document.addJson(fieldName, jsonString)
 
+        case mt: org.apache.spark.sql.types.MapType =>
+          // Convert to Scala Map
+          val mapData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.MapData]
+          val sparkMap = scala.collection.Map(
+            mapData.keyArray().toSeq[Any](mt.keyType).zip(
+              mapData.valueArray().toSeq[Any](mt.valueType)
+            ): _*
+          )
+
+          val jsonMap = jsonConverter.mapToJsonMap(sparkMap, mt)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(jsonMap)
+          document.addJson(fieldName, jsonString)
+
         case org.apache.spark.sql.types.StringType if jsonFieldMapper.getFieldType(fieldName) == "json" =>
           // Parse JSON string - it's already a string, just pass it through
           val jsonString = value.asInstanceOf[org.apache.spark.unsafe.types.UTF8String].toString
@@ -794,6 +808,20 @@ class TantivyDirectInterface(
           val wrappedMap = jsonConverter.wrapArrayInObject(jsonList)
           // Convert Java Map to JSON string
           val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(wrappedMap)
+          batchDocument.addJson(fieldName, jsonString)
+
+        case mt: org.apache.spark.sql.types.MapType =>
+          // Convert to Scala Map
+          val mapData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.MapData]
+          val sparkMap = scala.collection.Map(
+            mapData.keyArray().toSeq[Any](mt.keyType).zip(
+              mapData.valueArray().toSeq[Any](mt.valueType)
+            ): _*
+          )
+
+          val jsonMap = jsonConverter.mapToJsonMap(sparkMap, mt)
+          // Convert Java Map to JSON string
+          val jsonString = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(jsonMap)
           batchDocument.addJson(fieldName, jsonString)
 
         case org.apache.spark.sql.types.StringType if jsonFieldMapper.getFieldType(fieldName) == "json" =>

@@ -126,7 +126,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
 - 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
-- 🗂️ **JSON Field Support**: Native support for Spark Struct and Array fields with automatic detection, type-safe round-tripping, and high-performance filter pushdown (68/68 tests passing)
+- 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, and high-performance filter pushdown (99/99 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 
 ---
