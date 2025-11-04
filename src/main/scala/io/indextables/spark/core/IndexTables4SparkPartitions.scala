@@ -308,9 +308,12 @@ class IndexTables4SparkPartitionReader(
           java.util.Collections.emptyList[String]()                // skippedSplits
         )
 
+        // Create IndexTables4SparkOptions from config map for JSON field support
+        val options = Some(IndexTables4SparkOptions(config))
+
         // Use full readSchema since partition values are stored directly in splits (consistent with Quickwit)
         splitSearchEngine =
-          SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
+          SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig, options)
 
         // Get the schema from the split to validate filters
         val splitSchema = splitSearchEngine.getSchema()

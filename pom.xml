@@ -164,11 +164,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.25.0+ required for Azure support -->
+        <!-- Version 0.25.2+ required for JSON field support (jsonTermQuery, jsonRangeQuery, jsonExistsQuery) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.25.1</version>
+            <version>0.25.2</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 

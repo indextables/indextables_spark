@@ -48,7 +48,8 @@ class SplitSearchEngine private (
   sparkSchema: StructType,
   splitPath: String,
   metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
-  cacheConfig: SplitCacheConfig = SplitCacheConfig())
+  cacheConfig: SplitCacheConfig = SplitCacheConfig(),
+  options: Option[io.indextables.spark.core.IndexTables4SparkOptions] = None)
     extends AutoCloseable {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitSearchEngine])
@@ -142,6 +143,9 @@ class SplitSearchEngine private (
   /** Get the Tantivy schema for this split. */
   def getSchema(): Schema =
     splitSearcher.getSchema()
+
+  /** Get the Spark schema for this split. */
+  def getSparkSchema(): StructType = sparkSchema
 
   /**
    * Search the split using a SplitQuery object and return results as Spark InternalRows. This is the new preferred
@@ -332,8 +336,8 @@ class SplitSearchEngine private (
         case (document, index) =>
           try
             if (document != null) {
-              // Use the new SchemaMapping.Read.convertDocument method
-              val values = SchemaMapping.Read.convertDocument(document, splitSchema, sparkSchema)
+              // Use the new SchemaMapping.Read.convertDocument method with options for JSON field support
+              val values = SchemaMapping.Read.convertDocument(document, splitSchema, sparkSchema, options)
               org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
             } else {
               // Fallback to empty row if document retrieval fails
@@ -399,7 +403,8 @@ object SplitSearchEngine {
     sparkSchema: StructType,
     splitPath: String,
     metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
-    cacheConfig: SplitCacheConfig = SplitCacheConfig()
+    cacheConfig: SplitCacheConfig = SplitCacheConfig(),
+    options: Option[io.indextables.spark.core.IndexTables4SparkOptions] = None
   ): SplitSearchEngine = {
 
     if (metadata != null && metadata.hasFooterOffsets()) {
@@ -409,6 +414,6 @@ object SplitSearchEngine {
       logger.info(s"📁 STANDARD LOADING: Creating SplitSearchEngine without optimization metadata: $splitPath")
     }
 
-    new SplitSearchEngine(sparkSchema, splitPath, metadata, cacheConfig)
+    new SplitSearchEngine(sparkSchema, splitPath, metadata, cacheConfig, options)
   }
 }

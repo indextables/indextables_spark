@@ -23,6 +23,7 @@ import org.apache.spark.sql.sources._
 
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.search.SplitSearchEngine
+import io.indextables.spark.json.{JsonPredicateTranslator, SparkSchemaToTantivyMapper}
 import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
 import io.indextables.tantivy4java.query.{Occur, Query}
 import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
@@ -1067,6 +1068,29 @@ object FiltersToQueryConverter {
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None
   ): Option[SplitQuery] = {
     import org.apache.spark.sql.sources._
+
+    // Check if this is a nested field filter (JSON field) first
+    // Create JSON predicate translator with Spark schema and options
+    val sparkSchema = splitSearchEngine.getSparkSchema()
+    val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
+    val jsonMapper = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
+    val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
+
+    // Try to translate as JSON field filter using parseQuery syntax
+    jsonTranslator.translateFilterToParseQuery(filter) match {
+      case Some(queryString) =>
+        queryLog(s"Translating nested field filter to parseQuery: $queryString")
+        try {
+          val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          return Some(parsedQuery)
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to parse JSON field query '$queryString': ${e.getMessage}")
+            // Fall through to regular filter handling
+        }
+      case None =>
+        // Not a nested field filter, continue with regular filter handling
+    }
 
     filter match {
       case EqualTo(attribute, value) =>

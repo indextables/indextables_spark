@@ -479,13 +479,17 @@ class IndexTables4SparkGroupByAggregateReader(
       // Create split metadata from the split
       val splitMetadata = createSplitMetadataFromSplit()
 
+      // Create IndexTables4SparkOptions from config map for JSON field support
+      val options = Some(IndexTables4SparkOptions(partition.config))
+
       // Create SplitSearchEngine for filter conversion (uses caching internally)
       val splitSearchEngine =
         io.indextables.spark.search.SplitSearchEngine.fromSplitFileWithMetadata(
           partition.schema,
           splitPath,
           splitMetadata,
-          splitCacheConfig
+          splitCacheConfig,
+          options
         )
 
       logger.debug(s"🔍 GROUP BY EXECUTION: SplitSearchEngine created successfully")
