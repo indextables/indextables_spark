@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.3.1_spark_3.5.3</version>
+    <version>0.3.2_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>Tantivy4Spark</name>
