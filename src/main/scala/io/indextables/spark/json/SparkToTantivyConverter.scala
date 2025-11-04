@@ -65,6 +65,37 @@ class SparkToTantivyConverter(
   }
 
   /**
+   * Converts a Spark StructType InternalRow to a Java Map for tantivy4java JSON field.
+   * This handles UnsafeRow instances from Spark's internal execution.
+   *
+   * @param internalRow Spark InternalRow containing struct data
+   * @param structType Schema of the struct
+   * @return Java Map representing the JSON object
+   */
+  def structToJsonMapFromInternalRow(
+    internalRow: org.apache.spark.sql.catalyst.InternalRow,
+    structType: StructType
+  ): java.util.Map[String, Object] = {
+    val map = new java.util.HashMap[String, Object]()
+
+    structType.fields.zipWithIndex.foreach { case (field, idx) =>
+      if (!internalRow.isNullAt(idx)) {
+        val value = internalRow.get(idx, field.dataType)
+        val jsonValue = convertToJsonValue(value, field.dataType)
+        logger.debug(s"  Adding field '${field.name}' from InternalRow = $jsonValue")
+        map.put(field.name, jsonValue)
+      } else {
+        // Explicitly add null values to JSON map so they can be detected on read
+        map.put(field.name, null)
+        logger.debug(s"  Adding null field '${field.name}' from InternalRow")
+      }
+    }
+
+    logger.debug(s"Converted InternalRow struct to JSON map with ${map.size()} fields")
+    map
+  }
+
+  /**
    * Converts a Spark ArrayType to a Java List for tantivy4java JSON field.
    *
    * @param value Spark Seq value
@@ -121,7 +152,15 @@ class SparkToTantivyConverter(
   def convertToJsonValue(value: Any, dataType: DataType): Object = {
     dataType match {
       case st: StructType =>
-        structToJsonMap(value.asInstanceOf[Row], st)
+        // Handle both Row and InternalRow (UnsafeRow)
+        value match {
+          case internalRow: org.apache.spark.sql.catalyst.InternalRow =>
+            structToJsonMapFromInternalRow(internalRow, st)
+          case row: Row =>
+            structToJsonMap(row, st)
+          case other =>
+            throw new IllegalArgumentException(s"Expected Row or InternalRow for StructType, got ${other.getClass.getName}")
+        }
 
       case at: ArrayType =>
         arrayToJsonList(value, at)

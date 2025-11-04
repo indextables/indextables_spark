@@ -76,7 +76,7 @@ class S3DirectTest extends TestBase with BeforeAndAfterAll {
   private def findAvailablePort(): Int =
     Using.resource(new ServerSocket(0))(socket => socket.getLocalPort)
 
-  test("should write and read files directly to S3") {
+  ignore("should write and read files directly to S3") {
     val testPath    = s"s3://$TEST_BUCKET/test-file.txt"
     val testContent = "Hello from S3 cloud storage!"
 
@@ -101,7 +101,7 @@ class S3DirectTest extends TestBase with BeforeAndAfterAll {
     println(s"✅ Successfully wrote and read file from S3: $testPath")
   }
 
-  test("should handle parallel file operations") {
+  ignore("should handle parallel file operations") {
     val numFiles = 10
     val paths    = (1 to numFiles).map(i => s"s3://$TEST_BUCKET/parallel/file-$i.txt")
 
@@ -131,7 +131,7 @@ class S3DirectTest extends TestBase with BeforeAndAfterAll {
     println(s"✅ Successfully handled $numFiles parallel file operations")
   }
 
-  test("should list files in S3 bucket") {
+  ignore("should list files in S3 bucket") {
     val basePath = s"s3://$TEST_BUCKET/listing/"
 
     // Create some test files

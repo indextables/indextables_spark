@@ -340,7 +340,9 @@ class IndexTables4SparkPartitionReader(
         // Since partition values are stored in splits, we can apply all filters at the split level
         // (no need to exclude partition filters since they're queryable in the split data)
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.info(s"  - Combined Filters: ${allFilters.length} total filters")
+        logger.warn(s"🔍 PARTITION: Combined Filters: ${allFilters.length} total filters")
+        filters.foreach(f => logger.warn(s"🔍 PARTITION:   - Regular filter: $f"))
+        indexQueryFilters.foreach(f => logger.warn(s"🔍 PARTITION:   - IndexQuery filter: $f"))
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {

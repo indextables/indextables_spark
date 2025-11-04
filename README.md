@@ -126,7 +126,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
 - 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
-- 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, and high-performance filter pushdown (99/99 tests passing)
+- 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 
 ---
@@ -553,6 +553,7 @@ The system supports several configuration options for performance tuning:
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.indextables.indexing.typemap.<field_name>` | `string` | Field indexing type: `string`, `text`, or `json` (Struct/Array fields automatically use JSON) |
+| `spark.indextables.indexing.json.mode` | `full` | JSON field indexing mode: `full` (all features, fast fields enabled) or `minimal` (stored+indexed only, no fast fields) |
 | `spark.indextables.indexing.fastfields` | - | Comma-separated list of fields for fast access |
 | `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
 | `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
@@ -569,7 +570,7 @@ The system supports several configuration options for performance tuning:
 - ✅ **Null value support**: Proper handling of optional nested fields
 - ✅ **Nested structures**: Deep hierarchies with Struct-within-Struct support
 - ✅ **Array operations**: Full support for arrays of primitives and nested structures
-- ✅ **Production ready**: 68/68 tests passing (52 unit tests + 10 integration tests)
+- ✅ **Production ready**: 114/114 tests passing (99 unit/integration tests + 15 aggregate/configuration tests)
 
 ##### Quick Start
 
@@ -732,6 +733,59 @@ val nestedSchema = StructType(Seq(
 df.write.format("io.indextables.provider.IndexTablesProvider")
   .save("s3://bucket/nested-users")
 ```
+
+##### JSON Field Configuration Mode
+
+**New in v2.1**: Control JSON field indexing behavior with the `spark.indextables.indexing.json.mode` configuration option.
+
+**Configuration Key**: `spark.indextables.indexing.json.mode`
+
+**Supported Values**:
+- `"full"` (default): Enables all JSON field features including fast fields for range queries, sorting, and aggregations
+- `"minimal"`: Stored + indexed only, no fast fields (smaller index size, no range queries/aggregations)
+
+**Features**:
+- ✅ **Case-insensitive**: Values like "FULL", "full", "Full" all work
+- ✅ **Smart defaults**: Invalid values default to "full" mode
+- ✅ **Production ready**: 15/15 tests passing (6 configuration tests + 9 aggregate tests)
+
+**Usage Examples**:
+
+```scala
+// Default behavior (full mode with all features)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("s3://bucket/data")
+
+// Explicit full mode (range queries and aggregations enabled)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.indexing.json.mode", "full")
+  .save("s3://bucket/data")
+
+// Minimal mode (smaller index, no range queries/aggregations)
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.indexing.json.mode", "minimal")
+  .save("s3://bucket/text-search-only")
+
+// Session-level configuration
+spark.conf.set("spark.indextables.indexing.json.mode", "full")
+df.write.format("io.indextables.provider.IndexTablesProvider")
+  .save("s3://bucket/data")
+```
+
+**When to Use Each Mode**:
+
+**Full Mode (Default - Recommended)**:
+- ✅ Need range queries on nested JSON fields (`user.age > 30`)
+- ✅ Need aggregations (SUM, AVG, MIN, MAX, COUNT)
+- ✅ Need sorting on nested fields
+- ✅ Performance is more important than index size
+- ✅ Most use cases
+
+**Minimal Mode**:
+- ✅ Only need equality filters and text search
+- ✅ Index size is a primary concern
+- ✅ Don't need range queries or aggregations
+- ✅ Storage costs matter more than query performance
 
 For comprehensive documentation, usage examples, and technical details, see the **JSON Field Support** section in `CLAUDE.md`.
 

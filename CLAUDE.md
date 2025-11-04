@@ -24,7 +24,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Auto-sizing**: Intelligent DataFrame partitioning based on historical split analysis
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
-- **JSON field support**: Native Struct/Array/Map fields with filter pushdown (99/99 tests passing)
+- **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
 
 ## Key Configuration Settings
@@ -99,6 +99,8 @@ spark.indextables.indexing.typemap.<field>: "text"
 
 // JSON fields - automatic for Struct/Array/Map types
 // No configuration needed - auto-detected
+// Optional: Control JSON indexing mode
+spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 ```
 
 ### Fast Fields (for aggregations)
@@ -156,7 +158,14 @@ df.agg(count("*"), sum("score"), avg("score")).show()
 // Struct - automatic JSON field detection
 case class User(name: String, age: Int, city: String)
 val df1 = Seq((1, User("Alice", 30, "NYC"))).toDF("id", "user")
+
+// Default: full mode (all features including fast fields for range queries/aggregations)
 df1.write.format("indextables").save("s3://bucket/path1")
+
+// Optional: Minimal mode (smaller index, no range queries/aggregations)
+df1.write.format("indextables")
+  .option("spark.indextables.indexing.json.mode", "minimal")
+  .save("s3://bucket/path1-minimal")
 
 // Array - automatic detection
 val df2 = Seq((1, Seq("tag1", "tag2", "tag3"))).toDF("id", "tags")
@@ -262,9 +271,10 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
 
 ## Test Status
-- ✅ **259+ tests passing**: Complete coverage for all major features
-- ✅ **JSON fields**: 99/99 tests passing (Struct/Array/Map unit + integration)
-- ✅ **Aggregate pushdown**: 14/14 tests
+- ✅ **274+ tests passing**: Complete coverage for all major features
+- ✅ **JSON fields**: 114/114 tests passing (99 Struct/Array/Map tests + 15 aggregate/configuration tests)
+- ✅ **JSON configuration**: 6/6 tests passing (json.mode validation)
+- ✅ **JSON aggregates**: 9/9 tests passing (aggregates on nested fields with filter pushdown)
 - ✅ **Partitioned datasets**: 7/7 tests
 - ✅ **Transaction log**: All checkpoint and compression tests passing
 
@@ -275,6 +285,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Statistics truncation**: Enabled by default to prevent transaction log bloat
 - **Working directories**: Automatic /local_disk0 detection on Databricks/EMR
 - **JSON fields**: Automatic detection for Struct/Array/Map types with complete filter pushdown
+- **JSON configuration**: Use `spark.indextables.indexing.json.mode` to control indexing behavior ("full" or "minimal")
 
 ---
 

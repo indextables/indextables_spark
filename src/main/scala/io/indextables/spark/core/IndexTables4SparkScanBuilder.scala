@@ -52,8 +52,7 @@ class IndexTables4SparkScanBuilder(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScanBuilder])
 
-  logger.debug(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
-  logger.debug(s"🔍 SCAN BUILDER CREATED: V2 DataSource with SupportsPushDownAggregates interface")
+  logger.warn(s"🔍 SCAN BUILDER CREATED: NEW ScanBuilder instance ${System.identityHashCode(this)}")
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters      = Array.empty[Filter]
   private var requiredSchema      = schema
@@ -89,8 +88,8 @@ class IndexTables4SparkScanBuilder(
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
-        logger.debug(s"🔍 BUILD DEBUG: Creating IndexTables4SparkScan with ${_pushedFilters.length} pushed filters")
-        _pushedFilters.foreach(filter => logger.debug(s"  - Creating scan with filter: $filter"))
+        logger.warn(s"🔍 BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${_pushedFilters.length} pushed filters")
+        _pushedFilters.foreach(filter => logger.warn(s"🔍 BUILD:   - Creating scan with filter: $filter"))
         new IndexTables4SparkScan(
           sparkSession,
           transactionLog,
@@ -251,11 +250,9 @@ class IndexTables4SparkScanBuilder(
     new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    logger.debug(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
-    logger.debug(s"🔍 PUSHFILTERS DEBUG: pushFilters called with ${filters.length} filters")
+    logger.warn(s"🔍 PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
     filters.foreach { filter =>
-      println(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
-      logger.error(s"  - Input filter: $filter (${filter.getClass.getSimpleName})")
+      logger.warn(s"🔍 PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
     }
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
@@ -265,8 +262,9 @@ class IndexTables4SparkScanBuilder(
     // Store supported filters
     _pushedFilters = supported
 
-    logger.debug(s"🔍 PUSHFILTERS DEBUG: Stored ${_pushedFilters.length} pushed filters")
-    _pushedFilters.foreach(filter => println(s"  - Stored filter: $filter"))
+    logger.warn(s"🔍 PUSHFILTERS: Supported=${supported.length}, Unsupported=${unsupported.length}")
+    supported.foreach(filter => logger.warn(s"🔍 PUSHFILTERS:   ✓ SUPPORTED: $filter"))
+    unsupported.foreach(filter => logger.warn(s"🔍 PUSHFILTERS:   ✗ UNSUPPORTED: $filter"))
 
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
@@ -428,13 +426,13 @@ class IndexTables4SparkScanBuilder(
     filter match {
       case EqualTo(attribute, _)       => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
-      case _: GreaterThan              => false                    // Range queries require fast fields - defer to Spark
-      case _: GreaterThanOrEqual       => false                    // Range queries require fast fields - defer to Spark
-      case _: LessThan                 => false                    // Range queries require fast fields - defer to Spark
-      case _: LessThanOrEqual          => false                    // Range queries require fast fields - defer to Spark
+      case GreaterThan(attribute, _)        => isNestedJsonField(attribute)  // Support range on JSON fields
+      case GreaterThanOrEqual(attribute, _) => isNestedJsonField(attribute)  // Support range on JSON fields
+      case LessThan(attribute, _)           => isNestedJsonField(attribute)  // Support range on JSON fields
+      case LessThanOrEqual(attribute, _)    => isNestedJsonField(attribute)  // Support range on JSON fields
       case _: In                       => true
-      case _: IsNull                   => true
-      case _: IsNotNull                => true
+      case IsNull(attribute)           => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
+      case IsNotNull(attribute)        => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
       case And(left, right)            => isSupportedFilter(left) && isSupportedFilter(right)
       case Or(left, right)             => isSupportedFilter(left) && isSupportedFilter(right)
       case Not(child)                  => isSupportedFilter(child) // NOT is supported only if child is supported
@@ -443,6 +441,11 @@ class IndexTables4SparkScanBuilder(
       case _: StringContains   => true
       case _                   => false
     }
+  }
+
+  /** Check if an attribute references a nested JSON field (contains dot notation). */
+  private def isNestedJsonField(attribute: String): Boolean = {
+    attribute.contains(".")
   }
 
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
@@ -457,9 +460,16 @@ class IndexTables4SparkScanBuilder(
   /**
    * Check if a field is suitable for exact matching at the data source level. String fields (raw tokenizer) support
    * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches.
+   * Nested JSON fields (containing dots) are always supported for pushdown via JsonPredicateTranslator.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
-    // Check the field type configuration
+    // Check if this is a nested field (JSON field)
+    if (attribute.contains(".")) {
+      logger.debug(s"🔍 Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")
+      return true
+    }
+
+    // Check the field type configuration for top-level fields
     val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
     val fieldType    = config.get(fieldTypeKey)
 
