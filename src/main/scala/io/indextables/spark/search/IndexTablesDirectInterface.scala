@@ -194,8 +194,35 @@ object TantivyDirectInterface {
         if (shouldUseJson) {
           // Use JSON field for Struct, Array, or explicitly configured StringType
           logger.debug(s"🔍 CALLING addJsonField: name=$fieldName (detected as JSON field)")
-          val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
-          builder.addJsonField(fieldName, stored, tokenizer, "position")
+
+          // Configure JsonObjectOptions based on spark.indextables.indexing.json.mode
+          // Default: "full" (enables all features including fast fields for range queries)
+          // Options: "full", "minimal" (stored+indexed only, no fast fields)
+          val jsonModeRaw = options.get(io.indextables.spark.core.IndexTables4SparkOptions.INDEXING_JSON_MODE)
+          val jsonMode = if (jsonModeRaw != null && jsonModeRaw.nonEmpty) {
+            jsonModeRaw.toLowerCase()
+          } else {
+            "full"
+          }
+
+          val jsonOptions = jsonMode match {
+            case "minimal" =>
+              // Minimal mode: stored + indexed, but no fast fields
+              // Use case: Reduce index size when range queries/aggregations not needed
+              logger.debug(s"🔍 JSON mode: minimal (no fast fields)")
+              io.indextables.tantivy4java.core.JsonObjectOptions.storedAndIndexed()
+
+            case "full" | _ =>
+              // Full mode (default): All features enabled including fast fields
+              // Enables: text search, range queries, sorting, aggregations on nested fields
+              logger.debug(s"🔍 JSON mode: full (all features including fast fields)")
+              io.indextables.tantivy4java.core.JsonObjectOptions.full()
+          }
+
+          logger.debug(s"🔍 JSON field options: stored=${jsonOptions.isStored()}, " +
+                      s"indexed=${jsonOptions.getIndexing() != null}, fast=${jsonOptions.isFast()}")
+
+          builder.addJsonField(fieldName, jsonOptions)
         } else {
           // Handle non-JSON fields normally
           fieldType match {

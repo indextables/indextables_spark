@@ -550,10 +550,27 @@ object FiltersToQueryConverter {
     }
 
     val filterFields = getFilterFieldNames(filter)
-    val isValid      = filterFields.subsetOf(fieldNames)
+    // For nested JSON fields (e.g., "user.name"), check if the root field exists (e.g., "user")
+    val isValid      = filterFields.forall { fieldName =>
+      if (fieldName.contains(".")) {
+        // Nested field: check if root field exists in schema
+        val rootField = fieldName.split("\\.", 2)(0)
+        fieldNames.contains(rootField)
+      } else {
+        // Top-level field: check directly
+        fieldNames.contains(fieldName)
+      }
+    }
 
     if (!isValid) {
-      val missingFields = filterFields -- fieldNames
+      val missingFields = filterFields.filterNot { fieldName =>
+        if (fieldName.contains(".")) {
+          val rootField = fieldName.split("\\.", 2)(0)
+          fieldNames.contains(rootField)
+        } else {
+          fieldNames.contains(fieldName)
+        }
+      }
       queryLog(s"Filter $filter references non-existent fields: ${missingFields.mkString(", ")}")
     }
 
@@ -1079,16 +1096,18 @@ object FiltersToQueryConverter {
     // Try to translate as JSON field filter using parseQuery syntax
     jsonTranslator.translateFilterToParseQuery(filter) match {
       case Some(queryString) =>
-        queryLog(s"Translating nested field filter to parseQuery: $queryString")
+        logger.warn(s"🔍 JSON FILTER: Translating nested field filter to parseQuery: $queryString")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString)
+          logger.warn(s"🔍 JSON FILTER: Successfully parsed query: $queryString")
           return Some(parsedQuery)
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to parse JSON field query '$queryString': ${e.getMessage}")
+            logger.warn(s"🔍 JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
             // Fall through to regular filter handling
         }
       case None =>
+        logger.warn(s"🔍 JSON FILTER: Filter not recognized as nested field filter: $filter")
         // Not a nested field filter, continue with regular filter handling
     }
 

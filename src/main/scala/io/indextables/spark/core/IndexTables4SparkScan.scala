@@ -52,11 +52,17 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
+  logger.warn(s"🔍 SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
+  pushedFilters.foreach(f => logger.warn(s"🔍 SCAN CONSTRUCTION:   - Filter: $f"))
+
   override def readSchema(): StructType = readSchema
 
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
+    logger.warn(s"🔍 PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
+    pushedFilters.foreach(f => logger.warn(s"🔍 PLAN PARTITIONS:   - Filter: $f"))
+
     val addActions = transactionLog.listFiles()
 
     // Update broadcast locality information for better scheduling
@@ -116,6 +122,8 @@ class IndexTables4SparkScan(
     val partitions = filteredActions.zipWithIndex.map {
       case (addAction, index) =>
         println(s"🗺️  [DRIVER-SCAN] Creating partition $index for split: ${addAction.path}")
+        logger.warn(s"🔍 CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
+        pushedFilters.foreach(f => logger.warn(s"🔍 CREATE PARTITION:   - Filter: $f"))
         val partition =
           new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()

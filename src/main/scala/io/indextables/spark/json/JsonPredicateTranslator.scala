@@ -52,13 +52,15 @@ class JsonPredicateTranslator(
    * @return Some(queryString) if filter can be translated to parseQuery syntax, None otherwise
    */
   def translateFilterToParseQuery(filter: Filter): Option[String] = {
+    logger.warn(s"🔍 JsonPredicateTranslator.translateFilterToParseQuery called with: $filter")
     filter match {
       // Nested field equality: $"user.name" === "Alice" => data.name:"Alice"
       case EqualTo(attr, value) if isNestedAttribute(attr) =>
+        logger.warn(s"🔍 JsonPredicateTranslator: Detected nested attribute: $attr")
         val fullPath = attr.replace(".", ".")  // Already in correct format
         val escapedValue = escapeQueryValue(valueToString(value))
         val queryString = s"""$fullPath:"$escapedValue""""
-        logger.debug(s"Translating nested equality to parseQuery: $queryString")
+        logger.warn(s"🔍 JsonPredicateTranslator: Translating nested equality to parseQuery: $queryString")
         Some(queryString)
 
       // Nested field range queries
@@ -270,7 +272,9 @@ class JsonPredicateTranslator(
       val rootField = attr.split("\\.")(0)
       val field = sparkSchema.find(_.name == rootField)
       field.exists { f =>
-        f.dataType.isInstanceOf[StructType] || f.dataType.isInstanceOf[ArrayType]
+        f.dataType.isInstanceOf[StructType] ||
+        f.dataType.isInstanceOf[ArrayType] ||
+        f.dataType.isInstanceOf[MapType]
       }
     }
   }

@@ -24,12 +24,12 @@ import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Tests to verify that unsupported data types are explicitly rejected rather than being silently converted or causing
- * runtime errors.
+ * Tests to verify that complex data types (Struct, Array, Map) are now supported via JSON fields,
+ * and that other unsupported types are explicitly rejected.
  */
 class UnsupportedTypesTest extends TestBase with Matchers {
 
-  test("should reject array types when writing to IndexTables4Spark") {
+  test("should support array types via JSON fields when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -40,21 +40,25 @@ class UnsupportedTypesTest extends TestBase with Matchers {
         (2, "item2", Array("tagA", "tagB"))
       ).toDF("id", "name", "tags")
 
-      // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[org.apache.spark.SparkException] {
+      // Should succeed - arrays are now supported via JSON fields
+      noException should be thrownBy {
         dataWithArray.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(tempPath)
       }
 
-      // Verify the exception contains appropriate message about arrays
-      exception.getMessage should include("UnsupportedOperationException")
-      println(s"✅ Array type correctly rejected: ${exception.getMessage}")
+      // Verify we can read back the data
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      result.count() shouldBe 2
+      println(s"✅ Array type correctly supported via JSON fields")
     }
   }
 
-  test("should reject map types when writing to IndexTables4Spark") {
+  test("should support map types via JSON fields when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -66,21 +70,25 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       ).toDF("id", "name", "data_str")
         .withColumn("metadata", map(lit("type"), col("name"), lit("count"), lit(1)))
 
-      // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[org.apache.spark.SparkException] {
+      // Should succeed - maps are now supported via JSON fields
+      noException should be thrownBy {
         dataWithMap.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(tempPath)
       }
 
-      // Verify the exception contains appropriate message about maps
-      exception.getMessage should include("UnsupportedOperationException")
-      println(s"✅ Map type correctly rejected: ${exception.getMessage}")
+      // Verify we can read back the data
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      result.count() shouldBe 2
+      println(s"✅ Map type correctly supported via JSON fields")
     }
   }
 
-  test("should reject struct types when writing to IndexTables4Spark") {
+  test("should support struct types via JSON fields when writing to IndexTables4Spark") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -92,17 +100,21 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       ).toDF("id", "name", "raw_data")
         .withColumn("details", struct(col("name"), col("raw_data").alias("data")))
 
-      // Should throw UnsupportedOperationException when trying to write
-      val exception = intercept[org.apache.spark.SparkException] {
+      // Should succeed - structs are now supported via JSON fields
+      noException should be thrownBy {
         dataWithStruct.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(tempPath)
       }
 
-      // Verify the exception contains appropriate message about structs
-      exception.getMessage should include("UnsupportedOperationException")
-      println(s"✅ Struct type correctly rejected: ${exception.getMessage}")
+      // Verify we can read back the data
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      result.count() shouldBe 2
+      println(s"✅ Struct type correctly supported via JSON fields")
     }
   }
 
@@ -159,7 +171,7 @@ class UnsupportedTypesTest extends TestBase with Matchers {
     }
   }
 
-  test("should provide clear error messages for complex nested types") {
+  test("should support complex nested types via JSON fields") {
     withTempPath { tempPath =>
       val sparkImplicits = spark.implicits
       import sparkImplicits._
@@ -177,55 +189,30 @@ class UnsupportedTypesTest extends TestBase with Matchers {
           )
         )
 
-      // Should throw UnsupportedOperationException
-      val exception = intercept[org.apache.spark.SparkException] {
+      // Should succeed - complex nested types are now supported via JSON fields
+      noException should be thrownBy {
         complexData.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(tempPath)
       }
 
-      // Should mention unsupported operation (complex nested types)
-      exception.getMessage should include("UnsupportedOperationException")
-      println(s"✅ Complex nested type correctly rejected: ${exception.getMessage}")
+      // Verify we can read back the data
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      result.count() shouldBe 2
+      println(s"✅ Complex nested type correctly supported via JSON fields")
     }
   }
 
   test("should handle schema validation during DataFrame creation") {
-    // Test that the type checking happens early in the process
-    val arraySchema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("tags", ArrayType(StringType), nullable = true)
-      )
-    )
-
-    val mapSchema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("metadata", MapType(StringType, StringType), nullable = true)
-      )
-    )
-
-    val structSchema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField(
-          "details",
-          StructType(
-            Seq(
-              StructField("name", StringType, nullable = true),
-              StructField("value", IntegerType, nullable = true)
-            )
-          ),
-          nullable = true
-        )
-      )
-    )
-
-    // Test type conversion directly
+    // TypeConversionUtil handles basic field types only
+    // Complex types (Array, Map, Struct) are handled separately via JSON fields at a higher level
     import io.indextables.spark.util.TypeConversionUtil
 
+    // TypeConversionUtil still rejects complex types (these are handled by JSON field logic)
     intercept[UnsupportedOperationException] {
       TypeConversionUtil.sparkTypeToTantivyType(ArrayType(StringType))
     }.getMessage should include("Array types are not supported")
@@ -238,6 +225,6 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       TypeConversionUtil.sparkTypeToTantivyType(StructType(Seq.empty))
     }.getMessage should include("Struct types are not supported")
 
-    println(s"✅ Schema validation correctly rejects unsupported types at conversion level")
+    println(s"✅ TypeConversionUtil correctly rejects complex types (handled separately by JSON fields)")
   }
 }

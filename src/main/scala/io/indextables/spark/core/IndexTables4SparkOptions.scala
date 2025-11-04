@@ -234,4 +234,5 @@ object IndexTables4SparkOptions {
   val INDEXING_STOREONLY_FIELDS = "spark.indextables.indexing.storeonlyfields"
   val INDEXING_INDEXONLY_FIELDS = "spark.indextables.indexing.indexonlyfields"
   val INDEXING_TOKENIZER_PREFIX = "spark.indextables.indexing.tokenizer."
+  val INDEXING_JSON_MODE        = "spark.indextables.indexing.json.mode"
 }
