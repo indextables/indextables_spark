@@ -747,12 +747,28 @@ class IndexTables4SparkSimpleAggregateReader(
           }
       }
 
-      // Check if we have any matching documents (COUNT > 0 or COUNT(*) > 0)
+      // Check if we have any matching documents by looking for a COUNT or COUNT(*) aggregation
       // For splits with no matches, we should not emit a row to avoid polluting MIN/MAX with zeros
-      val hasMatchingDocs = aggregationResults.headOption match {
-        case Some(count: java.lang.Long) if count == 0L => false
-        case Some(count: Long) if count == 0L => false
-        case _ => true
+      val hasMatchingDocs = {
+        // Find the index of COUNT or COUNT(*) aggregation
+        val countIndex = partition.aggregation.aggregateExpressions.zipWithIndex.collectFirst {
+          case (_: Count, idx) => idx
+          case (_: CountStar, idx) => idx
+        }
+
+        countIndex match {
+          case Some(idx) if idx < aggregationResults.length =>
+            // Check if the COUNT result is 0
+            aggregationResults(idx) match {
+              case count: java.lang.Long => count != 0L
+              case count: Long => count != 0L
+              case _ => true // If not a Long, assume we have data
+            }
+          case _ =>
+            // No COUNT aggregation present, we can't determine if split is empty
+            // Assume it has data to be safe
+            true
+        }
       }
 
       if (!hasMatchingDocs) {
