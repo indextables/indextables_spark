@@ -327,7 +327,8 @@ class IndexTables4SparkScanBuilder(
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
     logger.debug(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
+    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(f => logger.debug(s"🔍 AGGREGATE PUSHDOWN: Pushed filter: $f"))
 
     // Check if this is a GROUP BY aggregation
     val groupByExpressions = aggregation.groupByExpressions()
@@ -364,19 +365,23 @@ class IndexTables4SparkScanBuilder(
     logger.debug(s"🔍 AGGREGATE PUSHDOWN: About to check isAggregationSupported")
     if (!isAggregationSupported(aggregation)) {
       logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
       return false
     }
     logger.debug(s"🔍 AGGREGATE PUSHDOWN: isAggregationSupported passed")
 
     // Check if filters are compatible with aggregate pushdown
     logger.debug(s"🔍 AGGREGATE PUSHDOWN: About to check areFiltersCompatibleWithAggregation")
-    if (!areFiltersCompatibleWithAggregation()) {
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
-      return false
+    try {
+      if (!areFiltersCompatibleWithAggregation()) {
+        logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
+        return false
+      }
+      logger.debug(s"🔍 AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
+    } catch {
+      case e: IllegalArgumentException =>
+        logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
+        return false
     }
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
 
     // Store for later use in build()
     _pushedAggregation = Some(aggregation)
@@ -426,10 +431,10 @@ class IndexTables4SparkScanBuilder(
     filter match {
       case EqualTo(attribute, _)       => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
-      case GreaterThan(attribute, _)        => isNestedJsonField(attribute)  // Support range on JSON fields
-      case GreaterThanOrEqual(attribute, _) => isNestedJsonField(attribute)  // Support range on JSON fields
-      case LessThan(attribute, _)           => isNestedJsonField(attribute)  // Support range on JSON fields
-      case LessThanOrEqual(attribute, _)    => isNestedJsonField(attribute)  // Support range on JSON fields
+      case GreaterThan(attribute, _)        => true  // Support range on all fields (both regular and JSON)
+      case GreaterThanOrEqual(attribute, _) => true  // Support range on all fields (both regular and JSON)
+      case LessThan(attribute, _)           => true  // Support range on all fields (both regular and JSON)
+      case LessThanOrEqual(attribute, _)    => true  // Support range on all fields (both regular and JSON)
       case _: In                       => true
       case IsNull(attribute)           => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
       case IsNotNull(attribute)        => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
@@ -595,14 +600,30 @@ class IndexTables4SparkScanBuilder(
     // Get actual fast fields from the schema/docMappingJson
     val fastFields = getActualFastFieldsFromSchema()
 
+    // For nested JSON fields (containing dots), check if the field itself OR its parent struct is marked as fast
+    if (fieldName.contains(".")) {
+      val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+      val isFieldFast = fastFields.contains(fieldName)
+      val isParentFast = fastFields.contains(parentField)
+
+      if (isFieldFast || isParentFast) {
+        logger.debug(s"🔍 FAST FIELD VALIDATION: ✓ Nested field '$fieldName' accepted (field_fast=$isFieldFast, parent_fast=$isParentFast, parent='$parentField')")
+        return true
+      } else {
+        logger.debug(s"🔍 FAST FIELD VALIDATION: ✗ Neither '$fieldName' nor parent '$parentField' marked as fast (available: ${fastFields.mkString(", ")})")
+        return false
+      }
+    }
+
+    // For top-level fields, check directly
     if (!fastFields.contains(fieldName)) {
-      logger.info(
-        s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema, rejecting aggregate pushdown"
+      logger.debug(
+        s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields.mkString(", ")})"
       )
       return false
     }
 
-    // Check if field is numeric
+    // Check if top-level field is numeric
     schema.fields.find(_.name == fieldName) match {
       case Some(field) if isNumericType(field.dataType) =>
         logger.debug(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is numeric and fast - supported")
@@ -709,6 +730,7 @@ class IndexTables4SparkScanBuilder(
         import scala.jdk.CollectionConverters._
 
         val mappingJson = existingDocMapping.get
+        logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Full docMappingJson: ${mappingJson.take(500)}${if (mappingJson.length > 500) "..." else ""}")
         val docMapping  = JsonUtil.mapper.readTree(mappingJson)
 
         if (docMapping.isArray) {
@@ -717,9 +739,12 @@ class IndexTables4SparkScanBuilder(
             val isFast = Option(fieldNode.get("fast"))
               .map(_.asBoolean())
               .getOrElse(false)
+            val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
+
+            logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Field entry: name=${fieldName.getOrElse("N/A")}, fast=$isFast, type=$fieldType")
 
             if (isFast && fieldName.isDefined) {
-              logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Found fast field: ${fieldName.get}")
+              logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: ✓ Found fast field: ${fieldName.get}")
               Some(fieldName.get)
             } else {
               None
@@ -771,11 +796,10 @@ class IndexTables4SparkScanBuilder(
     // Exclude partition columns from fast field validation
     val nonPartitionFilterFields = filterFields -- partitionColumns
 
+    logger.debug(s"🔍 FILTER VALIDATION: Filter: $filter")
     logger.debug(s"🔍 FILTER VALIDATION: All filter fields: ${filterFields.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION: Partition columns: ${partitionColumns.mkString(", ")}")
     logger.debug(s"🔍 FILTER VALIDATION: Non-partition filter fields: ${nonPartitionFilterFields.mkString(", ")}")
     logger.debug(s"🔍 FILTER VALIDATION: Fast fields from schema: ${fastFields.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION DEBUG: filterFields=$filterFields, partitionColumns=$partitionColumns, nonPartitionFilterFields=$nonPartitionFilterFields, fastFields=$fastFields")
 
     // If all filter fields are partition columns, we don't need fast fields (transaction log optimization)
     if (nonPartitionFilterFields.isEmpty) {
@@ -784,7 +808,20 @@ class IndexTables4SparkScanBuilder(
     }
 
     // Check if all non-partition filter fields are configured as fast fields
-    val missingFastFields = nonPartitionFilterFields.filterNot(fastFields.contains)
+    // For nested JSON fields (e.g., "metadata.field1"), check if either the field itself
+    // OR its parent (e.g., "metadata") is marked as fast
+    val missingFastFields = nonPartitionFilterFields.filterNot { fieldName =>
+      if (fieldName.contains(".")) {
+        // Nested field - check both field and parent
+        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+        val isFieldFast = fastFields.contains(fieldName)
+        val isParentFast = fastFields.contains(parentField)
+        isFieldFast || isParentFast
+      } else {
+        // Top-level field - direct check
+        fastFields.contains(fieldName)
+      }
+    }
     logger.debug(s"🔍 FILTER VALIDATION DEBUG: missingFastFields=$missingFastFields")
 
     if (missingFastFields.nonEmpty) {

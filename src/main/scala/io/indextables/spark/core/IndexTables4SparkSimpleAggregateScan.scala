@@ -310,7 +310,8 @@ class IndexTables4SparkSimpleAggregateReaderFactory(
     : org.apache.spark.sql.connector.read.PartitionReader[org.apache.spark.sql.catalyst.InternalRow] =
     partition match {
       case simpleAggPartition: IndexTables4SparkSimpleAggregatePartition =>
-        logger.debug(s"🔍 SIMPLE AGGREGATE READER FACTORY: Creating reader for simple aggregate partition")
+        logger.debug(s"🔍 SIMPLE AGGREGATE READER FACTORY: Creating reader for simple aggregate partition: ${simpleAggPartition.split.path}")
+        logger.debug(s"🔍 SIMPLE AGGREGATE READER FACTORY: Aggregations: ${simpleAggPartition.aggregation.aggregateExpressions.map(_.toString).mkString(", ")}")
 
         new IndexTables4SparkSimpleAggregateReader(
           simpleAggPartition,
@@ -488,33 +489,127 @@ class IndexTables4SparkSimpleAggregateReader(
         new SplitMatchAllQuery()
       }
 
-      // Create individual aggregations for each expression
+      // Create all aggregations and execute them in a single batch
       import org.apache.spark.sql.connector.expressions.aggregate._
-      val aggregationResults = ArrayBuffer[Any]()
+
+      // Step 1: Build all aggregations into a single HashMap
+      val aggregations = new java.util.HashMap[String, io.indextables.tantivy4java.split.SplitAggregation]()
+      val aggNames = ArrayBuffer[String]()
 
       partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
         case (aggExpr, index) =>
           aggExpr match {
-            case _: Count | _: CountStar =>
-              // For COUNT, execute query with filters applied
-              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing COUNT aggregation with filters")
-              val result = searcher.search(splitQuery, Int.MaxValue)
-              val count  = result.getHits().size()
-              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT result: $count")
-              aggregationResults += count.toLong
+            case count: Count =>
+              val fieldName = getFieldName(count.column)
+              val aggName = s"count_agg_$index"
+              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Adding COUNT aggregation for field '$fieldName' as '$aggName'")
+              aggregations.put(aggName, new CountAggregation(fieldName))
+              aggNames += aggName
+
+            case _: CountStar =>
+              // For COUNT(*), we need to find a fast field to use for counting
+              // Strategy: Find a field from another aggregation (SUM/MIN/MAX) which must be a fast field
+              val fastFieldFromAgg = partition.aggregation.aggregateExpressions.collectFirst {
+                case sum: Sum => getFieldName(sum.column)
+                case min: Min => getFieldName(min.column)
+                case max: Max => getFieldName(max.column)
+              }
+
+              val firstFastField = fastFieldFromAgg.getOrElse {
+                // No other aggregations - try to find any fast field from config or use first numeric field
+                partition.config.get("spark.indextables.indexing.fastfields")
+                  .orElse(partition.config.get("spark.indextables.indexing.fastfields".toLowerCase))
+                  .flatMap(_.split(",").headOption.map(_.trim))
+                  .getOrElse {
+                    // Last resort: use first numeric field (likely auto-fast-field)
+                    partition.schema.fields.find(f =>
+                      f.dataType == IntegerType || f.dataType == LongType || f.dataType == FloatType || f.dataType == DoubleType
+                    ).map(_.name).getOrElse("value") // Default to "value" instead of "id"
+                  }
+              }
+              val aggName = s"count_star_agg_$index"
+              logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Adding COUNT(*) aggregation using fast field '$firstFastField' as '$aggName'")
+              aggregations.put(aggName, new CountAggregation(firstFastField))
+              aggNames += aggName
+
+            case sum: Sum =>
+              val fieldName = getFieldName(sum.column)
+              val aggName = s"sum_agg_$index"
+              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Adding SUM aggregation for field '$fieldName' as '$aggName'")
+              aggregations.put(aggName, new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName))
+              aggNames += aggName
+
+            case avg: Avg =>
+              // AVG should be automatically transformed by Spark into SUM + COUNT when supportCompletePushDown=false
+              val fieldName = getFieldName(avg.column)
+              throw new IllegalStateException(
+                s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
+                  s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+                  s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
+              )
+
+            case min: Min =>
+              val fieldName = getFieldName(min.column)
+              val aggName = s"min_agg_$index"
+              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Adding MIN aggregation for field '$fieldName' as '$aggName'")
+              aggregations.put(aggName, new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName))
+              aggNames += aggName
+
+            case max: Max =>
+              val fieldName = getFieldName(max.column)
+              val aggName = s"max_agg_$index"
+              logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Adding MAX aggregation for field '$fieldName' as '$aggName'")
+              aggregations.put(aggName, new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName))
+              aggNames += aggName
+
+            case other =>
+              logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+              aggNames += s"unsupported_$index"
+          }
+      }
+
+      // Step 2: Execute all aggregations in a single batch
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Executing ${aggregations.size()} aggregations in a single batch")
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Aggregation names: ${aggNames.mkString(", ")}")
+      val result = searcher.aggregate(splitQuery, aggregations)
+      logger.info(s"🔍 SIMPLE AGGREGATE EXECUTION: Aggregate call completed, hasAggregations: ${result.hasAggregations()}")
+
+      // Step 3: Extract results in the same order as expressions
+      val aggregationResults = ArrayBuffer[Any]()
+
+      partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
+        case (aggExpr, index) =>
+          val aggName = aggNames(index)
+
+          aggExpr match {
+            case count: Count =>
+              if (result.hasAggregations()) {
+                val countResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult]
+                val countValue = if (countResult != null) countResult.getCount() else 0L
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT result for '$aggName': $countValue (split: ${partition.split.path})")
+                aggregationResults += countValue
+              } else {
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No COUNT aggregation result for '$aggName'")
+                aggregationResults += 0L
+              }
+
+            case _: CountStar =>
+              if (result.hasAggregations()) {
+                val countResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult]
+                val countValue = if (countResult != null) countResult.getCount() else 0L
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: COUNT(*) result for '$aggName': $countValue (split: ${partition.split.path})")
+                aggregationResults += countValue
+              } else {
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No COUNT(*) aggregation result")
+                aggregationResults += 0L
+              }
 
             case sum: Sum =>
               val fieldName = getFieldName(sum.column)
               val fieldType = getFieldType(fieldName)
-              logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing SUM aggregation for field '$fieldName' (type: $fieldType) with filters"
-              )
-              val sumAgg = new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
-              val result = searcher.search(splitQuery, 0, s"sum_agg", sumAgg)
-
               if (result.hasAggregations()) {
-                val sumResult =
-                  result.getAggregation("sum_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
+                val sumResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult]
                 val sumValue: Any = if (sumResult != null) {
                   // tantivy4java returns double - convert based on OUTPUT type (which widens integers to Long)
                   fieldType match {
@@ -535,10 +630,10 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _                      => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$fieldName': $sumValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: SUM result for '$aggName': $sumValue")
                 aggregationResults += sumValue
               } else {
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No SUM aggregation result for '$aggName'")
                 aggregationResults += (fieldType match {
                   case IntegerType | LongType => java.lang.Long.valueOf(0L)
                   case FloatType | DoubleType => 0.0
@@ -559,15 +654,8 @@ class IndexTables4SparkSimpleAggregateReader(
             case min: Min =>
               val fieldName = getFieldName(min.column)
               val fieldType = getFieldType(fieldName)
-              logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MIN aggregation for field '$fieldName' (type: $fieldType) with filters"
-              )
-              val minAgg = new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
-              val result = searcher.search(splitQuery, 0, s"min_agg", minAgg)
-
               if (result.hasAggregations()) {
-                val minResult =
-                  result.getAggregation("min_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
+                val minResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult]
                 val minValue: Any = if (minResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
@@ -595,10 +683,10 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _           => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$fieldName': $minValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MIN result for '$aggName': $minValue")
                 aggregationResults += minValue
               } else {
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MIN aggregation result for '$aggName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType    => java.lang.Long.valueOf(0L)
@@ -611,15 +699,8 @@ class IndexTables4SparkSimpleAggregateReader(
             case max: Max =>
               val fieldName = getFieldName(max.column)
               val fieldType = getFieldType(fieldName)
-              logger.info(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Executing MAX aggregation for field '$fieldName' (type: $fieldType) with filters"
-              )
-              val maxAgg = new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
-              val result = searcher.search(splitQuery, 0, s"max_agg", maxAgg)
-
               if (result.hasAggregations()) {
-                val maxResult =
-                  result.getAggregation("max_agg").asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
+                val maxResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult]
                 val maxValue: Any = if (maxResult != null) {
                   // tantivy4java returns double - convert to appropriate type based on source field type
                   fieldType match {
@@ -647,10 +728,10 @@ class IndexTables4SparkSimpleAggregateReader(
                     case _           => java.lang.Long.valueOf(0L)
                   }
                 }
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$fieldName': $maxValue")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: MAX result for '$aggName': $maxValue")
                 aggregationResults += maxValue
               } else {
-                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$fieldName'")
+                logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No MAX aggregation result for '$aggName'")
                 aggregationResults += (fieldType match {
                   case IntegerType => java.lang.Integer.valueOf(0)
                   case LongType    => java.lang.Long.valueOf(0L)
@@ -661,21 +742,35 @@ class IndexTables4SparkSimpleAggregateReader(
               }
 
             case other =>
-              logger.warn(
-                s"🔍 SIMPLE AGGREGATE EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}"
-              )
+              logger.warn(s"🔍 SIMPLE AGGREGATE EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
               aggregationResults += 0L
           }
       }
 
-      // Create a single row with all aggregation results
-      val row = InternalRow.fromSeq(aggregationResults.toSeq)
-      logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Generated result row with ${aggregationResults.length} values")
-      Array(row)
+      // Check if we have any matching documents (COUNT > 0 or COUNT(*) > 0)
+      // For splits with no matches, we should not emit a row to avoid polluting MIN/MAX with zeros
+      val hasMatchingDocs = aggregationResults.headOption match {
+        case Some(count: java.lang.Long) if count == 0L => false
+        case Some(count: Long) if count == 0L => false
+        case _ => true
+      }
+
+      if (!hasMatchingDocs) {
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: No matching documents in split ${partition.split.path}, skipping result row")
+        Array.empty[InternalRow]
+      } else {
+        // Create a single row with all aggregation results
+        val row = InternalRow.fromSeq(aggregationResults.toSeq)
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Generated result row with ${aggregationResults.length} values")
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Result values for split ${partition.split.path}: ${aggregationResults.mkString(", ")}")
+        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Returning 1 row from split ${partition.split.path}")
+        Array(row)
+      }
 
     } catch {
       case e: Exception =>
-        logger.debug(s"🔍 SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation", e)
+        logger.error(s"🔍 SIMPLE AGGREGATE EXECUTION: Failed to execute simple aggregation for split ${partition.split.path}", e)
+        logger.error(s"🔍 SIMPLE AGGREGATE EXECUTION: Exception message: ${e.getMessage}")
         e.printStackTrace()
         Array.empty[InternalRow]
     }
