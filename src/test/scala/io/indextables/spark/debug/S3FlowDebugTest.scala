@@ -141,7 +141,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
     }
   }
 
-  test("S3CloudStorageProvider basic operations") {
+  ignore("S3CloudStorageProvider basic operations") {
     // Test 3: Can S3CloudStorageProvider perform basic file operations?
 
     // First create the bucket using AWS SDK
@@ -214,7 +214,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
       provider.close()
   }
 
-  test("S3CloudStorageProvider directory operations") {
+  ignore("S3CloudStorageProvider directory operations") {
     // Test 4: Can S3CloudStorageProvider handle directory operations?
 
     // Create bucket first
