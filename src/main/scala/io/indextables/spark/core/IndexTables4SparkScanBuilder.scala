@@ -67,19 +67,19 @@ class IndexTables4SparkScanBuilder(
   private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
 
   override def build(): Scan = {
-    logger.debug(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
+    val aggregation = _pushedAggregation
+
+    logger.warn(s"🔍 BUILD: ScanBuilder.build() called on instance ${System.identityHashCode(this)}")
+    logger.warn(s"🔍 BUILD: Aggregation present: ${aggregation.isDefined}, filters: ${_pushedFilters.length}")
 
     // Check if we have aggregate pushdown
-    _pushedAggregation match {
-      case Some(aggregation) =>
-        logger.debug(s"🔍 BUILD: Creating aggregate scan for pushed aggregation: $aggregation")
-        logger.debug(s"🔍 BUILD: Creating aggregate scan for pushed aggregation")
-        // Return aggregate scan (will implement this next)
-        createAggregateScan(aggregation)
+    aggregation match {
+      case Some(agg) =>
+        logger.warn(s"🔍 BUILD: Creating aggregate scan for pushed aggregation")
+        createAggregateScan(agg)
       case None =>
         // Regular scan
-        logger.debug(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
-        logger.debug(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
+        logger.warn(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
@@ -194,14 +194,18 @@ class IndexTables4SparkScanBuilder(
     val result = aggregation.aggregateExpressions.length == 1 && {
       aggregation.aggregateExpressions.head match {
         case _: Count =>
-          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          // Transaction log optimization works when filters are only on partition columns
+          // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
+          // ensures all documents in a split have the same partition value
           val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"🔍 SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters")
+          logger.debug(s"🔍 SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _: CountStar =>
-          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          // Transaction log optimization works when filters are only on partition columns
+          // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
+          // ensures all documents in a split have the same partition value
           val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"🔍 SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters")
+          logger.debug(s"🔍 SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _ =>
           logger.debug(s"🔍 SCAN BUILDER: Not a COUNT aggregation, cannot use transaction log")
@@ -326,9 +330,9 @@ class IndexTables4SparkScanBuilder(
   }
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Number of pushed filters: ${_pushedFilters.length}")
-    _pushedFilters.foreach(f => logger.debug(s"🔍 AGGREGATE PUSHDOWN: Pushed filter: $f"))
+    logger.warn(s"🔍 AGGREGATE PUSHDOWN ATTEMPT: Received aggregation request: $aggregation")
+    logger.warn(s"🔍 AGGREGATE PUSHDOWN ATTEMPT: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(f => logger.warn(s"🔍 AGGREGATE PUSHDOWN ATTEMPT: Pushed filter: $f"))
 
     // Check if this is a GROUP BY aggregation
     val groupByExpressions = aggregation.groupByExpressions()
@@ -385,9 +389,8 @@ class IndexTables4SparkScanBuilder(
 
     // Store for later use in build()
     _pushedAggregation = Some(aggregation)
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Returning true")
+    logger.warn(s"🔍 AGGREGATE PUSHDOWN: ✅ ACCEPTED - aggregation will be pushed down")
+    logger.warn(s"🔍 AGGREGATE PUSHDOWN: Returning true")
     true
   }
 
@@ -1190,6 +1193,7 @@ object IndexTables4SparkScanBuilder {
   private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
   private val currentRelationId: ThreadLocal[Option[Int]]  = ThreadLocal.withInitial(() => None)
 
+
   /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
   def setCurrentRelation(relation: AnyRef): Unit = {
     // Use relation object identity - this is stable within a query execution
@@ -1252,4 +1256,5 @@ object IndexTables4SparkScanBuilder {
     val size = relationIndexQueries.synchronized(relationIndexQueries.size())
     s"IndexQuery Cache Stats - Size: $size (WeakHashMap)"
   }
+
 }

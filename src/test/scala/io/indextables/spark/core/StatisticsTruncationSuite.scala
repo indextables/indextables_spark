@@ -26,7 +26,7 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
   test("statistics truncation should drop long string values by default") {
     val minValues = Map(
       "id"        -> "doc1",
-      "long_text" -> ("x" * 500) // Exceeds 256 character limit
+      "long_text" -> ("x" * 500) // Exceeds 32 character limit (default)
     )
     val maxValues = Map(
       "id"        -> "doc999",
@@ -41,9 +41,13 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
     truncatedMin should contain key "id"
     truncatedMax should contain key "id"
 
-    // Long values dropped
-    truncatedMin should not contain key("long_text")
-    truncatedMax should not contain key("long_text")
+    // Long values truncated to 32 characters (default threshold)
+    truncatedMin should contain key "long_text"
+    truncatedMax should contain key "long_text"
+    truncatedMin("long_text") should have length 32
+    truncatedMax("long_text") should have length 32
+    truncatedMin("long_text") shouldBe ("x" * 32)
+    truncatedMax("long_text") shouldBe ("y" * 32)
   }
 
   test("statistics truncation should respect custom length threshold") {
@@ -54,8 +58,12 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
     val (truncatedMin, truncatedMax) = StatisticsTruncation.truncateStatistics(minValues, maxValues, config)
 
-    truncatedMin should not contain key("text")
-    truncatedMax should not contain key("text")
+    truncatedMin should contain key "text"
+    truncatedMax should contain key "text"
+    truncatedMin("text") should have length 200
+    truncatedMax("text") should have length 200
+    truncatedMin("text") shouldBe ("x" * 200)
+    truncatedMax("text") shouldBe ("y" * 200)
   }
 
   test("statistics truncation should be disabled when configured") {
@@ -120,9 +128,11 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
     truncatedMin should contain key "field1"
     truncatedMax should contain key "field1"
 
-    // field2 dropped (min exceeds threshold, even though max is short)
-    truncatedMin should not contain key("field2")
-    truncatedMax should not contain key("field2")
+    // field2 truncated (min exceeds threshold, so both min and max are truncated)
+    truncatedMin should contain key "field2"
+    truncatedMax should contain key "field2"
+    truncatedMin("field2") should have length 32
+    truncatedMax("field2") shouldBe "also_short" // Max was already short
   }
 
   test("statistics truncation should handle mixed short and long values") {
@@ -151,32 +161,38 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
     truncatedMax should contain key "title"
     truncatedMax should contain key "score"
 
-    // Long value dropped
-    truncatedMin should not contain key("content")
-    truncatedMax should not contain key("content")
+    // Long value truncated to 32 characters
+    truncatedMin should contain key "content"
+    truncatedMax should contain key "content"
+    truncatedMin("content") should have length 32
+    truncatedMax("content") should have length 32
   }
 
   test("statistics truncation should respect exactly 256 character threshold") {
     val minValues = Map(
-      "exactly_256" -> ("x" * 256), // Exactly at threshold
-      "one_more"    -> ("x" * 257)  // One over threshold
+      "exactly_32" -> ("x" * 32), // Exactly at threshold (default is 32)
+      "one_more"   -> ("x" * 33)  // One over threshold
     )
     val maxValues = Map(
-      "exactly_256" -> ("y" * 256),
-      "one_more"    -> ("y" * 257)
+      "exactly_32" -> ("y" * 32),
+      "one_more"   -> ("y" * 33)
     )
 
     val config = Map.empty[String, String]
 
     val (truncatedMin, truncatedMax) = StatisticsTruncation.truncateStatistics(minValues, maxValues, config)
 
-    // Exactly 256 characters should be preserved
-    truncatedMin should contain key "exactly_256"
-    truncatedMax should contain key "exactly_256"
+    // Exactly 32 characters should be preserved (not truncated)
+    truncatedMin should contain key "exactly_32"
+    truncatedMax should contain key "exactly_32"
+    truncatedMin("exactly_32") should have length 32
+    truncatedMax("exactly_32") should have length 32
 
-    // 257 characters should be dropped
-    truncatedMin should not contain key("one_more")
-    truncatedMax should not contain key("one_more")
+    // 33 characters should be truncated to 32
+    truncatedMin should contain key "one_more"
+    truncatedMax should contain key "one_more"
+    truncatedMin("one_more") should have length 32
+    truncatedMax("one_more") should have length 32
   }
 
   test("statistics truncation should handle asymmetric min/max lengths") {
@@ -193,11 +209,16 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
 
     val (truncatedMin, truncatedMax) = StatisticsTruncation.truncateStatistics(minValues, maxValues, config)
 
-    // Both fields should be dropped (each has one long value)
-    truncatedMin should not contain key("field1")
-    truncatedMax should not contain key("field1")
-    truncatedMin should not contain key("field2")
-    truncatedMax should not contain key("field2")
+    // Both fields should be truncated (each has one long value)
+    truncatedMin should contain key "field1"
+    truncatedMax should contain key "field1"
+    truncatedMin should contain key "field2"
+    truncatedMax should contain key "field2"
+
+    truncatedMin("field1") shouldBe "short_min" // Was already short
+    truncatedMax("field1") should have length 32 // Truncated from 500
+    truncatedMin("field2") should have length 32 // Truncated from 500
+    truncatedMax("field2") shouldBe "short_max" // Was already short
   }
 
   test("statistics truncation with very large threshold should preserve all values") {
@@ -266,8 +287,10 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
     truncatedMax should contain key "score"
     truncatedMax should contain key "timestamp"
 
-    // Long text dropped
-    truncatedMin should not contain key("description")
-    truncatedMax should not contain key("description")
+    // Long text truncated to 32 characters
+    truncatedMin should contain key "description"
+    truncatedMax should contain key "description"
+    truncatedMin("description") should have length 32
+    truncatedMax("description") should have length 32
   }
 }

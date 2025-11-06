@@ -32,16 +32,18 @@ class PartitionVsDataDateTest extends TestBase with Matchers {
       import sparkImplicits._
 
       // Create test data with both partition date and data date
+      // Added seq_num (IntegerType) for COUNT aggregation with filters
       val testData = Seq(
-        ("test1", Date.valueOf("2023-02-10"), "content1", Date.valueOf("2023-02-15")),
-        ("test2", Date.valueOf("2023-02-10"), "content2", Date.valueOf("2023-02-16"))
-      ).toDF("id", "partition_date", "description", "data_date")
+        ("test1", Date.valueOf("2023-02-10"), "content1", Date.valueOf("2023-02-15"), 1),
+        ("test2", Date.valueOf("2023-02-10"), "content2", Date.valueOf("2023-02-16"), 2)
+      ).toDF("id", "partition_date", "description", "data_date", "seq_num")
 
       // Write with partition_date as partition column, data_date as regular indexed field
+      // seq_num provides fast field for COUNT aggregation, data_date for filtering
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
-        .option("spark.indextables.indexing.fastfields", "partition_date,data_date")
+        .option("spark.indextables.indexing.fastfields", "seq_num,data_date")
         .partitionBy("partition_date")
         .save(tablePath)
 

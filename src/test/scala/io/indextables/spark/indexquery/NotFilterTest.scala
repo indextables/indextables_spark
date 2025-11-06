@@ -26,6 +26,7 @@ class NotFilterTest extends TestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.name", "text")       // tokenized for IndexQuery
       .option("spark.indextables.indexing.typemap.category", "string") // exact matching
+      .option("spark.indextables.indexing.fastfields", "price")        // enable range queries on price
       .mode("overwrite")
       .save(testPath)
 

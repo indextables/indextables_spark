@@ -233,13 +233,44 @@ class TransactionLogCountBatch(
         file.partitionValues.get(attribute).contains(value.toString)
       case EqualNullSafe(attribute, value) =>
         file.partitionValues.get(attribute).contains(value.toString)
+      case GreaterThan(attribute, value) =>
+        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) > 0)
+      case GreaterThanOrEqual(attribute, value) =>
+        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) >= 0)
+      case LessThan(attribute, value) =>
+        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) < 0)
+      case LessThanOrEqual(attribute, value) =>
+        file.partitionValues.get(attribute).exists(v => compareValues(v, value.toString) <= 0)
+      case In(attribute, values) =>
+        file.partitionValues.get(attribute).exists(v => values.map(_.toString).contains(v))
+      case IsNull(attribute) =>
+        !file.partitionValues.contains(attribute) || file.partitionValues.get(attribute).isEmpty
+      case IsNotNull(attribute) =>
+        file.partitionValues.get(attribute).nonEmpty
       case And(left, right) =>
         matchesFilter(file, left) && matchesFilter(file, right)
       case Or(left, right) =>
         matchesFilter(file, left) || matchesFilter(file, right)
       case Not(child) =>
         !matchesFilter(file, child)
-      case _ => true // Default to including the file if we can't evaluate the filter
+      case _ =>
+        // Log warning for unhandled filters instead of silently including
+        logger.warn(s"🔍 TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file")
+        true
+    }
+  }
+
+  /** Compare two partition values for range filters. Handles strings, dates, and numeric values. */
+  private def compareValues(partitionValue: String, filterValue: String): Int = {
+    // Try numeric comparison first
+    try {
+      val pNum = partitionValue.toDouble
+      val fNum = filterValue.toDouble
+      pNum.compareTo(fNum)
+    } catch {
+      case _: NumberFormatException =>
+        // Fall back to string comparison (works for ISO dates like "2024-01-01")
+        partitionValue.compareTo(filterValue)
     }
   }
 

@@ -1245,26 +1245,33 @@ object FiltersToQueryConverter {
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
         // Check if field is configured as a fast field - range queries only work on fast fields
-        queryLog(s"🔍 DEBUG: Checking fast field config for '$attribute', options = $options")
-        val isFastField = options
+        // First, check the Tantivy schema directly (most reliable source)
+        val isFastFieldInSchema = try {
+          val fieldInfo = schema.getFieldInfo(attribute)
+          fieldInfo != null && fieldInfo.isFast()
+        } catch {
+          case _: Exception => false
+        }
+
+        // Fall back to checking options (for backward compatibility)
+        val isFastFieldInOptions = options
           .map { opts =>
-            val fastFieldsStr = Option(opts.get("spark.indextables.indexing.fastfields"))
-            queryLog(s"🔍 DEBUG: fastfields config = '$fastFieldsStr'")
-            fastFieldsStr
+            Option(opts.get("spark.indextables.indexing.fastfields"))
               .map(_.split(",").map(_.trim).contains(attribute))
               .getOrElse(false)
           }
           .getOrElse(false)
 
+        val isFastField = isFastFieldInSchema || isFastFieldInOptions
+
         // For date fields, be more permissive since they're often used for range queries
-        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
         val isDateFieldWorkaround = fieldType == FieldType.DATE
         val shouldAllowQuery      = isFastField || isDateFieldWorkaround
 
-        queryLog(s"🔍 DEBUG: isFastField for '$attribute' = $isFastField, isDateField = $isDateFieldWorkaround, shouldAllow = $shouldAllowQuery")
+        logger.warn(s"🔍 LessThan range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
-          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }
 
@@ -1295,7 +1302,16 @@ object FiltersToQueryConverter {
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
         // Check if field is configured as a fast field - range queries only work on fast fields
-        val isFastField = options
+        // First, check the Tantivy schema directly (most reliable source)
+        val isFastFieldInSchema = try {
+          val fieldInfo = schema.getFieldInfo(attribute)
+          fieldInfo != null && fieldInfo.isFast()
+        } catch {
+          case _: Exception => false
+        }
+
+        // Fall back to checking options (for backward compatibility)
+        val isFastFieldInOptions = options
           .map { opts =>
             Option(opts.get("spark.indextables.indexing.fastfields"))
               .map(_.split(",").map(_.trim).contains(attribute))
@@ -1303,13 +1319,16 @@ object FiltersToQueryConverter {
           }
           .getOrElse(false)
 
+        val isFastField = isFastFieldInSchema || isFastFieldInOptions
+
         // For date fields, be more permissive since they're often used for range queries
-        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
         val isDateFieldWorkaround = fieldType == FieldType.DATE
         val shouldAllowQuery      = isFastField || isDateFieldWorkaround
 
+        logger.warn(s"🔍 LessThanOrEqual range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
+
         if (!shouldAllowQuery) {
-          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }
 
