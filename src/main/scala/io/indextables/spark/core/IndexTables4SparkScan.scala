@@ -560,7 +560,7 @@ class IndexTables4SparkScan(
         } catch {
           case ex: Exception =>
             logger.warn(
-              s"🔍 DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}"
+              s"DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}"
             )
             // Fallback to string comparison
             (

@@ -99,7 +99,7 @@ class IndexTables4SparkOptimizedWrite(
    *   1. DataFrame write options 2. Spark session configuration 3. Table properties 4. Default (enabled)
    */
   private def shouldOptimizeWrite(): Boolean = {
-    logger.debug(s"🔍 OPTIMIZED WRITE: shouldOptimizeWrite called")
+    logger.debug(s"OPTIMIZED WRITE: shouldOptimizeWrite called")
     val spark = SparkSession.active
 
     // Check DataFrame write options first
@@ -245,7 +245,7 @@ class IndexTables4SparkOptimizedWrite(
    */
   def createOptimizedWritePlan(queryExecution: org.apache.spark.sql.execution.QueryExecution)
     : org.apache.spark.sql.execution.SparkPlan = {
-    logger.debug(s"🔍 OPTIMIZED WRITE: createOptimizedWritePlan called")
+    logger.debug(s"OPTIMIZED WRITE: createOptimizedWritePlan called")
     val originalPlan = queryExecution.executedPlan
 
     if (shouldOptimizeWrite()) {
@@ -267,7 +267,7 @@ class IndexTables4SparkOptimizedWrite(
   }
 
   override def toBatch: BatchWrite = {
-    logger.debug(s"🔍 OPTIMIZED WRITE: toBatch called")
+    logger.debug(s"OPTIMIZED WRITE: toBatch called")
     this
   }
 
@@ -296,7 +296,7 @@ class IndexTables4SparkOptimizedWrite(
    * partitioning in V2. For auto-sizing, this method will attempt to count the input DataFrame.
    */
   override def requiredNumPartitions(): Int = {
-    logger.debug(s"🔍 OPTIMIZED WRITE: requiredNumPartitions called")
+    logger.debug(s"OPTIMIZED WRITE: requiredNumPartitions called")
     val targetRecords = getTargetRecordsPerSplit()
 
     // Check if auto-sizing is enabled
@@ -349,7 +349,7 @@ class IndexTables4SparkOptimizedWrite(
   override def requiredOrdering(): Array[SortOrder] = Array.empty
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    logger.debug(s"🔍 OPTIMIZED WRITE: createBatchWriterFactory called with ${info.numPartitions} partitions")
+    logger.debug(s"OPTIMIZED WRITE: createBatchWriterFactory called with ${info.numPartitions} partitions")
     val targetRecords = getTargetRecordsPerSplit()
 
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
@@ -390,9 +390,9 @@ class IndexTables4SparkOptimizedWrite(
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    logger.debug(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
+    logger.debug(s"DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
     serializedOptions.foreach {
       case (k, v) =>
         val redactedValue =
@@ -404,7 +404,7 @@ class IndexTables4SparkOptimizedWrite(
           } else {
             v
           }
-        logger.debug(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+        logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
     }
 
     val addActions: Seq[AddAction] = messages.flatMap {
@@ -415,10 +415,10 @@ class IndexTables4SparkOptimizedWrite(
     // Determine if this should be an overwrite based on existing table state and mode
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
-      logger.debug("🔍 DEBUG: Using explicit overwrite flag (isOverwrite = true)")
+      logger.debug("DEBUG: Using explicit overwrite flag (isOverwrite = true)")
       true
     } else {
-      logger.debug("🔍 DEBUG: isOverwrite = false, checking other conditions")
+      logger.debug("DEBUG: isOverwrite = false, checking other conditions")
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
@@ -457,7 +457,7 @@ class IndexTables4SparkOptimizedWrite(
           val mapper = new ObjectMapper()
           mapper.registerModule(DefaultScalaModule)
           val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
-          logger.debug(s"🔍 V2 OPTIMIZED DEBUG: Extracted partition columns: $partitionCols")
+          logger.debug(s"V2 OPTIMIZED DEBUG: Extracted partition columns: $partitionCols")
           partitionCols
         } catch {
           case e: Exception =>
@@ -482,12 +482,12 @@ class IndexTables4SparkOptimizedWrite(
     try {
       // Use appropriate transaction log method based on write mode
       val version = if (shouldOverwrite) {
-        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         transactionLog.overwriteFiles(addActions)
       } else {
-        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
-        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} files")
+        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} files")
+        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} files")
         transactionLog.addFiles(addActions)
       }
 

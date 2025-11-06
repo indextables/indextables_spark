@@ -235,7 +235,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -302,7 +302,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters for SplitQuery conversion:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} mixed filters for SplitQuery conversion:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -355,7 +355,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} mixed filters:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -446,7 +446,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} filters:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -1096,18 +1096,18 @@ object FiltersToQueryConverter {
     // Try to translate as JSON field filter using parseQuery syntax
     jsonTranslator.translateFilterToParseQuery(filter) match {
       case Some(queryString) =>
-        logger.debug(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
+        logger.warn(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          logger.debug(s"JSON FILTER: Successfully parsed query: $queryString")
+          logger.warn(s"JSON FILTER: Successfully parsed query: $queryString")
           return Some(parsedQuery)
         } catch {
           case e: Exception =>
-            logger.debug(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
+            logger.warn(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
             // Fall through to regular filter handling
         }
       case None =>
-        logger.debug(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
+        logger.warn(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
         // Not a nested field filter, continue with regular filter handling
     }
 

@@ -59,7 +59,7 @@ case class IndexTables4SparkOptimizedWriterExec(
 
   /** Calculate the optimal number of shuffle partitions based on the target records per split. */
   private def calculateOptimalPartitions(): Int = {
-    logger.debug(s"🔍 CALCULATE PARTITIONS DEBUG: Starting with targetRecordsPerSplit=$targetRecordsPerSplit")
+    logger.debug(s"CALCULATE PARTITIONS DEBUG: Starting with targetRecordsPerSplit=$targetRecordsPerSplit")
     val spark = SparkSession.active
 
     // Try to get actual row count for better accuracy
@@ -112,7 +112,7 @@ case class IndexTables4SparkOptimizedWriterExec(
   }
 
   override protected def doExecute() = {
-    logger.debug(s"🔍 OPTIMIZED WRITE DEBUG: doExecute() called with targetRecordsPerSplit=$targetRecordsPerSplit")
+    logger.debug(s"OPTIMIZED WRITE DEBUG: doExecute() called with targetRecordsPerSplit=$targetRecordsPerSplit")
     val optimalPartitions = calculateOptimalPartitions()
 
     // Update metrics

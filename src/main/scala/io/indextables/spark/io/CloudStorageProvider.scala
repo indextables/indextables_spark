@@ -425,7 +425,7 @@ object CloudStorageProviderFactory {
           )
 
         if (logger.isInfoEnabled) {
-          logger.info(s"🔍 AWS Region resolved: $finalRegion")
+          logger.info(s"AWS Region resolved: $finalRegion")
         }
 
         // Only warn about AWS region when actually using S3 - not for Azure or other providers

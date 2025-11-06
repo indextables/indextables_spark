@@ -196,8 +196,8 @@ class IndexTables4SparkPartitionReader(
   private def initialize(): Unit = {
     if (!initialized) {
       try {
-        logger.debug(s"🔍 ENTERING initialize() for split: ${addAction.path}")
-        logger.debug(s"🔍 V2 PartitionReader initializing for split: ${addAction.path}")
+        logger.debug(s"ENTERING initialize() for split: ${addAction.path}")
+        logger.debug(s"V2 PartitionReader initializing for split: ${addAction.path}")
 
         // Record that this host has accessed this split for future scheduling locality
         val currentHostname = SplitLocationRegistry.getCurrentHostname
@@ -220,11 +220,11 @@ class IndexTables4SparkPartitionReader(
         }
 
         // Create cache configuration from Spark options
-        logger.debug(s"🔍 ABOUT TO CALL createCacheConfig()...")
-        logger.debug(s"🔍 Creating cache configuration for split read...")
+        logger.debug(s"ABOUT TO CALL createCacheConfig()...")
+        logger.debug(s"Creating cache configuration for split read...")
         val cacheConfig = createCacheConfig()
-        logger.debug(s"🔍 createCacheConfig() COMPLETED SUCCESSFULLY")
-        logger.debug(s"🔍 Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
+        logger.debug(s"createCacheConfig() COMPLETED SUCCESSFULLY")
+        logger.debug(s"Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
 
         // Create split search engine using footer offset optimization when available
         // Normalize URLs for tantivy4java compatibility (S3, Azure, etc.)
@@ -246,7 +246,7 @@ class IndexTables4SparkPartitionReader(
           )
         }
 
-        logger.debug(s"🔍 SPLIT PATH DEBUG:")
+        logger.debug(s"SPLIT PATH DEBUG:")
         logger.debug(s"  - addAction.path: ${addAction.path}")
         logger.debug(s"  - tablePath: ${tablePath.toString}")
         logger.debug(s"  - filePath (resolved): $filePath")
@@ -277,12 +277,12 @@ class IndexTables4SparkPartitionReader(
         }
 
         logger.debug(
-          s"🔍 RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined)
+          s"RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined)
               s"PRESENT (${addAction.docMappingJson.get.length} chars)"
             else "MISSING/NULL"}"
         )
         if (addAction.docMappingJson.isDefined) {
-          logger.debug(s"🔍 AddAction docMappingJson content preview: ${addAction.docMappingJson.get
+          logger.debug(s"AddAction docMappingJson content preview: ${addAction.docMappingJson.get
               .take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
         }
 
@@ -330,7 +330,7 @@ class IndexTables4SparkPartitionReader(
           }
 
         // Log the filters and limit for debugging
-        logger.debug(s"🔍 PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
+        logger.debug(s"PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
         logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
         logger.info(
           s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}"
@@ -340,9 +340,9 @@ class IndexTables4SparkPartitionReader(
         // Since partition values are stored in splits, we can apply all filters at the split level
         // (no need to exclude partition filters since they're queryable in the split data)
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.warn(s"🔍 PARTITION: Combined Filters: ${allFilters.length} total filters")
-        filters.foreach(f => logger.warn(s"🔍 PARTITION:   - Regular filter: $f"))
-        indexQueryFilters.foreach(f => logger.warn(s"🔍 PARTITION:   - IndexQuery filter: $f"))
+        logger.warn(s"PARTITION: Combined Filters: ${allFilters.length} total filters")
+        filters.foreach(f => logger.warn(s"PARTITION:   - Regular filter: $f"))
+        indexQueryFilters.foreach(f => logger.warn(s"PARTITION:   - IndexQuery filter: $f"))
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
@@ -738,12 +738,12 @@ class IndexTables4SparkDataWriter(
           tagSet.asScala.toSet
         }
         val originalDocMapping = Option(splitMetadata.getDocMappingJson())
-        logger.debug(s"🔍 EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined)
+        logger.debug(s"EXTRACTED docMappingJson from tantivy4java: ${if (originalDocMapping.isDefined)
             s"PRESENT (${originalDocMapping.get.length} chars)"
           else "MISSING/NULL"}")
 
         val docMapping = if (originalDocMapping.isDefined) {
-          logger.debug(s"🔍 docMappingJson FULL CONTENT: ${originalDocMapping.get}")
+          logger.debug(s"docMappingJson FULL CONTENT: ${originalDocMapping.get}")
           originalDocMapping
         } else {
           // WORKAROUND: If tantivy4java didn't provide docMappingJson, create a minimal schema mapping

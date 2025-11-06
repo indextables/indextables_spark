@@ -121,12 +121,12 @@ object TantivySearchEngine {
             val hadoopValue = Option(hadoopConf.get(sparkKey))
             val result      = sparkValue.orElse(hadoopValue)
 
-            logger.info(s"🔍 Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
+            logger.info(s"Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
             result
           }
 
           logger.debug(
-            s"🔍 Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})"
+            s"Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})"
           )
 
           io.indextables.spark.storage.SplitCacheConfig(

@@ -69,7 +69,7 @@ class TransactionLogCountScan(
         // Simple COUNT: Return schema with a single count column
         StructType(Seq(StructField("count", LongType, nullable = false)))
     }
-    logger.debug(s"🔍 TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
+    logger.debug(s"TRANSACTION LOG readSchema(): Returning schema with ${schema.fields.length} fields: ${schema.fieldNames.mkString(", ")}, hasAggregations=$hasAggregations")
     schema
   }
 
@@ -255,7 +255,7 @@ class TransactionLogCountBatch(
         !matchesFilter(file, child)
       case _ =>
         // Log warning for unhandled filters instead of silently including
-        logger.warn(s"🔍 TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file")
+        logger.warn(s"TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file")
         true
     }
   }

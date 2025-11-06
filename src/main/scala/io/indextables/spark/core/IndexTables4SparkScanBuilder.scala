@@ -84,7 +84,7 @@ class IndexTables4SparkScanBuilder(
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
         logger.debug(
-          s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
+          s"BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
@@ -109,7 +109,7 @@ class IndexTables4SparkScanBuilder(
       case Some(groupByColumns) =>
         // GROUP BY aggregation
         logger.info(
-          s"🔍 AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
+          s"AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
         )
         createGroupByAggregateScan(aggregation, groupByColumns)
       case None =>
@@ -621,7 +621,7 @@ class IndexTables4SparkScanBuilder(
     // For top-level fields, check directly
     if (!fastFields.contains(fieldName)) {
       logger.debug(
-        s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields.mkString(", ")})"
+        s"FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields.mkString(", ")})"
       )
       return false
     }
@@ -716,7 +716,7 @@ class IndexTables4SparkScanBuilder(
    */
   private def getActualFastFieldsFromSchema(): Set[String] =
     try {
-      logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
+      logger.debug("SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
 
       // Read existing files from transaction log to get docMappingJson
       val existingFiles = transactionLog.listFiles()
@@ -725,7 +725,7 @@ class IndexTables4SparkScanBuilder(
         .headOption // Get the first available doc mapping
 
       if (existingDocMapping.isDefined) {
-        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
+        logger.debug("SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
 
         // Parse the docMappingJson to extract fast field information
         import com.fasterxml.jackson.databind.JsonNode
@@ -757,11 +757,11 @@ class IndexTables4SparkScanBuilder(
           logger.debug(s"SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
           fastFields
         } else {
-          logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
+          logger.debug("SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
           Set.empty[String]
         }
       } else {
-        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
+        logger.debug("SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
         // Fall back to configuration-based validation for new tables
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -909,10 +909,10 @@ class IndexTables4SparkScanBuilder(
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
                 )
                 println(
-                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
                 )
                 false
               }
@@ -923,28 +923,28 @@ class IndexTables4SparkScanBuilder(
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
                 )
                 false
               }
             case DateType | TimestampType =>
               if (isFast) {
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
                 )
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
                 )
                 false
               }
@@ -1018,10 +1018,10 @@ class IndexTables4SparkScanBuilder(
           }
         case other =>
           println(
-            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
           )
           logger.info(
-            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
           )
           false
       }
