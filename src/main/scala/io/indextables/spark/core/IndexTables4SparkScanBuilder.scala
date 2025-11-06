@@ -52,7 +52,7 @@ class IndexTables4SparkScanBuilder(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScanBuilder])
 
-  logger.warn(s"🔍 SCAN BUILDER CREATED: NEW ScanBuilder instance ${System.identityHashCode(this)}")
+  logger.debug(s"SCAN BUILDER CREATED: NEW ScanBuilder instance ${System.identityHashCode(this)}")
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters      = Array.empty[Filter]
   private var requiredSchema      = schema
@@ -67,29 +67,29 @@ class IndexTables4SparkScanBuilder(
   private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
 
   override def build(): Scan = {
-    logger.debug(s"🔍 BUILD: ScanBuilder.build() called - aggregation: ${_pushedAggregation.isDefined}, filters: ${_pushedFilters.length}")
+    val aggregation = _pushedAggregation
+
+    logger.debug(s"BUILD: ScanBuilder.build() called on instance ${System.identityHashCode(this)}")
+    logger.debug(s"BUILD: Aggregation present: ${aggregation.isDefined}, filters: ${_pushedFilters.length}")
 
     // Check if we have aggregate pushdown
-    _pushedAggregation match {
-      case Some(aggregation) =>
-        logger.debug(s"🔍 BUILD: Creating aggregate scan for pushed aggregation: $aggregation")
-        logger.debug(s"🔍 BUILD: Creating aggregate scan for pushed aggregation")
-        // Return aggregate scan (will implement this next)
-        createAggregateScan(aggregation)
+    aggregation match {
+      case Some(agg) =>
+        logger.debug(s"BUILD: Creating aggregate scan for pushed aggregation")
+        createAggregateScan(agg)
       case None =>
         // Regular scan
-        logger.debug(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
-        logger.debug(s"🔍 BUILD: Creating regular scan (no aggregation pushdown)")
+        logger.debug(s"BUILD: Creating regular scan (no aggregation pushdown)")
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
         logger.debug(
-          s"🔍 BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
+          s"BUILD DEBUG: Extracted ${extractedIndexQueryFilters.length} IndexQuery filters directly from plan"
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
-        logger.warn(s"🔍 BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${_pushedFilters.length} pushed filters")
-        _pushedFilters.foreach(filter => logger.warn(s"🔍 BUILD:   - Creating scan with filter: $filter"))
+        logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${_pushedFilters.length} pushed filters")
+        _pushedFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
         new IndexTables4SparkScan(
           sparkSession,
           transactionLog,
@@ -109,19 +109,19 @@ class IndexTables4SparkScanBuilder(
       case Some(groupByColumns) =>
         // GROUP BY aggregation
         logger.info(
-          s"🔍 AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
+          s"AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
         )
         createGroupByAggregateScan(aggregation, groupByColumns)
       case None =>
         // Simple aggregation without GROUP BY
         // Check if we can use transaction log count optimization
         if (canUseTransactionLogCount(aggregation)) {
-          logger.debug(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
-          logger.debug(s"🔍 AGGREGATE SCAN: Using transaction log count optimization")
+          logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
+          logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
           createTransactionLogCountScan(aggregation)
         } else {
-          logger.debug(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan")
-          logger.debug(s"🔍 AGGREGATE SCAN: Creating simple aggregation scan")
+          logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
+          logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
           createSimpleAggregateScan(aggregation)
         }
     }
@@ -182,33 +182,37 @@ class IndexTables4SparkScanBuilder(
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
     aggregation.aggregateExpressions.foreach(expr =>
-      logger.debug(s"🔍 SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})")
+      logger.debug(s"SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})")
     )
-    logger.debug(s"🔍 SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
-    _pushedFilters.foreach(filter => logger.debug(s"🔍 SCAN BUILDER: Pushed filter: $filter"))
+    logger.debug(s"SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(filter => logger.debug(s"SCAN BUILDER: Pushed filter: $filter"))
 
     // Extract IndexQuery filters to check if we have any
     val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
-    logger.debug(s"🔍 SCAN BUILDER: Number of IndexQuery filters: ${indexQueryFilters.length}")
+    logger.debug(s"SCAN BUILDER: Number of IndexQuery filters: ${indexQueryFilters.length}")
 
     val result = aggregation.aggregateExpressions.length == 1 && {
       aggregation.aggregateExpressions.head match {
         case _: Count =>
-          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          // Transaction log optimization works when filters are only on partition columns
+          // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
+          // ensures all documents in a split have the same partition value
           val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"🔍 SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters")
+          logger.debug(s"SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _: CountStar =>
-          // Check if we only have partition filters or no filters, AND no IndexQuery filters
+          // Transaction log optimization works when filters are only on partition columns
+          // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
+          // ensures all documents in a split have the same partition value
           val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"🔍 SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters")
+          logger.debug(s"SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _ =>
-          logger.debug(s"🔍 SCAN BUILDER: Not a COUNT aggregation, cannot use transaction log")
+          logger.debug(s"SCAN BUILDER: Not a COUNT aggregation, cannot use transaction log")
           false
       }
     }
-    logger.debug(s"🔍 SCAN BUILDER: canUseTransactionLogCount returning: $result")
+    logger.debug(s"SCAN BUILDER: canUseTransactionLogCount returning: $result")
     result
   }
 
@@ -250,9 +254,9 @@ class IndexTables4SparkScanBuilder(
     new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    logger.warn(s"🔍 PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
+    logger.debug(s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
     filters.foreach { filter =>
-      logger.warn(s"🔍 PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
+      logger.debug(s"PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
     }
 
     // Since IndexQuery expressions are now handled directly by the V2IndexQueryExpressionRule,
@@ -262,9 +266,9 @@ class IndexTables4SparkScanBuilder(
     // Store supported filters
     _pushedFilters = supported
 
-    logger.warn(s"🔍 PUSHFILTERS: Supported=${supported.length}, Unsupported=${unsupported.length}")
-    supported.foreach(filter => logger.warn(s"🔍 PUSHFILTERS:   ✓ SUPPORTED: $filter"))
-    unsupported.foreach(filter => logger.warn(s"🔍 PUSHFILTERS:   ✗ UNSUPPORTED: $filter"))
+    logger.debug(s"PUSHFILTERS: Supported=${supported.length}, Unsupported=${unsupported.length}")
+    supported.foreach(filter => logger.debug(s"PUSHFILTERS:   ✓ SUPPORTED: $filter"))
+    unsupported.foreach(filter => logger.debug(s"PUSHFILTERS:   ✗ UNSUPPORTED: $filter"))
 
     logger.info(s"Filter pushdown summary:")
     logger.info(s"  - ${supported.length} filters FULLY SUPPORTED by data source (will NOT be re-evaluated by Spark)")
@@ -278,8 +282,8 @@ class IndexTables4SparkScanBuilder(
   }
 
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
-    logger.debug(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
-    logger.debug(s"🔍 PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
+    logger.debug(s"PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
+    logger.debug(s"PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
     predicates.foreach { predicate =>
       println(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
       logger.info(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
@@ -321,68 +325,72 @@ class IndexTables4SparkScanBuilder(
     // This enables proper distributed aggregation where:
     // - AVG is transformed to SUM + COUNT by Spark
     // - Partial results from each partition are combined correctly
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: supportCompletePushDown called - returning false for distributed aggregation")
+    logger.debug(s"AGGREGATE PUSHDOWN: supportCompletePushDown called - returning false for distributed aggregation")
     false
   }
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
+    logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Received aggregation request: $aggregation")
+    logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(f => logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Pushed filter: $f"))
 
     // Check if this is a GROUP BY aggregation
     val groupByExpressions = aggregation.groupByExpressions()
     val hasGroupBy         = groupByExpressions != null && groupByExpressions.nonEmpty
 
-    logger.debug(s"🔍 GROUP BY CHECK: hasGroupBy = $hasGroupBy")
+    logger.debug(s"GROUP BY CHECK: hasGroupBy = $hasGroupBy")
     if (hasGroupBy) {
-      logger.debug(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
-      logger.debug(s"🔍 GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
-      groupByExpressions.foreach(expr => logger.debug(s"🔍 GROUP BY EXPRESSION: $expr"))
+      logger.debug(s"GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
+      logger.debug(s"GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
+      groupByExpressions.foreach(expr => logger.debug(s"GROUP BY EXPRESSION: $expr"))
 
       // Extract GROUP BY column names
       val groupByColumns = groupByExpressions.map(extractFieldNameFromExpression)
-      logger.debug(s"🔍 GROUP BY COLUMNS: ${groupByColumns.mkString(", ")}")
+      logger.debug(s"GROUP BY COLUMNS: ${groupByColumns.mkString(", ")}")
 
       // Validate GROUP BY columns are supported - throw exception if not
-      logger.debug(s"🔍 GROUP BY VALIDATION: About to check areGroupByColumnsSupported")
+      logger.debug(s"GROUP BY VALIDATION: About to check areGroupByColumnsSupported")
       validateGroupByColumnsOrThrow(groupByColumns)
-      logger.debug(s"🔍 GROUP BY VALIDATION: areGroupByColumnsSupported passed")
+      logger.debug(s"GROUP BY VALIDATION: areGroupByColumnsSupported passed")
 
       // Check if aggregation is compatible with GROUP BY - throw exception if not
-      logger.debug(s"🔍 GROUP BY VALIDATION: About to check isAggregationCompatibleWithGroupBy")
+      logger.debug(s"GROUP BY VALIDATION: About to check isAggregationCompatibleWithGroupBy")
       validateAggregationCompatibilityOrThrow(aggregation)
-      logger.debug(s"🔍 GROUP BY VALIDATION: isAggregationCompatibleWithGroupBy passed")
+      logger.debug(s"GROUP BY VALIDATION: isAggregationCompatibleWithGroupBy passed")
 
       // Store GROUP BY information
       _pushedGroupBy = Some(groupByColumns)
-      logger.debug(s"🔍 GROUP BY PUSHDOWN: ACCEPTED - GROUP BY will be pushed down")
+      logger.debug(s"GROUP BY PUSHDOWN: ACCEPTED - GROUP BY will be pushed down")
     } else {
-      logger.debug(s"🔍 SIMPLE AGGREGATION: No GROUP BY expressions found")
+      logger.debug(s"SIMPLE AGGREGATION: No GROUP BY expressions found")
     }
 
     // Validate aggregation is supported (both simple and GROUP BY)
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: About to check isAggregationSupported")
+    logger.debug(s"AGGREGATE PUSHDOWN: About to check isAggregationSupported")
     if (!isAggregationSupported(aggregation)) {
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
+      logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - aggregation not supported")
       return false
     }
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: isAggregationSupported passed")
+    logger.debug(s"AGGREGATE PUSHDOWN: isAggregationSupported passed")
 
     // Check if filters are compatible with aggregate pushdown
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: About to check areFiltersCompatibleWithAggregation")
-    if (!areFiltersCompatibleWithAggregation()) {
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
-      logger.debug(s"🔍 AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
-      return false
+    logger.debug(s"AGGREGATE PUSHDOWN: About to check areFiltersCompatibleWithAggregation")
+    try {
+      if (!areFiltersCompatibleWithAggregation()) {
+        logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - filters not compatible")
+        return false
+      }
+      logger.debug(s"AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
+    } catch {
+      case e: IllegalArgumentException =>
+        logger.debug(s"AGGREGATE PUSHDOWN: REJECTED - ${e.getMessage}")
+        return false
     }
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: areFiltersCompatibleWithAggregation passed")
 
     // Store for later use in build()
     _pushedAggregation = Some(aggregation)
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: ACCEPTED - aggregation will be pushed down")
-    logger.debug(s"🔍 AGGREGATE PUSHDOWN: Returning true")
+    logger.debug(s"AGGREGATE PUSHDOWN: ✅ ACCEPTED - aggregation will be pushed down")
+    logger.debug(s"AGGREGATE PUSHDOWN: Returning true")
     true
   }
 
@@ -391,14 +399,14 @@ class IndexTables4SparkScanBuilder(
     : String = {
     // Use toString and try to extract field name
     val exprStr = expression.toString
-    logger.debug(s"🔍 FIELD EXTRACTION: Expression string: '$exprStr'")
-    logger.debug(s"🔍 FIELD EXTRACTION: Expression class: ${expression.getClass.getSimpleName}")
+    logger.debug(s"FIELD EXTRACTION: Expression string: '$exprStr'")
+    logger.debug(s"FIELD EXTRACTION: Expression class: ${expression.getClass.getSimpleName}")
 
     // Check if it's a FieldReference by class name
     if (expression.getClass.getSimpleName == "FieldReference") {
       // For FieldReference, toString() returns the field name directly
       val fieldName = exprStr
-      logger.debug(s"🔍 FIELD EXTRACTION: Extracted field name from FieldReference: '$fieldName'")
+      logger.debug(s"FIELD EXTRACTION: Extracted field name from FieldReference: '$fieldName'")
       fieldName
     } else if (exprStr.startsWith("FieldReference(")) {
       // Fallback for other FieldReference string formats
@@ -406,15 +414,15 @@ class IndexTables4SparkScanBuilder(
       pattern.findFirstMatchIn(exprStr) match {
         case Some(m) =>
           val fieldName = m.group(1)
-          logger.debug(s"🔍 FIELD EXTRACTION: Extracted field name from pattern: '$fieldName'")
+          logger.debug(s"FIELD EXTRACTION: Extracted field name from pattern: '$fieldName'")
           fieldName
         case None =>
-          logger.debug(s"🔍 FIELD EXTRACTION: Could not extract field name from expression: $expression")
+          logger.debug(s"FIELD EXTRACTION: Could not extract field name from expression: $expression")
           logger.warn(s"Could not extract field name from expression: $expression")
           "unknown_field"
       }
     } else {
-      logger.debug(s"🔍 FIELD EXTRACTION: Unsupported expression type for field extraction: $expression")
+      logger.debug(s"FIELD EXTRACTION: Unsupported expression type for field extraction: $expression")
       logger.warn(s"Unsupported expression type for field extraction: $expression")
       "unknown_field"
     }
@@ -426,10 +434,10 @@ class IndexTables4SparkScanBuilder(
     filter match {
       case EqualTo(attribute, _)       => isFieldSuitableForExactMatching(attribute)
       case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
-      case GreaterThan(attribute, _)        => isNestedJsonField(attribute)  // Support range on JSON fields
-      case GreaterThanOrEqual(attribute, _) => isNestedJsonField(attribute)  // Support range on JSON fields
-      case LessThan(attribute, _)           => isNestedJsonField(attribute)  // Support range on JSON fields
-      case LessThanOrEqual(attribute, _)    => isNestedJsonField(attribute)  // Support range on JSON fields
+      case GreaterThan(attribute, _)        => true  // Support range on all fields (both regular and JSON)
+      case GreaterThanOrEqual(attribute, _) => true  // Support range on all fields (both regular and JSON)
+      case LessThan(attribute, _)           => true  // Support range on all fields (both regular and JSON)
+      case LessThanOrEqual(attribute, _)    => true  // Support range on all fields (both regular and JSON)
       case _: In                       => true
       case IsNull(attribute)           => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
       case IsNotNull(attribute)        => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
@@ -451,7 +459,7 @@ class IndexTables4SparkScanBuilder(
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
     // For V2 predicates, we need to inspect the actual predicate type
     // For now, let's accept all predicates and see what we get
-    logger.debug(s"🔍 isSupportedPredicate: Checking predicate $predicate")
+    logger.debug(s"isSupportedPredicate: Checking predicate $predicate")
 
     // TODO: Implement proper predicate type checking based on Spark's V2 Predicate types
     true // Accept all for now to see what comes through
@@ -465,7 +473,7 @@ class IndexTables4SparkScanBuilder(
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
     // Check if this is a nested field (JSON field)
     if (attribute.contains(".")) {
-      logger.debug(s"🔍 Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")
+      logger.debug(s"Field '$attribute' is a nested JSON field - supporting pushdown via JsonPredicateTranslator")
       return true
     }
 
@@ -475,17 +483,17 @@ class IndexTables4SparkScanBuilder(
 
     fieldType match {
       case Some("string") =>
-        logger.debug(s"🔍 Field '$attribute' configured as 'string' - supporting exact matching")
+        logger.debug(s"Field '$attribute' configured as 'string' - supporting exact matching")
         true
       case Some("text") =>
-        logger.debug(s"🔍 Field '$attribute' configured as 'text' - deferring exact matching to Spark")
+        logger.debug(s"Field '$attribute' configured as 'text' - deferring exact matching to Spark")
         false
       case Some(other) =>
-        logger.debug(s"🔍 Field '$attribute' configured as '$other' - supporting exact matching")
+        logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
         true
       case None =>
         // No explicit configuration - assume string type (new default)
-        logger.debug(s"🔍 Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
+        logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
         true
     }
   }
@@ -495,19 +503,19 @@ class IndexTables4SparkScanBuilder(
    * registry by using instance-scoped storage.
    */
   private def extractIndexQueriesFromCurrentPlan(): Array[Any] = {
-    logger.debug(s"🔍 EXTRACT DEBUG: Starting direct IndexQuery extraction")
+    logger.debug(s"EXTRACT DEBUG: Starting direct IndexQuery extraction")
 
     // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this relation object
     relationForIndexQuery match {
       case Some(relation) =>
         val storedQueries = IndexTables4SparkScanBuilder.getIndexQueries(relation)
         if (storedQueries.nonEmpty) {
-          logger.debug(s"🔍 EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from relation storage")
+          logger.debug(s"EXTRACT DEBUG: Found ${storedQueries.length} IndexQuery filters from relation storage")
           storedQueries.foreach(q => logger.debug(s"  - Relation IndexQuery: $q"))
           return storedQueries.toArray
         }
       case None =>
-        logger.debug(s"🔍 EXTRACT DEBUG: No relation object available from ThreadLocal")
+        logger.debug(s"EXTRACT DEBUG: No relation object available from ThreadLocal")
     }
 
     // Method 2: Fall back to registry (temporary until we fully eliminate it)
@@ -516,15 +524,15 @@ class IndexTables4SparkScanBuilder(
       case Some(queryId) =>
         val registryQueries = IndexQueryRegistry.getIndexQueriesForQuery(queryId)
         if (registryQueries.nonEmpty) {
-          logger.debug(s"🔍 EXTRACT DEBUG: Found ${registryQueries.length} IndexQuery filters from registry as fallback")
+          logger.debug(s"EXTRACT DEBUG: Found ${registryQueries.length} IndexQuery filters from registry as fallback")
           registryQueries.foreach(q => logger.debug(s"  - Registry IndexQuery: $q"))
           return registryQueries.toArray
         }
       case None =>
-        logger.debug(s"🔍 EXTRACT DEBUG: No query ID available in registry")
+        logger.debug(s"EXTRACT DEBUG: No query ID available in registry")
     }
 
-    logger.debug(s"🔍 EXTRACT DEBUG: No IndexQuery filters found using any method")
+    logger.debug(s"EXTRACT DEBUG: No IndexQuery filters found using any method")
     Array.empty[Any]
   }
 
@@ -532,51 +540,51 @@ class IndexTables4SparkScanBuilder(
   private def isAggregationSupported(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar, Sum, Avg, Min, Max}
 
-    logger.debug(s"🔍 AGGREGATE VALIDATION: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
+    logger.debug(s"AGGREGATE VALIDATION: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
     aggregation.aggregateExpressions.zipWithIndex.foreach {
       case (expr, index) =>
-        logger.debug(s"🔍 AGGREGATE VALIDATION: Expression $index: $expr (${expr.getClass.getSimpleName})")
+        logger.debug(s"AGGREGATE VALIDATION: Expression $index: $expr (${expr.getClass.getSimpleName})")
     }
 
     val result = aggregation.aggregateExpressions.forall { expr =>
       val isSupported = expr match {
         case _: Count =>
-          logger.debug(s"🔍 AGGREGATE VALIDATION: COUNT aggregation is supported")
-          logger.debug(s"🔍 AGGREGATE VALIDATION: COUNT aggregation is supported")
+          logger.debug(s"AGGREGATE VALIDATION: COUNT aggregation is supported")
+          logger.debug(s"AGGREGATE VALIDATION: COUNT aggregation is supported")
           true
         case _: CountStar =>
-          logger.debug(s"🔍 AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
-          logger.debug(s"🔍 AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
+          logger.debug(s"AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
+          logger.debug(s"AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
           true
         case sum: Sum =>
           val fieldName   = getFieldName(sum.column)
           val isSupported = isNumericFastField(fieldName)
-          logger.debug(s"🔍 AGGREGATE VALIDATION: SUM on field '$fieldName' supported: $isSupported")
+          logger.debug(s"AGGREGATE VALIDATION: SUM on field '$fieldName' supported: $isSupported")
           isSupported
         case avg: Avg =>
           val fieldName   = getFieldName(avg.column)
           val isSupported = isNumericFastField(fieldName)
-          logger.debug(s"🔍 AGGREGATE VALIDATION: AVG on field '$fieldName' supported: $isSupported")
+          logger.debug(s"AGGREGATE VALIDATION: AVG on field '$fieldName' supported: $isSupported")
           isSupported
         case min: Min =>
           val fieldName   = getFieldName(min.column)
           val isSupported = isNumericFastField(fieldName)
-          logger.debug(s"🔍 AGGREGATE VALIDATION: MIN on field '$fieldName' supported: $isSupported")
+          logger.debug(s"AGGREGATE VALIDATION: MIN on field '$fieldName' supported: $isSupported")
           isSupported
         case max: Max =>
           val fieldName   = getFieldName(max.column)
           val isSupported = isNumericFastField(fieldName)
-          logger.debug(s"🔍 AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
+          logger.debug(s"AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
           isSupported
         case other =>
-          logger.debug(s"🔍 AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
-          logger.debug(s"🔍 AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+          logger.debug(s"AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+          logger.debug(s"AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
           false
       }
-      logger.debug(s"🔍 AGGREGATE VALIDATION: Expression $expr supported: $isSupported")
+      logger.debug(s"AGGREGATE VALIDATION: Expression $expr supported: $isSupported")
       isSupported
     }
-    logger.debug(s"🔍 AGGREGATE VALIDATION: Overall aggregation supported: $result")
+    logger.debug(s"AGGREGATE VALIDATION: Overall aggregation supported: $result")
     result
   }
 
@@ -595,23 +603,39 @@ class IndexTables4SparkScanBuilder(
     // Get actual fast fields from the schema/docMappingJson
     val fastFields = getActualFastFieldsFromSchema()
 
+    // For nested JSON fields (containing dots), check if the field itself OR its parent struct is marked as fast
+    if (fieldName.contains(".")) {
+      val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+      val isFieldFast = fastFields.contains(fieldName)
+      val isParentFast = fastFields.contains(parentField)
+
+      if (isFieldFast || isParentFast) {
+        logger.debug(s"FAST FIELD VALIDATION: ✓ Nested field '$fieldName' accepted (field_fast=$isFieldFast, parent_fast=$isParentFast, parent='$parentField')")
+        return true
+      } else {
+        logger.debug(s"FAST FIELD VALIDATION: ✗ Neither '$fieldName' nor parent '$parentField' marked as fast (available: ${fastFields.mkString(", ")})")
+        return false
+      }
+    }
+
+    // For top-level fields, check directly
     if (!fastFields.contains(fieldName)) {
-      logger.info(
-        s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema, rejecting aggregate pushdown"
+      logger.debug(
+        s"FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields.mkString(", ")})"
       )
       return false
     }
 
-    // Check if field is numeric
+    // Check if top-level field is numeric
     schema.fields.find(_.name == fieldName) match {
       case Some(field) if isNumericType(field.dataType) =>
-        logger.debug(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is numeric and fast - supported")
+        logger.debug(s"FAST FIELD VALIDATION: Field '$fieldName' is numeric and fast - supported")
         true
       case Some(field) =>
-        logger.debug(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' is not numeric (${field.dataType}) - not supported")
+        logger.debug(s"FAST FIELD VALIDATION: Field '$fieldName' is not numeric (${field.dataType}) - not supported")
         false
       case None =>
-        logger.debug(s"🔍 FAST FIELD VALIDATION: Field '$fieldName' not found in schema - not supported")
+        logger.debug(s"FAST FIELD VALIDATION: Field '$fieldName' not found in schema - not supported")
         false
     }
   }
@@ -655,10 +679,10 @@ class IndexTables4SparkScanBuilder(
 
         // Unsupported filter types that would break aggregation accuracy
         case filter if filter.getClass.getSimpleName.contains("RLike") =>
-          logger.debug(s"🔍 FILTER COMPATIBILITY: Regular expression filter not supported for aggregation: $filter")
+          logger.debug(s"FILTER COMPATIBILITY: Regular expression filter not supported for aggregation: $filter")
           false
         case other =>
-          logger.debug(s"🔍 FILTER COMPATIBILITY: Unknown filter type, assuming supported: $other")
+          logger.debug(s"FILTER COMPATIBILITY: Unknown filter type, assuming supported: $other")
           true
       }
 
@@ -682,7 +706,7 @@ class IndexTables4SparkScanBuilder(
       metadata.partitionColumns.toSet
     } catch {
       case e: Exception =>
-        logger.debug(s"🔍 PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
+        logger.debug(s"PARTITION COLUMNS: Failed to get partition columns from transaction log: ${e.getMessage}")
         Set.empty
     }
 
@@ -692,7 +716,7 @@ class IndexTables4SparkScanBuilder(
    */
   private def getActualFastFieldsFromSchema(): Set[String] =
     try {
-      logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
+      logger.debug("SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
 
       // Read existing files from transaction log to get docMappingJson
       val existingFiles = transactionLog.listFiles()
@@ -701,7 +725,7 @@ class IndexTables4SparkScanBuilder(
         .headOption // Get the first available doc mapping
 
       if (existingDocMapping.isDefined) {
-        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
+        logger.debug("SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
 
         // Parse the docMappingJson to extract fast field information
         import com.fasterxml.jackson.databind.JsonNode
@@ -709,6 +733,7 @@ class IndexTables4SparkScanBuilder(
         import scala.jdk.CollectionConverters._
 
         val mappingJson = existingDocMapping.get
+        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Full docMappingJson: ${mappingJson.take(500)}${if (mappingJson.length > 500) "..." else ""}")
         val docMapping  = JsonUtil.mapper.readTree(mappingJson)
 
         if (docMapping.isArray) {
@@ -717,23 +742,26 @@ class IndexTables4SparkScanBuilder(
             val isFast = Option(fieldNode.get("fast"))
               .map(_.asBoolean())
               .getOrElse(false)
+            val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
+
+            logger.debug(s"SCHEMA FAST FIELD VALIDATION: Field entry: name=${fieldName.getOrElse("N/A")}, fast=$isFast, type=$fieldType")
 
             if (isFast && fieldName.isDefined) {
-              logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Found fast field: ${fieldName.get}")
+              logger.debug(s"SCHEMA FAST FIELD VALIDATION: ✓ Found fast field: ${fieldName.get}")
               Some(fieldName.get)
             } else {
               None
             }
           }.toSet
 
-          logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
+          logger.debug(s"SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
           fastFields
         } else {
-          logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
+          logger.debug("SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
           Set.empty[String]
         }
       } else {
-        logger.debug("🔍 SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
+        logger.debug("SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
         // Fall back to configuration-based validation for new tables
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -746,7 +774,7 @@ class IndexTables4SparkScanBuilder(
       }
     } catch {
       case e: Exception =>
-        logger.debug(s"🔍 SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
+        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
         // Fall back to configuration-based validation
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -771,29 +799,41 @@ class IndexTables4SparkScanBuilder(
     // Exclude partition columns from fast field validation
     val nonPartitionFilterFields = filterFields -- partitionColumns
 
-    logger.debug(s"🔍 FILTER VALIDATION: All filter fields: ${filterFields.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION: Partition columns: ${partitionColumns.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION: Non-partition filter fields: ${nonPartitionFilterFields.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION: Fast fields from schema: ${fastFields.mkString(", ")}")
-    logger.debug(s"🔍 FILTER VALIDATION DEBUG: filterFields=$filterFields, partitionColumns=$partitionColumns, nonPartitionFilterFields=$nonPartitionFilterFields, fastFields=$fastFields")
+    logger.debug(s"FILTER VALIDATION: Filter: $filter")
+    logger.debug(s"FILTER VALIDATION: All filter fields: ${filterFields.mkString(", ")}")
+    logger.debug(s"FILTER VALIDATION: Non-partition filter fields: ${nonPartitionFilterFields.mkString(", ")}")
+    logger.debug(s"FILTER VALIDATION: Fast fields from schema: ${fastFields.mkString(", ")}")
 
     // If all filter fields are partition columns, we don't need fast fields (transaction log optimization)
     if (nonPartitionFilterFields.isEmpty) {
-      logger.debug(s"🔍 FILTER VALIDATION: All filters are on partition columns - no fast fields required")
+      logger.debug(s"FILTER VALIDATION: All filters are on partition columns - no fast fields required")
       return true
     }
 
     // Check if all non-partition filter fields are configured as fast fields
-    val missingFastFields = nonPartitionFilterFields.filterNot(fastFields.contains)
-    logger.debug(s"🔍 FILTER VALIDATION DEBUG: missingFastFields=$missingFastFields")
+    // For nested JSON fields (e.g., "metadata.field1"), check if either the field itself
+    // OR its parent (e.g., "metadata") is marked as fast
+    val missingFastFields = nonPartitionFilterFields.filterNot { fieldName =>
+      if (fieldName.contains(".")) {
+        // Nested field - check both field and parent
+        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
+        val isFieldFast = fastFields.contains(fieldName)
+        val isParentFast = fastFields.contains(parentField)
+        isFieldFast || isParentFast
+      } else {
+        // Top-level field - direct check
+        fastFields.contains(fieldName)
+      }
+    }
+    logger.debug(s"FILTER VALIDATION DEBUG: missingFastFields=$missingFastFields")
 
     if (missingFastFields.nonEmpty) {
       val columnList        = missingFastFields.mkString("'", "', '", "'")
       val currentFastFields = if (fastFields.nonEmpty) fastFields.mkString("'", "', '", "'") else "none"
 
-      logger.debug(s"🔍 FILTER FAST FIELD VALIDATION: Missing fast fields for filter: $columnList")
-      logger.debug(s"🔍 FILTER FAST FIELD VALIDATION: Current fast fields from schema: $currentFastFields")
-      logger.debug(s"🔍 FILTER FAST FIELD VALIDATION: Filter rejected for aggregation pushdown: $filter")
+      logger.debug(s"FILTER FAST FIELD VALIDATION: Missing fast fields for filter: $columnList")
+      logger.debug(s"FILTER FAST FIELD VALIDATION: Current fast fields from schema: $currentFastFields")
+      logger.debug(s"FILTER FAST FIELD VALIDATION: Filter rejected for aggregation pushdown: $filter")
 
       throw new IllegalArgumentException(
         s"""COUNT aggregation with filters requires fast field configuration.
@@ -832,23 +872,23 @@ class IndexTables4SparkScanBuilder(
       case f: org.apache.spark.sql.sources.Or =>
         extractFieldNamesFromFilter(f.left) ++ extractFieldNamesFromFilter(f.right)
       case other =>
-        logger.debug(s"🔍 FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
+        logger.debug(s"FILTER FIELD EXTRACTION: Unknown filter type, cannot extract fields: $other")
         Set.empty[String]
     }
 
   /** Check if GROUP BY columns are supported for pushdown. */
   private def areGroupByColumnsSupported(groupByColumns: Array[String]): Boolean = {
-    logger.debug(s"🔍 GROUP BY VALIDATION: Checking ${groupByColumns.length} columns: ${groupByColumns.mkString(", ")}")
-    logger.debug(s"🔍 GROUP BY VALIDATION: Schema fields: ${schema.fields.map(_.name).mkString(", ")}")
+    logger.debug(s"GROUP BY VALIDATION: Checking ${groupByColumns.length} columns: ${groupByColumns.mkString(", ")}")
+    logger.debug(s"GROUP BY VALIDATION: Schema fields: ${schema.fields.map(_.name).mkString(", ")}")
 
     groupByColumns.forall { columnName =>
-      logger.debug(s"🔍 GROUP BY VALIDATION: Checking column '$columnName'")
+      logger.debug(s"GROUP BY VALIDATION: Checking column '$columnName'")
       // Check if the column exists in the schema
       val fieldExists = schema.fields.exists(_.name == columnName)
-      logger.debug(s"🔍 GROUP BY VALIDATION: Field '$columnName' exists: $fieldExists")
+      logger.debug(s"GROUP BY VALIDATION: Field '$columnName' exists: $fieldExists")
       if (!fieldExists) {
-        logger.debug(s"🔍 GROUP BY VALIDATION: Field '$columnName' not found in schema")
-        logger.debug(s"🔍 GROUP BY VALIDATION: Field '$columnName' not found in schema")
+        logger.debug(s"GROUP BY VALIDATION: Field '$columnName' not found in schema")
+        logger.debug(s"GROUP BY VALIDATION: Field '$columnName' not found in schema")
         return false
       }
 
@@ -864,53 +904,53 @@ class IndexTables4SparkScanBuilder(
           field.dataType match {
             case StringType =>
               if (isFast) {
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
+                logger.debug(s"GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
+                logger.debug(s"GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
                 )
                 println(
-                  s"🔍 GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
+                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
                 )
                 false
               }
             case IntegerType | LongType =>
               if (isFast) {
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
-                logger.debug(s"🔍 GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
+                logger.debug(s"GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
+                logger.debug(s"GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
+                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
                 )
                 false
               }
             case DateType | TimestampType =>
               if (isFast) {
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
+                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
                 )
                 true
               } else {
                 logger.info(
-                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
                 )
                 logger.debug(
-                  s"🔍 GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
+                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
                 )
                 false
               }
             case _ =>
-              logger.debug(s"🔍 GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
-              logger.debug(s"🔍 GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
+              logger.debug(s"GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
+              logger.debug(s"GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
               false
           }
         case None => false
@@ -921,74 +961,74 @@ class IndexTables4SparkScanBuilder(
   /** Check if the current aggregation is compatible with GROUP BY. */
   private def isAggregationCompatibleWithGroupBy(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate._
-    logger.debug(s"🔍 GROUP BY COMPATIBILITY: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
+    logger.debug(s"GROUP BY COMPATIBILITY: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
 
     // Check each aggregate expression - for GROUP BY, ALL aggregated fields must be fast fields
     val result = aggregation.aggregateExpressions.forall { expr =>
       val isCompatible = expr match {
         case _: Count =>
-          logger.debug(s"🔍 GROUP BY COMPATIBILITY: COUNT is compatible with GROUP BY (no field required)")
+          logger.debug(s"GROUP BY COMPATIBILITY: COUNT is compatible with GROUP BY (no field required)")
           true
         case _: CountStar =>
-          logger.debug(s"🔍 GROUP BY COMPATIBILITY: COUNT(*) is compatible with GROUP BY (no field required)")
+          logger.debug(s"GROUP BY COMPATIBILITY: COUNT(*) is compatible with GROUP BY (no field required)")
           true
         case sum: Sum =>
           val fieldName = getFieldName(sum.column)
           val isFast    = isNumericFastField(fieldName)
           if (isFast) {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) is compatible with GROUP BY (fast field)")
+            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) is compatible with GROUP BY (fast field)")
             true
           } else {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
             false
           }
         case avg: Avg =>
           val fieldName = getFieldName(avg.column)
           val isFast    = isNumericFastField(fieldName)
           if (isFast) {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) is compatible with GROUP BY (fast field)")
+            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) is compatible with GROUP BY (fast field)")
             true
           } else {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
             false
           }
         case min: Min =>
           val fieldName = getFieldName(min.column)
           val isFast    = isNumericFastField(fieldName)
           if (isFast) {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) is compatible with GROUP BY (fast field)")
+            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) is compatible with GROUP BY (fast field)")
             true
           } else {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
             false
           }
         case max: Max =>
           val fieldName = getFieldName(max.column)
           val isFast    = isNumericFastField(fieldName)
           if (isFast) {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) is compatible with GROUP BY (fast field)")
+            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) is compatible with GROUP BY (fast field)")
             true
           } else {
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"🔍 GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
+            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
             false
           }
         case other =>
           println(
-            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
           )
           logger.info(
-            s"🔍 GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
+            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
           )
           false
       }
-      logger.debug(s"🔍 GROUP BY COMPATIBILITY: Expression $expr compatible: $isCompatible")
+      logger.debug(s"GROUP BY COMPATIBILITY: Expression $expr compatible: $isCompatible")
       isCompatible
     }
-    logger.debug(s"🔍 GROUP BY COMPATIBILITY: Overall compatibility: $result")
+    logger.debug(s"GROUP BY COMPATIBILITY: Overall compatibility: $result")
     result
   }
 
@@ -1153,6 +1193,7 @@ object IndexTables4SparkScanBuilder {
   private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
   private val currentRelationId: ThreadLocal[Option[Int]]  = ThreadLocal.withInitial(() => None)
 
+
   /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
   def setCurrentRelation(relation: AnyRef): Unit = {
     // Use relation object identity - this is stable within a query execution
@@ -1215,4 +1256,5 @@ object IndexTables4SparkScanBuilder {
     val size = relationIndexQueries.synchronized(relationIndexQueries.size())
     s"IndexQuery Cache Stats - Size: $size (WeakHashMap)"
   }
+
 }

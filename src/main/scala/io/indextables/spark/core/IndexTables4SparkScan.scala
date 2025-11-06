@@ -52,16 +52,16 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
-  logger.warn(s"🔍 SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
-  pushedFilters.foreach(f => logger.warn(s"🔍 SCAN CONSTRUCTION:   - Filter: $f"))
+  logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
+  pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
 
   override def readSchema(): StructType = readSchema
 
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
-    logger.warn(s"🔍 PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
-    pushedFilters.foreach(f => logger.warn(s"🔍 PLAN PARTITIONS:   - Filter: $f"))
+    logger.debug(s"PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
+    pushedFilters.foreach(f => logger.debug(s"PLAN PARTITIONS:   - Filter: $f"))
 
     val addActions = transactionLog.listFiles()
 
@@ -115,15 +115,15 @@ class IndexTables4SparkScan(
       }
     }
 
-    logger.debug(s"🔍 SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
+    logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
 
     println(s"🗺️  [DRIVER-SCAN] Planning ${filteredActions.length} partitions")
 
     val partitions = filteredActions.zipWithIndex.map {
       case (addAction, index) =>
         println(s"🗺️  [DRIVER-SCAN] Creating partition $index for split: ${addAction.path}")
-        logger.warn(s"🔍 CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
-        pushedFilters.foreach(f => logger.warn(s"🔍 CREATE PARTITION:   - Filter: $f"))
+        logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
+        pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
           new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()
@@ -175,39 +175,36 @@ class IndexTables4SparkScan(
     }
 
   def applyDataSkipping(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
-    println(
-      s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
-    )
-    logger.warn(
-      s"🔍 DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
+    logger.debug(
+      s"DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
     )
     filters.foreach { f =>
-      logger.debug(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
-      logger.debug(s"🔍 DATA SKIPPING DEBUG: Filter: $f")
+      logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
+      logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
     }
 
     if (filters.isEmpty) {
-      logger.debug(s"🔍 DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")
+      logger.debug(s"DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")
       return addActions
     }
 
     val partitionColumns = transactionLog.getPartitionColumns()
-    logger.debug(s"🔍 DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
+    logger.debug(s"DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
     val initialCount = addActions.length
 
     // Debug: Print AddAction details
     addActions.zipWithIndex.foreach {
       case (action, index) =>
-        logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - path: ${action.path}")
-        logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - partitionValues: ${action.partitionValues}")
+        logger.debug(s"DATA SKIPPING DEBUG: AddAction $index - path: ${action.path}")
+        logger.debug(s"DATA SKIPPING DEBUG: AddAction $index - partitionValues: ${action.partitionValues}")
         action.numRecords.foreach { numRecs =>
-          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - numRecords: $numRecs")
+          logger.debug(s"DATA SKIPPING DEBUG: AddAction $index - numRecords: $numRecs")
         }
         action.minValues.foreach { minVals =>
-          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - minValues: $minVals")
+          logger.debug(s"DATA SKIPPING DEBUG: AddAction $index - minValues: $minVals")
         }
         action.maxValues.foreach { maxVals =>
-          logger.debug(s"🔍 DATA SKIPPING DEBUG: AddAction $index - maxValues: $maxVals")
+          logger.debug(s"DATA SKIPPING DEBUG: AddAction $index - maxValues: $maxVals")
         }
     }
 
@@ -292,19 +289,19 @@ class IndexTables4SparkScan(
   private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
     import org.apache.spark.sql.sources._
 
-    logger.debug(s"🔍 canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
-    filters.foreach(f => logger.debug(s"🔍 canFileMatchFilters: Filter: $f"))
+    logger.debug(s"canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
+    filters.foreach(f => logger.debug(s"canFileMatchFilters: Filter: $f"))
 
     // If no min/max values available, conservatively keep the file
     if (addAction.minValues.isEmpty || addAction.maxValues.isEmpty) {
-      logger.debug(s"🔍 canFileMatchFilters: No min/max values, keeping file")
+      logger.debug(s"canFileMatchFilters: No min/max values, keeping file")
       return true
     }
 
     // A file can match only if ALL filters can potentially match
     // Filters at this level are combined with AND logic by Spark
     val result = filters.forall(filter => canFilterMatchFile(addAction, filter))
-    logger.debug(s"🔍 canFileMatchFilters: Result for file ${addAction.path}: $result")
+    logger.debug(s"canFileMatchFilters: Result for file ${addAction.path}: $result (min=${addAction.minValues}, max=${addAction.maxValues})")
     result
   }
 
@@ -345,10 +342,9 @@ class IndexTables4SparkScan(
           case EqualTo(attribute, value) =>
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
-            logger.debug(s"🔍 DATA SKIPPING DEBUG: EqualTo filter for $attribute = $value")
-            logger.debug(s"🔍 DATA SKIPPING DEBUG: minVal=$minVal, maxVal=$maxVal")
+            logger.debug(s"DATA SKIPPING EqualTo: attribute=$attribute, value=$value, minVal=$minVal, maxVal=$maxVal")
             (minVal, maxVal) match {
-              case (Some(min), Some(max)) =>
+              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
                 val (convertedValue, convertedMin, convertedMax) = convertValuesForComparison(attribute, value, min, max)
 
                 // Simple lexicographic comparison: skip if value is outside [min, max] range
@@ -356,30 +352,35 @@ class IndexTables4SparkScan(
                 val shouldSkip =
                   convertedValue.compareTo(convertedMin) < 0 || convertedValue.compareTo(convertedMax) > 0
 
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: convertedValue=$convertedValue, convertedMin=$convertedMin, convertedMax=$convertedMax")
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: Lexicographic comparison, shouldSkip=$shouldSkip")
+                logger.debug(s"DATA SKIPPING EqualTo: convertedValue=$convertedValue (${convertedValue.getClass.getSimpleName}), convertedMin=$convertedMin (${convertedMin.getClass.getSimpleName}), convertedMax=$convertedMax (${convertedMax.getClass.getSimpleName})")
+                logger.debug(s"DATA SKIPPING EqualTo: compareToMin=${convertedValue.compareTo(convertedMin)}, compareToMax=${convertedValue.compareTo(convertedMax)}, shouldSkip=$shouldSkip")
                 shouldSkip
               case _ =>
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: No min/max values found, not skipping")
+                logger.debug(s"DATA SKIPPING DEBUG: No min/max values found, not skipping")
                 false
             }
           case GreaterThan(attribute, value) =>
             maxVals.get(attribute) match {
-              case Some(max) =>
+              case Some(max) if max.nonEmpty =>
                 val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
                 convertedMax.compareTo(convertedValue) <= 0
-              case None => false
+              case _ => false  // No statistics or empty string - don't skip
             }
           case LessThan(attribute, value) =>
             minVals.get(attribute) match {
-              case Some(min) =>
+              case Some(min) if min.nonEmpty =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                convertedMin.compareTo(convertedValue) >= 0
-              case None => false
+                val compareResult = convertedMin.compareTo(convertedValue)
+                val shouldSkip = compareResult >= 0
+                logger.debug(s"DATA SKIPPING LessThan: attribute=$attribute, min=$min, filterValue=$value")
+                logger.debug(s"DATA SKIPPING LessThan: convertedMin=$convertedMin (${convertedMin.getClass.getSimpleName}), convertedValue=$convertedValue (${convertedValue.getClass.getSimpleName})")
+                logger.debug(s"DATA SKIPPING LessThan: compareResult=$compareResult, shouldSkip=$shouldSkip")
+                shouldSkip
+              case _ => false  // No statistics or empty string - don't skip
             }
           case GreaterThanOrEqual(attribute, value) =>
             maxVals.get(attribute) match {
-              case Some(max) =>
+              case Some(max) if max.nonEmpty =>
                 val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
                 val valueStr                          = convertedValue.toString
                 val maxStr                            = convertedMax.toString
@@ -387,11 +388,11 @@ class IndexTables4SparkScan(
                 // BUT don't skip if filterValue starts with max (truncated max means actual value could be >= filterValue)
                 // Example: max="aaa" (truncated), filterValue="aaab" - actual could be "aaac" which is >= "aaab"
                 convertedMax.compareTo(convertedValue) < 0 && !valueStr.startsWith(maxStr)
-              case None => false
+              case _ => false  // No statistics or empty string - don't skip
             }
           case LessThanOrEqual(attribute, value) =>
             minVals.get(attribute) match {
-              case Some(min) =>
+              case Some(min) if min.nonEmpty =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
                 val valueStr                          = convertedValue.toString
                 val minStr                            = convertedMin.toString
@@ -399,20 +400,20 @@ class IndexTables4SparkScan(
                 // BUT don't skip if filterValue starts with min (truncated min means actual value could be <= filterValue)
                 // Example: min="bbb" (truncated), filterValue="bbbc" - actual could be "bbba" which is <= "bbbc"
                 convertedMin.compareTo(convertedValue) > 0 && !valueStr.startsWith(minStr)
-              case None => false
+              case _ => false  // No statistics or empty string - don't skip
             }
           case StringStartsWith(attribute, value) =>
             // For startsWith, check if any string in [min, max] could start with the value
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
             (minVal, maxVal) match {
-              case (Some(min), Some(max)) =>
+              case (Some(min), Some(max)) if min.nonEmpty && max.nonEmpty =>
                 val valueStr = value.toString
                 // Skip if the prefix is lexicographically greater than max value
                 // or if max value is shorter than prefix and doesn't start with it
                 val shouldSkip = valueStr.compareTo(max) > 0 ||
                   (!max.startsWith(valueStr) && max.compareTo(valueStr) < 0)
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: StringStartsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                logger.debug(s"DATA SKIPPING DEBUG: StringStartsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
                 shouldSkip
               case _ => false
             }
@@ -426,7 +427,7 @@ class IndexTables4SparkScan(
                 val valueStr = value.toString
                 // Very conservative: only skip if min and max are identical and don't end with value
                 val shouldSkip = min == max && !min.endsWith(valueStr)
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: StringEndsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                logger.debug(s"DATA SKIPPING DEBUG: StringEndsWith($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
                 shouldSkip
               case _ => false
             }
@@ -438,13 +439,51 @@ class IndexTables4SparkScan(
               case (Some(min), Some(max)) =>
                 val valueStr   = value.toString
                 val shouldSkip = min == max && !min.contains(valueStr)
-                logger.debug(s"🔍 DATA SKIPPING DEBUG: StringContains($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
+                logger.debug(s"DATA SKIPPING DEBUG: StringContains($attribute, '$value') - min='$min', max='$max', shouldSkip=$shouldSkip")
                 shouldSkip
               case _ => false
             }
           case _ => false
         }
       case _ => false
+    }
+  }
+
+  /** Generic utility to convert numeric values for comparison, handling optional min/max */
+  private def convertNumericValues[T](
+    typeName: String,
+    filterValue: Any,
+    minValue: String,
+    maxValue: String,
+    parser: String => T,
+    boxer: T => Comparable[Any],
+    logger: org.slf4j.Logger
+  ): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
+    try {
+      val filterNum = parser(filterValue.toString)
+      val minNum    = if (minValue.nonEmpty) Some(parser(minValue)) else None
+      val maxNum    = if (maxValue.nonEmpty) Some(parser(maxValue)) else None
+
+      logger.debug(s"$typeName CONVERSION SUCCESS: filter=$filterNum, min=$minNum, max=$maxNum")
+
+      (minNum, maxNum) match {
+        case (Some(min), Some(max)) =>
+          (boxer(filterNum), boxer(min), boxer(max))
+        case (Some(min), None) =>
+          (boxer(filterNum), boxer(min), "".asInstanceOf[Comparable[Any]])
+        case (None, Some(max)) =>
+          (boxer(filterNum), "".asInstanceOf[Comparable[Any]], boxer(max))
+        case (None, None) =>
+          (filterValue.toString.asInstanceOf[Comparable[Any]], "".asInstanceOf[Comparable[Any]], "".asInstanceOf[Comparable[Any]])
+      }
+    } catch {
+      case ex: Exception =>
+        logger.debug(s"$typeName CONVERSION FAILED: $filterValue - ${ex.getMessage}")
+        (
+          filterValue.toString.asInstanceOf[Comparable[Any]],
+          minValue.asInstanceOf[Comparable[Any]],
+          maxValue.asInstanceOf[Comparable[Any]]
+        )
     }
   }
 
@@ -460,47 +499,59 @@ class IndexTables4SparkScan(
     // Find the field data type in the schema
     val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
 
-    // logger.debug(s"🔍 TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
-    // logger.debug(s"🔍 TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
+    // logger.debug(s"TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
+    // logger.debug(s"TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
 
     fieldType match {
       case Some(DateType) =>
         // For DateType, the table stores values as days since epoch (integer)
-        logger.debug(s"🔍 DATE CONVERSION: Processing DateType field $attribute")
-        logger.debug(s"🔍 DATE CONVERSION: filterValue=$filterValue (${filterValue.getClass.getSimpleName})")
+        logger.debug(s"DATE CONVERSION: Processing DateType field $attribute")
+        logger.debug(s"DATE CONVERSION: filterValue=$filterValue (${filterValue.getClass.getSimpleName})")
         try {
           val filterDaysSinceEpoch = filterValue match {
             case dateStr: String =>
-              logger.debug(s"🔍 DATE CONVERSION: Parsing string date: $dateStr")
+              logger.debug(s"DATE CONVERSION: Parsing string date: $dateStr")
               val filterDate = LocalDate.parse(dateStr)
               val epochDate  = LocalDate.of(1970, 1, 1)
               val days       = epochDate.until(filterDate).getDays
               logger.debug(
-                s"🔍 DATE CONVERSION: String '$dateStr' -> LocalDate '$filterDate' -> days since epoch: $days"
+                s"DATE CONVERSION: String '$dateStr' -> LocalDate '$filterDate' -> days since epoch: $days"
               )
               days
             case sqlDate: Date =>
-              logger.debug(s"🔍 DATE CONVERSION: Converting SQL Date: $sqlDate")
+              logger.debug(s"DATE CONVERSION: Converting SQL Date: $sqlDate")
               // Use direct calculation from milliseconds since epoch
               val millisSinceEpoch = sqlDate.getTime
               val daysSinceEpoch   = (millisSinceEpoch / (24 * 60 * 60 * 1000)).toInt
-              logger.debug(s"🔍 DATE CONVERSION: SQL Date '$sqlDate' -> millis=$millisSinceEpoch -> days since epoch: $daysSinceEpoch")
+              logger.debug(s"DATE CONVERSION: SQL Date '$sqlDate' -> millis=$millisSinceEpoch -> days since epoch: $daysSinceEpoch")
               daysSinceEpoch
             case intVal: Int =>
-              logger.debug(s"🔍 DATE CONVERSION: Using int value directly: $intVal")
+              logger.debug(s"DATE CONVERSION: Using int value directly: $intVal")
               intVal
             case _ =>
-              logger.debug(s"🔍 DATE CONVERSION: Fallback parsing toString: ${filterValue.toString}")
+              logger.debug(s"DATE CONVERSION: Fallback parsing toString: ${filterValue.toString}")
               val filterDate = LocalDate.parse(filterValue.toString)
               val epochDate  = LocalDate.of(1970, 1, 1)
               val days       = epochDate.until(filterDate).getDays
-              logger.debug(s"🔍 DATE CONVERSION: Fallback '${filterValue.toString}' -> LocalDate '$filterDate' -> days since epoch: $days")
+              logger.debug(s"DATE CONVERSION: Fallback '${filterValue.toString}' -> LocalDate '$filterDate' -> days since epoch: $days")
               days
           }
 
-          val minDays = minValue.toInt
-          val maxDays = maxValue.toInt
-          // logger.debug(s"🔍 DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
+          // Helper function to parse date string or integer to days since epoch
+          def parseDateOrInt(value: String): Int = {
+            if (value.contains("-")) {
+              // Date string format (e.g., "2023-02-15")
+              val date = LocalDate.parse(value)
+              val epochDate = LocalDate.of(1970, 1, 1)
+              java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt
+            } else {
+              value.toInt
+            }
+          }
+
+          val minDays = parseDateOrInt(minValue)
+          val maxDays = parseDateOrInt(maxValue)
+          // logger.debug(s"DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
           (
             filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
             minDays.asInstanceOf[Comparable[Any]],
@@ -509,7 +560,7 @@ class IndexTables4SparkScan(
         } catch {
           case ex: Exception =>
             logger.warn(
-              s"🔍 DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}"
+              s"DATE CONVERSION FAILED: $filterValue (${filterValue.getClass.getSimpleName}) - ${ex.getMessage}"
             )
             // Fallback to string comparison
             (
@@ -520,102 +571,20 @@ class IndexTables4SparkScan(
         }
 
       case Some(IntegerType) =>
-        // Convert integer values for proper numeric comparison
-        logger.debug(s"🔍 INTEGER CONVERSION: Processing IntegerType field $attribute")
-        try {
-          val filterInt = filterValue.toString.toInt
-          val minInt    = minValue.toInt
-          val maxInt    = maxValue.toInt
-          logger.debug(s"🔍 INTEGER CONVERSION RESULT: filterInt=$filterInt, minInt=$minInt, maxInt=$maxInt")
-          (
-            filterInt.asInstanceOf[Comparable[Any]],
-            minInt.asInstanceOf[Comparable[Any]],
-            maxInt.asInstanceOf[Comparable[Any]]
-          )
-        } catch {
-          case ex: Exception =>
-            logger.debug(s"🔍 INTEGER CONVERSION FAILED: $filterValue - ${ex.getMessage}")
-            (
-              filterValue.toString.asInstanceOf[Comparable[Any]],
-              minValue.asInstanceOf[Comparable[Any]],
-              maxValue.asInstanceOf[Comparable[Any]]
-            )
-        }
+        convertNumericValues[Int]("INTEGER", filterValue, minValue, maxValue, (s: String) => s.toInt, (n: Int) => Integer.valueOf(n).asInstanceOf[Comparable[Any]], logger)
 
       case Some(LongType) =>
-        // Convert long values for proper numeric comparison
-        logger.debug(s"🔍 LONG CONVERSION: Processing LongType field $attribute")
-        try {
-          val filterLong = filterValue.toString.toLong
-          val minLong    = minValue.toLong
-          val maxLong    = maxValue.toLong
-          logger.debug(s"🔍 LONG CONVERSION RESULT: filterLong=$filterLong, minLong=$minLong, maxLong=$maxLong")
-          (
-            filterLong.asInstanceOf[Comparable[Any]],
-            minLong.asInstanceOf[Comparable[Any]],
-            maxLong.asInstanceOf[Comparable[Any]]
-          )
-        } catch {
-          case ex: Exception =>
-            logger.debug(s"🔍 LONG CONVERSION FAILED: $filterValue - ${ex.getMessage}")
-            (
-              filterValue.toString.asInstanceOf[Comparable[Any]],
-              minValue.asInstanceOf[Comparable[Any]],
-              maxValue.asInstanceOf[Comparable[Any]]
-            )
-        }
+        convertNumericValues[Long]("LONG", filterValue, minValue, maxValue, (s: String) => s.toLong, (n: Long) => Long.box(n).asInstanceOf[Comparable[Any]], logger)
 
       case Some(FloatType) =>
-        // Convert float values for proper numeric comparison
-        logger.debug(s"🔍 FLOAT CONVERSION: Processing FloatType field $attribute")
-        try {
-          val filterFloat = filterValue.toString.toFloat
-          val minFloat    = minValue.toFloat
-          val maxFloat    = maxValue.toFloat
-          logger.debug(s"🔍 FLOAT CONVERSION RESULT: filterFloat=$filterFloat, minFloat=$minFloat, maxFloat=$maxFloat")
-          (
-            filterFloat.asInstanceOf[Comparable[Any]],
-            minFloat.asInstanceOf[Comparable[Any]],
-            maxFloat.asInstanceOf[Comparable[Any]]
-          )
-        } catch {
-          case ex: Exception =>
-            logger.debug(s"🔍 FLOAT CONVERSION FAILED: $filterValue - ${ex.getMessage}")
-            (
-              filterValue.toString.asInstanceOf[Comparable[Any]],
-              minValue.asInstanceOf[Comparable[Any]],
-              maxValue.asInstanceOf[Comparable[Any]]
-            )
-        }
+        convertNumericValues[Float]("FLOAT", filterValue, minValue, maxValue, (s: String) => s.toFloat, (n: Float) => Float.box(n).asInstanceOf[Comparable[Any]], logger)
 
       case Some(DoubleType) =>
-        // Convert double values for proper numeric comparison
-        logger.debug(s"🔍 DOUBLE CONVERSION: Processing DoubleType field $attribute")
-        try {
-          val filterDouble = filterValue.toString.toDouble
-          val minDouble    = minValue.toDouble
-          val maxDouble    = maxValue.toDouble
-          logger.info(
-            s"🔍 DOUBLE CONVERSION RESULT: filterDouble=$filterDouble, minDouble=$minDouble, maxDouble=$maxDouble"
-          )
-          (
-            filterDouble.asInstanceOf[Comparable[Any]],
-            minDouble.asInstanceOf[Comparable[Any]],
-            maxDouble.asInstanceOf[Comparable[Any]]
-          )
-        } catch {
-          case ex: Exception =>
-            logger.debug(s"🔍 DOUBLE CONVERSION FAILED: $filterValue - ${ex.getMessage}")
-            (
-              filterValue.toString.asInstanceOf[Comparable[Any]],
-              minValue.asInstanceOf[Comparable[Any]],
-              maxValue.asInstanceOf[Comparable[Any]]
-            )
-        }
+        convertNumericValues[Double]("DOUBLE", filterValue, minValue, maxValue, (s: String) => s.toDouble, (n: Double) => Double.box(n).asInstanceOf[Comparable[Any]], logger)
 
       case _ =>
         // For other data types (strings, etc.), use string comparison
-        logger.debug(s"🔍 STRING CONVERSION: Using string comparison for $attribute")
+        logger.debug(s"STRING CONVERSION: Using string comparison for $attribute")
         (
           filterValue.toString.asInstanceOf[Comparable[Any]],
           minValue.asInstanceOf[Comparable[Any]],

@@ -256,7 +256,7 @@ class S3CloudStorageProvider(
       }
 
     try {
-      logger.info(s"🔍 S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")
+      logger.info(s"S3 LIST DEBUG - Listing S3 files: bucket=$bucket, prefix=$prefix (original: $originalPrefix), recursive=$recursive, isS3Mock=$isS3Mock")
       val request = ListObjectsV2Request
         .builder()
         .bucket(bucket)
@@ -274,7 +274,7 @@ class S3CloudStorageProvider(
           val originalKey = s3Object.key()
           val displayKey  = unflattenPathFromS3Mock(originalKey)
 
-          logger.debug(s"🔍 S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
+          logger.debug(s"S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
 
           CloudFileInfo(
             path = s"s3://$bucket/$displayKey",
@@ -305,7 +305,7 @@ class S3CloudStorageProvider(
 
       val allResults = files ++ directories
       logger.info(
-        s"🔍 S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'"
+        s"S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'"
       )
       files.foreach(f => logger.debug(s"  File: ${f.path}"))
       allResults

@@ -164,11 +164,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.25.2+ required for JSON field support (jsonTermQuery, jsonRangeQuery, jsonExistsQuery) -->
+        <!-- Version 0.25.3+ required for JSON field discovery (dynamic field_mappings for aggregations) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.25.2</version>
+            <version>0.25.3</version>
             <classifier>${platform.classifier}</classifier>
         </dependency>
 

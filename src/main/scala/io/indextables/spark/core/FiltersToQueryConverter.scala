@@ -235,7 +235,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} filters for SplitQuery conversion:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -302,7 +302,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters for SplitQuery conversion:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} mixed filters for SplitQuery conversion:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -355,7 +355,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} mixed filters:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} mixed filters:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -446,7 +446,7 @@ object FiltersToQueryConverter {
     }
 
     // Debug logging to understand what filters we receive
-    queryLog(s"🔍 FiltersToQueryConverter received ${filters.length} filters:")
+    queryLog(s"FiltersToQueryConverter received ${filters.length} filters:")
     filters.zipWithIndex.foreach {
       case (filter, idx) =>
         queryLog(s"  Filter[$idx]: $filter (${filter.getClass.getSimpleName})")
@@ -1096,18 +1096,18 @@ object FiltersToQueryConverter {
     // Try to translate as JSON field filter using parseQuery syntax
     jsonTranslator.translateFilterToParseQuery(filter) match {
       case Some(queryString) =>
-        logger.warn(s"🔍 JSON FILTER: Translating nested field filter to parseQuery: $queryString")
+        logger.warn(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          logger.warn(s"🔍 JSON FILTER: Successfully parsed query: $queryString")
+          logger.warn(s"JSON FILTER: Successfully parsed query: $queryString")
           return Some(parsedQuery)
         } catch {
           case e: Exception =>
-            logger.warn(s"🔍 JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
+            logger.warn(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
             // Fall through to regular filter handling
         }
       case None =>
-        logger.warn(s"🔍 JSON FILTER: Filter not recognized as nested field filter: $filter")
+        logger.warn(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
         // Not a nested field filter, continue with regular filter handling
     }
 
@@ -1245,26 +1245,33 @@ object FiltersToQueryConverter {
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
         // Check if field is configured as a fast field - range queries only work on fast fields
-        queryLog(s"🔍 DEBUG: Checking fast field config for '$attribute', options = $options")
-        val isFastField = options
+        // First, check the Tantivy schema directly (most reliable source)
+        val isFastFieldInSchema = try {
+          val fieldInfo = schema.getFieldInfo(attribute)
+          fieldInfo != null && fieldInfo.isFast()
+        } catch {
+          case _: Exception => false
+        }
+
+        // Fall back to checking options (for backward compatibility)
+        val isFastFieldInOptions = options
           .map { opts =>
-            val fastFieldsStr = Option(opts.get("spark.indextables.indexing.fastfields"))
-            queryLog(s"🔍 DEBUG: fastfields config = '$fastFieldsStr'")
-            fastFieldsStr
+            Option(opts.get("spark.indextables.indexing.fastfields"))
               .map(_.split(",").map(_.trim).contains(attribute))
               .getOrElse(false)
           }
           .getOrElse(false)
 
+        val isFastField = isFastFieldInSchema || isFastFieldInOptions
+
         // For date fields, be more permissive since they're often used for range queries
-        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
         val isDateFieldWorkaround = fieldType == FieldType.DATE
         val shouldAllowQuery      = isFastField || isDateFieldWorkaround
 
-        queryLog(s"🔍 DEBUG: isFastField for '$attribute' = $isFastField, isDateField = $isDateFieldWorkaround, shouldAllow = $shouldAllowQuery")
+        logger.debug(s"LessThan range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
-          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }
 
@@ -1295,7 +1302,16 @@ object FiltersToQueryConverter {
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
         // Check if field is configured as a fast field - range queries only work on fast fields
-        val isFastField = options
+        // First, check the Tantivy schema directly (most reliable source)
+        val isFastFieldInSchema = try {
+          val fieldInfo = schema.getFieldInfo(attribute)
+          fieldInfo != null && fieldInfo.isFast()
+        } catch {
+          case _: Exception => false
+        }
+
+        // Fall back to checking options (for backward compatibility)
+        val isFastFieldInOptions = options
           .map { opts =>
             Option(opts.get("spark.indextables.indexing.fastfields"))
               .map(_.split(",").map(_.trim).contains(attribute))
@@ -1303,13 +1319,16 @@ object FiltersToQueryConverter {
           }
           .getOrElse(false)
 
+        val isFastField = isFastFieldInSchema || isFastFieldInOptions
+
         // For date fields, be more permissive since they're often used for range queries
-        // TODO: This is a temporary workaround until fast field config is persisted in transaction log
         val isDateFieldWorkaround = fieldType == FieldType.DATE
         val shouldAllowQuery      = isFastField || isDateFieldWorkaround
 
+        logger.debug(s"LessThanOrEqual range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
+
         if (!shouldAllowQuery) {
-          queryLog(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
           return None
         }
 

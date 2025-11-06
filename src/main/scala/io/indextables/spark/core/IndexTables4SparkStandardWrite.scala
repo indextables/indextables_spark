@@ -80,12 +80,12 @@ class IndexTables4SparkStandardWrite(
           mapper.registerModule(DefaultScalaModule)
           val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
 
-          logger.debug(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
-          logger.debug(s"🔍 PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          logger.debug(s"PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          logger.debug(s"PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
           partitionCols
         } catch {
           case e: Exception =>
-            logger.debug(s"🔍 PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
+            logger.debug(s"PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
             logger.warn(s"Failed to parse partition columns from options: $partitionColumnsJson", e)
             Seq.empty
         }
@@ -93,12 +93,12 @@ class IndexTables4SparkStandardWrite(
         // Fallback: try to read from existing transaction log
         try {
           val cols = transactionLog.getPartitionColumns()
-          logger.debug(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
-          logger.debug(s"🔍 PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          logger.debug(s"PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
+          logger.debug(s"PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
           cols
         } catch {
           case ex: Exception =>
-            logger.debug(s"🔍 PARTITION DEBUG: No partition columns found")
+            logger.debug(s"PARTITION DEBUG: No partition columns found")
             logger.warn(s"Could not retrieve partition columns during construction: ${ex.getMessage}")
             Seq.empty[String]
         }
@@ -143,9 +143,9 @@ class IndexTables4SparkStandardWrite(
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    logger.debug(s"🔍 DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
-    logger.debug(s"🔍 DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
+    logger.debug(s"DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"DEBUG: Committing ${messages.length} writer messages (overwrite mode: $isOverwrite)")
+    logger.debug(s"DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
     serializedOptions.foreach {
       case (k, v) =>
         val redactedValue =
@@ -157,7 +157,7 @@ class IndexTables4SparkStandardWrite(
           } else {
             v
           }
-        logger.debug(s"🔍 DEBUG: serializedOption $k = $redactedValue")
+        logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
     }
 
     // Validate indexing configuration for append operations
@@ -180,8 +180,8 @@ class IndexTables4SparkStandardWrite(
     // Determine if this should be an overwrite based on existing table state and mode
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
-      logger.debug(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
-      logger.debug(s"🔍 DEBUG: Using explicit isOverwrite=true flag")
+      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
+      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
       true
     } else {
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
@@ -210,8 +210,8 @@ class IndexTables4SparkStandardWrite(
           logger.warn(s"Unknown saveMode: $other, defaulting to append")
           false
       }
-      logger.debug(s"🔍 DEBUG: Final saveMode decision: $saveMode")
-      logger.debug(s"🔍 DEBUG: Final saveMode decision: $saveMode")
+      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
+      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
       saveMode
     }
 
@@ -230,13 +230,13 @@ class IndexTables4SparkStandardWrite(
     try {
       // Commit the changes
       if (shouldOverwrite) {
-        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-        logger.debug(s"🔍 DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
         val version = transactionLog.overwriteFiles(addActions)
         logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
       } else {
-        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
-        logger.debug(s"🔍 DEBUG: Performing APPEND with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} new files")
+        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} new files")
         // Standard append operation
         val version = transactionLog.addFiles(addActions)
         logger.info(s"Added ${addActions.length} files in transaction version $version")
@@ -267,7 +267,7 @@ class IndexTables4SparkStandardWrite(
    */
   private def validateIndexingConfigurationForAppend(): Unit =
     try {
-      logger.debug("🔍 VALIDATION DEBUG: Running append configuration validation")
+      logger.debug("VALIDATION DEBUG: Running append configuration validation")
 
       // Read existing doc mapping from latest add actions
       val existingFiles = transactionLog.listFiles()
@@ -276,7 +276,7 @@ class IndexTables4SparkStandardWrite(
         .headOption // Get the first available doc mapping
 
       if (existingDocMapping.isDefined) {
-        logger.debug("🔍 VALIDATION DEBUG: Found existing doc mapping, validating configuration")
+        logger.debug("VALIDATION DEBUG: Found existing doc mapping, validating configuration")
 
         // Parse existing configuration
         import com.fasterxml.jackson.databind.JsonNode
@@ -284,25 +284,25 @@ class IndexTables4SparkStandardWrite(
         import scala.jdk.CollectionConverters._
 
         val existingMapping = JsonUtil.mapper.readTree(existingDocMapping.get: String)
-        logger.debug(s"🔍 VALIDATION DEBUG: Parsed existing mapping JSON: $existingMapping")
+        logger.debug(s"VALIDATION DEBUG: Parsed existing mapping JSON: $existingMapping")
 
         // The docMappingJson is directly an array of field definitions
         if (existingMapping.isArray) {
           logger.warn(
-            s"🔍 VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
+            s"VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
           )
           val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(
             new org.apache.spark.sql.util.CaseInsensitiveStringMap(serializedOptions.asJava)
           )
           val errors = scala.collection.mutable.ListBuffer[String]()
 
-          logger.debug(s"🔍 VALIDATION DEBUG: Schema has ${writeSchema.fields.length} fields")
+          logger.debug(s"VALIDATION DEBUG: Schema has ${writeSchema.fields.length} fields")
 
           // Check each field in the current schema for configuration conflicts
           writeSchema.fields.foreach { field =>
             try {
               val fieldName = field.name
-              logger.debug(s"🔍 VALIDATION DEBUG: Processing field '$fieldName'")
+              logger.debug(s"VALIDATION DEBUG: Processing field '$fieldName'")
 
               val currentConfig = tantivyOptions.getFieldIndexingConfig(fieldName)
 
@@ -311,54 +311,54 @@ class IndexTables4SparkStandardWrite(
                 Option(fieldNode.get("name")).map(_.asText()).contains(fieldName)
               }
 
-              logger.debug(s"🔍 VALIDATION DEBUG: Current config: $currentConfig")
-              logger.debug(s"🔍 VALIDATION DEBUG: Existing field config present: ${existingFieldConfig.isDefined}")
+              logger.debug(s"VALIDATION DEBUG: Current config: $currentConfig")
+              logger.debug(s"VALIDATION DEBUG: Existing field config present: ${existingFieldConfig.isDefined}")
 
               if (existingFieldConfig.isDefined) {
                 val existing     = existingFieldConfig.get
                 val existingType = Option(existing.get("type")).map(_.asText())
-                logger.debug(s"🔍 VALIDATION DEBUG: Existing field type: $existingType")
+                logger.debug(s"VALIDATION DEBUG: Existing field type: $existingType")
 
                 // Check field type configuration conflicts
                 if (currentConfig.fieldType.isDefined) {
                   val currentType = currentConfig.fieldType.get
-                  logger.debug(s"🔍 VALIDATION DEBUG: Current type: $currentType")
+                  logger.debug(s"VALIDATION DEBUG: Current type: $currentType")
 
                   // Strict validation: field types must match exactly
                   if (existingType.isDefined && existingType.get != currentType) {
-                    logger.debug(s"🔍 VALIDATION DEBUG: CONFLICT DETECTED for field '$fieldName'!")
+                    logger.debug(s"VALIDATION DEBUG: CONFLICT DETECTED for field '$fieldName'!")
                     errors += s"Field '$fieldName' type mismatch: existing table has ${existingType.get} field, cannot append with $currentType configuration"
                   } else {
-                    logger.debug(s"🔍 VALIDATION DEBUG: Compatible types for field '$fieldName' (existing: ${existingType.getOrElse("none")}, current: $currentType)")
+                    logger.debug(s"VALIDATION DEBUG: Compatible types for field '$fieldName' (existing: ${existingType.getOrElse("none")}, current: $currentType)")
                   }
                 } else {
-                  logger.debug(s"🔍 VALIDATION DEBUG: No current field type configured for '$fieldName'")
+                  logger.debug(s"VALIDATION DEBUG: No current field type configured for '$fieldName'")
                 }
               } else {
-                logger.debug(s"🔍 VALIDATION DEBUG: Field '$fieldName' not found in existing configuration")
+                logger.debug(s"VALIDATION DEBUG: Field '$fieldName' not found in existing configuration")
               }
             } catch {
               case e: Exception =>
-                logger.debug(s"🔍 VALIDATION DEBUG: Exception processing field '${field.name}': ${e.getMessage}")
+                logger.debug(s"VALIDATION DEBUG: Exception processing field '${field.name}': ${e.getMessage}")
             }
           }
 
-          logger.debug(s"🔍 VALIDATION DEBUG: Finished processing all fields. Errors found: ${errors.length}")
+          logger.debug(s"VALIDATION DEBUG: Finished processing all fields. Errors found: ${errors.length}")
           if (errors.nonEmpty) {
             val errorMessage = s"Configuration validation failed for append operation:\n${errors.mkString("\n")}"
             logger.error(errorMessage)
             throw new IllegalArgumentException(errorMessage)
           }
         } else {
-          logger.debug("🔍 VALIDATION DEBUG: Existing mapping is not an array - unexpected format")
+          logger.debug("VALIDATION DEBUG: Existing mapping is not an array - unexpected format")
         }
       } else {
-        logger.debug("🔍 VALIDATION DEBUG: No existing doc mapping found, skipping validation")
+        logger.debug("VALIDATION DEBUG: No existing doc mapping found, skipping validation")
       }
     } catch {
       case e: IllegalArgumentException => throw e // Re-throw validation errors
       case e: Exception =>
-        logger.debug(s"🔍 VALIDATION DEBUG: Validation failed with exception: ${e.getMessage}")
+        logger.debug(s"VALIDATION DEBUG: Validation failed with exception: ${e.getMessage}")
       // Don't fail the write for other types of errors
     }
 

@@ -725,7 +725,7 @@ class IndexTables4SparkDataSource extends DataSourceRegister with RelationProvid
       val optimalPartitions = Math.max(1, Math.ceil(totalRecords.toDouble / targetRecords.toDouble).toInt)
       val currentPartitions = data.rdd.getNumPartitions
 
-      logger.debug(s"🔍 V1 OPTIMIZED WRITE: totalRecords=$totalRecords, targetRecords=$targetRecords, optimalPartitions=$optimalPartitions, currentPartitions=$currentPartitions")
+      logger.debug(s"V1 OPTIMIZED WRITE: totalRecords=$totalRecords, targetRecords=$targetRecords, optimalPartitions=$optimalPartitions, currentPartitions=$currentPartitions")
 
       if (tantivyOptions.autoSizeEnabled.getOrElse(false)) {
         logger.info(
@@ -1589,7 +1589,7 @@ class IndexTables4SparkTable(
       }
 
     // Validate ALL configurations that might be numeric
-    logger.debug(s"🔍 newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
+    logger.debug(s"newScanBuilder called - validating ${tantivyConfigs.size} tantivy configs")
     tantivyConfigs.foreach {
       case (key, value) =>
         key.toLowerCase match {

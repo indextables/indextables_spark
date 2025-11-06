@@ -387,8 +387,8 @@ case class SerializableAwsConfig(
     import org.apache.hadoop.conf.Configuration
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    println(s"🔍 [EXECUTOR] Resolving credentials using custom provider: $providerClassName")
-    println(s"🔍 [EXECUTOR] Using table path for credential provider: $tablePath")
+    println(s"[EXECUTOR] Resolving credentials using custom provider: $providerClassName")
+    println(s"[EXECUTOR] Using table path for credential provider: $tablePath")
 
     // Use the provided table path for the credential provider constructor
     val tableUri   = new URI(tablePath)
@@ -399,7 +399,7 @@ case class SerializableAwsConfig(
     val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(provider)
 
     println(s"✅ [EXECUTOR] Successfully resolved credentials from $providerClassName")
-    println(s"🔍 [EXECUTOR] Resolved credentials: accessKey=${basicCredentials.accessKey
+    println(s"[EXECUTOR] Resolved credentials: accessKey=${basicCredentials.accessKey
         .take(4)}***, sessionToken=${basicCredentials.sessionToken.map(_ => "***").getOrElse("None")}")
 
     (basicCredentials.accessKey, basicCredentials.secretKey, basicCredentials.sessionToken)
@@ -455,7 +455,7 @@ class MergeSplitsExecutor(
       def getConfigWithFallback(sparkKey: String): Option[String] = {
         val result = mergedConfigs.get(sparkKey)
 
-        logger.debug(s"🔍 AWS Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        logger.debug(s"AWS Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
         result
       }
 
@@ -484,12 +484,12 @@ class MergeSplitsExecutor(
       val debugEnabled =
         getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
 
-      logger.info(s"🔍 Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
+      logger.info(s"Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
       logger.info(
-        s"🔍 AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}"
+        s"AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}"
       )
-      logger.info(s"🔍 Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
-      logger.info(s"🔍 Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
+      logger.info(s"Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
+      logger.info(s"Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
 
       // Validate temp directory path if specified
       tempDirectoryPath.foreach { path =>
@@ -548,7 +548,7 @@ class MergeSplitsExecutor(
       // Helper function to get config from normalized configs
       def getConfigWithFallback(sparkKey: String): Option[String] = {
         val result = mergedConfigs.get(sparkKey)
-        logger.debug(s"🔍 Azure Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        logger.debug(s"Azure Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
         result
       }
 
@@ -561,13 +561,13 @@ class MergeSplitsExecutor(
       val clientId         = getConfigWithFallback("spark.indextables.azure.clientId")
       val clientSecret     = getConfigWithFallback("spark.indextables.azure.clientSecret")
 
-      logger.info(s"🔍 Creating AzureConfig with: accountName=${accountName.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}")
+      logger.info(s"Creating AzureConfig with: accountName=${accountName.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}")
       logger.info(
-        s"🔍 Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString
+        s"Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString
             .map(_ => "***")
             .getOrElse("None")}, bearerToken=${bearerToken.map(_ => "***").getOrElse("None")}"
       )
-      logger.info(s"🔍 OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId
+      logger.info(s"OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId
           .getOrElse("None")}, clientSecret=${clientSecret.map(_ => "***").getOrElse("None")}")
 
       SerializableAzureConfig(
@@ -619,17 +619,17 @@ class MergeSplitsExecutor(
     val metadata = transactionLog.getMetadata()
 
     // DEBUG: Log the metadata details
-    logger.info(s"🔍 MERGE DEBUG: Retrieved metadata from transaction log:")
-    logger.info(s"🔍 MERGE DEBUG:   Metadata ID: ${metadata.id}")
-    logger.info(s"🔍 MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
-    logger.info(s"🔍 MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
-    logger.info(s"🔍 MERGE DEBUG:   Configuration: ${metadata.configuration}")
+    logger.info(s"MERGE DEBUG: Retrieved metadata from transaction log:")
+    logger.info(s"MERGE DEBUG:   Metadata ID: ${metadata.id}")
+    logger.info(s"MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
+    logger.info(s"MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
+    logger.info(s"MERGE DEBUG:   Configuration: ${metadata.configuration}")
 
     val partitionSchema = StructType(
       metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
     )
 
-    logger.info(s"🔍 MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
+    logger.info(s"MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
 
     // If no partition columns are defined in metadata, skip partition validation
     if (metadata.partitionColumns.isEmpty) {
@@ -856,7 +856,7 @@ class MergeSplitsExecutor(
 
               // CRITICAL: Validate all merged files actually exist before updating transaction log
               println(
-                s"🔍 [DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
+                s"[DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
               )
               physicalMergeResults.foreach { result =>
                 val fullMergedPath =
@@ -1593,13 +1593,13 @@ object MergeSplitsExecutor {
     logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
 
     // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
-    logger.debug(s"🔍 SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
+    logger.debug(s"SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
     mergeGroup.files.zipWithIndex.foreach {
       case (file, idx) =>
         file.docMappingJson match {
           case Some(json) =>
-            logger.debug(s"🔍 SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
-            logger.debug(s"🔍 SOURCE SPLIT[$idx]: Content: $json")
+            logger.debug(s"SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
+            logger.debug(s"SOURCE SPLIT[$idx]: Content: $json")
           case None =>
             logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
         }
@@ -1672,15 +1672,15 @@ object MergeSplitsExecutor {
     // CRITICAL: Verify the merged file actually exists at the expected location
     try
       if (isS3Path) {
-        println(s"🔍 [EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
-        println(s"🔍 [EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
+        println(s"[EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
+        println(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else if (isAzurePath) {
-        println(s"🔍 [EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
-        println(s"🔍 [EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
+        println(s"[EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
+        println(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else {
         val outputFile = new java.io.File(outputSplitPath)
         val exists     = outputFile.exists()
-        println(s"🔍 [EXECUTOR] File verification: $outputSplitPath exists = $exists")
+        println(s"[EXECUTOR] File verification: $outputSplitPath exists = $exists")
         if (!exists) {
           throw new RuntimeException(s"CRITICAL: Merged file was not created at expected location: $outputSplitPath")
         }

@@ -94,21 +94,25 @@ object StatisticsTruncation {
     }
 
     // Truncate statistics for columns with long values
-    val truncatedMinValues = minValues.map {
+    val truncatedMinValues = minValues.flatMap {
       case (colName, value) =>
         if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
-          (colName, value.substring(0, maxLength))
+          val truncated = value.substring(0, maxLength)
+          // If truncation results in empty string, drop the entry entirely
+          if (truncated.isEmpty) None else Some((colName, truncated))
         } else {
-          (colName, value)
+          Some((colName, value))
         }
     }
 
-    val truncatedMaxValues = maxValues.map {
+    val truncatedMaxValues = maxValues.flatMap {
       case (colName, value) =>
         if (columnsToTruncate.contains(colName) && value != null && value.length > maxLength) {
-          (colName, value.substring(0, maxLength))
+          val truncated = value.substring(0, maxLength)
+          // If truncation results in empty string, drop the entry entirely
+          if (truncated.isEmpty) None else Some((colName, truncated))
         } else {
-          (colName, value)
+          Some((colName, value))
         }
     }
 

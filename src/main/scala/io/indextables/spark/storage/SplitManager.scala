@@ -132,12 +132,12 @@ object SplitManager {
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
         val docMappingJson = metadata.getDocMappingJson()
-        logger.debug(s"🔍 SPLIT CREATED: docMappingJson from tantivy4java:")
-        logger.debug(s"🔍 SPLIT CREATED: $docMappingJson")
+        logger.debug(s"SPLIT CREATED: docMappingJson from tantivy4java:")
+        logger.debug(s"SPLIT CREATED: $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
+          logger.debug(s"SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
+          logger.debug(s"SPLIT CREATED WITH fast=true in schema")
         }
 
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
@@ -187,12 +187,12 @@ object SplitManager {
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
         val docMappingJson = metadata.getDocMappingJson()
-        logger.debug(s"🔍 SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
-        logger.debug(s"🔍 SPLIT CREATED (non-S3): $docMappingJson")
+        logger.debug(s"SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
+        logger.debug(s"SPLIT CREATED (non-S3): $docMappingJson")
         if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.debug(s"🔍 SPLIT CREATED WITH fast=false in schema")
+          logger.debug(s"SPLIT CREATED WITH fast=false in schema")
         } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.debug(s"🔍 SPLIT CREATED WITH fast=true in schema")
+          logger.debug(s"SPLIT CREATED WITH fast=true in schema")
         }
 
         metadata
@@ -283,7 +283,7 @@ case class SplitCacheConfig(
     }
 
     // AWS configuration with detailed verification
-    logger.info(s"🔍 SplitCacheConfig AWS Verification:")
+    logger.info(s"SplitCacheConfig AWS Verification:")
     logger.info(s"  - awsAccessKey: ${awsAccessKey.map(k => s"${k.take(4)}...").getOrElse("None")}")
     logger.info(s"  - awsSecretKey: ${awsSecretKey.map(_ => "***").getOrElse("None")}")
     logger.info(s"  - awsRegion: ${awsRegion.getOrElse("None")}")
@@ -348,7 +348,7 @@ case class SplitCacheConfig(
 
     // Azure configuration with detailed verification
     // Priority: 1) Bearer Token, 2) Account Key, 3) Connection String
-    logger.debug(s"🔍 SplitCacheConfig Azure Verification:")
+    logger.debug(s"SplitCacheConfig Azure Verification:")
     logger.debug(s"  - azureAccountName: ${azureAccountName.getOrElse("None")}")
     logger.debug(s"  - azureAccountKey: ${azureAccountKey.map(_ => "***").getOrElse("None")}")
     logger.debug(s"  - azureConnectionString: ${azureConnectionString.map(_ => "***").getOrElse("None")}")
