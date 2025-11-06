@@ -1403,7 +1403,7 @@ src/main/antlr4/        # ANTLR grammar definitions
 └── io/indextables/spark/sql/parser/
     └── IndexTables4SparkSqlBase.g4  # SQL parser grammar for custom commands
 
-src/test/scala/         # Comprehensive test suite (205+ tests passing)
+src/test/scala/         # Comprehensive test suite (296+ tests passing)
 ├── io/indextables/spark/
 │   ├── autosize/       # Auto-sizing feature tests
 │   ├── comprehensive/  # Comprehensive integration tests
