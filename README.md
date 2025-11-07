@@ -89,6 +89,17 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [Application Performance Monitoring](#-application-performance-monitoring-apm)
   - [Full-Text Search in Documents](#-full-text-search-in-documents)
   - [Business Intelligence and Analytics](#-business-intelligence-and-analytics)
+- [Structured Streaming](#structured-streaming)
+  - [Basic Streaming Write](#basic-streaming-write)
+  - [PySpark Streaming Example](#pyspark-streaming-example)
+  - [Streaming with Merge-On-Write](#streaming-with-merge-on-write)
+  - [Streaming with Partitioning](#streaming-with-partitioning)
+  - [availableNow Trigger](#availablenow-trigger-one-time-processing)
+  - [Streaming from Kafka](#streaming-from-kafka)
+  - [Streaming Best Practices](#streaming-best-practices)
+  - [Streaming Data Integrity](#streaming-data-integrity)
+  - [Error Handling](#error-handling)
+  - [Reading Streaming Results](#reading-streaming-results)
 - [Migration Guide](#migration-guide)
 - [Best Practices](#best-practices)
 - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
@@ -314,6 +325,370 @@ FROM support_tickets
 WHERE status = 'open'
   AND description indexquery 'billing problem OR payment failed'
   AND priority = 'high';
+```
+
+---
+
+## Structured Streaming
+
+IndexTables4Spark supports Spark Structured Streaming for continuous data ingestion and incremental loading. Use the `foreachBatch` API to write streaming data with full support for all IndexTables features including merge-on-write, partitioning, and text indexing.
+
+### Basic Streaming Write
+
+```scala
+import org.apache.spark.sql.streaming.Trigger
+
+// Read streaming data from any source (Kafka, files, etc.)
+val streamingDF = spark.readStream
+  .format("csv")
+  .option("header", "true")
+  .schema("id INT, username STRING, message STRING, timestamp TIMESTAMP")
+  .load("s3://bucket/input-data/")
+
+// Write to IndexTables using foreachBatch
+val query = streamingDF.writeStream
+  .trigger(Trigger.ProcessingTime("10 seconds"))  // Micro-batch every 10 seconds
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    println(s"Processing batch $batchId with ${batchDF.count()} records")
+
+    batchDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")  // Always append for streaming
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .save("s3://bucket/indextables-data/")
+  }
+  .option("checkpointLocation", "s3://bucket/checkpoints/my-stream")
+  .start()
+
+query.awaitTermination()
+```
+
+### PySpark Streaming Example
+
+IndexTables4Spark works seamlessly with PySpark's structured streaming API:
+
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, date_format, hour
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, TimestampType
+
+spark = SparkSession.builder \
+    .appName("IndexTables Streaming") \
+    .getOrCreate()
+
+# Define schema
+schema = StructType([
+    StructField("id", IntegerType(), True),
+    StructField("username", StringType(), True),
+    StructField("message", StringType(), True),
+    StructField("timestamp", TimestampType(), True)
+])
+
+# Read streaming data
+streaming_df = spark.readStream \
+    .format("csv") \
+    .option("header", "true") \
+    .schema(schema) \
+    .load("s3://bucket/input-data/")
+
+# Write to IndexTables with merge-on-write
+def write_batch(batch_df, batch_id):
+    print(f"Processing batch {batch_id} with {batch_df.count()} records")
+
+    batch_df.write \
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") \
+        .mode("append") \
+        .option("spark.indextables.mergeOnWrite.enabled", "true") \
+        .option("spark.indextables.mergeOnWrite.targetSize", "4G") \
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "20") \
+        .option("spark.indextables.indexing.typemap.message", "text") \
+        .option("spark.indextables.indexing.fastfields", "timestamp") \
+        .save("s3://bucket/indextables-data/")
+
+query = streaming_df.writeStream \
+    .trigger(processingTime="5 minutes") \
+    .foreachBatch(write_batch) \
+    .option("checkpointLocation", "s3://bucket/checkpoints/pyspark-stream") \
+    .start()
+
+query.awaitTermination()
+```
+
+**PySpark with Partitioning:**
+
+```python
+def write_partitioned_batch(batch_df, batch_id):
+    # Add partition columns
+    partitioned_df = batch_df \
+        .withColumn("date", date_format(col("timestamp"), "yyyy-MM-dd")) \
+        .withColumn("hour", hour(col("timestamp")))
+
+    partitioned_df.write \
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider") \
+        .mode("append") \
+        .partitionBy("date", "hour") \
+        .option("spark.indextables.mergeOnWrite.enabled", "true") \
+        .option("spark.indextables.indexing.typemap.message", "text") \
+        .save("s3://bucket/partitioned-data/")
+
+query = streaming_df.writeStream \
+    .trigger(processingTime="1 minute") \
+    .foreachBatch(write_partitioned_batch) \
+    .option("checkpointLocation", "s3://bucket/checkpoints/partitioned") \
+    .start()
+```
+
+**PySpark Query with IndexQuery:**
+
+```python
+# Read back streaming data
+df = spark.read \
+    .format("io.indextables.spark.core.IndexTables4SparkTableProvider") \
+    .load("s3://bucket/indextables-data/")
+
+# Full-text search using SQL
+df.createOrReplaceTempView("streaming_data")
+results = spark.sql("""
+    SELECT id, username, message, timestamp
+    FROM streaming_data
+    WHERE message indexquery 'error OR failure'
+      AND date = '2024-01-01'
+""")
+results.show()
+
+# Aggregations
+spark.sql("""
+    SELECT
+        date,
+        COUNT(*) as total_messages,
+        COUNT(DISTINCT username) as unique_users
+    FROM streaming_data
+    WHERE date >= '2024-01-01'
+    GROUP BY date
+    ORDER BY date
+""").show()
+```
+
+### Streaming with Merge-On-Write
+
+For optimal performance, enable merge-on-write to automatically consolidate small files during streaming writes:
+
+```scala
+val query = streamingDF.writeStream
+  .trigger(Trigger.ProcessingTime("5 minutes"))
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    batchDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      // Enable merge-on-write for automatic optimization
+      .option("spark.indextables.mergeOnWrite.enabled", "true")
+      .option("spark.indextables.mergeOnWrite.targetSize", "4G")
+      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "20")
+      // Text field configuration
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .option("spark.indextables.indexing.typemap.content", "text")
+      // Fast fields for aggregations
+      .option("spark.indextables.indexing.fastfields", "timestamp,user_id")
+      .save("s3://bucket/streaming-data/")
+  }
+  .option("checkpointLocation", "s3://bucket/checkpoints/streaming-merge")
+  .start()
+```
+
+### Streaming with Partitioning
+
+Combine streaming with table partitioning for efficient data organization:
+
+```scala
+val query = streamingDF.writeStream
+  .trigger(Trigger.ProcessingTime("1 minute"))
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    // Add partition columns if not present
+    val partitionedDF = batchDF
+      .withColumn("date", date_format(col("timestamp"), "yyyy-MM-dd"))
+      .withColumn("hour", hour(col("timestamp")))
+
+    partitionedDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .partitionBy("date", "hour")  // Partition by date and hour
+      .option("spark.indextables.mergeOnWrite.enabled", "true")
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .save("s3://bucket/partitioned-stream/")
+  }
+  .option("checkpointLocation", "s3://bucket/checkpoints/partitioned")
+  .start()
+```
+
+### availableNow Trigger (One-Time Processing)
+
+Process all available data once and stop (useful for batch-like streaming):
+
+```scala
+val query = streamingDF.writeStream
+  .trigger(Trigger.AvailableNow())  // Process all data then stop
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    println(s"Processing batch $batchId")
+
+    batchDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .option("spark.indextables.mergeOnWrite.enabled", "true")
+      .option("spark.indextables.indexing.typemap.content", "text")
+      .save("s3://bucket/output/")
+  }
+  .option("checkpointLocation", "s3://bucket/checkpoints/available-now")
+  .start()
+
+query.awaitTermination()
+```
+
+### Streaming from Kafka
+
+```scala
+import org.apache.spark.sql.functions._
+
+// Read from Kafka
+val kafkaDF = spark.readStream
+  .format("kafka")
+  .option("kafka.bootstrap.servers", "localhost:9092")
+  .option("subscribe", "events")
+  .load()
+
+// Parse JSON messages and write to IndexTables
+val query = kafkaDF
+  .selectExpr("CAST(value AS STRING) as json")
+  .select(from_json(col("json"), schema).as("data"))
+  .select("data.*")
+  .writeStream
+  .trigger(Trigger.ProcessingTime("30 seconds"))
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    batchDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .option("spark.indextables.mergeOnWrite.enabled", "true")
+      .option("spark.indextables.indexing.typemap.message", "text")
+      .save("s3://bucket/kafka-events/")
+  }
+  .option("checkpointLocation", "s3://bucket/checkpoints/kafka")
+  .start()
+```
+
+### Streaming Best Practices
+
+#### Trigger Selection
+- **ProcessingTime**: Use for continuous streaming with regular intervals (e.g., "30 seconds", "5 minutes")
+- **AvailableNow**: Use for one-time batch processing of available data
+- **Continuous**: Not recommended with IndexTables (micro-batch is sufficient)
+
+#### Merge-On-Write for Streaming
+- ✅ **Enable for production**: Automatically consolidates splits during writes
+- ✅ **Set appropriate targetSize**: Use "4G" (default) for production, "1G" for smaller batches
+- ✅ **Ensure disk space**: Set `minDiskSpaceGB: 20` for production, `1` for testing
+- ✅ **Monitor batch sizes**: Larger micro-batches benefit more from merge-on-write
+
+#### Checkpointing
+- ✅ **Always specify checkpointLocation**: Required for exactly-once semantics
+- ✅ **Use reliable storage**: S3, HDFS, or Azure Blob Storage
+- ✅ **Never reuse checkpoint directories**: Each streaming query needs unique checkpoint path
+
+#### Performance Optimization
+```scala
+// Optimize streaming performance
+spark.conf.set("spark.sql.streaming.fileSource.cleaner.numThreads", "4")
+spark.conf.set("spark.sql.streaming.schemaInference", "false")  // Define schema explicitly
+
+// IndexTables-specific optimization
+batchDF.write
+  .option("spark.indextables.indexWriter.threads", "4")
+  .option("spark.indextables.indexWriter.batchSize", "20000")
+  .option("spark.indextables.s3.maxConcurrency", "8")
+  .save(path)
+```
+
+#### Monitoring and Observability
+```scala
+// Monitor streaming query progress
+query.recentProgress.foreach(println)
+query.status.prettyJson
+
+// Custom monitoring in foreachBatch
+.foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+  val recordCount = batchDF.count()
+  val timestamp = System.currentTimeMillis()
+
+  println(s"Batch $batchId: $recordCount records at $timestamp")
+
+  // Write metrics to monitoring system
+  metricsCollector.recordBatchMetrics(batchId, recordCount, timestamp)
+
+  // Write data
+  batchDF.write.format("indextables").mode("append").save(path)
+}
+```
+
+### Streaming Data Integrity
+
+IndexTables provides exactly-once semantics with transaction log:
+- ✅ **Atomic commits**: Each batch is committed atomically via transaction log
+- ✅ **Idempotent writes**: Checkpoint ensures no duplicate processing
+- ✅ **Data validation**: Zero data loss validated with 10K+ records in tests
+- ✅ **ACID guarantees**: Full transaction log support for all streaming writes
+
+### Error Handling
+
+```scala
+val query = streamingDF.writeStream
+  .trigger(Trigger.ProcessingTime("1 minute"))
+  .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
+    try {
+      batchDF.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("append")
+        .option("spark.indextables.mergeOnWrite.enabled", "true")
+        .save(outputPath)
+
+      println(s"✅ Batch $batchId completed successfully")
+
+    } catch {
+      case e: Exception =>
+        println(s"❌ Batch $batchId failed: ${e.getMessage}")
+        // Log to monitoring system
+        logger.error(s"Streaming batch $batchId failed", e)
+        // Rethrow to trigger Spark's retry mechanism
+        throw e
+    }
+  }
+  .option("checkpointLocation", checkpointPath)
+  .start()
+```
+
+### Reading Streaming Results
+
+Query the streaming table while it's being written:
+
+```scala
+// Read the streaming table for interactive queries
+val resultsDF = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/streaming-data/")
+
+// Query with full-text search
+resultsDF.createOrReplaceTempView("streaming_events")
+spark.sql("""
+  SELECT * FROM streaming_events
+  WHERE message indexquery 'error OR warning'
+  ORDER BY timestamp DESC
+  LIMIT 100
+""").show()
+
+// Aggregations work seamlessly
+spark.sql("""
+  SELECT date, COUNT(*) as event_count, AVG(response_time) as avg_response
+  FROM streaming_events
+  GROUP BY date
+  ORDER BY date DESC
+""").show()
 ```
 
 ---
