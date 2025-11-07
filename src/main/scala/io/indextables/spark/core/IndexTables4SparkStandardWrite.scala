@@ -106,6 +106,9 @@ class IndexTables4SparkStandardWrite(
 
   override def toBatch: BatchWrite = this
 
+  // Store staging uploader for use in commit()
+  @transient private var stagingUploader: Option[io.indextables.spark.merge.SplitStagingUploader] = None
+
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating standard batch writer factory for ${info.numPartitions} partitions")
     logger.info(s"Using Spark's default partitioning (no optimization)")
@@ -139,7 +142,55 @@ class IndexTables4SparkStandardWrite(
         }
     }
 
-    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
+    // Check if merge-on-write is enabled
+    import io.indextables.spark.merge._
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+
+    val options = new CaseInsensitiveStringMap(serializedOptions.asJava)
+    val mergeOnWriteEnabled = MergeOnWriteHelper.isMergeOnWriteEnabled(options)
+
+    // Create merge-on-write config if enabled
+    val mergeOnWriteConfigOpt = if (mergeOnWriteEnabled) {
+      logger.info("🔀 Merge-on-write is ENABLED - creating serializable config")
+      val basePath = MergeOnWriteHelper.getStagingBasePath(tablePath.toString, options)
+
+      // Create serializable config instead of non-serializable uploader
+      val config = io.indextables.spark.merge.MergeOnWriteConfig(
+        enabled = true,
+        stagingBasePath = basePath,
+        serializedHadoopConfig = combinedHadoopConfig,
+        serializedOptions = serializedOptions
+      )
+
+      // Create uploader on driver for use in commit() only
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        tablePath.toString, options, hadoopConf
+      )
+      val numThreads = options.getOrDefault("spark.indextables.mergeOnWrite.stagingThreads", "4").toInt
+      val maxRetries = options.getOrDefault("spark.indextables.mergeOnWrite.stagingRetries", "3").toInt
+      val uploader = new SplitStagingUploader(
+        cloudProvider,
+        basePath,
+        numThreads,
+        maxRetries
+      )
+      stagingUploader = Some(uploader)
+
+      Some(config)
+    } else {
+      logger.info("Traditional write mode (merge-on-write disabled)")
+      None
+    }
+
+    new IndexTables4SparkWriterFactory(
+      tablePath,
+      writeSchema,
+      serializedOptions,
+      combinedHadoopConfig,
+      partitionColumns,
+      mergeOnWriteConfigOpt
+    )
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -165,13 +216,30 @@ class IndexTables4SparkStandardWrite(
       validateIndexingConfigurationForAppend()
     }
 
+    // Extract both AddActions (traditional) and StagedSplitInfo (merge-on-write)
+    import io.indextables.spark.merge._
+
     val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions
       case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                                   => Seq.empty[AddAction]
     }
 
+    val stagedSplits: Seq[StagedSplitInfo] = messages.flatMap {
+      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.stagedSplits
+      case _                                                => Seq.empty[StagedSplitInfo]
+    }
+
+    // Check if merge-on-write is being used
+    val mergeOnWriteActive = stagedSplits.nonEmpty
+
+    if (mergeOnWriteActive) {
+      logger.info(s"🔀 Merge-on-write ACTIVE: ${stagedSplits.size} staged splits, ${addActions.size} direct AddActions")
+    }
+
     // Log how many empty partitions were filtered out
-    val emptyPartitionsCount = messages.length - addActions.length
+    val totalItems = addActions.size + stagedSplits.size
+    val emptyPartitionsCount = messages.length - totalItems
     if (emptyPartitionsCount > 0) {
       println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
       logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
@@ -228,21 +296,51 @@ class IndexTables4SparkStandardWrite(
     TransactionLog.setWriteOptions(writeOptions)
 
     try {
-      // Commit the changes
-      if (shouldOverwrite) {
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${addActions.length} new files")
-        val version = transactionLog.overwriteFiles(addActions)
-        logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
+      // Determine final AddActions (either direct or from merge-on-write)
+      val finalAddActions = if (mergeOnWriteActive && stagingUploader.isDefined) {
+        logger.info("🔀 Executing merge-on-write orchestration...")
+
+        // Create orchestrator
+        val orchestrator = new LocalityAwareSplitMergeOrchestrator(
+          tablePath = tablePath.toString,
+          options = writeOptions,
+          hadoopConf = hadoopConf,
+          sparkSession = org.apache.spark.sql.SparkSession.active,
+          schema = writeSchema
+        )
+
+        // Execute merge-on-write
+        val mergedActions = orchestrator.executeMergeOnWrite(
+          stagedSplits,
+          stagingUploader.get,
+          if (shouldOverwrite) org.apache.spark.sql.SaveMode.Overwrite else org.apache.spark.sql.SaveMode.Append
+        )
+
+        // Shutdown staging uploader
+        stagingUploader.foreach(_.shutdown())
+
+        // Combine with any direct AddActions
+        addActions ++ mergedActions
       } else {
-        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} new files")
-        logger.debug(s"DEBUG: Performing APPEND with ${addActions.length} new files")
-        // Standard append operation
-        val version = transactionLog.addFiles(addActions)
-        logger.info(s"Added ${addActions.length} files in transaction version $version")
+        // Traditional mode - use AddActions directly
+        addActions
       }
 
-      logger.info(s"Successfully committed ${addActions.length} files")
+      // Commit the changes
+      if (shouldOverwrite) {
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
+        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
+        val version = transactionLog.overwriteFiles(finalAddActions)
+        logger.info(s"Overwrite completed in transaction version $version, added ${finalAddActions.length} files")
+      } else {
+        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
+        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
+        // Standard append operation
+        val version = transactionLog.addFiles(finalAddActions)
+        logger.info(s"Added ${finalAddActions.length} files in transaction version $version")
+      }
+
+      logger.info(s"Successfully committed ${finalAddActions.length} files")
     } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()

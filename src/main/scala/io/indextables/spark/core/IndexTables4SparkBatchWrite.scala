@@ -78,7 +78,8 @@ class IndexTables4SparkBatchWrite(
       props.toMap
     }
 
-    new IndexTables4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig)
+    // BatchWrite does NOT support merge-on-write - pass empty partition columns and None for merge config
+    new IndexTables4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig, Seq.empty, None)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
