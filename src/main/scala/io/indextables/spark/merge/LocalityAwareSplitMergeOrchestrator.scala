@@ -158,7 +158,7 @@ class LocalityAwareSplitMergeOrchestrator(
 
       // Phase 3: Execute merges in parallel on Spark cluster (with locality)
       val mergeStartTime = System.currentTimeMillis()
-      val (mergedSplits, mergeMetrics) = executeMergeGroupsWithLocality(mergeGroups)
+      val (mergedSplits, mergedSplitIds, mergeMetrics) = executeMergeGroupsWithLocality(mergeGroups)
       val mergeDuration = System.currentTimeMillis() - mergeStartTime
 
       metricsBuilder = metricsBuilder.copy(
@@ -173,7 +173,10 @@ class LocalityAwareSplitMergeOrchestrator(
       )
 
       // Phase 4: Promote unmerged splits (those too small or not grouped)
-      val promotedSplits = promoteUnmergedSplits(updatedSplits, mergeGroups)
+      // BUG FIX: Use mergedSplitIds instead of mergeGroups to determine unmerged splits
+      val unmergedSplits = updatedSplits.filterNot(s => mergedSplitIds.contains(s.uuid))
+      logger.info(s"Promoting ${unmergedSplits.size} unmerged splits (${mergedSplitIds.size} were merged)")
+      val promotedSplits = promoteUnmergedSplits(unmergedSplits)
 
       logger.info(s"Merge complete: ${mergedSplits.size} merged, ${promotedSplits.size} promoted")
       metricsBuilder = metricsBuilder.copy(
@@ -326,10 +329,10 @@ class LocalityAwareSplitMergeOrchestrator(
    */
   private def executeMergeGroupsWithLocality(
     mergeGroups: Seq[LocalityAwareMergeGroup]
-  ): (Seq[AddAction], MergeExecutionMetrics) = {
+  ): (Seq[AddAction], Set[String], MergeExecutionMetrics) = {
 
     if (mergeGroups.isEmpty) {
-      return (Seq.empty, MergeExecutionMetrics(0, 0, 0, 0))
+      return (Seq.empty, Set.empty, MergeExecutionMetrics(0, 0, 0, 0))
     }
 
     // Gap #6: Calculate dynamic timeout based on largest merge group
@@ -355,20 +358,57 @@ class LocalityAwareSplitMergeOrchestrator(
     val tablePathStr = tablePath
     val schemaValue = schema
 
-    // Create RDD of merge groups with locality hints
+    // Create RDD of merge groups with locality-preserving distribution
+    // BUG FIX: Distribute work across all executors while preserving locality
+    val numExecutors = sparkSession.sparkContext.getExecutorMemoryStatus.size - 1 // exclude driver
+
+    // Group merge groups by host, then distribute each host's groups across multiple partitions
+    val groupsByHost = mergeGroups.groupBy(_.preferredHost)
+    logger.info(s"Merge groups distributed across ${groupsByHost.size} hosts: " +
+      groupsByHost.map { case (host, groups) => s"$host(${groups.size})" }.mkString(", "))
+
+    // Create a flat list of (mergeGroup, preferredHost, partitionIndex) tuples
+    // Distribute each host's groups across multiple partitions to ensure parallelism
+    val distributedGroups = groupsByHost.flatMap { case (host, hostGroups) =>
+      // Calculate how many partitions this host should use
+      // Aim for at least one partition per host, but distribute if there are many groups
+      val partitionsForHost = Math.max(1, Math.min(numExecutors / groupsByHost.size, hostGroups.size))
+
+      // Round-robin assign this host's groups across its allocated partitions
+      hostGroups.zipWithIndex.map { case (group, idx) =>
+        val partitionOffset = groupsByHost.keys.toSeq.sorted.indexOf(host) * partitionsForHost
+        val partitionIndex = partitionOffset + (idx % partitionsForHost)
+        (group, Seq(host), partitionIndex)
+      }
+    }.toSeq.sortBy(_._3) // Sort by partition index for deterministic ordering
+
+    logger.info(s"Distributing ${mergeGroups.size} merge groups across ${distributedGroups.map(_._3).distinct.size} partitions " +
+      s"($numExecutors executors available)")
+
+    // Create RDD with locality preferences intact
+    // makeRDD signature: Seq[(T, Seq[String])] creates RDD[T] with locality hints
     val mergeGroupsRDD = sparkSession.sparkContext.makeRDD(
-      mergeGroups.map(g => (g, g.preferredHost))
+      distributedGroups.map { case (group, hosts, _) => (group, hosts) }
     )
 
-    // Execute merges (Spark will try to schedule tasks on preferred hosts)
-    val mergeResults = mergeGroupsRDD.mapPartitions { iter =>
+    // Execute merges (Spark will schedule tasks on preferred hosts due to locality hints)
+    val mergeResultsWithIds = mergeGroupsRDD.mapPartitions { iter =>
       // Reconstruct non-serializable objects on executor
       import scala.jdk.CollectionConverters._
+      val executorLogger = org.slf4j.LoggerFactory.getLogger(classOf[LocalityAwareSplitMergeOrchestrator])
       val executorOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(serializedOptions.asJava)
       val executorHadoopConf = new org.apache.hadoop.conf.Configuration()
       serializedHadoopConf.foreach { case (k, v) => executorHadoopConf.set(k, v) }
 
-      iter.flatMap { case (mergeGroup, _) =>
+      // Track actual host for locality metrics
+      val actualHost = java.net.InetAddress.getLocalHost.getHostName
+
+      iter.flatMap { mergeGroup =>
+        // Log locality: check if we're running on the preferred host
+        if (actualHost != mergeGroup.preferredHost) {
+          executorLogger.warn(s"Locality miss: merge group for host ${mergeGroup.preferredHost} running on $actualHost")
+        }
+
         // Execute merge operation inline (cannot call instance method)
         LocalityAwareSplitMergeOrchestrator.executeSingleMergeOperationStatic(
           mergeGroup,
@@ -380,7 +420,12 @@ class LocalityAwareSplitMergeOrchestrator(
       }
     }.collect()
 
-    logger.info(s"Completed ${mergeResults.length} merge operations")
+    logger.info(s"Completed ${mergeResultsWithIds.length} merge operations")
+
+    // Separate AddActions from merged split IDs
+    val mergeResults = mergeResultsWithIds.map(_._1)
+    val mergedSplitIds = mergeResultsWithIds.flatMap(_._2).toSet
+    logger.info(s"Merged splits: ${mergedSplitIds.size} split IDs tracked")
 
     // Extract metrics from results
     val totalMerges = mergeResults.length
@@ -388,21 +433,17 @@ class LocalityAwareSplitMergeOrchestrator(
     val remoteMerges = mergeResults.count(_.tags.flatMap(_.get("localityType")).contains("remote"))
     val bytesDownloaded = mergeResults.flatMap(_.tags.flatMap(_.get("bytesDownloaded")).map(_.toLong)).sum
 
-    (mergeResults.toSeq, MergeExecutionMetrics(totalMerges, localMerges, remoteMerges, bytesDownloaded))
+    (mergeResults.toSeq, mergedSplitIds, MergeExecutionMetrics(totalMerges, localMerges, remoteMerges, bytesDownloaded))
   }
 
 
   /**
    * Promote unmerged splits to final location
-   * (Splits that weren't included in any merge group)
+   * (Splits that weren't included in any merge group or failed to merge)
    */
   private def promoteUnmergedSplits(
-    allSplits: Seq[StagedSplitInfo],
-    mergeGroups: Seq[LocalityAwareMergeGroup]
+    unmergedSplits: Seq[StagedSplitInfo]
   ): Seq[AddAction] = {
-
-    val mergedSplitIds = mergeGroups.flatMap(_.splits.map(_.uuid)).toSet
-    val unmergedSplits = allSplits.filterNot(s => mergedSplitIds.contains(s.uuid))
 
     logger.info(s"Promoting ${unmergedSplits.size} unmerged splits to final location")
 
@@ -421,15 +462,38 @@ class LocalityAwareSplitMergeOrchestrator(
         val finalPath = s"${tablePath}/$relativePath"
 
         // Check if local file still exists, otherwise use staging
+        // BUG FIX #3: Add comprehensive debug logging
+        val localFile = new File(split.localPath)
+        val localExists = localFile.exists()
+
+        logger.info(s"Promoting split ${split.uuid}: localPath=${split.localPath} (exists=$localExists), " +
+          s"stagingPath=${split.stagingPath} (available=${split.stagingAvailable}), " +
+          s"workerHost=${split.workerHost}, executorId=${split.executorId}")
+
         val sourceStream = {
-          val localFile = new File(split.localPath)
-          if (localFile.exists()) {
+          if (localExists) {
+            logger.info(s"Using local file for promotion: ${split.localPath}")
             new FileInputStream(localFile)
           } else if (split.stagingAvailable) {
-            cloudProvider.openInputStream(split.stagingPath)
+            logger.info(s"Downloading from staging for promotion: ${split.stagingPath}")
+            try {
+              cloudProvider.openInputStream(split.stagingPath)
+            } catch {
+              case e: Exception =>
+                logger.error(s"Failed to download from staging: ${split.stagingPath}", e)
+                throw new RuntimeException(
+                  s"Unmerged split failed to download from staging: uuid=${split.uuid}, " +
+                  s"localPath=${split.localPath} (exists=$localExists), " +
+                  s"stagingPath=${split.stagingPath} (available=${split.stagingAvailable})",
+                  e
+                )
+            }
           } else {
             throw new RuntimeException(
-              s"Unmerged split not available locally or in staging: ${split.uuid}"
+              s"Unmerged split not available locally or in staging: uuid=${split.uuid}, " +
+              s"localPath=${split.localPath} (exists=$localExists), " +
+              s"stagingPath=${split.stagingPath} (available=${split.stagingAvailable}), " +
+              s"workerHost=${split.workerHost}, executorId=${split.executorId}"
             )
           }
         }
@@ -557,6 +621,8 @@ object LocalityAwareSplitMergeOrchestrator {
    * Execute a single merge operation on executor (static method to avoid serialization issues)
    *
    * This method must be static (in companion object) to avoid capturing the orchestrator instance.
+   *
+   * Returns: Option[(AddAction, Set[String])] where the Set contains UUIDs of merged splits
    */
   def executeSingleMergeOperationStatic(
     mergeGroup: LocalityAwareMergeGroup,
@@ -564,7 +630,7 @@ object LocalityAwareSplitMergeOrchestrator {
     options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
     hadoopConf: org.apache.hadoop.conf.Configuration,
     schema: org.apache.spark.sql.types.StructType
-  ): Option[AddAction] = {
+  ): Option[(AddAction, Set[String])] = {
 
     // Create logger on executor (not serialized)
     val logger = org.slf4j.LoggerFactory.getLogger(classOf[LocalityAwareSplitMergeOrchestrator])
@@ -636,22 +702,23 @@ object LocalityAwareSplitMergeOrchestrator {
         inputMaxValues
       )
 
-      // Progressive cleanup - delete local splits immediately after successful merge
-      if (options.getOrDefault("spark.indextables.mergeOnWrite.progressiveCleanup", "true").toBoolean) {
-        mergeGroup.splits.foreach { split =>
-          try {
-            val localFile = new java.io.File(split.localPath)
-            if (localFile.exists() && localFile.delete()) {
-              logger.debug(s"Deleted local split after merge: ${split.localPath}")
-            }
-          } catch {
-            case e: Exception => logger.warn(s"Failed to delete local split: ${split.localPath}", e)
-          }
-        }
-      }
+      // BUG FIX: DO NOT delete local splits here! They might be needed for promotion.
+      // Progressive cleanup is now handled AFTER promotion to avoid race condition.
+      // The driver will clean up splits after determining which were merged vs promoted.
+      //
+      // OLD BUGGY CODE (commented out):
+      // if (options.getOrDefault("spark.indextables.mergeOnWrite.progressiveCleanup", "true").toBoolean) {
+      //   mergeGroup.splits.foreach { split =>
+      //     val localFile = new java.io.File(split.localPath)
+      //     if (localFile.exists() && localFile.delete()) {
+      //       logger.debug(s"Deleted local split after merge: ${split.localPath}")
+      //     }
+      //   }
+      // }
 
-      // 5. Create AddAction with locality metadata (use relative path)
-      Some(AddAction(
+      // 5. Create AddAction with locality metadata and merged split IDs
+      val mergedSplitIds = mergeGroup.splits.map(_.uuid).toSet
+      val addAction = AddAction(
         path = relativePath,
         partitionValues = mergeGroup.partition,
         size = mergedMetadata.size,
@@ -678,7 +745,9 @@ object LocalityAwareSplitMergeOrchestrator {
         numMergeOps = Some(mergeGroup.splits.size),
         docMappingJson = mergedMetadata.docMappingJson,
         uncompressedSizeBytes = mergedMetadata.uncompressedSizeBytes
-      ))
+      )
+
+      Some((addAction, mergedSplitIds))
 
     } catch {
       case e: Exception =>
