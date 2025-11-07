@@ -52,7 +52,7 @@ spark.indextables.stats.truncation.maxLength: 256
 
 // Merge-On-Write (automatic split consolidation during writes)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
-spark.indextables.mergeOnWrite.targetSize: "100M" (target merged split size)
+spark.indextables.mergeOnWrite.targetSize: "4G" (default: 4G, target merged split size)
 spark.indextables.mergeOnWrite.minSplitsToMerge: 2 (minimum splits to trigger merge)
 spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
 spark.indextables.mergeOnWrite.maxRetries: 3 (network retry attempts)
