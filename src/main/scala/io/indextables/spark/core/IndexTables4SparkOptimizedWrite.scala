@@ -386,7 +386,8 @@ class IndexTables4SparkOptimizedWrite(
         }
     }
 
-    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
+    // OptimizedWrite does NOT support merge-on-write - always pass None
+    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns, None)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -407,9 +408,18 @@ class IndexTables4SparkOptimizedWrite(
         logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
     }
 
+    // OptimizedWrite handles commit messages - extract AddActions only (no merge-on-write orchestration)
+    import io.indextables.spark.merge._
     val addActions: Seq[AddAction] = messages.flatMap {
+      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions  // Extract addActions from merge-on-write message
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _                                   => Seq.empty[AddAction]
+      case _ => Seq.empty[AddAction]
+    }
+
+    // Log how many empty partitions were filtered out
+    val emptyPartitionsCount = messages.length - addActions.size
+    if (emptyPartitionsCount > 0) {
+      logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
