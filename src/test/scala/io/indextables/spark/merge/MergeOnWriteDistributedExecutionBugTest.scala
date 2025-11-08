@@ -134,17 +134,49 @@ class MergeOnWriteDistributedExecutionBugTest extends AnyFunSuite with Matchers 
 
     logFiles.foreach { logFile =>
       try {
-        val lines = if (logFile.getName.endsWith(".gz")) {
+        println(s"  Parsing log file: ${logFile.getName} (${logFile.length()} bytes)")
+
+        // Try to detect if file is actually GZIP regardless of extension
+        // Transaction log files may have a 2-byte header before GZIP data
+        val (isGzipped, skipBytes) = {
+          val fis = new java.io.FileInputStream(logFile)
+          val firstFourBytes = new Array[Byte](4)
+          fis.read(firstFourBytes)
+          fis.close()
+
+          // Check if GZIP magic number (0x1f 0x8b) is at start
+          if (firstFourBytes(0) == 0x1f.toByte && firstFourBytes(1) == 0x8b.toByte) {
+            (true, 0)
+          // Check if GZIP magic number is at offset 2 (after 2-byte header)
+          } else if (firstFourBytes(2) == 0x1f.toByte && firstFourBytes(3) == 0x8b.toByte) {
+            (true, 2)
+          } else {
+            (false, 0)
+          }
+        }
+
+        println(s"    Is GZIP: $isGzipped (skip $skipBytes bytes, extension says: ${logFile.getName.endsWith(".gz")})")
+
+        val lines = if (isGzipped) {
           import java.util.zip.GZIPInputStream
           import java.io.FileInputStream
-          val gzipStream = new GZIPInputStream(new FileInputStream(logFile))
+          val fis = new FileInputStream(logFile)
+          // Skip header bytes if present
+          if (skipBytes > 0) {
+            fis.skip(skipBytes)
+          }
+          val gzipStream = new GZIPInputStream(fis)
           scala.io.Source.fromInputStream(gzipStream, "UTF-8").getLines().toList
         } else {
           scala.io.Source.fromFile(logFile, "UTF-8").getLines().toList
         }
+        println(s"    Lines read: ${lines.size}")
+        if (lines.nonEmpty) {
+          println(s"    First line preview: ${lines.head.take(80)}...")
+        }
 
         lines.foreach { line =>
-          if (line.contains("\"add\"")) {
+          if (line.trim.nonEmpty && line.contains("\"add\"")) {
             totalSplitsCreated += 1
 
             // Check for merge tags
@@ -155,9 +187,22 @@ class MergeOnWriteDistributedExecutionBugTest extends AnyFunSuite with Matchers 
             }
           }
         }
+        println(s"    Found: $totalSplitsCreated splits ($totalMergeOps merged, $totalPromotedSplits promoted)")
       } catch {
         case e: Exception =>
-          println(s"Warning: Failed to parse log file ${logFile.getName}: ${e.getMessage}")
+          println(s"Warning: Failed to parse log file ${logFile.getName}: ${e.getClass.getSimpleName}: ${e.getMessage}")
+          e.printStackTrace()
+          // Try to read first few bytes to debug
+          try {
+            val rawBytes = new Array[Byte](100)
+            val fis = new java.io.FileInputStream(logFile)
+            val bytesRead = fis.read(rawBytes)
+            fis.close()
+            println(s"    First $bytesRead bytes (raw): ${rawBytes.take(bytesRead).map(b => f"$b%02x").mkString(" ")}")
+            println(s"    As string: ${new String(rawBytes.take(bytesRead), "UTF-8")}")
+          } catch {
+            case ex: Exception => println(s"    Could not read raw bytes: ${ex.getMessage}")
+          }
       }
     }
 
