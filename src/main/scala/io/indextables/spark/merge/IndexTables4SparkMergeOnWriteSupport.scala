@@ -88,23 +88,25 @@ object MergeOnWriteHelper {
   ): StagedSplitInfo = {
 
     // Get or create local temp directory
-    // FIX: Use shared directory for all splits in this write operation, not per-task UUID
-    // The directory will persist until merge phase completes
     val localTempDir = SplitCacheConfig.getDefaultTempPath()
       .getOrElse(System.getProperty("java.io.tmpdir"))
-
-    // Use a consistent directory name for all tasks in this write operation
-    // This ensures files are available during merge phase even if task JVMs terminate
-    val workingDir = new File(localTempDir, s"merge-on-write-staging")
-    workingDir.mkdirs()
 
     // Generate unique split ID and filename
     val splitUuid = UUID.randomUUID().toString
     val taskAttemptId = Option(TaskContext.get()).map(_.taskAttemptId()).getOrElse(0L)
     val fileName = f"part-$partitionId%05d-$taskId-$splitUuid.split"
 
-    // Create local split file path
-    val localSplitPath = new File(workingDir, fileName).getAbsolutePath
+    // CRITICAL FIX: Create split to a tantivy-controlled temp location first
+    // Tantivy4java may delete files in its staging locations, so we can't trust them to persist
+    val tantivyTempDir = new File(localTempDir, s"tantivy-split-creation-$splitUuid")
+    tantivyTempDir.mkdirs()
+    val tantivyTempSplitPath = new File(tantivyTempDir, fileName).getAbsolutePath
+
+    // Our permanent staging directory (separate from tantivy's temp location)
+    // This directory is under our control and files will persist for merge phase
+    val mergeOnWriteStagingDir = new File(localTempDir, "merge-on-write-staging")
+    mergeOnWriteStagingDir.mkdirs()
+    val finalLocalPath = new File(mergeOnWriteStagingDir, fileName).getAbsolutePath
 
     // Get worker identification
     val workerHost = java.net.InetAddress.getLocalHost.getHostName
@@ -136,16 +138,36 @@ object MergeOnWriteHelper {
     logger.info(s"  Node ID: $nodeId")
     logger.info("=" * 80)
 
-    logger.info(s"Creating local split for merge-on-write: $localSplitPath (worker: $workerHost, executor: $executorId)")
+    logger.info(s"Creating local split in tantivy temp location: $tantivyTempSplitPath (worker: $workerHost, executor: $executorId)")
 
-    // Create split from the index using the search engine
-    val (splitPath, splitMetadata) = searchEngine.commitAndCreateSplit(localSplitPath, partitionId.toLong, nodeId)
+    // Create split from the index using the search engine (in tantivy-controlled temp location)
+    val (tantivySplitPath, splitMetadata) = searchEngine.commitAndCreateSplit(tantivyTempSplitPath, partitionId.toLong, nodeId)
 
-    // Get split file size
-    val splitFile = new File(splitPath)
-    val splitSize = splitFile.length()
+    // CRITICAL: Immediately copy the split to our permanent staging directory
+    // This protects against tantivy4java deleting the file during cleanup
+    logger.info(s"Copying split from tantivy temp to merge-on-write staging: $tantivySplitPath → $finalLocalPath")
+    val tantivySplitFile = new File(tantivySplitPath)
+    val finalLocalFile = new File(finalLocalPath)
 
-    logger.info(s"Created local split: $splitPath (${splitSize / 1024 / 1024}MB, $recordCount records)")
+    // Use NIO for efficient file copy
+    java.nio.file.Files.copy(
+      tantivySplitFile.toPath,
+      finalLocalFile.toPath,
+      java.nio.file.StandardCopyOption.REPLACE_EXISTING
+    )
+
+    val splitSize = finalLocalFile.length()
+    logger.info(s"Split copied to permanent location: $finalLocalPath (${splitSize / 1024 / 1024}MB, $recordCount records)")
+
+    // Clean up tantivy temp directory now that we have our copy
+    try {
+      tantivySplitFile.delete()
+      tantivyTempDir.delete()
+      logger.debug(s"Cleaned up tantivy temp directory: $tantivyTempDir")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to clean up tantivy temp directory: ${e.getMessage}")
+    }
 
     // Extract metadata from split
     val rawMinValues = statistics.getMinValues
@@ -185,7 +207,7 @@ object MergeOnWriteHelper {
       taskAttemptId = taskAttemptId,
       workerHost = workerHost,
       executorId = executorId,
-      localPath = splitPath,
+      localPath = finalLocalPath,  // Use our permanent copy, not tantivy's temp file
       stagingPath = stagingPath,
       stagingAvailable = false, // Will be set to true after successful upload
       size = splitSize,
@@ -205,9 +227,9 @@ object MergeOnWriteHelper {
     )
 
     // Upload to staging SYNCHRONOUSLY to ensure file is available before task completes
-    // This is critical for merge-on-write reliability in distributed environments
-    logger.info(s"Starting synchronous staging upload: $splitPath → $stagingPath")
-    val uploadResult = stagingUploader.stageSync(splitUuid, splitPath, stagedSplitBeforeUpload)
+    // Upload from our permanent copy (not tantivy's temp file)
+    logger.info(s"Starting synchronous staging upload: $finalLocalPath → $stagingPath")
+    val uploadResult = stagingUploader.stageSync(splitUuid, finalLocalPath, stagedSplitBeforeUpload)
 
     // If staging upload fails, fail the task immediately
     // This ensures we never proceed with partial/missing staging files

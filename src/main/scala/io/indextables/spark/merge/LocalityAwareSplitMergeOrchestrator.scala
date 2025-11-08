@@ -208,34 +208,46 @@ class LocalityAwareSplitMergeOrchestrator(
   }
 
   /**
-   * Clean up local staging directory after merge completes
+   * Clean up local staging files after merge completes
    *
-   * This removes the shared merge-on-write-staging directory that was used
-   * to store splits before merging. Only cleans up after successful merge.
+   * CRITICAL: Only deletes the specific split files that were merged, NOT the entire directory.
+   * Multiple concurrent merges may share the same merge-on-write-staging directory,
+   * so we must only remove our own files.
    */
   private def cleanupLocalStagingDirectory(splits: Seq[StagedSplitInfo]): Unit = {
     try {
-      // Get unique set of local directories from all splits
-      val localDirs = splits.map { split =>
-        new File(split.localPath).getParentFile
-      }.toSet.filter(_ != null)
+      // Delete only the specific files that were merged
+      var filesDeleted = 0
+      var filesFailed = 0
 
-      localDirs.foreach { dir =>
-        if (dir.exists() && dir.getName.startsWith("merge-on-write")) {
-          logger.info(s"Cleaning up local staging directory: ${dir.getAbsolutePath}")
+      splits.foreach { split =>
+        val localFile = new File(split.localPath)
+        if (localFile.exists()) {
           try {
-            org.apache.commons.io.FileUtils.deleteDirectory(dir)
-            logger.info(s"Successfully cleaned up local staging directory: ${dir.getAbsolutePath}")
+            if (localFile.delete()) {
+              filesDeleted += 1
+              logger.debug(s"Deleted local split file: ${split.localPath}")
+            } else {
+              filesFailed += 1
+              logger.warn(s"Failed to delete local split file: ${split.localPath}")
+            }
           } catch {
             case e: Exception =>
-              logger.warn(s"Failed to clean up local staging directory: ${dir.getAbsolutePath}", e)
-              // Don't fail the operation if cleanup fails
+              filesFailed += 1
+              logger.warn(s"Exception deleting local split file: ${split.localPath}", e)
           }
         }
       }
+
+      if (filesDeleted > 0) {
+        logger.info(s"Cleaned up $filesDeleted local split files (${filesFailed} failures)")
+      }
+
+      // Note: We do NOT delete the merge-on-write-staging directory itself
+      // because other concurrent merge operations may be using it
     } catch {
       case e: Exception =>
-        logger.warn("Failed to clean up local staging directories", e)
+        logger.warn("Failed to clean up local staging files", e)
         // Don't fail the operation if cleanup fails
     }
   }
