@@ -108,10 +108,33 @@ object MergeOnWriteHelper {
 
     // Get worker identification
     val workerHost = java.net.InetAddress.getLocalHost.getHostName
-    val executorId = Option(System.getProperty("spark.executor.id")).getOrElse("driver")
+
+    // Get executor ID from SparkEnv (must be available during write phase)
+    val sparkEnv = org.apache.spark.SparkEnv.get
+    if (sparkEnv == null) {
+      throw new IllegalStateException(
+        "SparkEnv is null - createLocalSplitForMergeOnWrite must be called from executor context"
+      )
+    }
+    val executorId = sparkEnv.executorId
 
     // Generate node ID for the split
     val nodeId = s"$workerHost-$executorId"
+
+    // DIAGNOSTIC: Log hostname and executor details
+    logger.info("=" * 80)
+    logger.info("SPLIT CREATION HOSTNAME DIAGNOSTICS")
+    logger.info(s"  InetAddress.getLocalHost.getHostName: $workerHost")
+    logger.info(s"  InetAddress.getLocalHost.getHostAddress: ${java.net.InetAddress.getLocalHost.getHostAddress}")
+    logger.info(s"  InetAddress.getLocalHost.getCanonicalHostName: ${java.net.InetAddress.getLocalHost.getCanonicalHostName}")
+    logger.info(s"  SparkEnv.get.executorId: $executorId")
+    val taskContext = TaskContext.get()
+    if (taskContext != null) {
+      logger.info(s"  TaskContext.taskAttemptId(): ${taskContext.taskAttemptId()}")
+      logger.info(s"  TaskContext.partitionId(): ${taskContext.partitionId()}")
+    }
+    logger.info(s"  Node ID: $nodeId")
+    logger.info("=" * 80)
 
     logger.info(s"Creating local split for merge-on-write: $localSplitPath (worker: $workerHost, executor: $executorId)")
 
@@ -156,15 +179,15 @@ object MergeOnWriteHelper {
     // Create staging path with task attempt ID (Gap #5: speculative execution handling)
     val stagingPath = s"$stagingBasePath/task-$taskAttemptId-$splitUuid.tmp"
 
-    // Build StagedSplitInfo
-    val stagedSplit = StagedSplitInfo(
+    // Build initial StagedSplitInfo (before staging)
+    val stagedSplitBeforeUpload = StagedSplitInfo(
       uuid = splitUuid,
       taskAttemptId = taskAttemptId,
       workerHost = workerHost,
       executorId = executorId,
       localPath = splitPath,
       stagingPath = stagingPath,
-      stagingAvailable = false, // Will be updated after staging completes
+      stagingAvailable = false, // Will be set to true after successful upload
       size = splitSize,
       numRecords = recordCount,
       minValues = minValues,
@@ -181,13 +204,27 @@ object MergeOnWriteHelper {
       schemaFingerprint = schemaFingerprint
     )
 
-    // Initiate async staging upload
-    // NOTE: stagingAvailable will be updated to true after upload completes
-    // in LocalityAwareSplitMergeOrchestrator.awaitAllStaging()
-    logger.info(s"Initiating async staging upload: $splitPath → $stagingPath")
-    stagingUploader.stageAsync(splitUuid, splitPath, stagedSplit)
+    // Upload to staging SYNCHRONOUSLY to ensure file is available before task completes
+    // This is critical for merge-on-write reliability in distributed environments
+    logger.info(s"Starting synchronous staging upload: $splitPath → $stagingPath")
+    val uploadResult = stagingUploader.stageSync(splitUuid, splitPath, stagedSplitBeforeUpload)
 
-    stagedSplit
+    // If staging upload fails, fail the task immediately
+    // This ensures we never proceed with partial/missing staging files
+    if (!uploadResult.success) {
+      val errorMsg = uploadResult.error.getOrElse("unknown error")
+      logger.error(s"Staging upload failed: $stagingPath - $errorMsg")
+      throw new RuntimeException(
+        s"Failed to upload split to staging: $stagingPath\n" +
+        s"Error: $errorMsg\n" +
+        s"This is a fatal error - task will fail to ensure data consistency"
+      )
+    }
+
+    logger.info(s"Staging upload succeeded: $stagingPath (${splitSize / 1024 / 1024}MB)")
+
+    // Return split with stagingAvailable = true
+    stagedSplitBeforeUpload.copy(stagingAvailable = true)
   }
 
   /**

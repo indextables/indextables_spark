@@ -101,45 +101,38 @@ class LocalityAwareSplitMergeOrchestrator(
         metricsBuilder = metricsBuilder.copy(dynamicAllocationDetected = true)
       }
 
-      // Phase 0: Wait for all async staging uploads to complete
-      logger.info(s"Waiting for ${stagedSplits.size} staging uploads to complete...")
-      val stagingStartTime = System.currentTimeMillis()
+      // Phase 0: Staging uploads are now SYNCHRONOUS - already completed during write phase
+      // The stagingAvailable flag has been set correctly by the executors
+      logger.info(s"Processing ${stagedSplits.size} staged splits (synchronous upload mode)")
 
-      val allowPartialStaging = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.allowPartialStaging", "false"
-      ).toBoolean
-      val minSuccessRate = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.minStagingSuccessRate", "0.95"
-      ).toDouble
+      // Validate staging succeeded for all splits
+      val stagingFailures = stagedSplits.count(!_.stagingAvailable)
+      if (stagingFailures > 0) {
+        val failureRate = stagingFailures.toDouble / stagedSplits.size
+        logger.warn(s"$stagingFailures/${stagedSplits.size} splits failed staging upload (${(failureRate * 100).toInt}%)")
 
-      val stagingResults = stagingUploader.awaitAllStaging(
-        timeoutMillis = 600000,
-        allowPartialStaging = allowPartialStaging,
-        minSuccessRate = minSuccessRate
-      )
-
-      val stagingDuration = System.currentTimeMillis() - stagingStartTime
-
-      // Update splits with staging availability (Gap #2)
-      val updatedSplits = stagedSplits.map { split =>
-        val result = stagingResults.get(split.uuid)
-        val available = result.exists(_.success)
-        split.copy(stagingAvailable = available)
+        // If too many failures, abort
+        val minSuccessRate = options.getOrDefault(
+          "spark.indextables.mergeOnWrite.minStagingSuccessRate", "0.95"
+        ).toDouble
+        if (failureRate > (1.0 - minSuccessRate)) {
+          throw new RuntimeException(
+            s"Staging upload failure rate ${(failureRate * 100).toInt}% exceeds threshold " +
+            s"${((1.0 - minSuccessRate) * 100).toInt}%"
+          )
+        }
+      } else {
+        logger.info(s"All ${stagedSplits.size} staging uploads succeeded")
       }
 
-      // Collect staging metrics
-      val stagingFailures = stagingResults.values.count(!_.success)
-      val stagingRetries = stagingResults.values.map(_.retriesAttempted).sum
-      val bytesUploaded = stagingResults.values.map(_.bytesUploaded).sum
-
-      logger.info(s"Staging uploads completed: ${stagedSplits.size - stagingFailures}/${stagedSplits.size} successful")
+      val updatedSplits = stagedSplits
 
       metricsBuilder = metricsBuilder.copy(
         totalSplitsStaged = stagedSplits.size - stagingFailures,
-        stagingUploadTimeMs = stagingDuration,
+        stagingUploadTimeMs = 0, // Now tracked during write phase
         stagingFailures = stagingFailures,
-        stagingRetries = stagingRetries,
-        networkBytesUploaded = bytesUploaded
+        stagingRetries = 0, // Now tracked during write phase
+        networkBytesUploaded = 0 // Now tracked during write phase
       )
 
       // Gap #3: Validate schema compatibility
@@ -451,10 +444,44 @@ class LocalityAwareSplitMergeOrchestrator(
     // BUG FIX: Distribute work across all executors while preserving locality
     val numExecutors = sparkSession.sparkContext.getExecutorMemoryStatus.size - 1 // exclude driver
 
+    // DIAGNOSTIC: Log what Spark knows about executors
+    logger.info("=" * 80)
+    logger.info("EXECUTOR HOSTNAME DIAGNOSTICS")
+    logger.info("=" * 80)
+    val executorMemoryStatus = sparkSession.sparkContext.getExecutorMemoryStatus
+    logger.info(s"Number of executors (including driver): ${executorMemoryStatus.size}")
+    executorMemoryStatus.foreach { case (execId, (host, port)) =>
+      logger.info(s"  Executor ID: $execId")
+      logger.info(s"    Host (from BlockManagerId): $host")
+      logger.info(s"    Port: $port")
+    }
+
+    // Try to get executor info from StatusTracker (may have more details)
+    try {
+      val executorInfos = sparkSession.sparkContext.statusTracker.getExecutorInfos
+      logger.info(s"Executor infos from StatusTracker: ${executorInfos.length} total")
+      executorInfos.foreach { info =>
+        logger.info(s"  Host: ${info.host()}, Port: ${info.port()}, Running tasks: ${info.numRunningTasks()}")
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn("Could not get executor info from StatusTracker", e)
+    }
+    logger.info("=" * 80)
+
     // Group merge groups by host, then distribute each host's groups across multiple partitions
     val groupsByHost = mergeGroups.groupBy(_.preferredHost)
     logger.info(s"Merge groups distributed across ${groupsByHost.size} hosts: " +
       groupsByHost.map { case (host, groups) => s"$host(${groups.size})" }.mkString(", "))
+
+    // DIAGNOSTIC: Show what hostnames we're about to pass to makeRDD
+    logger.info("=" * 80)
+    logger.info("LOCALITY HINTS BEING PASSED TO makeRDD:")
+    logger.info("=" * 80)
+    groupsByHost.foreach { case (host, groups) =>
+      logger.info(s"  Host: '$host' -> ${groups.size} merge groups")
+    }
+    logger.info("=" * 80)
 
     // Create a flat list of (mergeGroup, preferredHost, partitionIndex) tuples
     // Distribute each host's groups across multiple partitions to ensure parallelism
@@ -491,11 +518,35 @@ class LocalityAwareSplitMergeOrchestrator(
 
       // Track actual host for locality metrics
       val actualHost = java.net.InetAddress.getLocalHost.getHostName
+      val actualExecutorId = org.apache.spark.SparkEnv.get.executorId
+
+      // DIAGNOSTIC: Log where this merge task is actually running
+      executorLogger.info("=" * 80)
+      executorLogger.info("MERGE TASK EXECUTION LOCATION")
+      executorLogger.info(s"  Actual hostname: $actualHost")
+      executorLogger.info(s"  Actual executor ID: $actualExecutorId")
+      executorLogger.info(s"  Task context available: ${org.apache.spark.TaskContext.get() != null}")
+      if (org.apache.spark.TaskContext.get() != null) {
+        val tc = org.apache.spark.TaskContext.get()
+        executorLogger.info(s"  Task attempt ID: ${tc.taskAttemptId()}")
+        executorLogger.info(s"  Partition ID: ${tc.partitionId()}")
+      }
+      executorLogger.info("=" * 80)
 
       iter.flatMap { mergeGroup =>
         // Log locality: check if we're running on the preferred host
+        executorLogger.info(s"Processing merge group ${mergeGroup.groupId}:")
+        executorLogger.info(s"  Preferred host: ${mergeGroup.preferredHost}")
+        executorLogger.info(s"  Actual host: $actualHost")
+        executorLogger.info(s"  Number of splits in group: ${mergeGroup.splits.size}")
+        mergeGroup.splits.foreach { split =>
+          executorLogger.info(s"    Split ${split.uuid}: workerHost=${split.workerHost}, executorId=${split.executorId}")
+        }
+
         if (actualHost != mergeGroup.preferredHost) {
-          executorLogger.warn(s"Locality miss: merge group for host ${mergeGroup.preferredHost} running on $actualHost")
+          executorLogger.warn(s"LOCALITY MISS: merge group for host ${mergeGroup.preferredHost} running on $actualHost")
+        } else {
+          executorLogger.info(s"LOCALITY HIT: merge group running on preferred host $actualHost")
         }
 
         // Execute merge operation inline (cannot call instance method)
