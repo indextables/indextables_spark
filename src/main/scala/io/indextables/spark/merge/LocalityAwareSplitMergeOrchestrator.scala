@@ -30,7 +30,7 @@ import org.apache.spark.sql.types.StructType
 
 import org.apache.hadoop.conf.Configuration
 
-import io.indextables.spark.io.CloudStorageProviderFactory
+import io.indextables.spark.io.{CloudStorageProvider, CloudStorageProviderFactory}
 import io.indextables.spark.transaction.AddAction
 import io.indextables.spark.util.SizeParser
 import org.slf4j.LoggerFactory
@@ -197,6 +197,10 @@ class LocalityAwareSplitMergeOrchestrator(
       // Log final metrics (Gap #9: Observability)
       logger.info(metricsBuilder.summary)
 
+      // FIX: Clean up after successful merge
+      cleanupLocalStagingDirectory(updatedSplits)
+      cleanupRemoteStagingFiles(updatedSplits, mergedSplitIds)
+
       mergedSplits ++ promotedSplits
 
     } catch {
@@ -207,6 +211,91 @@ class LocalityAwareSplitMergeOrchestrator(
         )
         logger.error(s"Partial metrics before failure:\n${metricsBuilder.summary}")
         throw e
+    }
+  }
+
+  /**
+   * Clean up local staging directory after merge completes
+   *
+   * This removes the shared merge-on-write-staging directory that was used
+   * to store splits before merging. Only cleans up after successful merge.
+   */
+  private def cleanupLocalStagingDirectory(splits: Seq[StagedSplitInfo]): Unit = {
+    try {
+      // Get unique set of local directories from all splits
+      val localDirs = splits.map { split =>
+        new File(split.localPath).getParentFile
+      }.toSet.filter(_ != null)
+
+      localDirs.foreach { dir =>
+        if (dir.exists() && dir.getName.startsWith("merge-on-write")) {
+          logger.info(s"Cleaning up local staging directory: ${dir.getAbsolutePath}")
+          try {
+            org.apache.commons.io.FileUtils.deleteDirectory(dir)
+            logger.info(s"Successfully cleaned up local staging directory: ${dir.getAbsolutePath}")
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to clean up local staging directory: ${dir.getAbsolutePath}", e)
+              // Don't fail the operation if cleanup fails
+          }
+        }
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn("Failed to clean up local staging directories", e)
+        // Don't fail the operation if cleanup fails
+    }
+  }
+
+  /**
+   * Clean up remote staging files after merge completes
+   *
+   * Deletes staging files from S3/cloud storage for splits that were successfully merged.
+   * Promoted (unmerged) splits' staging files are kept as they may be needed for recovery.
+   */
+  private def cleanupRemoteStagingFiles(splits: Seq[StagedSplitInfo], mergedSplitIds: Set[String]): Unit = {
+    val cloudProvider = CloudStorageProviderFactory.createProvider(tablePath, options, hadoopConf)
+
+    try {
+      // Only delete staging files for splits that were merged
+      val splitsToCleanup = splits.filter(s => mergedSplitIds.contains(s.uuid) && s.stagingAvailable)
+
+      if (splitsToCleanup.isEmpty) {
+        logger.info("No remote staging files to clean up")
+        return
+      }
+
+      logger.info(s"Cleaning up ${splitsToCleanup.size} staging files from cloud storage...")
+
+      var successCount = 0
+      var failureCount = 0
+
+      splitsToCleanup.foreach { split =>
+        try {
+          cloudProvider.deleteFile(split.stagingPath)
+          successCount += 1
+          logger.debug(s"Deleted staging file: ${split.stagingPath}")
+        } catch {
+          case e: Exception =>
+            failureCount += 1
+            logger.warn(s"Failed to delete staging file: ${split.stagingPath}", e)
+            // Don't fail the operation if cleanup fails
+        }
+      }
+
+      logger.info(s"Staging cleanup completed: $successCount deleted, $failureCount failed")
+
+    } catch {
+      case e: Exception =>
+        logger.warn("Failed to clean up remote staging files", e)
+        // Don't fail the operation if cleanup fails
+    } finally {
+      try {
+        cloudProvider.close()
+      } catch {
+        case e: Exception =>
+          logger.warn("Failed to close cloud provider during staging cleanup", e)
+      }
     }
   }
 
@@ -661,6 +750,9 @@ object LocalityAwareSplitMergeOrchestrator {
             tempFilesToCleanup += tempFile
             tempFile.getAbsolutePath
           } else {
+            // FIX: Add diagnostic logging to help debug file availability issues
+            logSplitAvailabilityDiagnostics(split, cloudProvider)
+
             throw new RuntimeException(
               s"Split not available locally or in staging: ${split.uuid} (local: ${split.localPath}, staging: ${split.stagingPath})"
             )
@@ -766,6 +858,107 @@ object LocalityAwareSplitMergeOrchestrator {
       }
       mergeEngine.cleanup()
     }
+  }
+
+  /**
+   * Log detailed diagnostics when a split is not available
+   * Helps debug issues with local file cleanup or staging upload failures
+   */
+  private def logSplitAvailabilityDiagnostics(
+    split: StagedSplitInfo,
+    cloudProvider: CloudStorageProvider
+  ): Unit = {
+    val logger = LoggerFactory.getLogger(getClass)
+    logger.error("=" * 80)
+    logger.error("SPLIT AVAILABILITY DIAGNOSTICS")
+    logger.error("=" * 80)
+    logger.error(s"Split UUID: ${split.uuid}")
+    logger.error(s"Split size: ${split.size / 1024 / 1024}MB")
+    logger.error(s"Worker host: ${split.workerHost}")
+    logger.error(s"Executor ID: ${split.executorId}")
+    logger.error(s"Staging available flag: ${split.stagingAvailable}")
+    logger.error("")
+
+    // Check local file
+    logger.error("LOCAL FILE DIAGNOSTICS:")
+    logger.error(s"  Expected path: ${split.localPath}")
+    val localFile = new java.io.File(split.localPath)
+    logger.error(s"  File exists: ${localFile.exists()}")
+
+    if (localFile.exists()) {
+      logger.error(s"  File size: ${localFile.length() / 1024 / 1024}MB")
+      logger.error(s"  Readable: ${localFile.canRead()}")
+    } else {
+      // Check parent directory
+      val parentDir = localFile.getParentFile
+      if (parentDir != null) {
+        logger.error(s"  Parent dir: ${parentDir.getAbsolutePath}")
+        logger.error(s"  Parent exists: ${parentDir.exists()}")
+
+        if (parentDir.exists()) {
+          val filesInDir = parentDir.listFiles()
+          if (filesInDir != null) {
+            logger.error(s"  Files in parent dir (${filesInDir.length} total):")
+            filesInDir.take(10).foreach { f =>
+              logger.error(s"    - ${f.getName} (${f.length() / 1024}KB)")
+            }
+            if (filesInDir.length > 10) {
+              logger.error(s"    ... and ${filesInDir.length - 10} more files")
+            }
+          } else {
+            logger.error("  Parent directory not readable or empty")
+          }
+        }
+      }
+    }
+
+    logger.error("")
+    logger.error("STAGING DIAGNOSTICS:")
+    logger.error(s"  Expected path: ${split.stagingPath}")
+
+    try {
+      // Try to check if staging file exists
+      val stagingExists = cloudProvider.exists(split.stagingPath)
+      logger.error(s"  File exists in cloud: $stagingExists")
+
+      if (!stagingExists) {
+        // List files in staging directory to see what's actually there
+        val stagingDir = split.stagingPath.substring(0, split.stagingPath.lastIndexOf('/'))
+        logger.error(s"  Staging directory: $stagingDir")
+
+        try {
+          val filesInStaging = cloudProvider.listFiles(stagingDir, recursive = false)
+          logger.error(s"  Files in staging dir (${filesInStaging.length} total):")
+          filesInStaging.take(10).foreach { fileInfo =>
+            logger.error(s"    - ${fileInfo.path.split('/').last} (${fileInfo.size / 1024}KB)")
+          }
+          if (filesInStaging.length > 10) {
+            logger.error(s"    ... and ${filesInStaging.length - 10} more files")
+          }
+        } catch {
+          case e: Exception =>
+            logger.error(s"  Failed to list staging directory: ${e.getMessage}")
+        }
+      }
+    } catch {
+      case e: Exception =>
+        logger.error(s"  Failed to check staging file: ${e.getMessage}")
+    }
+
+    logger.error("")
+    logger.error("POSSIBLE CAUSES:")
+    if (!split.stagingAvailable) {
+      logger.error("  1. Staging upload never completed or failed")
+      logger.error("  2. stagingAvailable flag was not updated after async upload")
+      logger.error("  3. Upload skipped due to size threshold (should not happen with fix)")
+    }
+    val localFile2 = new java.io.File(split.localPath)
+    if (!localFile2.exists()) {
+      logger.error("  4. Local temp directory was cleaned up prematurely")
+      logger.error("  5. Wrong local path (check if using shared 'merge-on-write-staging' directory)")
+      logger.error("  6. Task ran on different executor than the one that created the file")
+    }
+    logger.error("=" * 80)
   }
 }
 

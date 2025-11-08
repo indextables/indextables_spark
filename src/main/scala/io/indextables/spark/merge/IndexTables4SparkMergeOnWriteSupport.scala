@@ -88,10 +88,14 @@ object MergeOnWriteHelper {
   ): StagedSplitInfo = {
 
     // Get or create local temp directory
+    // FIX: Use shared directory for all splits in this write operation, not per-task UUID
+    // The directory will persist until merge phase completes
     val localTempDir = SplitCacheConfig.getDefaultTempPath()
       .getOrElse(System.getProperty("java.io.tmpdir"))
 
-    val workingDir = new File(localTempDir, s"merge-on-write-${UUID.randomUUID()}")
+    // Use a consistent directory name for all tasks in this write operation
+    // This ensures files are available during merge phase even if task JVMs terminate
+    val workingDir = new File(localTempDir, s"merge-on-write-staging")
     workingDir.mkdirs()
 
     // Generate unique split ID and filename
@@ -177,7 +181,9 @@ object MergeOnWriteHelper {
       schemaFingerprint = schemaFingerprint
     )
 
-    // Initiate async staging upload (Gap #2: async with retry support)
+    // Initiate async staging upload
+    // NOTE: stagingAvailable will be updated to true after upload completes
+    // in LocalityAwareSplitMergeOrchestrator.awaitAllStaging()
     logger.info(s"Initiating async staging upload: $splitPath → $stagingPath")
     stagingUploader.stageAsync(splitUuid, splitPath, stagedSplit)
 

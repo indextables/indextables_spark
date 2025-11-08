@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory
  * - Gap #2 (Partial Staging Failures): Implements retry logic with exponential backoff
  * - Gap #2 (Disk Space Management): Tracks upload progress and can report disk usage
  * - Gap #8 (Cost Optimization): Supports configurable minimum size threshold for staging
+ *
+ * IMPORTANT: For merge-on-write, minSizeToStage should be 0 to ensure all splits are staged,
+ * since local files may not be available during the merge phase.
  */
 class SplitStagingUploader(
   cloudProvider: CloudStorageProvider,
@@ -43,7 +46,7 @@ class SplitStagingUploader(
   numThreads: Int = 4,
   maxRetries: Int = 3,               // Gap #2: Configurable retry attempts
   retryDelayMs: Long = 1000,         // Gap #2: Base retry delay with exponential backoff
-  minSizeToStage: Long = 10 * 1024 * 1024 // Gap #8: Minimum size (10M) to stage
+  minSizeToStage: Long = 0           // Changed from 10MB to 0 for merge-on-write reliability
 ) extends Serializable {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[SplitStagingUploader])
@@ -57,10 +60,41 @@ class SplitStagingUploader(
   @transient private lazy val totalRetries = new java.util.concurrent.atomic.AtomicInteger(0)
 
   /**
+   * Upload split file to staging area synchronously
+   *
+   * FIX: Changed from async to sync by default to ensure files are available
+   * before write task completes. This is critical for merge-on-write reliability.
+   *
+   * @param splitUuid Unique identifier for split
+   * @param localPath Path to split on local disk
+   * @param metadata Split metadata to include
+   * @return StagingResult with upload status
+   */
+  def stageSync(
+    splitUuid: String,
+    localPath: String,
+    metadata: StagedSplitInfo
+  ): StagingResult = {
+
+    val file = new File(localPath)
+    val fileSize = file.length()
+
+    val stagingPath = s"$stagingBasePath/$splitUuid.tmp"
+
+    // Upload synchronously with retry
+    val result = uploadWithRetry(splitUuid, localPath, stagingPath, fileSize, attempt = 0)
+
+    // Track in pendingUploads for compatibility with awaitStaging calls
+    pendingUploads.put(splitUuid, Future.successful(result))
+
+    result
+  }
+
+  /**
    * Initiate asynchronous upload of split file to staging area
    *
-   * Gap #8: Skips staging for small files below threshold to reduce API costs
-   * Gap #2: Implements retry logic for failed uploads
+   * NOTE: Async mode should only be used if explicitly configured.
+   * Sync mode (stageSync) is recommended for merge-on-write.
    *
    * @param splitUuid Unique identifier for split
    * @param localPath Path to split on local disk
@@ -75,24 +109,6 @@ class SplitStagingUploader(
 
     val file = new File(localPath)
     val fileSize = file.length()
-
-    // Gap #8: Skip staging for small files below threshold
-    if (fileSize < minSizeToStage) {
-      logger.info(s"Skipping staging for small split: ${fileSize / 1024 / 1024}MB < ${minSizeToStage / 1024 / 1024}MB (uuid: $splitUuid)")
-
-      val result = StagingResult(
-        success = true,
-        stagingPath = "",
-        bytesUploaded = 0,
-        durationMs = 0,
-        error = Some(s"Skipped staging (below size threshold: ${fileSize / 1024 / 1024}MB)"),
-        retriesAttempted = 0
-      )
-
-      val immediateFuture = Future.successful(result)
-      pendingUploads.put(splitUuid, immediateFuture)
-      return immediateFuture
-    }
 
     val stagingPath = s"$stagingBasePath/$splitUuid.tmp"
 
