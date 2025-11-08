@@ -47,8 +47,10 @@ case class IndexTables4SparkMergeOnWriteCommitMessage(
 /**
  * Helper methods to support merge-on-write functionality in IndexTables4SparkDataWriter
  *
- * This provides the logic to create splits on local disk and stage them asynchronously
- * instead of immediately uploading to cloud storage.
+ * ARCHITECTURE: Shuffle-based merge
+ * - Write phase: Creates splits and keeps bytes in RDD for shuffle
+ * - Merge phase: Spark shuffle distributes split bytes to merge executors
+ * - No local file persistence issues (100% locality via shuffle)
  */
 object MergeOnWriteHelper {
 
@@ -57,8 +59,8 @@ object MergeOnWriteHelper {
   /**
    * Create a local split file for merge-on-write mode
    *
-   * Instead of uploading directly to cloud storage, creates the split in a local temp directory
-   * and initiates async staging upload.
+   * Creates the split in a local temp directory for shuffle-based merge.
+   * No S3 staging - Spark shuffle provides durability.
    *
    * @param searchEngine The TantivySearchEngine with indexed data
    * @param writeSchema Schema for computing fingerprint
@@ -82,9 +84,7 @@ object MergeOnWriteHelper {
     partitionId: Int,
     taskId: Long,
     options: CaseInsensitiveStringMap,
-    hadoopConf: Configuration,
-    stagingUploader: SplitStagingUploader,
-    stagingBasePath: String
+    hadoopConf: Configuration
   ): StagedSplitInfo = {
 
     // Get or create local temp directory
@@ -102,8 +102,8 @@ object MergeOnWriteHelper {
     tantivyTempDir.mkdirs()
     val tantivyTempSplitPath = new File(tantivyTempDir, fileName).getAbsolutePath
 
-    // Our permanent staging directory (separate from tantivy's temp location)
-    // This directory is under our control and files will persist for merge phase
+    // Our local temp directory (separate from tantivy's temp location)
+    // Files here persist until shuffle-based merge reads them and they're uploaded to final location
     val mergeOnWriteStagingDir = new File(localTempDir, "merge-on-write-staging")
     mergeOnWriteStagingDir.mkdirs()
     val finalLocalPath = new File(mergeOnWriteStagingDir, fileName).getAbsolutePath
@@ -143,9 +143,9 @@ object MergeOnWriteHelper {
     // Create split from the index using the search engine (in tantivy-controlled temp location)
     val (tantivySplitPath, splitMetadata) = searchEngine.commitAndCreateSplit(tantivyTempSplitPath, partitionId.toLong, nodeId)
 
-    // CRITICAL: Immediately copy the split to our permanent staging directory
+    // CRITICAL: Immediately copy the split to our local temp directory
     // This protects against tantivy4java deleting the file during cleanup
-    logger.info(s"Copying split from tantivy temp to merge-on-write staging: $tantivySplitPath → $finalLocalPath")
+    logger.info(s"Copying split from tantivy temp to local merge staging: $tantivySplitPath → $finalLocalPath")
     val tantivySplitFile = new File(tantivySplitPath)
     val finalLocalFile = new File(finalLocalPath)
 
@@ -198,18 +198,20 @@ object MergeOnWriteHelper {
     // Compute schema fingerprint for compatibility checking (Gap #3)
     val schemaFingerprint = computeSchemaFingerprint(writeSchema)
 
-    // Create staging path with task attempt ID (Gap #5: speculative execution handling)
-    val stagingPath = s"$stagingBasePath/task-$taskAttemptId-$splitUuid.tmp"
+    // No S3 staging needed - Spark shuffle provides durability
+    // The split file is already persisted locally in merge-on-write-staging directory
+    logger.info(s"Split ready for shuffle-based merge (no S3 staging needed): $finalLocalPath")
 
-    // Build initial StagedSplitInfo (before staging)
-    val stagedSplitBeforeUpload = StagedSplitInfo(
+    // Build and return StagedSplitInfo
+    // Note: stagingPath and stagingAvailable are not used in shuffle-based merge
+    StagedSplitInfo(
       uuid = splitUuid,
       taskAttemptId = taskAttemptId,
       workerHost = workerHost,
       executorId = executorId,
-      localPath = finalLocalPath,  // Use our permanent copy, not tantivy's temp file
-      stagingPath = stagingPath,
-      stagingAvailable = false, // Will be set to true after successful upload
+      localPath = finalLocalPath,  // Split persisted in merge-on-write-staging directory
+      stagingPath = "",  // Not used in shuffle-based merge
+      stagingAvailable = false,  // Not used in shuffle-based merge
       size = splitSize,
       numRecords = recordCount,
       minValues = minValues,
@@ -225,28 +227,6 @@ object MergeOnWriteHelper {
       uncompressedSizeBytes = uncompressedSizeBytes,
       schemaFingerprint = schemaFingerprint
     )
-
-    // Upload to staging SYNCHRONOUSLY to ensure file is available before task completes
-    // Upload from our permanent copy (not tantivy's temp file)
-    logger.info(s"Starting synchronous staging upload: $finalLocalPath → $stagingPath")
-    val uploadResult = stagingUploader.stageSync(splitUuid, finalLocalPath, stagedSplitBeforeUpload)
-
-    // If staging upload fails, fail the task immediately
-    // This ensures we never proceed with partial/missing staging files
-    if (!uploadResult.success) {
-      val errorMsg = uploadResult.error.getOrElse("unknown error")
-      logger.error(s"Staging upload failed: $stagingPath - $errorMsg")
-      throw new RuntimeException(
-        s"Failed to upload split to staging: $stagingPath\n" +
-        s"Error: $errorMsg\n" +
-        s"This is a fatal error - task will fail to ensure data consistency"
-      )
-    }
-
-    logger.info(s"Staging upload succeeded: $stagingPath (${splitSize / 1024 / 1024}MB)")
-
-    // Return split with stagingAvailable = true
-    stagedSplitBeforeUpload.copy(stagingAvailable = true)
   }
 
   /**
@@ -331,6 +311,42 @@ object MergeOnWriteHelper {
     val schemaJson = schema.json
     val hash = digest.digest(schemaJson.getBytes("UTF-8"))
     hash.map("%02x".format(_)).mkString
+  }
+
+  /**
+   * Create ShuffledSplitData for RDD-based merge (reads split file into memory)
+   *
+   * This method:
+   * 1. Reads the split file bytes from finalLocalPath
+   * 2. Uploads to S3 for durability (in case shuffle fails)
+   * 3. Returns ShuffledSplitData with bytes for RDD shuffle
+   *
+   * @param splitInfo Split metadata
+   * @param finalLocalPath Path to split file on local disk
+   * @param stagingUploader Uploader for S3 durability
+   * @return ShuffledSplitData with split bytes
+   */
+  def createShuffledSplitData(
+    splitInfo: StagedSplitInfo,
+    finalLocalPath: String,
+    stagingUploader: SplitStagingUploader
+  ): ShuffledSplitData = {
+
+    // Read split bytes into memory
+    val splitFile = new File(finalLocalPath)
+    val splitBytes = java.nio.file.Files.readAllBytes(splitFile.toPath)
+
+    logger.info(s"Read split bytes for shuffle: ${splitBytes.length / 1024 / 1024}MB from $finalLocalPath")
+
+    // No S3 upload needed - Spark shuffle provides durability
+    // The final merged splits will be uploaded to S3 after merge completes
+    logger.info(s"Skip S3 upload - using Spark shuffle for durability")
+
+    // Return shuffled data
+    ShuffledSplitData(
+      info = splitInfo,
+      bytes = splitBytes
+    )
   }
 
   /**

@@ -246,42 +246,56 @@ class IndexTables4SparkStandardWrite(
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
+    logger.debug(s"SAVEMODE DEBUG: isOverwrite flag = $isOverwrite")
+    logger.debug(s"SAVEMODE DEBUG: serializedOptions.get(saveMode) = ${serializedOptions.get("saveMode")}")
+
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
-      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
-      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
+      logger.debug(s"SAVEMODE DEBUG: Using isOverwrite=true from truncate/overwrite call")
       true
     } else {
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
-        case Some("Overwrite")     => true
-        case Some("ErrorIfExists") => false
-        case Some("Ignore")        => false
-        case Some("Append")        => false
+        case Some("Overwrite")     =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Overwrite in options, returning true")
+          true
+        case Some("ErrorIfExists") =>
+          logger.debug("SAVEMODE DEBUG: saveMode=ErrorIfExists in options, returning false")
+          false
+        case Some("Ignore")        =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Ignore in options, returning false")
+          false
+        case Some("Append")        =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Append in options, returning false")
+          false
         case None                  =>
           // Check if this looks like an initial write (no existing files) - treat as overwrite
+          logger.debug("SAVEMODE DEBUG: No saveMode in options, checking existing files")
           try {
             val existingFiles = transactionLog.listFiles()
             if (existingFiles.isEmpty) {
-              logger.info("No existing files found - treating as initial write (overwrite semantics)")
+              logger.debug("SAVEMODE DEBUG: No existing files, treating as initial write (append)")
               false // Initial write doesn't need overwrite semantics, just add files
             } else {
-              logger.info(s"Found ${existingFiles.length} existing files - need to determine write mode")
+              logger.debug(s"SAVEMODE DEBUG: Found ${existingFiles.length} existing files, defaulting to append")
               // Without explicit mode info, default to append to be safe
               false
             }
           } catch {
-            case _: Exception => false // If we can't read transaction log, assume append
+            case e: Exception =>
+              logger.debug(s"SAVEMODE DEBUG: Exception reading transaction log: ${e.getMessage}, assuming append")
+              false // If we can't read transaction log, assume append
           }
         case Some(other) =>
-          logger.warn(s"Unknown saveMode: $other, defaulting to append")
+          logger.debug(s"SAVEMODE DEBUG: Unknown saveMode: $other, defaulting to append")
           false
       }
-      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
-      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
+      logger.debug(s"SAVEMODE DEBUG: Final saveMode decision = $saveMode")
       saveMode
     }
+
+    logger.debug(s"SAVEMODE DEBUG: shouldOverwrite = $shouldOverwrite")
 
     // Initialize transaction log with schema if this is the first commit
     transactionLog.initialize(writeSchema, partitionColumns)
@@ -297,30 +311,33 @@ class IndexTables4SparkStandardWrite(
 
     try {
       // Determine final AddActions (either direct or from merge-on-write)
-      val finalAddActions = if (mergeOnWriteActive && stagingUploader.isDefined) {
-        logger.info("🔀 Executing merge-on-write orchestration...")
+      val finalAddActions = if (mergeOnWriteActive) {
+        logger.debug(s"MERGE DEBUG: Starting merge-on-write with ${stagedSplits.size} staged splits, ${addActions.size} direct addActions")
+        logger.info("🔀 Executing shuffle-based merge-on-write orchestration...")
 
-        // Create orchestrator
-        val orchestrator = new LocalityAwareSplitMergeOrchestrator(
+        // Create orchestrator (using shuffle-based approach for 100% locality)
+        val orchestrator = new io.indextables.spark.merge.ShuffleBasedMergeOrchestrator(
           tablePath = tablePath.toString,
+          schema = writeSchema,
           options = writeOptions,
-          hadoopConf = hadoopConf,
-          sparkSession = org.apache.spark.sql.SparkSession.active,
-          schema = writeSchema
+          hadoopConf = hadoopConf
         )
 
-        // Execute merge-on-write
+        // Execute merge-on-write (no staging uploader needed - uses Spark shuffle)
         val mergedActions = orchestrator.executeMergeOnWrite(
           stagedSplits,
-          stagingUploader.get,
           if (shouldOverwrite) org.apache.spark.sql.SaveMode.Overwrite else org.apache.spark.sql.SaveMode.Append
         )
 
-        // Shutdown staging uploader
+        logger.debug(s"MERGE DEBUG: Orchestrator returned ${mergedActions.size} merged actions")
+
+        // Shutdown staging uploader if present
         stagingUploader.foreach(_.shutdown())
 
         // Combine with any direct AddActions
-        addActions ++ mergedActions
+        val combined = addActions ++ mergedActions
+        logger.debug(s"MERGE DEBUG: Combined total: ${combined.size} AddActions (${addActions.size} direct + ${mergedActions.size} merged)")
+        combined
       } else {
         // Traditional mode - use AddActions directly
         addActions
@@ -328,18 +345,35 @@ class IndexTables4SparkStandardWrite(
 
       // Commit the changes
       if (shouldOverwrite) {
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
+        logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
         val version = transactionLog.overwriteFiles(finalAddActions)
+        logger.debug(s"COMMIT DEBUG: Overwrite completed in transaction version $version")
+
+        // Log what's in the transaction log after this operation
+        val filesAfter = transactionLog.listFiles()
+        logger.debug(s"COMMIT DEBUG: After OVERWRITE, transaction log contains ${filesAfter.length} files:")
+        filesAfter.foreach { action =>
+          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
+        }
+
         logger.info(s"Overwrite completed in transaction version $version, added ${finalAddActions.length} files")
       } else {
-        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
-        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
+        logger.debug(s"COMMIT DEBUG: Performing APPEND with ${finalAddActions.length} new files")
         // Standard append operation
         val version = transactionLog.addFiles(finalAddActions)
+        logger.debug(s"COMMIT DEBUG: Append completed in transaction version $version")
+
+        // Log what's in the transaction log after this operation
+        val filesAfter = transactionLog.listFiles()
+        logger.debug(s"COMMIT DEBUG: After APPEND, transaction log contains ${filesAfter.length} files:")
+        filesAfter.foreach { action =>
+          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
+        }
+
         logger.info(s"Added ${finalAddActions.length} files in transaction version $version")
       }
 
+      logger.debug(s"COMMIT DEBUG: Successfully committed ${finalAddActions.length} files")
       logger.info(s"Successfully committed ${finalAddActions.length} files")
     } finally
       // Always clear thread-local to prevent memory leaks

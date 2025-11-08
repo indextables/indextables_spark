@@ -671,14 +671,14 @@ class MergeOnWriteEndToEndTest extends AnyFunSuite with Matchers with BeforeAndA
     }
   }
 
-  test("Promotion path: Single split bypasses merge when minSplitsToMerge not met") {
-    val tablePath = new File(tempDir, "promotion-test").getAbsolutePath
+  test("Direct upload: Single split bypasses merge when minSplitsToMerge not met") {
+    val tablePath = new File(tempDir, "direct-upload-test").getAbsolutePath
 
     val sparkImplicits = spark.implicits
     import sparkImplicits._
 
     println("\n" + "="*80)
-    println("TEST: Promotion Path Validation")
+    println("TEST: Direct Upload Path Validation (Shuffle-Based Merge)")
     println("="*80)
 
     // Step 1: Create single partition with data (minSplitsToMerge: 2 means this won't merge)
@@ -719,40 +719,33 @@ class MergeOnWriteEndToEndTest extends AnyFunSuite with Matchers with BeforeAndA
       println(s"       - size: ${action.size / 1024}KB")
     }
 
-    // Step 4: Validate promotion occurred
-    println("\n[Step 4] Validating promotion path...")
+    // Step 4: Validate direct upload (single split, no merge needed)
+    println("\n[Step 4] Validating direct upload (no merge)...")
     assert(addActions.size == 1, s"Expected exactly 1 split, got ${addActions.size}")
 
-    val promotedSplit = addActions.head
+    val directUploadSplit = addActions.head
 
-    // Verify it's a promoted split (not merged)
-    assert(promotedSplit.path.startsWith("split-"),
-      s"Expected split- prefix for promoted split, got: ${promotedSplit.path}")
+    // Verify it's a direct upload split (not merged) - shuffle-based merge uses "part-" prefix
+    assert(directUploadSplit.path.startsWith("part-"),
+      s"Expected part- prefix for direct upload split, got: ${directUploadSplit.path}")
 
-    // Verify mergeStrategy tag
-    assert(promotedSplit.tags.isDefined, "Expected tags to be present")
-    assert(promotedSplit.tags.get.contains("mergeStrategy"),
-      s"Expected mergeStrategy tag, got: ${promotedSplit.tags.get}")
-    assert(promotedSplit.tags.get("mergeStrategy") == "promoted",
-      s"Expected mergeStrategy=promoted, got: ${promotedSplit.tags.get("mergeStrategy")}")
+    // Verify numMergeOps is 0 (no merge operations - direct upload)
+    assert(directUploadSplit.numMergeOps.isDefined, "Expected numMergeOps to be present")
+    assert(directUploadSplit.numMergeOps.get == 0,
+      s"Expected numMergeOps=0 for direct upload split, got: ${directUploadSplit.numMergeOps.get}")
 
-    // Verify numMergeOps is 0 (no merge operations)
-    assert(promotedSplit.numMergeOps.isDefined, "Expected numMergeOps to be present")
-    assert(promotedSplit.numMergeOps.get == 0,
-      s"Expected numMergeOps=0 for promoted split, got: ${promotedSplit.numMergeOps.get}")
-
-    println(s"   ✓ Split correctly tagged with mergeStrategy=promoted")
+    println(s"   ✓ Split uploaded directly with part- prefix (< minSplitsToMerge threshold)")
     println(s"   ✓ numMergeOps=0 confirms no merge occurred")
 
     // Step 5: Validate min/max statistics present
     println("\n[Step 5] Validating data skipping statistics...")
-    assert(promotedSplit.minValues.nonEmpty, "Expected minValues to be present")
-    assert(promotedSplit.maxValues.nonEmpty, "Expected maxValues to be present")
-    assert(promotedSplit.minValues.contains("score"), "Expected score in minValues")
-    assert(promotedSplit.maxValues.contains("score"), "Expected score in maxValues")
+    assert(directUploadSplit.minValues.nonEmpty, "Expected minValues to be present")
+    assert(directUploadSplit.maxValues.nonEmpty, "Expected maxValues to be present")
+    assert(directUploadSplit.minValues.contains("score"), "Expected score in minValues")
+    assert(directUploadSplit.maxValues.contains("score"), "Expected score in maxValues")
 
     println(s"   ✓ Min/max statistics present:")
-    println(s"     - score range: [${promotedSplit.minValues("score")}, ${promotedSplit.maxValues("score")}]")
+    println(s"     - score range: [${directUploadSplit.minValues("score")}, ${directUploadSplit.maxValues("score")}]")
 
     // Step 6: Validate staging cleanup
     println("\n[Step 6] Validating staging cleanup...")
@@ -767,7 +760,7 @@ class MergeOnWriteEndToEndTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Step 7: Validate physical file exists
     println("\n[Step 7] Validating physical file exists...")
-    val splitFile = new File(tablePath, promotedSplit.path)
+    val splitFile = new File(tablePath, directUploadSplit.path)
     assert(splitFile.exists(), s"Split file does not exist: ${splitFile.getAbsolutePath}")
     assert(splitFile.length() > 0, "Split file is empty")
     println(s"   ✓ Physical file exists: ${splitFile.length() / 1024}KB")

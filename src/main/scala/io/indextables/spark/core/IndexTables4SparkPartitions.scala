@@ -615,8 +615,8 @@ class IndexTables4SparkDataWriter(
         return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
       }
 
-      val result = if (mergeOnWriteConfig.exists(_.enabled) && stagingUploader.isDefined) {
-        // Merge-on-write mode: create local split and stage
+      val result = if (mergeOnWriteConfig.exists(_.enabled)) {
+        // Merge-on-write mode: create local split (no S3 staging - uses Spark shuffle)
         logger.info(s"Committing in merge-on-write mode for partition $partitionId")
         val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
           searchEngine,
@@ -627,9 +627,7 @@ class IndexTables4SparkDataWriter(
           partitionId,
           taskId,
           options,
-          hadoopConf,
-          stagingUploader.get,
-          mergeOnWriteConfig.get.stagingBasePath
+          hadoopConf
         )
         Right(stagedSplit)
       } else {
@@ -651,8 +649,8 @@ class IndexTables4SparkDataWriter(
           if (recordCount > 0) {
             val partitionValues = parsePartitionKey(partitionKey)
 
-            val result = if (mergeOnWriteConfig.exists(_.enabled) && stagingUploader.isDefined) {
-              // Merge-on-write mode
+            val result = if (mergeOnWriteConfig.exists(_.enabled)) {
+              // Merge-on-write mode (no S3 staging - uses Spark shuffle)
               val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
                 searchEngine,
                 writeSchema,
@@ -662,9 +660,7 @@ class IndexTables4SparkDataWriter(
                 partitionId,
                 taskId,
                 options,
-                hadoopConf,
-                stagingUploader.get,
-                mergeOnWriteConfig.get.stagingBasePath
+                hadoopConf
               )
               Right(stagedSplit)
             } else {
