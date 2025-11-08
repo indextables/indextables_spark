@@ -79,7 +79,8 @@ class SplitStagingUploader(
     val file = new File(localPath)
     val fileSize = file.length()
 
-    val stagingPath = s"$stagingBasePath/$splitUuid.tmp"
+    // Use the staging path from metadata (includes task attempt ID for speculative execution handling)
+    val stagingPath = metadata.stagingPath
 
     // Upload synchronously with retry
     val result = uploadWithRetry(splitUuid, localPath, stagingPath, fileSize, attempt = 0)
@@ -110,7 +111,8 @@ class SplitStagingUploader(
     val file = new File(localPath)
     val fileSize = file.length()
 
-    val stagingPath = s"$stagingBasePath/$splitUuid.tmp"
+    // Use the staging path from metadata (includes task attempt ID for speculative execution handling)
+    val stagingPath = metadata.stagingPath
 
     val uploadFuture = Future {
       uploadWithRetry(splitUuid, localPath, stagingPath, fileSize, attempt = 0)
