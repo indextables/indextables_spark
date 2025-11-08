@@ -32,12 +32,15 @@ import org.scalatest.matchers.should.Matchers
 /**
  * S3-specific integration tests for merge-on-write feature.
  *
- * These tests validate:
- * 1. Staging uploads to S3
- * 2. Worker downloads from S3 for remote merges
- * 3. Final split uploads to S3
- * 4. Transaction log in S3
- * 5. Retry logic for S3 failures
+ * These tests validate shuffle-based merge-on-write with S3 storage:
+ * 1. Write phase: Split creation on executors
+ * 2. Shuffle phase: RDD-based split distribution (no S3 staging)
+ * 3. Merge phase: Executor-side merge using local split bytes
+ * 4. Upload phase: Final merged splits uploaded to S3
+ * 5. Transaction log: S3-based transaction log operations
+ * 6. Data integrity: Verify all data survives shuffle and merge
+ *
+ * ARCHITECTURE: Shuffle-based (no S3 staging, 100% locality via Spark shuffle)
  *
  * NOTE: These tests require AWS credentials and an S3 bucket.
  * Set environment variables:
