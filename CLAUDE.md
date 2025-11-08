@@ -50,13 +50,13 @@ spark.indextables.transaction.compression.enabled: true (default)
 spark.indextables.stats.truncation.enabled: true
 spark.indextables.stats.truncation.maxLength: 256
 
-// Merge-On-Write (automatic split consolidation during writes)
+// Merge-On-Write (automatic split consolidation during writes via Spark shuffle)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
 spark.indextables.mergeOnWrite.targetSize: "4G" (default: 4G, target merged split size)
-spark.indextables.mergeOnWrite.minSplitsToMerge: 2 (minimum splits to trigger merge)
+spark.indextables.mergeOnWrite.minSplitsToMerge: 2 (minimum splits to trigger merge, below this → direct upload)
 spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
-spark.indextables.mergeOnWrite.maxRetries: 3 (network retry attempts)
-spark.indextables.mergeOnWrite.retryDelayMs: 1000 (base retry delay, exponential backoff)
+spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker: <auto> (default: auto-calculated based on heap size)
+spark.indextables.mergeOnWrite.memoryOverheadFactor: 3.0 (default: 3.0, memory overhead multiplier for merge size)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)
@@ -279,14 +279,17 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
 
 ## Test Status
-- ✅ **296+ tests passing**: Complete coverage for all major features
-- ✅ **Merge-on-write**: 42/42 tests passing (20 original + 22 new comprehensive tests)
+- ✅ **300+ tests passing**: Complete coverage for all major features
+- ✅ **Merge-on-write**: 68/68 tests passing
+  - Shuffle-based merge tests (6 tests)
+  - End-to-end scenarios (22 tests including 10K scale)
+  - S3 integration (9 tests)
+  - Azure integration (9 tests)
+  - Locality verification (8 tests)
+  - Temp file lifecycle (cleanup validation)
   - Edge cases (empty data, boundary values, Unicode)
-  - Scale testing (100+ splits, 10K records)
-  - Concurrency (multiple writers, transaction log consistency)
   - Data integrity (no loss, no duplicates, 10K scale validated)
-  - Configuration (minDiskSpaceGB propagation verified)
-  - Cleanup and observability
+  - Resource safety (RDD unpersist, temp file cleanup)
 - ✅ **JSON fields**: 114/114 tests passing (99 Struct/Array/Map tests + 15 aggregate/configuration tests)
 - ✅ **JSON configuration**: 6/6 tests passing (json.mode validation)
 - ✅ **JSON aggregates**: 9/9 tests passing (aggregates on nested fields with filter pushdown)
@@ -301,8 +304,10 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Working directories**: Automatic /local_disk0 detection on Databricks/EMR
 - **JSON fields**: Automatic detection for Struct/Array/Map types with complete filter pushdown
 - **JSON configuration**: Use `spark.indextables.indexing.json.mode` to control indexing behavior ("full" or "minimal")
+- **Merge-on-write**: Shuffle-based architecture (no S3 staging needed), 100% locality guaranteed
 - **Merge-on-write disk space**: Default 20GB minimum for production; use 1GB for test environments via `minDiskSpaceGB` option
-- **Data integrity**: 10K scale validated with zero data loss across 42 comprehensive tests
+- **Merge-on-write concurrency**: Auto-calculated based on heap size, or override with `maxConcurrentMergesPerWorker`
+- **Data integrity**: 10K scale validated with zero data loss across 68 comprehensive merge tests
 
 ---
 

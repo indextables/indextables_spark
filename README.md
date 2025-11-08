@@ -1175,18 +1175,16 @@ For comprehensive documentation, usage examples, and technical details, see the 
 
 #### Merge-On-Write Configuration
 
-Merge-on-write automatically consolidates small split files during write operations, improving query performance and reducing storage overhead. When enabled, split files are staged locally during write and then merged before being uploaded to cloud storage.
+Merge-on-write automatically consolidates small split files during write operations using Spark's shuffle mechanism, improving query performance and reducing storage overhead. When enabled, split bytes are distributed via RDD shuffle and merged on executors before being uploaded to final storage. **No S3 staging needed** - shuffle provides durability.
 
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.indextables.mergeOnWrite.enabled` | `false` | Enable automatic split consolidation during writes |
 | `spark.indextables.mergeOnWrite.targetSize` | `"4G"` | Target size for merged splits (supports: "100M", "1G", "4G", bytes) |
-| `spark.indextables.mergeOnWrite.minSplitsToMerge` | `2` | Minimum number of splits required to trigger a merge operation |
+| `spark.indextables.mergeOnWrite.minSplitsToMerge` | `2` | Minimum number of splits required to trigger merge (below this threshold → direct upload) |
 | `spark.indextables.mergeOnWrite.minDiskSpaceGB` | `20` | Minimum free disk space (in GB) required to enable merge operations (use 1GB for test environments) |
-| `spark.indextables.mergeOnWrite.maxRetries` | `3` | Maximum number of retry attempts for network operations during merge |
-| `spark.indextables.mergeOnWrite.retryDelayMs` | `1000` | Base delay in milliseconds between retry attempts (uses exponential backoff) |
-| `spark.indextables.mergeOnWrite.stagingThreads` | `4` | Number of parallel threads for staging split files to temporary storage |
-| `spark.indextables.mergeOnWrite.stagingRetries` | `3` | Maximum retry attempts for staging operations |
+| `spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker` | Auto | Maximum concurrent merges per worker (default: auto-calculated based on heap size) |
+| `spark.indextables.mergeOnWrite.memoryOverheadFactor` | `3.0` | Memory overhead multiplier for merge size estimation (used in auto-concurrency calculation) |
 
 **Usage Example:**
 
