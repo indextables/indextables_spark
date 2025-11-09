@@ -383,8 +383,17 @@ class IndexTables4SparkStandardWrite(
                   val currentType = currentConfig.fieldType.get
                   logger.debug(s"VALIDATION DEBUG: Current type: $currentType")
 
-                  // Strict validation: field types must match exactly
-                  if (existingType.isDefined && existingType.get != currentType) {
+                  // Check for type compatibility
+                  // Note: "json" config maps to "object" type in tantivy, these are equivalent
+                  val typesCompatible = existingType.isEmpty || {
+                    val existing = existingType.get
+                    val current = currentType
+                    existing == current ||
+                    (existing == "object" && current == "json") ||
+                    (existing == "json" && current == "object")
+                  }
+
+                  if (!typesCompatible) {
                     logger.debug(s"VALIDATION DEBUG: CONFLICT DETECTED for field '$fieldName'!")
                     errors += s"Field '$fieldName' type mismatch: existing table has ${existingType.get} field, cannot append with $currentType configuration"
                   } else {
