@@ -354,18 +354,18 @@ class IndexTables4SparkSimpleAggregateReader(
 
   /** Initialize the simple aggregation by executing aggregation via tantivy4java. */
   private def initialize(): Unit = {
-    logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: Called for split: ${partition.split.path}")
-    logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: Aggregate expressions: ${partition.aggregation.aggregateExpressions.map(_.getClass.getSimpleName).mkString(", ")}")
-    logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: Pushed filters: ${partition.pushedFilters.length}, IndexQuery filters: ${partition.indexQueryFilters.length}")
+    logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: Called for split: ${partition.split.path}")
+    logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: Aggregate expressions: ${partition.aggregation.aggregateExpressions.map(_.getClass.getSimpleName).mkString(", ")}")
+    logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: Pushed filters: ${partition.pushedFilters.length}, IndexQuery filters: ${partition.indexQueryFilters.length}")
 
     try {
       // Execute simple aggregation using tantivy4java
-      logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: About to call executeSimpleAggregation()")
+      logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: About to call executeSimpleAggregation()")
       val results = executeSimpleAggregation()
       aggregateResults = results.iterator
-      logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: Simple aggregation completed with ${results.length} result(s)")
+      logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: Simple aggregation completed with ${results.length} result(s)")
       if (results.nonEmpty) {
-        logger.warn(s"SIMPLE AGGREGATE READER INITIALIZE: First result contains ${results.head.numFields} fields")
+        logger.debug(s"SIMPLE AGGREGATE READER INITIALIZE: First result contains ${results.head.numFields} fields")
       }
     } catch {
       case e: Exception =>
