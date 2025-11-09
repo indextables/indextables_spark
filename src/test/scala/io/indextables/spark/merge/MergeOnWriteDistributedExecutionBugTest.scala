@@ -32,15 +32,14 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Reproduction test for distributed execution bugs in merge-on-write at scale.
  *
- * REPRODUCES BUG:
+ * TESTS SHUFFLE-BASED MERGE AT SCALE:
  * - 670+ splits created
  * - 64 executors configured (local[64])
- * - Only 1-2 executors do work, 62-63 sit idle
- * - Progressive cleanup deletes files before promotion
- * - "Unmerged split not available locally or in staging" error
- * - Invalid metrics (Final Splits: 0)
+ * - Spark shuffle distributes work evenly across executors
+ * - Validates both merged and direct upload splits
+ * - Verifies data integrity with shuffle-based distribution
  *
- * This test should FAIL before fixes are applied, and PASS after.
+ * This test validates that shuffle-based merge handles scale correctly.
  */
 class MergeOnWriteDistributedExecutionBugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -179,15 +178,22 @@ class MergeOnWriteDistributedExecutionBugTest extends AnyFunSuite with Matchers 
           if (line.trim.nonEmpty && line.contains("\"add\"")) {
             totalSplitsCreated += 1
 
-            // Check for merge tags
-            if (line.contains("\"mergeStrategy\"") && line.contains("\"merge_on_write\"")) {
-              totalMergeOps += 1
-            } else if (line.contains("\"mergeStrategy\"") && line.contains("\"promoted\"")) {
-              totalPromotedSplits += 1
+            // Check for numMergeOps to distinguish merged vs. direct upload splits
+            // In shuffle-based merge: numMergeOps > 0 = merged, numMergeOps = 0 = direct upload
+            if (line.contains("\"numMergeOps\"")) {
+              val numMergeOpsMatch = "\"numMergeOps\"\\s*:\\s*(\\d+)".r.findFirstMatchIn(line)
+              numMergeOpsMatch.foreach { m =>
+                val numOps = m.group(1).toInt
+                if (numOps > 0) {
+                  totalMergeOps += 1
+                } else {
+                  totalPromotedSplits += 1  // Direct upload (not merged)
+                }
+              }
             }
           }
         }
-        println(s"    Found: $totalSplitsCreated splits ($totalMergeOps merged, $totalPromotedSplits promoted)")
+        println(s"    Found: $totalSplitsCreated splits ($totalMergeOps merged, $totalPromotedSplits direct upload)")
       } catch {
         case e: Exception =>
           println(s"Warning: Failed to parse log file ${logFile.getName}: ${e.getClass.getSimpleName}: ${e.getMessage}")
@@ -225,14 +231,14 @@ class MergeOnWriteDistributedExecutionBugTest extends AnyFunSuite with Matchers 
         totalSplitsCreated should be > 0
       }
 
-      // ASSERTION 2: Should have both merged and promoted splits
+      // ASSERTION 2: Should have both merged and direct upload splits
       // (Unless all splits were merged, which is unlikely with this configuration)
-      withClue("BUG DETECTED: No splits promoted - progressive cleanup likely deleted files before promotion\n") {
+      withClue("BUG DETECTED: No splits with numMergeOps field - shuffle-based merge metadata missing\n") {
         (totalMergeOps + totalPromotedSplits) should be > 0
       }
 
       // ASSERTION 3: Total should equal final split count
-      withClue(s"BUG DETECTED: Mismatch between merged ($totalMergeOps) + promoted ($totalPromotedSplits) and total ($totalSplitsCreated)\n") {
+      withClue(s"BUG DETECTED: Mismatch between merged ($totalMergeOps) + direct upload ($totalPromotedSplits) and total ($totalSplitsCreated)\n") {
         totalSplitsCreated shouldBe (totalMergeOps + totalPromotedSplits)
       }
     }

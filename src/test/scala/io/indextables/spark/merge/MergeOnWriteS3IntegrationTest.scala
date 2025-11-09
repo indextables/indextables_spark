@@ -501,17 +501,16 @@ class MergeOnWriteS3IntegrationTest extends AnyFunSuite with Matchers with Befor
     println(s"   - Records: $rowCount")
   }
 
-  test("S3: Promotion path - single split bypasses merge") {
+  test("S3: Direct upload - single split bypasses merge") {
     skipIfS3NotConfigured()
 
-    val tablePath = s"s3a://${s3Bucket.get}/$s3Prefix/promotion-test-${System.currentTimeMillis()}"
-    val stagingPath = s"$tablePath/_staging"
+    val tablePath = s"s3a://${s3Bucket.get}/$s3Prefix/direct-upload-test-${System.currentTimeMillis()}"
 
     println("\n" + "="*80)
-    println("S3 TEST: Promotion Path Validation")
+    println("S3 TEST: Direct Upload Path Validation (Shuffle-Based)")
     println("="*80)
 
-    // Step 1: Create single partition (will trigger promotion, not merge)
+    // Step 1: Create single partition (will trigger direct upload, not merge)
     println("\n[Step 1] Creating single partition with 1000 records...")
     val sparkImplicits = spark.implicits
     import sparkImplicits._
@@ -531,7 +530,6 @@ class MergeOnWriteS3IntegrationTest extends AnyFunSuite with Matchers with Befor
       .option("spark.indextables.mergeOnWrite.targetSize", "50M")
       .option("spark.indextables.mergeOnWrite.minSplitsToMerge", "2")  // Requires 2+ to merge
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
-      .option("spark.indextables.mergeOnWrite.stagingPath", stagingPath)
       .option("spark.indextables.indexing.typemap.content", "string")
       .option("spark.indextables.indexing.typemap.category", "string")
       .option("spark.indextables.indexing.fastfields", "score")
@@ -555,41 +553,33 @@ class MergeOnWriteS3IntegrationTest extends AnyFunSuite with Matchers with Befor
     println(s"   - Transaction log has ${addActions.size} split(s)")
     addActions.foreach { action =>
       println(s"     * ${action.path}")
-      println(s"       - tags: ${action.tags}")
       println(s"       - numMergeOps: ${action.numMergeOps}")
     }
 
-    // Step 4: Validate promotion occurred
-    println("\n[Step 4] Validating promotion path...")
+    // Step 4: Validate direct upload occurred (shuffle-based merge)
+    println("\n[Step 4] Validating direct upload path...")
     assert(addActions.size == 1, s"Expected exactly 1 split, got ${addActions.size}")
 
-    val promotedSplit = addActions.head
+    val directUploadSplit = addActions.head
 
-    // Verify it's a promoted split (not merged)
-    assert(promotedSplit.path.startsWith("split-"),
-      s"Expected split- prefix for promoted split, got: ${promotedSplit.path}")
+    // Verify it's a direct upload split (not merged) - shuffle-based merge uses "part-" prefix
+    assert(directUploadSplit.path.startsWith("part-"),
+      s"Expected part- prefix for direct upload split, got: ${directUploadSplit.path}")
 
-    // Verify mergeStrategy tag
-    assert(promotedSplit.tags.isDefined, "Expected tags to be present")
-    assert(promotedSplit.tags.get.contains("mergeStrategy"),
-      s"Expected mergeStrategy tag, got: ${promotedSplit.tags.get}")
-    assert(promotedSplit.tags.get("mergeStrategy") == "promoted",
-      s"Expected mergeStrategy=promoted, got: ${promotedSplit.tags.get("mergeStrategy")}")
+    // Verify numMergeOps is 0 (no merge operations - direct upload)
+    assert(directUploadSplit.numMergeOps.isDefined, "Expected numMergeOps to be present")
+    assert(directUploadSplit.numMergeOps.get == 0,
+      s"Expected numMergeOps=0 for direct upload split, got: ${directUploadSplit.numMergeOps.get}")
 
-    // Verify numMergeOps is 0
-    assert(promotedSplit.numMergeOps.isDefined, "Expected numMergeOps to be present")
-    assert(promotedSplit.numMergeOps.get == 0,
-      s"Expected numMergeOps=0 for promoted split, got: ${promotedSplit.numMergeOps.get}")
-
-    println(s"   ✓ Split correctly tagged with mergeStrategy=promoted")
+    println(s"   ✓ Split correctly uses direct upload (not merged)")
     println(s"   ✓ numMergeOps=0 confirms no merge occurred")
 
     // Step 5: Validate statistics
     println("\n[Step 5] Validating data skipping statistics...")
-    assert(promotedSplit.minValues.isDefined, "Expected minValues")
-    assert(promotedSplit.maxValues.isDefined, "Expected maxValues")
-    assert(promotedSplit.minValues.get.contains("score"), "Expected score in minValues")
-    assert(promotedSplit.maxValues.get.contains("score"), "Expected score in maxValues")
+    assert(directUploadSplit.minValues.isDefined, "Expected minValues")
+    assert(directUploadSplit.maxValues.isDefined, "Expected maxValues")
+    assert(directUploadSplit.minValues.get.contains("score"), "Expected score in minValues")
+    assert(directUploadSplit.maxValues.get.contains("score"), "Expected score in maxValues")
     println(s"   ✓ Statistics preserved")
 
     // Step 6: Validate data readable from S3
