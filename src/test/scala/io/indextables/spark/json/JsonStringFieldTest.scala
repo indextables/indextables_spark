@@ -191,4 +191,184 @@ class JsonStringFieldTest extends TestBase {
       println("\n🎉 Complex queries on JSON string fields work!")
     }
   }
+
+  test("should support mixed-case field names with JSON string fields") {
+    withTempPath { path =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Test with mixed-case column name: "valField"
+      val df = Seq(
+        (1, """{"one": "two", "three": "four"}"""),
+        (2, """{"one": "alpha", "three": "beta"}"""),
+        (3, """{"one": "two", "three": "gamma"}""")
+      ).toDF("id", "valField")
+
+      println("✅ Writing data with mixed-case field name 'valField'")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.valField", "json")
+        .mode("overwrite")
+        .save(path)
+
+      println("✅ Successfully wrote data with mixed-case field name")
+
+      // Read back
+      val resultDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+
+      resultDf.createOrReplaceTempView("test_table")
+
+      // Verify schema preserves mixed case
+      val schema = resultDf.schema
+      val fieldNames = schema.fieldNames
+      println(s"✅ Schema field names: ${fieldNames.mkString(", ")}")
+      fieldNames should contain("valField")
+
+      // Test: Query using mixed-case field name
+      println("\n🔍 Test: _indexall indexquery 'valField.one:two'")
+      val query = spark.sql("""
+        SELECT id, valField
+        FROM test_table
+        WHERE _indexall indexquery 'valField.one:two'
+        ORDER BY id
+      """)
+
+      val results = query.collect()
+      println(s"   Found ${results.length} matching documents:")
+      results.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}")
+      }
+
+      results.length shouldBe 2
+      results(0).getInt(0) shouldBe 1
+      results(1).getInt(0) shouldBe 3
+
+      // Test: Query with different JSON field
+      println("\n🔍 Test: _indexall indexquery 'valField.three:beta'")
+      val query2 = spark.sql("""
+        SELECT id, valField
+        FROM test_table
+        WHERE _indexall indexquery 'valField.three:beta'
+      """)
+
+      val results2 = query2.collect()
+      println(s"   Found ${results2.length} matching documents:")
+      results2.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}")
+      }
+
+      results2.length shouldBe 1
+      results2(0).getInt(0) shouldBe 2
+
+      println("\n🎉 Mixed-case field names work correctly with JSON string fields!")
+    }
+  }
+
+  test("should support various mixed-case patterns in field names") {
+    withTempPath { path =>
+      val spark = this.spark
+      import spark.implicits._
+
+      // Test multiple mixed-case patterns
+      val df = Seq(
+        (1, """{"status": "active"}""", """{"code": "200"}""", """{"level": "info"}"""),
+        (2, """{"status": "inactive"}""", """{"code": "404"}""", """{"level": "error"}"""),
+        (3, """{"status": "active"}""", """{"code": "500"}""", """{"level": "error"}""")
+      ).toDF("id", "userStatus", "httpResponse", "LogLevel")
+
+      println("✅ Writing data with multiple mixed-case field names")
+
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.userStatus", "json")
+        .option("spark.indextables.indexing.typemap.httpResponse", "json")
+        .option("spark.indextables.indexing.typemap.LogLevel", "json")
+        .mode("overwrite")
+        .save(path)
+
+      println("✅ Successfully wrote data with multiple mixed-case field names")
+
+      val resultDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(path)
+
+      resultDf.createOrReplaceTempView("mixed_case_table")
+
+      // Verify all field names preserved
+      val fieldNames = resultDf.schema.fieldNames
+      println(s"✅ Schema field names: ${fieldNames.mkString(", ")}")
+      fieldNames should contain("userStatus")
+      fieldNames should contain("httpResponse")
+      fieldNames should contain("LogLevel")
+
+      // Test: Query first mixed-case field
+      println("\n🔍 Test: _indexall indexquery 'userStatus.status:active'")
+      val query1 = spark.sql("""
+        SELECT id, userStatus
+        FROM mixed_case_table
+        WHERE _indexall indexquery 'userStatus.status:active'
+        ORDER BY id
+      """)
+
+      val results1 = query1.collect()
+      println(s"   Found ${results1.length} active users:")
+      results1.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, userStatus: ${row.getString(1)}")
+      }
+      results1.length shouldBe 2
+
+      // Test: Query second mixed-case field
+      println("\n🔍 Test: _indexall indexquery 'httpResponse.code:404'")
+      val query2 = spark.sql("""
+        SELECT id, httpResponse
+        FROM mixed_case_table
+        WHERE _indexall indexquery 'httpResponse.code:404'
+      """)
+
+      val results2 = query2.collect()
+      println(s"   Found ${results2.length} 404 responses:")
+      results2.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, httpResponse: ${row.getString(1)}")
+      }
+      results2.length shouldBe 1
+      results2(0).getInt(0) shouldBe 2
+
+      // Test: Query third mixed-case field (PascalCase)
+      println("\n🔍 Test: _indexall indexquery 'LogLevel.level:error'")
+      val query3 = spark.sql("""
+        SELECT id, LogLevel
+        FROM mixed_case_table
+        WHERE _indexall indexquery 'LogLevel.level:error'
+        ORDER BY id
+      """)
+
+      val results3 = query3.collect()
+      println(s"   Found ${results3.length} error logs:")
+      results3.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, LogLevel: ${row.getString(1)}")
+      }
+      results3.length shouldBe 2
+
+      // Test: Combined query across mixed-case fields
+      println("\n🔍 Test: Combined query across multiple mixed-case fields")
+      val query4 = spark.sql("""
+        SELECT id, userStatus, LogLevel
+        FROM mixed_case_table
+        WHERE _indexall indexquery 'userStatus.status:active AND LogLevel.level:error'
+      """)
+
+      val results4 = query4.collect()
+      println(s"   Found ${results4.length} active users with errors:")
+      results4.foreach { row =>
+        println(s"   - ID: ${row.getInt(0)}, userStatus: ${row.getString(1)}, LogLevel: ${row.getString(2)}")
+      }
+      results4.length shouldBe 1
+      results4(0).getInt(0) shouldBe 3
+
+      println("\n🎉 All mixed-case field name patterns work correctly!")
+    }
+  }
 }

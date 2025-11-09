@@ -81,6 +81,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
    * Supports both spark.tantivy4spark and spark.indextables prefixes.
+   *
+   * NOTE: Field names are stored in lowercase to handle case-insensitive matching with schema field names.
    */
   def getFieldTypeMapping: Map[String, String] = {
     import scala.jdk.CollectionConverters._
@@ -100,7 +102,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
           } else {
             key.substring("spark.indextables.indexing.typemap.".length)
           }
-          fieldName -> value.toLowerCase
+          // Normalize field name to lowercase for case-insensitive matching
+          fieldName.toLowerCase -> value.toLowerCase
       }
   }
 

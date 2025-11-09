@@ -68,7 +68,8 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
    * @return Field type: "string", "text", or "json"
    */
   def getFieldType(fieldName: String): String = {
-    fieldTypeMapping.getOrElse(fieldName, "string")
+    // Use lowercase for case-insensitive matching
+    fieldTypeMapping.getOrElse(fieldName.toLowerCase, "string")
   }
 
   /**
@@ -94,7 +95,8 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
       field.dataType match {
         case _: StructType | _: ArrayType | _: MapType =>
           // These should automatically use JSON fields
-          val configuredType = fieldTypeMapping.get(field.name)
+          // Use lowercase for case-insensitive matching
+          val configuredType = fieldTypeMapping.get(field.name.toLowerCase)
           if (configuredType.isDefined && configuredType.get != "json") {
             throw new IllegalArgumentException(
               s"Field '${field.name}' has type ${field.dataType} but is configured as '${configuredType.get}'. " +
@@ -112,7 +114,8 @@ class SparkSchemaToTantivyMapper(options: IndexTables4SparkOptions) {
           }
         case _ =>
           // Primitive types - should not have "json" configuration
-          val configuredType = fieldTypeMapping.get(field.name)
+          // Use lowercase for case-insensitive matching
+          val configuredType = fieldTypeMapping.get(field.name.toLowerCase)
           if (configuredType.contains("json")) {
             throw new IllegalArgumentException(
               s"Field '${field.name}' has type ${field.dataType} but is configured as 'json'. " +
