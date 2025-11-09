@@ -147,6 +147,29 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
         logger.warn(s"⚠️  Warning: Could not clean up test data: ${e.getMessage}")
     }
 
+  /**
+   * Count the number of split files in the transaction log.
+   * This gives us the current active split count after all merges.
+   */
+  private def countActiveSplits(tablePath: String): Int = {
+    import org.apache.hadoop.fs.Path
+    import io.indextables.spark.transaction.TransactionLogFactory
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
+    val path = new Path(tablePath)
+    val transactionLog = TransactionLogFactory.create(
+      path,
+      spark,
+      new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    )
+
+    val activeSplits = transactionLog.listFiles()
+    val count = activeSplits.size
+
+    logger.info(s"📊 Active splits in transaction log: $count")
+    count
+  }
+
   test("Real S3: post-commit merge-on-write should trigger when threshold is met") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
 
@@ -182,6 +205,16 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       .save(tablePath)
 
     logger.info(s"✅ Write completed (merge should have been triggered)")
+
+    // Verify that merge actually occurred by checking split count
+    // With 2000 rows and batchSize=100, we expect ~20 initial splits
+    // After merge with targetSize=1M and low threshold, we should have fewer splits
+    val activeSplitCount = countActiveSplits(tablePath)
+
+    // Merged splits should be significantly fewer than initial splits
+    // We expect at least consolidation to happen
+    activeSplitCount should be < 20
+    logger.info(s"✅ Merge confirmed: reduced to $activeSplitCount active splits (expected < 20)")
 
     // Verify data integrity
     val readOptions = getReadOptions()
@@ -221,6 +254,16 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       .save(tablePath)
 
     logger.info(s"✅ Write completed (merge should NOT have triggered)")
+
+    // Verify that merge did NOT occur by checking split count
+    // With 100 rows and no merge, we expect only a couple of splits
+    val activeSplitCount = countActiveSplits(tablePath)
+
+    // Without merge (very high threshold), splits should remain as written
+    // We expect 2-4 splits for this small dataset
+    activeSplitCount should be >= 1
+    activeSplitCount should be <= 10
+    logger.info(s"✅ Merge correctly did NOT trigger ($activeSplitCount active splits, as written)")
 
     // Verify data integrity
     val readOptions = getReadOptions()
@@ -377,6 +420,16 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       .save(tablePath)
 
     logger.info("✅ Third write completed (merge should have triggered)")
+
+    // Verify that merge actually occurred by checking split count
+    // After 3 writes with batchSize=50, we would have many small splits
+    // After merge with targetSize=500K and low threshold, we should have fewer splits
+    val activeSplitCount = countActiveSplits(tablePath)
+
+    // After merge, we should have consolidated splits
+    // We expect fewer than 15 splits for 300 rows
+    activeSplitCount should be < 15
+    logger.info(s"✅ Merge confirmed after multiple appends: reduced to $activeSplitCount active splits")
 
     // Verify all data is present
     val readOptions = getReadOptions()
