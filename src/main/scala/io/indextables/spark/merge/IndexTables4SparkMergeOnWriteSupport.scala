@@ -37,11 +37,18 @@ import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
 
 /**
- * Extended commit message that can carry either traditional AddActions or StagedSplitInfo for merge-on-write
+ * Extended commit message that can carry either traditional AddActions or ShuffledSplitData for merge-on-write.
+ *
+ * For in-memory shuffle-based merge:
+ * - Split bytes are included in the commit message (via shuffledSplits field)
+ * - Spark's task result mechanism moves bytes from executors to driver
+ * - Driver then creates RDD from in-memory split data for merge phase
+ * - No file-based coordination or locality needed!
  */
 case class IndexTables4SparkMergeOnWriteCommitMessage(
   addActions: Seq[AddAction] = Seq.empty,
-  stagedSplits: Seq[StagedSplitInfo] = Seq.empty
+  stagedSplits: Seq[StagedSplitInfo] = Seq.empty,  // Legacy: file-based (deprecated)
+  shuffledSplits: Seq[ShuffledSplitData] = Seq.empty  // New: in-memory bytes for shuffle-based merge
 ) extends WriterCommitMessage
 
 /**
@@ -57,10 +64,15 @@ object MergeOnWriteHelper {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Create a local split file for merge-on-write mode
+   * Create a local split file for merge-on-write mode and immediately read bytes for shuffle
    *
-   * Creates the split in a local temp directory for shuffle-based merge.
-   * No S3 staging - Spark shuffle provides durability.
+   * In-memory shuffle approach:
+   * 1. Create split file in temp directory (on same executor that wrote data)
+   * 2. Immediately read bytes into memory
+   * 3. Return ShuffledSplitData with bytes
+   * 4. Bytes travel back to driver via Spark's task result mechanism
+   * 5. Driver creates RDD from in-memory data for merge phase
+   * 6. No file-based coordination needed - data moves through Spark's execution framework!
    *
    * @param searchEngine The TantivySearchEngine with indexed data
    * @param writeSchema Schema for computing fingerprint
@@ -71,9 +83,7 @@ object MergeOnWriteHelper {
    * @param taskId Spark task ID
    * @param options Configuration options
    * @param hadoopConf Hadoop configuration
-   * @param stagingUploader Uploader for async staging
-   * @param stagingBasePath Base path for staging files
-   * @return StagedSplitInfo with split metadata and staging information
+   * @return ShuffledSplitData with split metadata AND bytes for shuffle-based merge
    */
   def createLocalSplitForMergeOnWrite(
     searchEngine: TantivySearchEngine,
@@ -85,7 +95,7 @@ object MergeOnWriteHelper {
     taskId: Long,
     options: CaseInsensitiveStringMap,
     hadoopConf: Configuration
-  ): StagedSplitInfo = {
+  ): ShuffledSplitData = {
 
     // Get or create local temp directory
     val localTempDir = SplitCacheConfig.getDefaultTempPath()
@@ -198,13 +208,8 @@ object MergeOnWriteHelper {
     // Compute schema fingerprint for compatibility checking (Gap #3)
     val schemaFingerprint = computeSchemaFingerprint(writeSchema)
 
-    // No S3 staging needed - Spark shuffle provides durability
-    // The split file is already persisted locally in merge-on-write-staging directory
-    logger.info(s"Split ready for shuffle-based merge (no S3 staging needed): $finalLocalPath")
-
-    // Build and return StagedSplitInfo
-    // Note: stagingPath and stagingAvailable are not used in shuffle-based merge
-    StagedSplitInfo(
+    // Build StagedSplitInfo with metadata
+    val splitInfo = StagedSplitInfo(
       uuid = splitUuid,
       taskAttemptId = taskAttemptId,
       workerHost = workerHost,
@@ -226,6 +231,29 @@ object MergeOnWriteHelper {
       docMappingJson = docMappingJson,
       uncompressedSizeBytes = uncompressedSizeBytes,
       schemaFingerprint = schemaFingerprint
+    )
+
+    // IN-MEMORY SHUFFLE: Immediately read split bytes into memory
+    // This happens on the SAME executor that created the split (no locality issues!)
+    // Bytes will travel back to driver via Spark's task result mechanism
+    logger.info(s"Reading split bytes into memory for shuffle-based merge: $finalLocalPath")
+    val splitBytes = java.nio.file.Files.readAllBytes(finalLocalFile.toPath)
+    logger.info(s"Split bytes loaded: ${splitBytes.length / 1024 / 1024}MB")
+
+    // Clean up temp file immediately - we have bytes in memory now
+    try {
+      finalLocalFile.delete()
+      logger.debug(s"Cleaned up temp split file: $finalLocalPath")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to clean up temp split file: ${e.getMessage}")
+    }
+
+    // Return ShuffledSplitData with both metadata and bytes
+    // This will be serialized back to driver in the commit message
+    ShuffledSplitData(
+      info = splitInfo,
+      bytes = splitBytes
     )
   }
 
@@ -311,42 +339,6 @@ object MergeOnWriteHelper {
     val schemaJson = schema.json
     val hash = digest.digest(schemaJson.getBytes("UTF-8"))
     hash.map("%02x".format(_)).mkString
-  }
-
-  /**
-   * Create ShuffledSplitData for RDD-based merge (reads split file into memory)
-   *
-   * This method:
-   * 1. Reads the split file bytes from finalLocalPath
-   * 2. Uploads to S3 for durability (in case shuffle fails)
-   * 3. Returns ShuffledSplitData with bytes for RDD shuffle
-   *
-   * @param splitInfo Split metadata
-   * @param finalLocalPath Path to split file on local disk
-   * @param stagingUploader Uploader for S3 durability
-   * @return ShuffledSplitData with split bytes
-   */
-  def createShuffledSplitData(
-    splitInfo: StagedSplitInfo,
-    finalLocalPath: String,
-    stagingUploader: SplitStagingUploader
-  ): ShuffledSplitData = {
-
-    // Read split bytes into memory
-    val splitFile = new File(finalLocalPath)
-    val splitBytes = java.nio.file.Files.readAllBytes(splitFile.toPath)
-
-    logger.info(s"Read split bytes for shuffle: ${splitBytes.length / 1024 / 1024}MB from $finalLocalPath")
-
-    // No S3 upload needed - Spark shuffle provides durability
-    // The final merged splits will be uploaded to S3 after merge completes
-    logger.info(s"Skip S3 upload - using Spark shuffle for durability")
-
-    // Return shuffled data
-    ShuffledSplitData(
-      info = splitInfo,
-      bytes = splitBytes
-    )
   }
 
   /**

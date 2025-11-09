@@ -605,20 +605,21 @@ class IndexTables4SparkDataWriter(
   override def commit(): WriterCommitMessage = {
     import io.indextables.spark.merge._
 
-    val allResults = scala.collection.mutable.ArrayBuffer[Either[AddAction, StagedSplitInfo]]()
+    val allResults = scala.collection.mutable.ArrayBuffer[Either[AddAction, ShuffledSplitData]]()
 
     // Handle non-partitioned writes
     if (singleWriter.isDefined) {
       val (searchEngine, statistics, recordCount) = singleWriter.get
       if (recordCount == 0) {
         logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
-        return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
+        return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty, Seq.empty)
       }
 
       val result = if (mergeOnWriteConfig.exists(_.enabled)) {
-        // Merge-on-write mode: create local split (no S3 staging - uses Spark shuffle)
-        logger.info(s"Committing in merge-on-write mode for partition $partitionId")
-        val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
+        // IN-MEMORY SHUFFLE merge-on-write: create split and immediately read bytes into memory
+        // Bytes will be returned in commit message and travel to driver via Spark's task result mechanism
+        logger.info(s"Committing in merge-on-write mode for partition $partitionId (in-memory shuffle with bytes)")
+        val shuffledSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
           searchEngine,
           writeSchema,
           statistics,
@@ -629,7 +630,7 @@ class IndexTables4SparkDataWriter(
           options,
           hadoopConf
         )
-        Right(stagedSplit)
+        Right(shuffledSplit)
       } else {
         // Traditional mode: upload immediately
         logger.info(s"Committing in traditional mode for partition $partitionId")
@@ -650,8 +651,8 @@ class IndexTables4SparkDataWriter(
             val partitionValues = parsePartitionKey(partitionKey)
 
             val result = if (mergeOnWriteConfig.exists(_.enabled)) {
-              // Merge-on-write mode (no S3 staging - uses Spark shuffle)
-              val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
+              // IN-MEMORY SHUFFLE merge-on-write (bytes in memory)
+              val shuffledSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
                 searchEngine,
                 writeSchema,
                 statistics,
@@ -662,7 +663,7 @@ class IndexTables4SparkDataWriter(
                 options,
                 hadoopConf
               )
-              Right(stagedSplit)
+              Right(shuffledSplit)
             } else {
               // Traditional mode
               val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
@@ -678,15 +679,15 @@ class IndexTables4SparkDataWriter(
 
     if (allResults.isEmpty) {
       logger.info(s"⚠️  No records written in partition $partitionId")
-      return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
+      return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty, Seq.empty)
     }
 
-    // Separate AddActions and StagedSplitInfo
+    // Separate AddActions and ShuffledSplitData
     val addActions = allResults.collect { case Left(action) => action }
-    val stagedSplits = allResults.collect { case Right(split) => split }
+    val shuffledSplits = allResults.collect { case Right(split) => split }
 
-    logger.info(s"Committed partition $partitionId with ${addActions.size} AddActions, ${stagedSplits.size} staged splits")
-    IndexTables4SparkMergeOnWriteCommitMessage(addActions.toSeq, stagedSplits.toSeq)
+    logger.info(s"Committed partition $partitionId with ${addActions.size} AddActions, ${shuffledSplits.size} shuffled splits (with in-memory bytes)")
+    IndexTables4SparkMergeOnWriteCommitMessage(addActions.toSeq, Seq.empty, shuffledSplits.toSeq)
   }
 
   private def parsePartitionKey(partitionKey: String): Map[String, String] =

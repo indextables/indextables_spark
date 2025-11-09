@@ -208,13 +208,14 @@ object ShuffleBasedMergeOrchestrator {
    * Used when split count < minSplitsToMerge threshold
    */
   def uploadSplitDirectly(
-    splitInfo: StagedSplitInfo,
+    shuffledSplit: ShuffledSplitData,  // Changed to ShuffledSplitData
     tablePathBC: String,
     optionsMapBC: Map[String, String]
   ): Option[AddAction] = {
     val logger = LoggerFactory.getLogger(classOf[ShuffleBasedMergeOrchestrator])
+    val splitInfo = shuffledSplit.info  // Extract metadata
 
-    logger.info(s"Uploading split directly (< minSplitsToMerge): ${splitInfo.uuid}")
+    logger.info(s"Uploading split directly from in-memory bytes (< minSplitsToMerge): ${splitInfo.uuid}")
 
     try {
       // Recreate CaseInsensitiveStringMap from serializable map
@@ -241,21 +242,16 @@ object ShuffleBasedMergeOrchestrator {
 
       logger.info(s"Uploading direct split to: $cloudPath")
 
-      // Upload the local split file to final location
-      val localFile = new File(splitInfo.localPath)
-      if (!localFile.exists()) {
-        throw new RuntimeException(s"Local split file not found: ${splitInfo.localPath}")
-      }
-
-      val inputStream = new FileInputStream(localFile)
+      // IN-MEMORY SHUFFLE: Upload directly from in-memory bytes (no file I/O!)
+      val inputStream = new java.io.ByteArrayInputStream(shuffledSplit.bytes)
       try {
-        cloudProvider.writeFileFromStream(cloudPath, inputStream, Some(localFile.length()))
+        cloudProvider.writeFileFromStream(cloudPath, inputStream, Some(shuffledSplit.bytes.length.toLong))
       } finally {
         inputStream.close()
       }
 
-      val uploadedSize = localFile.length()
-      logger.info(s"Direct upload complete: $cloudPath (${uploadedSize / 1024}KB)")
+      val uploadedSize = shuffledSplit.bytes.length.toLong
+      logger.info(s"Direct upload complete from memory: $cloudPath (${uploadedSize / 1024}KB)")
 
       // Create AddAction
       val addAction = AddAction(
@@ -335,80 +331,59 @@ class ShuffleBasedMergeOrchestrator(
   ).toInt
 
   /**
-   * Orchestrate merge-on-write using RDD shuffle
+   * Orchestrate merge-on-write using Spark's execution framework with in-memory shuffle
    *
-   * This method reads split files from local disk and creates an RDD with the bytes.
-   * In a future optimization, the write phase could create this RDD directly.
+   * IN-MEMORY SHUFFLE: Split bytes are already in memory (from commit messages).
+   * No file reading needed - data moves purely through Spark's framework!
    *
-   * @param stagedSplits Splits with metadata (from write phase)
-   * @param stagingUploader Uploader (not used in shuffle mode, but kept for interface compatibility)
+   * @param shuffledSplits Splits with metadata AND bytes (from write phase)
    * @param saveMode Save mode (Overwrite or Append)
    * @return Sequence of AddActions for merged splits
    */
   def executeMergeOnWrite(
-    stagedSplits: Seq[StagedSplitInfo],
+    shuffledSplits: Seq[ShuffledSplitData],  // Changed: now includes bytes!
     saveMode: org.apache.spark.sql.SaveMode
   ): Seq[AddAction] = {
 
-    logger.info(s"Shuffle-based merge orchestrator starting with ${stagedSplits.size} staged splits (mode: $saveMode)")
+    logger.info(s"Shuffle-based merge orchestrator starting with ${shuffledSplits.size} shuffled splits (in-memory shuffle, mode: $saveMode)")
 
     val spark = org.apache.spark.sql.SparkSession.active
 
     logger.info("=" * 80)
-    logger.info("SHUFFLE-BASED MERGE-ON-WRITE ORCHESTRATION")
-    logger.info(s"Input: ${stagedSplits.size} splits from write phase")
+    logger.info("IN-MEMORY SHUFFLE-BASED MERGE-ON-WRITE")
+    logger.info(s"Input: ${shuffledSplits.size} splits with in-memory bytes")
+    logger.info(s"Total data: ${shuffledSplits.map(_.size).sum / 1024 / 1024}MB")
     logger.info(s"Target merge size: ${targetSizeBytes / 1024 / 1024}MB")
     logger.info(s"Minimum splits to merge: $minSplitsToMerge")
     logger.info("=" * 80)
 
-    // No S3 staging validation needed - Spark shuffle provides durability
-    // Final merged splits will be uploaded to S3
-
-    // Create RDD with one partition per split
-    // Each partition will read its own local split file (avoiding unnecessary driver I/O)
     // Broadcast configuration to avoid serialization issues
     val optionsMap: Map[String, String] = options.asCaseSensitiveMap().asScala.toMap
     val broadcastTablePath = spark.sparkContext.broadcast(tablePath)
     val broadcastOptionsMap = spark.sparkContext.broadcast(optionsMap)
 
-    logger.info(s"Creating RDD with ${stagedSplits.size} partitions (one per split)...")
+    logger.info(s"Creating RDD from ${shuffledSplits.size} in-memory split objects...")
 
-    // Create RDD where each partition reads its own split file
-    // This keeps data local and avoids reading all splits into driver memory
-    val splitsRDD = spark.sparkContext.parallelize(stagedSplits, stagedSplits.size)
-      .mapPartitions { iter =>
-        // Each partition has exactly one StagedSplitInfo
-        iter.map { splitInfo =>
-          val splitFile = new File(splitInfo.localPath)
-          if (!splitFile.exists()) {
-            // Detailed diagnostics for debugging
-            val parentDir = splitFile.getParentFile
-            val parentExists = parentDir != null && parentDir.exists()
-            val parentFiles = if (parentExists) parentDir.listFiles().map(_.getName).mkString(", ") else "N/A"
+    // IN-MEMORY SHUFFLE ARCHITECTURE:
+    // 1. Split bytes are ALREADY in memory (loaded during write phase, returned in commit messages)
+    // 2. Create RDD directly from in-memory data - NO file reading needed!
+    // 3. Spark's shuffle mechanism distributes bytes to merge executors
+    // 4. Merge tasks write consolidated splits directly to S3
+    // 5. Pure in-memory data movement through Spark's execution framework!
+    //
+    // This eliminates file-based coordination and locality issues completely.
+    val splitsRDD = spark.sparkContext.parallelize(shuffledSplits, shuffledSplits.size)
 
-            throw new RuntimeException(
-              s"Split file not found: ${splitInfo.localPath}\n" +
-              s"UUID: ${splitInfo.uuid}\n" +
-              s"Worker: ${splitInfo.workerHost}, Executor: ${splitInfo.executorId}\n" +
-              s"Parent directory exists: $parentExists\n" +
-              s"Parent directory: ${if (parentDir != null) parentDir.getAbsolutePath else "null"}\n" +
-              s"Files in parent: $parentFiles\n" +
-              s"This split should have been written during the write phase."
-            )
-          }
-          val bytes = Files.readAllBytes(splitFile.toPath)
-          ShuffledSplitData(splitInfo, bytes)
-        }
-      }
-
-    logger.info(s"Created RDD with ${stagedSplits.size} split data entries")
+    logger.info(s"Created RDD with ${shuffledSplits.size} split data entries (no file I/O needed!)")
 
     // Step 1: Create merge groups (bin packing by partition and size)
+    // Extract StagedSplitInfo from ShuffledSplitData for bin packing logic
+    val stagedSplits = shuffledSplits.map(_.info)
     val mergeGroupsResult = createMergeGroups(stagedSplits)
     val mergeGroups = mergeGroupsResult.groupsToMerge
     val directUploadSplits = mergeGroupsResult.directUploadSplits
 
-    logger.info(s"Created ${mergeGroups.size} merge groups from ${stagedSplits.size} splits")
+    logger.info(s"Created ${mergeGroups.size} merge groups from ${shuffledSplits.size} splits")
     mergeGroups.take(5).foreach { group =>
       logger.info(s"  Group ${group.groupId}: ${group.splits.size} splits, " +
         s"${group.estimatedSize / 1024 / 1024}MB, partition: ${group.partition}")
@@ -426,10 +401,19 @@ class ShuffleBasedMergeOrchestrator(
     // Step 2: Handle direct uploads (splits < minSplitsToMerge threshold)
     val directUploadActions = if (directUploadSplits.nonEmpty) {
       logger.info(s"Processing ${directUploadSplits.size} direct upload splits...")
-      val directUploadsRDD = spark.sparkContext.parallelize(directUploadSplits, directUploadSplits.size).mapPartitions { splits =>
-        splits.flatMap { splitInfo =>
+
+      // Create lookup map from UUID to ShuffledSplitData
+      val splitsByUUID = shuffledSplits.map(s => s.info.uuid -> s).toMap
+
+      // Get ShuffledSplitData for direct uploads
+      val directUploadShuffledSplits = directUploadSplits.flatMap { splitInfo =>
+        splitsByUUID.get(splitInfo.uuid)
+      }
+
+      val directUploadsRDD = spark.sparkContext.parallelize(directUploadShuffledSplits, directUploadShuffledSplits.size).mapPartitions { splits =>
+        splits.flatMap { shuffledSplit =>
           ShuffleBasedMergeOrchestrator.uploadSplitDirectly(
-            splitInfo,
+            shuffledSplit,  // Pass ShuffledSplitData (with bytes)
             broadcastTablePath.value,
             broadcastOptionsMap.value
           )
@@ -468,10 +452,7 @@ class ShuffleBasedMergeOrchestrator(
       Seq.empty
     }
 
-    // Step 4: Cleanup local split files after successful merge/upload
-    cleanupLocalSplitFiles(stagedSplits)
-
-    // Step 5: Combine results
+    // Step 4: Combine results (no cleanup needed - files already deleted after reading bytes)
     val allActions = directUploadActions ++ mergedActions
 
     logger.info(s"Merge-on-write completed: ${directUploadActions.size} direct uploads + ${mergedActions.size} merged splits = ${allActions.size} total")
