@@ -1181,7 +1181,7 @@ Merge-on-write automatically consolidates small split files during write operati
 |---------------|---------|-------------|
 | `spark.indextables.mergeOnWrite.enabled` | `false` | Enable automatic split consolidation during writes |
 | `spark.indextables.mergeOnWrite.targetSize` | `"4G"` | Target size for merged splits (supports: "100M", "1G", "4G", bytes) |
-| `spark.indextables.mergeOnWrite.minSplitsToMerge` | `2` | Minimum number of splits required to trigger merge (below this threshold → direct upload) |
+| `spark.indextables.mergeOnWrite.mergeGroupMultiplier` | `2.0` | Threshold multiplier: merge runs if merge groups ≥ (defaultParallelism × multiplier) |
 | `spark.indextables.mergeOnWrite.minDiskSpaceGB` | `20` | Minimum free disk space (in GB) required to enable merge operations (use 1GB for test environments) |
 | `spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker` | Auto | Maximum concurrent merges per worker (default: auto-calculated based on heap size) |
 | `spark.indextables.mergeOnWrite.memoryOverheadFactor` | `3.0` | Memory overhead multiplier for merge size estimation (used in auto-concurrency calculation) |

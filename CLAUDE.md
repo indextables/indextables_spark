@@ -50,10 +50,13 @@ spark.indextables.transaction.compression.enabled: true (default)
 spark.indextables.stats.truncation.enabled: true
 spark.indextables.stats.truncation.maxLength: 256
 
-// Merge-On-Write (automatic split consolidation after writes via post-commit evaluation)
+// Merge-On-Write (automatic split consolidation during writes via Spark shuffle)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
 spark.indextables.mergeOnWrite.targetSize: "4G" (default: 4G, target merged split size)
 spark.indextables.mergeOnWrite.mergeGroupMultiplier: 2.0 (default: 2.0, threshold = parallelism × multiplier)
+spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
+spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker: <auto> (default: auto-calculated based on heap size)
+spark.indextables.mergeOnWrite.memoryOverheadFactor: 3.0 (default: 3.0, memory overhead multiplier for merge size)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)
