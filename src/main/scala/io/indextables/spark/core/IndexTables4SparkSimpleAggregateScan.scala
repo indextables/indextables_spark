@@ -377,9 +377,9 @@ class IndexTables4SparkSimpleAggregateReader(
 
   /** Execute simple aggregation using tantivy4java aggregations. */
   private def executeSimpleAggregation(): Array[org.apache.spark.sql.catalyst.InternalRow] = {
-    logger.warn(s"EXECUTE SIMPLE AGGREGATION: Starting execution")
-    logger.warn(s"EXECUTE SIMPLE AGGREGATION: Split path: ${partition.split.path}")
-    logger.warn(s"EXECUTE SIMPLE AGGREGATION: Aggregate expressions count: ${partition.aggregation.aggregateExpressions.length}")
+    logger.debug(s"EXECUTE SIMPLE AGGREGATION: Starting execution")
+    logger.debug(s"EXECUTE SIMPLE AGGREGATION: Split path: ${partition.split.path}")
+    logger.debug(s"EXECUTE SIMPLE AGGREGATION: Aggregate expressions count: ${partition.aggregation.aggregateExpressions.length}")
     import org.apache.spark.sql.catalyst.InternalRow
     import org.apache.spark.unsafe.types.UTF8String
     import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
@@ -597,22 +597,22 @@ class IndexTables4SparkSimpleAggregateReader(
       }
 
       // Step 2: Execute all aggregations in a single batch
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: Executing ${aggregations.size()} aggregations in a single batch")
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: Aggregation names: ${aggNames.mkString(", ")}")
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: Query: ${splitQuery.getClass.getSimpleName}")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: Executing ${aggregations.size()} aggregations in a single batch")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: Aggregation names: ${aggNames.mkString(", ")}")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: Query: ${splitQuery.getClass.getSimpleName}")
       val result = searcher.aggregate(splitQuery, aggregations)
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: Aggregate call completed, hasAggregations: ${result.hasAggregations()}")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: Aggregate call completed, hasAggregations: ${result.hasAggregations()}")
 
       // Step 4: Extract results in the same order as expressions
       val aggregationResults = ArrayBuffer[Any]()
 
-      logger.warn(s"SIMPLE AGGREGATE EXECUTION: About to extract ${partition.aggregation.aggregateExpressions.length} aggregation results")
+      logger.debug(s"SIMPLE AGGREGATE EXECUTION: About to extract ${partition.aggregation.aggregateExpressions.length} aggregation results")
 
       partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
         case (aggExpr, index) =>
           val aggName = aggNames(index)
-          logger.warn(s"SIMPLE AGGREGATE EXECUTION: Extracting result $index: ${aggExpr.getClass.getSimpleName}")
+          logger.debug(s"SIMPLE AGGREGATE EXECUTION: Extracting result $index: ${aggExpr.getClass.getSimpleName}")
 
           aggExpr match {
             case count: Count =>
@@ -620,10 +620,10 @@ class IndexTables4SparkSimpleAggregateReader(
               if (result.hasAggregations()) {
                 val countResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult]
                 val countValue = if (countResult != null) countResult.getCount() else 0L
-                logger.warn(s"SIMPLE AGGREGATE EXECUTION: COUNT result: $countValue (split: ${partition.split.path})")
+                logger.debug(s"SIMPLE AGGREGATE EXECUTION: COUNT result: $countValue (split: ${partition.split.path})")
                 aggregationResults += countValue
               } else {
-                logger.warn(s"SIMPLE AGGREGATE EXECUTION: No COUNT aggregation result for '$aggName'")
+                logger.debug(s"SIMPLE AGGREGATE EXECUTION: No COUNT aggregation result for '$aggName'")
                 aggregationResults += 0L
               }
 
@@ -632,10 +632,10 @@ class IndexTables4SparkSimpleAggregateReader(
               if (result.hasAggregations()) {
                 val countResult = result.getAggregation(aggName).asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult]
                 val countValue = if (countResult != null) countResult.getCount() else 0L
-                logger.warn(s"SIMPLE AGGREGATE EXECUTION: COUNT(*) result: $countValue (split: ${partition.split.path})")
+                logger.debug(s"SIMPLE AGGREGATE EXECUTION: COUNT(*) result: $countValue (split: ${partition.split.path})")
                 aggregationResults += countValue
               } else {
-                logger.warn(s"SIMPLE AGGREGATE EXECUTION: No COUNT(*) aggregation result")
+                logger.debug(s"SIMPLE AGGREGATE EXECUTION: No COUNT(*) aggregation result")
                 aggregationResults += 0L
               }
 
