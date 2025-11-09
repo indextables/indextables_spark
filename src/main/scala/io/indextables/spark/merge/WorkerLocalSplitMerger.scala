@@ -28,6 +28,24 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.TaskContext
 
+/**
+ * Metadata extracted from a merged split file
+ */
+case class MergedSplitMetadata(
+  size: Long,
+  numRecords: Long,
+  minValues: Map[String, String],
+  maxValues: Map[String, String],
+  footerStartOffset: Option[Long],
+  footerEndOffset: Option[Long],
+  timeRangeStart: Option[String],
+  timeRangeEnd: Option[String],
+  splitTags: Option[Set[String]],
+  deleteOpstamp: Option[Long],
+  docMappingJson: Option[String],
+  uncompressedSizeBytes: Option[Long]
+) extends Serializable
+
 import org.apache.hadoop.conf.Configuration
 
 import io.indextables.spark.util.SizeParser

@@ -433,7 +433,8 @@ class MergeSplitsExecutor(
   partitionPredicates: Seq[String],
   targetSize: Long,
   maxGroups: Option[Int],
-  preCommitMerge: Boolean = false) {
+  preCommitMerge: Boolean = false,
+  overrideOptions: Option[Map[String, String]] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
@@ -451,11 +452,11 @@ class MergeSplitsExecutor(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-      // Helper function to get config from normalized configs with fallback
+      // Helper function to get config with priority: overrideOptions > mergedConfigs
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = mergedConfigs.get(sparkKey)
+        val result = overrideOptions.flatMap(_.get(sparkKey)).orElse(mergedConfigs.get(sparkKey))
 
-        logger.debug(s"AWS Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideOptions.flatMap(_.get(sparkKey)).getOrElse("None")}, merged=${result.getOrElse("None")}")
         result
       }
 
@@ -545,10 +546,10 @@ class MergeSplitsExecutor(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-      // Helper function to get config from normalized configs
+      // Helper function to get config with priority: overrideOptions > mergedConfigs
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = mergedConfigs.get(sparkKey)
-        logger.debug(s"Azure Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        val result = overrideOptions.flatMap(_.get(sparkKey)).orElse(mergedConfigs.get(sparkKey))
+        logger.debug(s"Azure Config fallback for $sparkKey: override=${overrideOptions.flatMap(_.get(sparkKey)).getOrElse("None")}, merged=${result.getOrElse("None")}")
         result
       }
 

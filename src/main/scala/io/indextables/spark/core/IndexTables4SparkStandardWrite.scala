@@ -139,40 +139,12 @@ class IndexTables4SparkStandardWrite(
         }
     }
 
-    // Check if merge-on-write is enabled
-    import io.indextables.spark.merge._
-    import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
-
-    val options = new CaseInsensitiveStringMap(serializedOptions.asJava)
-    val mergeOnWriteEnabled = MergeOnWriteHelper.isMergeOnWriteEnabled(options)
-
-    // Create merge-on-write config if enabled
-    val mergeOnWriteConfigOpt = if (mergeOnWriteEnabled) {
-      logger.info("🔀 Merge-on-write is ENABLED - creating serializable config")
-      val basePath = MergeOnWriteHelper.getStagingBasePath(tablePath.toString, options)
-
-      // Create serializable config
-      val config = io.indextables.spark.merge.MergeOnWriteConfig(
-        enabled = true,
-        stagingBasePath = basePath,
-        serializedHadoopConfig = combinedHadoopConfig,
-        serializedOptions = serializedOptions
-      )
-
-      Some(config)
-    } else {
-      logger.info("Traditional write mode (merge-on-write disabled)")
-      None
-    }
-
     new IndexTables4SparkWriterFactory(
       tablePath,
       writeSchema,
       serializedOptions,
       combinedHadoopConfig,
-      partitionColumns,
-      mergeOnWriteConfigOpt
+      partitionColumns
     )
   }
 
@@ -199,31 +171,14 @@ class IndexTables4SparkStandardWrite(
       validateIndexingConfigurationForAppend()
     }
 
-    // Extract both AddActions (traditional) and StagedSplitInfo (merge-on-write)
-    import io.indextables.spark.merge._
-
+    // Extract AddActions from commit messages
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions
       case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                                   => Seq.empty[AddAction]
     }
 
-    // S3 STAGING: Extract StagedSplitInfo (metadata only) from commit messages
-    val stagedSplits: Seq[StagedSplitInfo] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.stagedSplits
-      case _                                                => Seq.empty[StagedSplitInfo]
-    }
-
-    // Check if merge-on-write is being used
-    val mergeOnWriteActive = stagedSplits.nonEmpty
-
-    if (mergeOnWriteActive) {
-      logger.info(s"🔀 Merge-on-write ACTIVE (S3 staging): ${stagedSplits.size} staged splits (metadata only), ${addActions.size} direct AddActions")
-    }
-
     // Log how many empty partitions were filtered out
-    val totalItems = addActions.size + stagedSplits.size
-    val emptyPartitionsCount = messages.length - totalItems
+    val emptyPartitionsCount = messages.length - addActions.size
     if (emptyPartitionsCount > 0) {
       println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
       logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
@@ -294,40 +249,10 @@ class IndexTables4SparkStandardWrite(
     TransactionLog.setWriteOptions(writeOptions)
 
     try {
-      // Determine final AddActions (either direct or from merge-on-write)
-      val finalAddActions = if (mergeOnWriteActive) {
-        logger.debug(s"MERGE DEBUG: Starting S3 staging merge-on-write with ${stagedSplits.size} staged splits (metadata only), ${addActions.size} direct addActions")
-        logger.info("🔀 Executing S3 staging-based merge-on-write...")
-
-        // Create orchestrator (using S3 staging approach)
-        val orchestrator = new io.indextables.spark.merge.MergeOnWriteOrchestrator(
-          tablePath = tablePath.toString,
-          schema = writeSchema,
-          options = writeOptions,
-          hadoopConf = hadoopConf
-        )
-
-        // Execute merge-on-write with StagedSplitInfo (metadata only)
-        val mergedActions = orchestrator.executeMergeOnWrite(
-          stagedSplits,
-          if (shouldOverwrite) org.apache.spark.sql.SaveMode.Overwrite else org.apache.spark.sql.SaveMode.Append
-        )
-
-        logger.debug(s"MERGE DEBUG: Orchestrator returned ${mergedActions.size} merged actions")
-
-        // Combine with any direct AddActions
-        val combined = addActions ++ mergedActions
-        logger.debug(s"MERGE DEBUG: Combined total: ${combined.size} AddActions (${addActions.size} direct + ${mergedActions.size} merged)")
-        combined
-      } else {
-        // Traditional mode - use AddActions directly
-        addActions
-      }
-
-      // Commit the changes
+      // Commit the changes to transaction log
       if (shouldOverwrite) {
-        logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
-        val version = transactionLog.overwriteFiles(finalAddActions)
+        logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        val version = transactionLog.overwriteFiles(addActions)
         logger.debug(s"COMMIT DEBUG: Overwrite completed in transaction version $version")
 
         // Log what's in the transaction log after this operation
@@ -337,11 +262,11 @@ class IndexTables4SparkStandardWrite(
           logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
         }
 
-        logger.info(s"Overwrite completed in transaction version $version, added ${finalAddActions.length} files")
+        logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
       } else {
-        logger.debug(s"COMMIT DEBUG: Performing APPEND with ${finalAddActions.length} new files")
+        logger.debug(s"COMMIT DEBUG: Performing APPEND with ${addActions.length} new files")
         // Standard append operation
-        val version = transactionLog.addFiles(finalAddActions)
+        val version = transactionLog.addFiles(addActions)
         logger.debug(s"COMMIT DEBUG: Append completed in transaction version $version")
 
         // Log what's in the transaction log after this operation
@@ -351,11 +276,14 @@ class IndexTables4SparkStandardWrite(
           logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
         }
 
-        logger.info(s"Added ${finalAddActions.length} files in transaction version $version")
+        logger.info(s"Added ${addActions.length} files in transaction version $version")
       }
 
-      logger.debug(s"COMMIT DEBUG: Successfully committed ${finalAddActions.length} files")
-      logger.info(s"Successfully committed ${finalAddActions.length} files")
+      logger.debug(s"COMMIT DEBUG: Successfully committed ${addActions.length} files")
+      logger.info(s"Successfully committed ${addActions.length} files")
+
+      // POST-COMMIT EVALUATION: Check if merge-on-write should run
+      evaluateAndExecuteMergeOnWrite(writeOptions)
     } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
@@ -474,5 +402,170 @@ class IndexTables4SparkStandardWrite(
         logger.debug(s"VALIDATION DEBUG: Validation failed with exception: ${e.getMessage}")
       // Don't fail the write for other types of errors
     }
+
+  /**
+   * Evaluate if merge-on-write should run after transaction commit.
+   *
+   * This method:
+   * 1. Checks if merge-on-write is enabled
+   * 2. Counts mergeable groups from the transaction log
+   * 3. Compares against threshold (defaultParallelism * mergeGroupMultiplier)
+   * 4. Invokes MERGE SPLITS command if worthwhile
+   */
+  private def evaluateAndExecuteMergeOnWrite(
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
+  ): Unit = {
+    try {
+      // Check if merge-on-write is enabled
+      val mergeOnWriteEnabled = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.enabled", "false").toBoolean
+
+      if (!mergeOnWriteEnabled) {
+        logger.debug("Merge-on-write is disabled, skipping post-commit evaluation")
+        return
+      }
+
+      logger.info("🔀 Merge-on-write enabled - evaluating if merge is worthwhile...")
+
+      // Get configuration
+      val mergeGroupMultiplier = writeOptions.getOrDefault(
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0"
+      ).toDouble
+      val targetSize = writeOptions.getOrDefault(
+        "spark.indextables.mergeOnWrite.targetSize", "4G"
+      )
+
+      // Get Spark session for default parallelism
+      val spark = org.apache.spark.sql.SparkSession.active
+      val defaultParallelism = spark.sparkContext.defaultParallelism
+      val threshold = (defaultParallelism * mergeGroupMultiplier).toInt
+
+      logger.info(s"Merge threshold: $threshold merge groups (parallelism: $defaultParallelism × multiplier: $mergeGroupMultiplier)")
+
+      // Count mergeable groups from transaction log
+      val mergeGroups = countMergeGroupsFromTransactionLog(targetSize)
+
+      logger.info(s"Found $mergeGroups mergeable groups (threshold: $threshold)")
+
+      if (mergeGroups >= threshold) {
+        logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS")
+        executeMergeSplitsCommand(writeOptions)
+      } else {
+        logger.info(s"⏭️  Merge not worthwhile: $mergeGroups groups < $threshold threshold - skipping")
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write operation if merge evaluation fails
+        logger.warn(s"Failed to evaluate merge-on-write: ${e.getMessage}", e)
+    }
+  }
+
+  /**
+   * Count number of merge groups that would be created based on current transaction log state.
+   * Uses the same logic as MERGE SPLITS command to determine groups.
+   */
+  private def countMergeGroupsFromTransactionLog(targetSizeStr: String): Int = {
+    try {
+      val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
+      val allFiles = transactionLog.listFiles()
+
+      // Group by partition
+      val partitionedFiles = allFiles.groupBy(_.partitionValues)
+
+      var totalGroups = 0
+
+      // Count groups in each partition
+      partitionedFiles.foreach { case (partitionValues, files) =>
+        // Filter files that are below target size (candidates for merging)
+        val mergeableSplits = files.filter(_.size < targetSizeBytes).sortBy(_.modificationTime)
+
+        // Simulate bin-packing to count groups
+        var currentGroupSize = 0L
+        var groupCount = 0
+
+        mergeableSplits.foreach { file =>
+          if (currentGroupSize + file.size <= targetSizeBytes) {
+            currentGroupSize += file.size
+          } else {
+            // Start new group
+            groupCount += 1
+            currentGroupSize = file.size
+          }
+        }
+
+        // Count the last group if it has content
+        if (currentGroupSize > 0) {
+          groupCount += 1
+        }
+
+        totalGroups += groupCount
+      }
+
+      totalGroups
+
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to count merge groups: ${e.getMessage}")
+        0
+    }
+  }
+
+  /**
+   * Execute MERGE SPLITS command programmatically with write options.
+   *
+   * This method passes write options directly to MergeSplitsExecutor so it has access
+   * to AWS/Azure credentials, temp directories, heap size, and all other write-time configuration.
+   */
+  private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit = {
+    try {
+      import io.indextables.spark.sql.MergeSplitsExecutor
+      import scala.jdk.CollectionConverters._
+
+      val targetSizeStr = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
+      val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
+
+      logger.info(s"Executing MERGE SPLITS for table: ${tablePath.toString} with target size: $targetSizeStr ($targetSizeBytes bytes)")
+
+      val spark = org.apache.spark.sql.SparkSession.active
+
+      // Extract all indextables options from writeOptions to pass to merge executor
+      val optionsToPass = writeOptions.asCaseSensitiveMap().asScala.toMap
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+
+      logger.info(s"Passing ${optionsToPass.size} write options to MERGE SPLITS executor")
+      optionsToPass.foreach { case (key, value) =>
+        val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
+        logger.debug(s"  Passing option: $key = $displayValue")
+      }
+
+      // Create executor with transaction log and write options
+      val executor = new io.indextables.spark.sql.MergeSplitsExecutor(
+        sparkSession = spark,
+        transactionLog = transactionLog,
+        tablePath = tablePath,
+        partitionPredicates = Seq.empty, // Merge all partitions
+        targetSize = targetSizeBytes,
+        maxGroups = None, // No limit on groups for auto-merge
+        preCommitMerge = false,
+        overrideOptions = Some(optionsToPass) // Pass write options directly
+      )
+
+      // Execute merge
+      val results = executor.merge()
+
+      // Log first row of results (contains metrics)
+      if (results.nonEmpty) {
+        val firstRow = results.head
+        logger.info(s"✅ MERGE SPLITS completed: ${firstRow.getString(0)} - merged ${firstRow.getStruct(1).getLong(1)} files")
+      } else {
+        logger.info(s"✅ MERGE SPLITS completed with no results")
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write if merge fails
+        logger.warn(s"Failed to execute MERGE SPLITS: ${e.getMessage}", e)
+    }
+  }
 
 }

@@ -386,8 +386,8 @@ class IndexTables4SparkOptimizedWrite(
         }
     }
 
-    // OptimizedWrite does NOT support merge-on-write - always pass None
-    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns, None)
+    // OptimizedWrite does NOT support merge-on-write
+    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -408,10 +408,8 @@ class IndexTables4SparkOptimizedWrite(
         logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
     }
 
-    // OptimizedWrite handles commit messages - extract AddActions only (no merge-on-write orchestration)
-    import io.indextables.spark.merge._
+    // OptimizedWrite handles commit messages - extract AddActions only
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions  // Extract addActions from merge-on-write message
       case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _ => Seq.empty[AddAction]
     }
