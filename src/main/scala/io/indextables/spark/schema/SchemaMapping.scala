@@ -386,6 +386,22 @@ object SchemaMapping {
             case other => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp from TEXT field")
           }
 
+        // JSON -> StringType (for StringType fields indexed as "json")
+        case (FieldType.JSON, StringType) =>
+          // Convert JSON value back to stringified JSON
+          import com.fasterxml.jackson.databind.ObjectMapper
+          val mapper = new ObjectMapper()
+
+          val jsonString = rawValue match {
+            case s: String =>
+              // Already a string, return as-is
+              s
+            case _ =>
+              // Use Jackson to serialize Map, List, or any other object to JSON
+              mapper.writeValueAsString(rawValue)
+          }
+          org.apache.spark.unsafe.types.UTF8String.fromString(jsonString)
+
         // Unsupported conversion
         case (fromType, toType) =>
           throw new IllegalArgumentException(
