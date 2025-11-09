@@ -81,19 +81,8 @@ class IndexTables4SparkStandardWrite(
   // Validate the write schema
   validateSchema(writeSchema)
   private val serializedHadoopConf = {
-    // Serialize only the tantivy4spark config properties from hadoopConf
-    val props = scala.collection.mutable.Map[String, String]()
-    val iter  = hadoopConf.iterator()
-    while (iter.hasNext) {
-      val entry = iter.next()
-      if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
-        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-          entry.getKey.replace("spark.indextables.", "spark.indextables.")
-        } else entry.getKey
-        props.put(normalizedKey, entry.getValue)
-      }
-    }
-    props.toMap
+    // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
+    io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
   }
   private val partitionColumns =
     // Extract partition columns from write options (set by .partitionBy())
@@ -558,10 +547,14 @@ class IndexTables4SparkStandardWrite(
       val spark = org.apache.spark.sql.SparkSession.active
 
       // Extract all indextables options from writeOptions to pass to merge executor
-      val optionsToPass = writeOptions.asCaseSensitiveMap().asScala.toMap
+      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
         .filter { case (key, _) => key.startsWith("spark.indextables.") }
 
-      logger.info(s"Passing ${optionsToPass.size} write options to MERGE SPLITS executor")
+      // CRITICAL FIX: Merge with serializedHadoopConf to include credentials from enrichedHadoopConf
+      // Write options take precedence over hadoopConf
+      val optionsToPass = serializedHadoopConf ++ optionsFromWrite
+
+      logger.info(s"Passing ${optionsToPass.size} options to MERGE SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
       optionsToPass.foreach { case (key, value) =>
         val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
         logger.debug(s"  Passing option: $key = $displayValue")

@@ -453,10 +453,19 @@ class MergeSplitsExecutor(
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
       // Helper function to get config with priority: overrideOptions > mergedConfigs
+      // CASE-INSENSITIVE lookup to handle write options (lowercase) vs expected keys (camelCase)
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = overrideOptions.flatMap(_.get(sparkKey)).orElse(mergedConfigs.get(sparkKey))
+        // Try exact match first, then case-insensitive match
+        val overrideValue = overrideOptions.flatMap { opts =>
+          opts.get(sparkKey).orElse {
+            // Case-insensitive fallback for write options
+            opts.find { case (k, _) => k.equalsIgnoreCase(sparkKey) }.map(_._2)
+          }
+        }
 
-        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideOptions.flatMap(_.get(sparkKey)).getOrElse("None")}, merged=${result.getOrElse("None")}")
+        val result = overrideValue.orElse(mergedConfigs.get(sparkKey))
+
+        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideValue.getOrElse("None")}, merged=${result.getOrElse("None")}")
         result
       }
 
