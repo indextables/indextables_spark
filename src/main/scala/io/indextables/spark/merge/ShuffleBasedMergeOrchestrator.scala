@@ -88,28 +88,6 @@ case class ShuffledMergeGroup(
  */
 object ShuffleBasedMergeOrchestrator {
   /**
-   * Static function to read split data - no closure capture
-   */
-  def readSplitData(
-    splitInfo: StagedSplitInfo,
-    tablePathBC: String,
-    optionsMapBC: Map[String, String]
-  ): ShuffledSplitData = {
-    val splitFile = new File(splitInfo.localPath)
-    if (!splitFile.exists()) {
-      throw new RuntimeException(
-        s"Split file not found: ${splitInfo.localPath}\n" +
-        s"Shuffle-based merge requires splits to be available locally from write phase.\n" +
-        s"No S3 fallback since we skip S3 staging in shuffle mode."
-      )
-    }
-
-    // Read from local file
-    val bytes = Files.readAllBytes(splitFile.toPath)
-    ShuffledSplitData(splitInfo, bytes)
-  }
-
-  /**
    * Execute merge for a single group (on executor) - static to avoid closure capture
    *
    * Split bytes are already local via shuffle - no download needed!
@@ -386,22 +364,42 @@ class ShuffleBasedMergeOrchestrator(
     // No S3 staging validation needed - Spark shuffle provides durability
     // Final merged splits will be uploaded to S3
 
-    // Create RDD with split bytes (read from local files)
+    // Create RDD with one partition per split
+    // Each partition will read its own local split file (avoiding unnecessary driver I/O)
     // Broadcast configuration to avoid serialization issues
-    // Convert CaseInsensitiveStringMap to regular Map for serializability
     val optionsMap: Map[String, String] = options.asCaseSensitiveMap().asScala.toMap
     val broadcastTablePath = spark.sparkContext.broadcast(tablePath)
     val broadcastOptionsMap = spark.sparkContext.broadcast(optionsMap)
 
-    logger.info(s"Reading ${stagedSplits.size} split files into RDD for shuffle...")
-    val splitsRDD = spark.sparkContext.parallelize(stagedSplits, stagedSplits.size).map { splitInfo =>
-      // Call static method to avoid closure capture
-      ShuffleBasedMergeOrchestrator.readSplitData(
-        splitInfo,
-        broadcastTablePath.value,
-        broadcastOptionsMap.value
-      )
-    }
+    logger.info(s"Creating RDD with ${stagedSplits.size} partitions (one per split)...")
+
+    // Create RDD where each partition reads its own split file
+    // This keeps data local and avoids reading all splits into driver memory
+    val splitsRDD = spark.sparkContext.parallelize(stagedSplits, stagedSplits.size)
+      .mapPartitions { iter =>
+        // Each partition has exactly one StagedSplitInfo
+        iter.map { splitInfo =>
+          val splitFile = new File(splitInfo.localPath)
+          if (!splitFile.exists()) {
+            // Detailed diagnostics for debugging
+            val parentDir = splitFile.getParentFile
+            val parentExists = parentDir != null && parentDir.exists()
+            val parentFiles = if (parentExists) parentDir.listFiles().map(_.getName).mkString(", ") else "N/A"
+
+            throw new RuntimeException(
+              s"Split file not found: ${splitInfo.localPath}\n" +
+              s"UUID: ${splitInfo.uuid}\n" +
+              s"Worker: ${splitInfo.workerHost}, Executor: ${splitInfo.executorId}\n" +
+              s"Parent directory exists: $parentExists\n" +
+              s"Parent directory: ${if (parentDir != null) parentDir.getAbsolutePath else "null"}\n" +
+              s"Files in parent: $parentFiles\n" +
+              s"This split should have been written during the write phase."
+            )
+          }
+          val bytes = Files.readAllBytes(splitFile.toPath)
+          ShuffledSplitData(splitInfo, bytes)
+        }
+      }
 
     logger.info(s"Created RDD with ${stagedSplits.size} split data entries")
 
