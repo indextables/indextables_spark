@@ -30,6 +30,7 @@ import org.apache.hadoop.conf.Configuration
 
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
+import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.search.TantivySearchEngine
 import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.transaction.AddAction
@@ -37,42 +38,44 @@ import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
 
 /**
- * Extended commit message that can carry either traditional AddActions or ShuffledSplitData for merge-on-write.
+ * Extended commit message that can carry either traditional AddActions or StagedSplitInfo for merge-on-write.
  *
- * For in-memory shuffle-based merge:
- * - Split bytes are included in the commit message (via shuffledSplits field)
- * - Spark's task result mechanism moves bytes from executors to driver
- * - Driver then creates RDD from in-memory split data for merge phase
- * - No file-based coordination or locality needed!
+ * For S3 staging-based merge:
+ * - Split metadata is included in the commit message (via stagedSplits field)
+ * - Split files are uploaded to S3 staging location during write phase
+ * - Driver receives only metadata (~1KB per split)
+ * - Merge phase downloads splits from S3 staging as needed
+ * - Scalable to any data size (no driver memory bottleneck)
  */
 case class IndexTables4SparkMergeOnWriteCommitMessage(
   addActions: Seq[AddAction] = Seq.empty,
-  stagedSplits: Seq[StagedSplitInfo] = Seq.empty,  // Legacy: file-based (deprecated)
-  shuffledSplits: Seq[ShuffledSplitData] = Seq.empty  // New: in-memory bytes for shuffle-based merge
+  stagedSplits: Seq[StagedSplitInfo] = Seq.empty  // S3 staging: metadata only
 ) extends WriterCommitMessage
 
 /**
  * Helper methods to support merge-on-write functionality in IndexTables4SparkDataWriter
  *
- * ARCHITECTURE: Shuffle-based merge
- * - Write phase: Creates splits and keeps bytes in RDD for shuffle
- * - Merge phase: Spark shuffle distributes split bytes to merge executors
- * - No local file persistence issues (100% locality via shuffle)
+ * ARCHITECTURE: S3 staging-based merge
+ * - Write phase: Creates splits locally and uploads to S3 staging location
+ * - Commit message: Returns metadata only (no bytes, ~1KB per split)
+ * - Merge phase: Downloads splits from S3 staging, merges, uploads to final location
+ * - Scalable to any data size (no driver memory bottleneck)
  */
 object MergeOnWriteHelper {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Create a local split file for merge-on-write mode and immediately read bytes for shuffle
+   * Create a local split file for merge-on-write mode and upload to S3 staging
    *
-   * In-memory shuffle approach:
+   * S3 staging approach:
    * 1. Create split file in temp directory (on same executor that wrote data)
-   * 2. Immediately read bytes into memory
-   * 3. Return ShuffledSplitData with bytes
-   * 4. Bytes travel back to driver via Spark's task result mechanism
-   * 5. Driver creates RDD from in-memory data for merge phase
-   * 6. No file-based coordination needed - data moves through Spark's execution framework!
+   * 2. Upload split to S3 staging location
+   * 3. Return StagedSplitInfo with metadata only (no bytes)
+   * 4. Metadata travels back to driver via Spark's task result mechanism (~1KB)
+   * 5. Driver creates RDD from metadata for merge phase
+   * 6. Merge phase downloads splits from S3 staging as needed
+   * 7. Scalable to any data size (no driver memory bottleneck)
    *
    * @param searchEngine The TantivySearchEngine with indexed data
    * @param writeSchema Schema for computing fingerprint
@@ -81,9 +84,10 @@ object MergeOnWriteHelper {
    * @param partitionValues Partition values (if partitioned table)
    * @param partitionId Spark partition ID
    * @param taskId Spark task ID
+   * @param tablePath Table base path (for S3 staging location)
    * @param options Configuration options
    * @param hadoopConf Hadoop configuration
-   * @return ShuffledSplitData with split metadata AND bytes for shuffle-based merge
+   * @return StagedSplitInfo with split metadata only (no bytes)
    */
   def createLocalSplitForMergeOnWrite(
     searchEngine: TantivySearchEngine,
@@ -93,9 +97,10 @@ object MergeOnWriteHelper {
     partitionValues: Map[String, String],
     partitionId: Int,
     taskId: Long,
+    tablePath: String,
     options: CaseInsensitiveStringMap,
     hadoopConf: Configuration
-  ): ShuffledSplitData = {
+  ): StagedSplitInfo = {
 
     // Get or create local temp directory
     val localTempDir = SplitCacheConfig.getDefaultTempPath()
@@ -208,15 +213,75 @@ object MergeOnWriteHelper {
     // Compute schema fingerprint for compatibility checking (Gap #3)
     val schemaFingerprint = computeSchemaFingerprint(writeSchema)
 
-    // Build StagedSplitInfo with metadata
+    // Upload split to S3 staging location
+    val stagingBasePath = getStagingBasePath(tablePath, options)
+    val stagingPath = s"$stagingBasePath/$fileName"
+
+    logger.info(s"Uploading split to S3 staging: $stagingPath (${splitSize / 1024 / 1024}MB)")
+
+    // Create cloud storage provider
+    import scala.jdk.CollectionConverters._
+    val cloudProvider = CloudStorageProviderFactory.createProvider(
+      tablePath,
+      options,
+      hadoopConf
+    )
+
+    // Upload split file to S3 staging with retries
+    val maxRetries = options.getInt("spark.indextables.mergeOnWrite.maxRetries", 3)
+    val retryDelayMs = options.getLong("spark.indextables.mergeOnWrite.retryDelayMs", 1000L)
+
+    var uploadSuccess = false
+    var retryCount = 0
+    var lastException: Option[Throwable] = None
+
+    while (!uploadSuccess && retryCount <= maxRetries) {
+      try {
+        val inputStream = new java.io.FileInputStream(finalLocalFile)
+        try {
+          cloudProvider.writeFileFromStream(stagingPath, inputStream, Some(splitSize))
+          uploadSuccess = true
+          logger.info(s"Successfully uploaded split to S3 staging: $stagingPath")
+        } finally {
+          inputStream.close()
+        }
+      } catch {
+        case e: Exception =>
+          lastException = Some(e)
+          retryCount += 1
+          if (retryCount <= maxRetries) {
+            val backoffDelay = retryDelayMs * math.pow(2, retryCount - 1).toLong
+            logger.warn(s"Failed to upload split to S3 staging (attempt $retryCount/$maxRetries): ${e.getMessage}. Retrying in ${backoffDelay}ms...")
+            Thread.sleep(backoffDelay)
+          }
+      }
+    }
+
+    if (!uploadSuccess) {
+      throw new RuntimeException(
+        s"Failed to upload split to S3 staging after $maxRetries retries: ${lastException.map(_.getMessage).getOrElse("unknown error")}",
+        lastException.orNull
+      )
+    }
+
+    // Clean up local file after successful upload
+    try {
+      finalLocalFile.delete()
+      logger.debug(s"Cleaned up local split file after S3 upload: $finalLocalPath")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to clean up local split file: ${e.getMessage}")
+    }
+
+    // Build StagedSplitInfo with metadata only (no bytes)
     val splitInfo = StagedSplitInfo(
       uuid = splitUuid,
       taskAttemptId = taskAttemptId,
       workerHost = workerHost,
       executorId = executorId,
-      localPath = finalLocalPath,  // Split persisted in merge-on-write-staging directory
-      stagingPath = "",  // Not used in shuffle-based merge
-      stagingAvailable = false,  // Not used in shuffle-based merge
+      localPath = "",  // Not used in S3 staging approach
+      stagingPath = stagingPath,  // S3 staging location
+      stagingAvailable = true,  // Split is available on S3
       size = splitSize,
       numRecords = recordCount,
       minValues = minValues,
@@ -233,28 +298,9 @@ object MergeOnWriteHelper {
       schemaFingerprint = schemaFingerprint
     )
 
-    // IN-MEMORY SHUFFLE: Immediately read split bytes into memory
-    // This happens on the SAME executor that created the split (no locality issues!)
-    // Bytes will travel back to driver via Spark's task result mechanism
-    logger.info(s"Reading split bytes into memory for shuffle-based merge: $finalLocalPath")
-    val splitBytes = java.nio.file.Files.readAllBytes(finalLocalFile.toPath)
-    logger.info(s"Split bytes loaded: ${splitBytes.length / 1024 / 1024}MB")
-
-    // Clean up temp file immediately - we have bytes in memory now
-    try {
-      finalLocalFile.delete()
-      logger.debug(s"Cleaned up temp split file: $finalLocalPath")
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to clean up temp split file: ${e.getMessage}")
-    }
-
-    // Return ShuffledSplitData with both metadata and bytes
-    // This will be serialized back to driver in the commit message
-    ShuffledSplitData(
-      info = splitInfo,
-      bytes = splitBytes
-    )
+    // Return StagedSplitInfo with metadata only (no bytes)
+    // This will be serialized back to driver in the commit message (~1KB)
+    splitInfo
   }
 
   /**

@@ -106,9 +106,6 @@ class IndexTables4SparkStandardWrite(
 
   override def toBatch: BatchWrite = this
 
-  // Store staging uploader for use in commit()
-  @transient private var stagingUploader: Option[io.indextables.spark.merge.SplitStagingUploader] = None
-
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating standard batch writer factory for ${info.numPartitions} partitions")
     logger.info(s"Using Spark's default partitioning (no optimization)")
@@ -155,27 +152,13 @@ class IndexTables4SparkStandardWrite(
       logger.info("🔀 Merge-on-write is ENABLED - creating serializable config")
       val basePath = MergeOnWriteHelper.getStagingBasePath(tablePath.toString, options)
 
-      // Create serializable config instead of non-serializable uploader
+      // Create serializable config
       val config = io.indextables.spark.merge.MergeOnWriteConfig(
         enabled = true,
         stagingBasePath = basePath,
         serializedHadoopConfig = combinedHadoopConfig,
         serializedOptions = serializedOptions
       )
-
-      // Create uploader on driver for use in commit() only
-      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-        tablePath.toString, options, hadoopConf
-      )
-      val numThreads = options.getOrDefault("spark.indextables.mergeOnWrite.stagingThreads", "4").toInt
-      val maxRetries = options.getOrDefault("spark.indextables.mergeOnWrite.stagingRetries", "3").toInt
-      val uploader = new SplitStagingUploader(
-        cloudProvider,
-        basePath,
-        numThreads,
-        maxRetries
-      )
-      stagingUploader = Some(uploader)
 
       Some(config)
     } else {
@@ -225,31 +208,21 @@ class IndexTables4SparkStandardWrite(
       case _                                   => Seq.empty[AddAction]
     }
 
-    // IN-MEMORY SHUFFLE: Extract ShuffledSplitData (with in-memory bytes) from commit messages
-    val shuffledSplits: Seq[ShuffledSplitData] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.shuffledSplits
-      case _                                                => Seq.empty[ShuffledSplitData]
-    }
-
-    // Legacy support for file-based stagedSplits (deprecated)
+    // S3 STAGING: Extract StagedSplitInfo (metadata only) from commit messages
     val stagedSplits: Seq[StagedSplitInfo] = messages.flatMap {
       case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.stagedSplits
       case _                                                => Seq.empty[StagedSplitInfo]
     }
 
-    // Check if merge-on-write is being used (prefer shuffledSplits, fall back to stagedSplits)
-    val mergeOnWriteActive = shuffledSplits.nonEmpty || stagedSplits.nonEmpty
+    // Check if merge-on-write is being used
+    val mergeOnWriteActive = stagedSplits.nonEmpty
 
     if (mergeOnWriteActive) {
-      if (shuffledSplits.nonEmpty) {
-        logger.info(s"🔀 Merge-on-write ACTIVE (in-memory shuffle): ${shuffledSplits.size} splits with in-memory bytes, ${addActions.size} direct AddActions")
-      } else {
-        logger.info(s"🔀 Merge-on-write ACTIVE (legacy): ${stagedSplits.size} staged splits, ${addActions.size} direct AddActions")
-      }
+      logger.info(s"🔀 Merge-on-write ACTIVE (S3 staging): ${stagedSplits.size} staged splits (metadata only), ${addActions.size} direct AddActions")
     }
 
     // Log how many empty partitions were filtered out
-    val totalItems = addActions.size + shuffledSplits.size + stagedSplits.size
+    val totalItems = addActions.size + stagedSplits.size
     val emptyPartitionsCount = messages.length - totalItems
     if (emptyPartitionsCount > 0) {
       println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
@@ -323,42 +296,24 @@ class IndexTables4SparkStandardWrite(
     try {
       // Determine final AddActions (either direct or from merge-on-write)
       val finalAddActions = if (mergeOnWriteActive) {
-        if (shuffledSplits.nonEmpty) {
-          logger.debug(s"MERGE DEBUG: Starting in-memory shuffle merge-on-write with ${shuffledSplits.size} shuffled splits (in-memory), ${addActions.size} direct addActions")
-          logger.info("🔀 Executing in-memory shuffle-based merge-on-write...")
-        } else {
-          logger.debug(s"MERGE DEBUG: Starting legacy merge-on-write with ${stagedSplits.size} staged splits, ${addActions.size} direct addActions")
-          logger.info("🔀 Executing legacy shuffle-based merge-on-write orchestration...")
-        }
+        logger.debug(s"MERGE DEBUG: Starting S3 staging merge-on-write with ${stagedSplits.size} staged splits (metadata only), ${addActions.size} direct addActions")
+        logger.info("🔀 Executing S3 staging-based merge-on-write...")
 
-        // Create orchestrator (using shuffle-based approach with in-memory data)
-        val orchestrator = new io.indextables.spark.merge.ShuffleBasedMergeOrchestrator(
+        // Create orchestrator (using S3 staging approach)
+        val orchestrator = new io.indextables.spark.merge.MergeOnWriteOrchestrator(
           tablePath = tablePath.toString,
           schema = writeSchema,
           options = writeOptions,
           hadoopConf = hadoopConf
         )
 
-        // IN-MEMORY SHUFFLE: Use shuffledSplits (with in-memory bytes) if available, fall back to stagedSplits
-        val splitsToMerge = if (shuffledSplits.nonEmpty) shuffledSplits else {
-          // Legacy: Convert StagedSplitInfo to ShuffledSplitData by reading files
-          logger.warn("Using legacy file-based merge (reading split files) - consider upgrading to in-memory shuffle")
-          throw new UnsupportedOperationException(
-            "Legacy file-based merge is no longer supported. " +
-            "This indicates an internal error - split bytes should be in memory."
-          )
-        }
-
-        // Execute merge-on-write
+        // Execute merge-on-write with StagedSplitInfo (metadata only)
         val mergedActions = orchestrator.executeMergeOnWrite(
-          splitsToMerge,
+          stagedSplits,
           if (shouldOverwrite) org.apache.spark.sql.SaveMode.Overwrite else org.apache.spark.sql.SaveMode.Append
         )
 
         logger.debug(s"MERGE DEBUG: Orchestrator returned ${mergedActions.size} merged actions")
-
-        // Shutdown staging uploader if present
-        stagingUploader.foreach(_.shutdown())
 
         // Combine with any direct AddActions
         val combined = addActions ++ mergedActions

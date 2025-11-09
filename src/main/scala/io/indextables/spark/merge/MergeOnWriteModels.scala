@@ -43,9 +43,9 @@ case class StagedSplitInfo(
   taskAttemptId: Long,              // NEW: Spark task attempt ID for speculative execution handling
   workerHost: String,
   executorId: String,
-  localPath: String,                // e.g., /local_disk0/temp/tantivy-abc123/split-001.tmp
-  stagingPath: String,               // e.g., s3://bucket/path/_staging/task-123-abc.tmp
-  stagingAvailable: Boolean = false, // NEW: true if staging upload succeeded (Gap #2)
+  localPath: String,                // OBSOLETE in S3 staging mode - local files cleaned up after upload
+  stagingPath: String,               // S3 staging location: e.g., s3://bucket/path/_staging/part-00001-abc123.split
+  stagingAvailable: Boolean = false, // NEW: true if S3 staging upload succeeded (always true in S3 mode)
   size: Long,
   numRecords: Long,
   minValues: Map[String, String],

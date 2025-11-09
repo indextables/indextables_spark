@@ -662,10 +662,17 @@ class MergeOnWriteEndToEndTest extends AnyFunSuite with Matchers with BeforeAndA
   private def validateStagingCleanup(stagingPath: String): Unit = {
     val stagingDir = new File(stagingPath.replace("file://", ""))
     if (stagingDir.exists()) {
-      val stagingFiles = stagingDir.listFiles().filter(_.getName.endsWith(".tmp"))
-      println(s"   - Staging directory contains ${stagingFiles.length} .tmp files")
-      stagingFiles.length shouldBe 0
-      println(s"   ✓ Staging directory is properly cleaned up")
+      val allFiles = stagingDir.listFiles()
+      val tmpFiles = allFiles.filter(_.getName.endsWith(".tmp"))
+      val splitFiles = allFiles.filter(_.getName.endsWith(".split"))
+
+      println(s"   - Staging directory contains ${tmpFiles.length} .tmp files and ${splitFiles.length} .split files")
+
+      // Both .tmp and .split files should be cleaned up
+      tmpFiles.length shouldBe 0
+      splitFiles.length shouldBe 0
+
+      println(s"   ✓ Staging directory is properly cleaned up (no .tmp or .split files)")
     } else {
       println(s"   ✓ Staging directory does not exist (cleaned up completely)")
     }

@@ -484,45 +484,6 @@ class IndexTables4SparkDataWriter(
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkDataWriter])
 
-  // Lazily create staging uploader on executor (not serialized from driver)
-  @transient private lazy val stagingUploader: Option[io.indextables.spark.merge.SplitStagingUploader] = {
-    mergeOnWriteConfig.map { config =>
-      // Reconstruct options and cloud provider on executor
-      import scala.jdk.CollectionConverters._
-      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-        config.serializedOptions.asJava
-      )
-
-      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-        config.stagingBasePath,
-        options,
-        hadoopConf
-      )
-
-      val numThreads = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.stagingThreads", "4"
-      ).toInt
-      val maxRetries = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.maxRetries", "3"
-      ).toInt
-      val retryDelayMs = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.retryDelayMs", "1000"
-      ).toLong
-      val minSizeToStage = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.minSizeToStage", "10485760"  // 10MB
-      ).toLong
-
-      new io.indextables.spark.merge.SplitStagingUploader(
-        cloudProvider,
-        config.stagingBasePath,
-        numThreads,
-        maxRetries,
-        retryDelayMs,
-        minSizeToStage
-      )
-    }
-  }
-
   // Create CaseInsensitiveStringMap from serialized options for components that need it
   private lazy val options: CaseInsensitiveStringMap = {
     import scala.jdk.CollectionConverters._
@@ -605,21 +566,21 @@ class IndexTables4SparkDataWriter(
   override def commit(): WriterCommitMessage = {
     import io.indextables.spark.merge._
 
-    val allResults = scala.collection.mutable.ArrayBuffer[Either[AddAction, ShuffledSplitData]]()
+    val allResults = scala.collection.mutable.ArrayBuffer[Either[AddAction, io.indextables.spark.merge.StagedSplitInfo]]()
 
     // Handle non-partitioned writes
     if (singleWriter.isDefined) {
       val (searchEngine, statistics, recordCount) = singleWriter.get
       if (recordCount == 0) {
         logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
-        return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty, Seq.empty)
+        return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
       }
 
       val result = if (mergeOnWriteConfig.exists(_.enabled)) {
-        // IN-MEMORY SHUFFLE merge-on-write: create split and immediately read bytes into memory
-        // Bytes will be returned in commit message and travel to driver via Spark's task result mechanism
-        logger.info(s"Committing in merge-on-write mode for partition $partitionId (in-memory shuffle with bytes)")
-        val shuffledSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
+        // S3 STAGING merge-on-write: create split and upload to S3 staging
+        // Only metadata will be returned in commit message (no bytes, ~1KB)
+        logger.info(s"Committing in merge-on-write mode for partition $partitionId (S3 staging with metadata only)")
+        val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
           searchEngine,
           writeSchema,
           statistics,
@@ -627,10 +588,11 @@ class IndexTables4SparkDataWriter(
           partitionValues = Map.empty,
           partitionId,
           taskId,
+          tablePath.toString,
           options,
           hadoopConf
         )
-        Right(shuffledSplit)
+        Right(stagedSplit)
       } else {
         // Traditional mode: upload immediately
         logger.info(s"Committing in traditional mode for partition $partitionId")
@@ -651,8 +613,8 @@ class IndexTables4SparkDataWriter(
             val partitionValues = parsePartitionKey(partitionKey)
 
             val result = if (mergeOnWriteConfig.exists(_.enabled)) {
-              // IN-MEMORY SHUFFLE merge-on-write (bytes in memory)
-              val shuffledSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
+              // S3 STAGING merge-on-write (metadata only)
+              val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
                 searchEngine,
                 writeSchema,
                 statistics,
@@ -660,10 +622,11 @@ class IndexTables4SparkDataWriter(
                 partitionValues,
                 partitionId,
                 taskId,
+                tablePath.toString,
                 options,
                 hadoopConf
               )
-              Right(shuffledSplit)
+              Right(stagedSplit)
             } else {
               // Traditional mode
               val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
@@ -679,15 +642,15 @@ class IndexTables4SparkDataWriter(
 
     if (allResults.isEmpty) {
       logger.info(s"⚠️  No records written in partition $partitionId")
-      return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty, Seq.empty)
+      return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
     }
 
-    // Separate AddActions and ShuffledSplitData
+    // Separate AddActions and StagedSplitInfo
     val addActions = allResults.collect { case Left(action) => action }
-    val shuffledSplits = allResults.collect { case Right(split) => split }
+    val stagedSplits = allResults.collect { case Right(split) => split }
 
-    logger.info(s"Committed partition $partitionId with ${addActions.size} AddActions, ${shuffledSplits.size} shuffled splits (with in-memory bytes)")
-    IndexTables4SparkMergeOnWriteCommitMessage(addActions.toSeq, Seq.empty, shuffledSplits.toSeq)
+    logger.info(s"Committed partition $partitionId with ${addActions.size} AddActions, ${stagedSplits.size} staged splits (metadata only, on S3)")
+    IndexTables4SparkMergeOnWriteCommitMessage(addActions.toSeq, stagedSplits.toSeq)
   }
 
   private def parsePartitionKey(partitionKey: String): Map[String, String] =

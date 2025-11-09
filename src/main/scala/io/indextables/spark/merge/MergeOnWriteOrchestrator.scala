@@ -39,45 +39,11 @@ import io.indextables.spark.util.SizeParser
 import org.slf4j.LoggerFactory
 
 /**
- * Split data container for RDD shuffle
- *
- * This class holds split metadata AND the split file bytes for shuffling.
- * Spark will automatically spill to disk if memory is tight.
- *
- * @param info Split metadata (lightweight)
- * @param bytes Split file bytes (can be large, will spill to disk)
- */
-case class ShuffledSplitData(
-  info: StagedSplitInfo,
-  bytes: Array[Byte]
-) extends Serializable {
-
-  // Efficient size check without deserializing bytes
-  def size: Long = bytes.length.toLong
-
-  /**
-   * Write bytes to a temporary .split file for merge processing
-   */
-  def writeToTempFile(tempDir: File): String = {
-    val splitFile = new File(tempDir, s"shuffled-${info.uuid}.split")
-    val fos = new FileOutputStream(splitFile)
-    try {
-      fos.write(bytes)
-      fos.flush()
-      fos.getFD().sync()  // Ensure bytes are actually written to disk
-    } finally {
-      fos.close()
-    }
-    splitFile.getAbsolutePath
-  }
-}
-
-/**
- * Merge group with split data (not just references)
+ * Merge group with split metadata (splits on S3 staging)
  */
 case class ShuffledMergeGroup(
   groupId: String,
-  splits: Seq[ShuffledSplitData],
+  splits: Seq[StagedSplitInfo],
   partition: Map[String, String],
   estimatedSize: Long,
   schemaFingerprint: String
@@ -86,18 +52,18 @@ case class ShuffledMergeGroup(
 /**
  * Companion object with serializable static functions for RDD operations
  */
-object ShuffleBasedMergeOrchestrator {
+object MergeOnWriteOrchestrator {
   /**
    * Execute merge for a single group (on executor) - static to avoid closure capture
    *
-   * Split bytes are already local via shuffle - no download needed!
+   * Downloads splits from S3 staging, merges them, uploads to final location
    */
   def executeMergeGroup(
     group: ShuffledMergeGroup,
     tablePathBC: String,
     optionsMapBC: Map[String, String]
   ): Option[AddAction] = {
-    val logger = LoggerFactory.getLogger(classOf[ShuffleBasedMergeOrchestrator])
+    val logger = LoggerFactory.getLogger(classOf[MergeOnWriteOrchestrator])
 
     logger.info(s"Executing merge for group ${group.groupId}: ${group.splits.size} splits, " +
       s"${group.estimatedSize / 1024 / 1024}MB")
@@ -109,14 +75,31 @@ object ShuffleBasedMergeOrchestrator {
       // Recreate CaseInsensitiveStringMap from serializable map
       val optionsBC = new CaseInsensitiveStringMap(optionsMapBC.asJava)
 
-      // Write shuffled bytes to temp .split files
-      val totalInputRecords = group.splits.map(_.info.numRecords).sum
+      // Download splits from S3 staging to temp .split files
+      val totalInputRecords = group.splits.map(_.numRecords).sum
       logger.debug(s"MERGE GROUP DEBUG: Group ${group.groupId} has ${group.splits.size} splits with $totalInputRecords total records")
 
-      val splitPaths = group.splits.map { splitData =>
-        val splitPath = splitData.writeToTempFile(tempDir)
-        logger.debug(s"MERGE GROUP DEBUG: Wrote split with ${splitData.info.numRecords} records to: $splitPath (${splitData.size / 1024}KB)")
-        splitPath
+      val cloudProvider = CloudStorageProviderFactory.createProvider(tablePathBC, optionsBC, new Configuration())
+
+      val splitPaths = group.splits.map { splitInfo =>
+        // Download split from S3 staging
+        val localSplitPath = new File(tempDir, s"staged-${splitInfo.uuid}.split").getAbsolutePath
+        logger.debug(s"MERGE GROUP DEBUG: Downloading split from S3 staging: ${splitInfo.stagingPath} -> $localSplitPath")
+
+        // Read split bytes from S3 staging
+        val splitBytes = cloudProvider.readFile(splitInfo.stagingPath)
+
+        // Write bytes to local file
+        val outputStream = new FileOutputStream(localSplitPath)
+        try {
+          outputStream.write(splitBytes)
+          outputStream.flush()
+        } finally {
+          outputStream.close()
+        }
+
+        logger.debug(s"MERGE GROUP DEBUG: Downloaded split with ${splitInfo.numRecords} records to: $localSplitPath (${splitInfo.size / 1024}KB)")
+        localSplitPath
       }
 
       // Execute merge using tantivy4java (use empty hadoopConf on executor)
@@ -127,8 +110,7 @@ object ShuffleBasedMergeOrchestrator {
         partitionId = 0
       )
 
-      // Upload merged split to S3 (use empty hadoopConf on executor)
-      val cloudProvider = CloudStorageProviderFactory.createProvider(tablePathBC, optionsBC, new Configuration())
+      // Upload merged split to S3 (reuse cloudProvider from download phase)
       try {
         val partitionPath = if (group.partition.nonEmpty) {
           group.partition.toSeq.sortBy(_._1).map { case (k, v) => s"$k=$v" }.mkString("/") + "/"
@@ -148,8 +130,8 @@ object ShuffleBasedMergeOrchestrator {
         logger.info(s"Uploaded merged split: $finalPath (${mergedFile.length() / 1024 / 1024}MB)")
 
         // Extract metadata
-        val inputMinValues = group.splits.map(_.info.minValues)
-        val inputMaxValues = group.splits.map(_.info.maxValues)
+        val inputMinValues = group.splits.map(_.minValues)
+        val inputMaxValues = group.splits.map(_.maxValues)
         val mergedMetadata = mergeEngine.extractMetadataFromMergeResult(
           metadata,
           mergedSplitPath,
@@ -208,14 +190,13 @@ object ShuffleBasedMergeOrchestrator {
    * Used when split count < minSplitsToMerge threshold
    */
   def uploadSplitDirectly(
-    shuffledSplit: ShuffledSplitData,  // Changed to ShuffledSplitData
+    splitInfo: StagedSplitInfo,  // Metadata only
     tablePathBC: String,
     optionsMapBC: Map[String, String]
   ): Option[AddAction] = {
-    val logger = LoggerFactory.getLogger(classOf[ShuffleBasedMergeOrchestrator])
-    val splitInfo = shuffledSplit.info  // Extract metadata
+    val logger = LoggerFactory.getLogger(classOf[MergeOnWriteOrchestrator])
 
-    logger.info(s"Uploading split directly from in-memory bytes (< minSplitsToMerge): ${splitInfo.uuid}")
+    logger.info(s"Uploading split directly from S3 staging (< minSplitsToMerge): ${splitInfo.uuid}")
 
     try {
       // Recreate CaseInsensitiveStringMap from serializable map
@@ -240,18 +221,20 @@ object ShuffleBasedMergeOrchestrator {
         s"$normalized/$relativePathComponents"
       }
 
-      logger.info(s"Uploading direct split to: $cloudPath")
+      logger.info(s"Copying split from S3 staging to final location: ${splitInfo.stagingPath} -> $cloudPath")
 
-      // IN-MEMORY SHUFFLE: Upload directly from in-memory bytes (no file I/O!)
-      val inputStream = new java.io.ByteArrayInputStream(shuffledSplit.bytes)
+      // S3 STAGING: Copy from staging to final location
+      // Read from staging, write to final location
+      val splitBytes = cloudProvider.readFile(splitInfo.stagingPath)
+      val inputStream = new java.io.ByteArrayInputStream(splitBytes)
       try {
-        cloudProvider.writeFileFromStream(cloudPath, inputStream, Some(shuffledSplit.bytes.length.toLong))
+        cloudProvider.writeFileFromStream(cloudPath, inputStream, Some(splitInfo.size))
       } finally {
         inputStream.close()
       }
 
-      val uploadedSize = shuffledSplit.bytes.length.toLong
-      logger.info(s"Direct upload complete from memory: $cloudPath (${uploadedSize / 1024}KB)")
+      val uploadedSize = splitInfo.size
+      logger.info(s"Direct upload complete from S3 staging: $cloudPath (${uploadedSize / 1024}KB)")
 
       // Create AddAction
       val addAction = AddAction(
@@ -288,36 +271,35 @@ object ShuffleBasedMergeOrchestrator {
 }
 
 /**
- * Shuffle-based merge orchestrator that eliminates local file persistence issues
+ * S3 staging-based merge orchestrator for merge-on-write
  *
  * ARCHITECTURE:
- * 1. Write phase creates splits and keeps bytes in RDD (not local files)
- * 2. Shuffle phase uses Spark's shuffle to distribute split bytes to merge executors
- * 3. Merge phase writes shuffled bytes to temp .split files and merges them
- * 4. Cleanup phase deletes temp files (not shared staging directories)
+ * 1. Write phase creates splits locally and uploads to S3 staging location
+ * 2. Driver receives only metadata (~1KB per split) via task results
+ * 3. Shuffle phase distributes metadata (not bytes) to merge executors
+ * 4. Merge phase downloads splits from S3 staging, merges locally, uploads to final location
+ * 5. Cleanup phase deletes S3 staging files after successful merge
  *
- * ADVANTAGES over file-based approach:
- * - 100% locality: Spark shuffle ensures data is local to merge executor
- * - No file persistence issues: Splits exist in RDD, not fragile local files
- * - Automatic disk spilling: Spark spills large shuffles to disk automatically
- * - Simpler: No local staging directory management
- * - Fault tolerant: Shuffle blocks are tracked by Spark
+ * ADVANTAGES over in-memory shuffle:
+ * - Unlimited scalability: No driver memory bottleneck
+ * - Metadata-only shuffle: Only ~1KB per split travels through Spark
+ * - S3 as coordination layer: Natural fit for cloud-native environments
+ * - Fault tolerant: S3 staging files persist across retries
+ * - Production-ready: Proven pattern (Delta Lake, Iceberg, Hudi)
  *
- * CONFIGURATION for aggressive disk spilling:
- * - spark.shuffle.spill: true (default, enables spilling)
- * - spark.shuffle.spill.compress: true (compress spilled data)
- * - spark.memory.fraction: 0.3 (lower = more aggressive spilling, default 0.6)
- * - spark.memory.storageFraction: 0.2 (within memory fraction, how much for cache vs execution)
- * - spark.shuffle.file.buffer: 32k (smaller = more frequent spilling)
+ * CONFIGURATION:
+ * - spark.indextables.mergeOnWrite.stagingDir: "_staging" (default, S3 staging subdirectory)
+ * - spark.indextables.mergeOnWrite.maxRetries: 3 (S3 upload retry attempts)
+ * - spark.indextables.mergeOnWrite.retryDelayMs: 1000 (retry delay with exponential backoff)
  */
-class ShuffleBasedMergeOrchestrator(
+class MergeOnWriteOrchestrator(
   tablePath: String,
   schema: StructType,
   options: CaseInsensitiveStringMap,
   @transient hadoopConf: Configuration
 ) {
 
-  @transient private lazy val logger = LoggerFactory.getLogger(classOf[ShuffleBasedMergeOrchestrator])
+  @transient private lazy val logger = LoggerFactory.getLogger(classOf[MergeOnWriteOrchestrator])
 
   // Configuration
   private val targetSizeBytes = SizeParser.parseSize(
@@ -331,28 +313,28 @@ class ShuffleBasedMergeOrchestrator(
   ).toInt
 
   /**
-   * Orchestrate merge-on-write using Spark's execution framework with in-memory shuffle
+   * Orchestrate merge-on-write using Spark's execution framework with S3 staging
    *
-   * IN-MEMORY SHUFFLE: Split bytes are already in memory (from commit messages).
-   * No file reading needed - data moves purely through Spark's framework!
+   * S3 STAGING: Split metadata is in memory, splits are on S3 staging location.
+   * Merge executors download from S3 staging as needed!
    *
-   * @param shuffledSplits Splits with metadata AND bytes (from write phase)
+   * @param stagedSplits Splits with metadata only (bytes on S3 staging)
    * @param saveMode Save mode (Overwrite or Append)
    * @return Sequence of AddActions for merged splits
    */
   def executeMergeOnWrite(
-    shuffledSplits: Seq[ShuffledSplitData],  // Changed: now includes bytes!
+    stagedSplits: Seq[StagedSplitInfo],  // Metadata only
     saveMode: org.apache.spark.sql.SaveMode
   ): Seq[AddAction] = {
 
-    logger.info(s"Shuffle-based merge orchestrator starting with ${shuffledSplits.size} shuffled splits (in-memory shuffle, mode: $saveMode)")
+    logger.info(s"Shuffle-based merge orchestrator starting with ${stagedSplits.size} staged splits (S3 staging, mode: $saveMode)")
 
     val spark = org.apache.spark.sql.SparkSession.active
 
     logger.info("=" * 80)
-    logger.info("IN-MEMORY SHUFFLE-BASED MERGE-ON-WRITE")
-    logger.info(s"Input: ${shuffledSplits.size} splits with in-memory bytes")
-    logger.info(s"Total data: ${shuffledSplits.map(_.size).sum / 1024 / 1024}MB")
+    logger.info("S3 STAGING-BASED MERGE-ON-WRITE")
+    logger.info(s"Input: ${stagedSplits.size} staged splits (metadata only)")
+    logger.info(s"Total data: ${stagedSplits.map(_.size).sum / 1024 / 1024}MB")
     logger.info(s"Target merge size: ${targetSizeBytes / 1024 / 1024}MB")
     logger.info(s"Minimum splits to merge: $minSplitsToMerge")
     logger.info("=" * 80)
@@ -362,28 +344,27 @@ class ShuffleBasedMergeOrchestrator(
     val broadcastTablePath = spark.sparkContext.broadcast(tablePath)
     val broadcastOptionsMap = spark.sparkContext.broadcast(optionsMap)
 
-    logger.info(s"Creating RDD from ${shuffledSplits.size} in-memory split objects...")
+    logger.info(s"Creating RDD from ${stagedSplits.size} staged split metadata objects...")
 
-    // IN-MEMORY SHUFFLE ARCHITECTURE:
-    // 1. Split bytes are ALREADY in memory (loaded during write phase, returned in commit messages)
-    // 2. Create RDD directly from in-memory data - NO file reading needed!
-    // 3. Spark's shuffle mechanism distributes bytes to merge executors
-    // 4. Merge tasks write consolidated splits directly to S3
-    // 5. Pure in-memory data movement through Spark's execution framework!
+    // S3 STAGING ARCHITECTURE:
+    // 1. Split metadata is in memory (loaded from commit messages - ~1KB per split)
+    // 2. Split files are on S3 staging location (uploaded during write phase)
+    // 3. Create RDD from metadata only
+    // 4. Spark shuffle distributes metadata to merge executors
+    // 5. Merge tasks download splits from S3 staging, merge, upload to final location
+    // 6. Scalable to any data size (no driver memory bottleneck)
     //
-    // This eliminates file-based coordination and locality issues completely.
-    val splitsRDD = spark.sparkContext.parallelize(shuffledSplits, shuffledSplits.size)
+    // This eliminates driver memory bottleneck while maintaining distributed merge.
+    val splitsRDD = spark.sparkContext.parallelize(stagedSplits, stagedSplits.size)
 
-    logger.info(s"Created RDD with ${shuffledSplits.size} split data entries (no file I/O needed!)")
+    logger.info(s"Created RDD with ${stagedSplits.size} split metadata entries (splits on S3 staging)")
 
     // Step 1: Create merge groups (bin packing by partition and size)
-    // Extract StagedSplitInfo from ShuffledSplitData for bin packing logic
-    val stagedSplits = shuffledSplits.map(_.info)
     val mergeGroupsResult = createMergeGroups(stagedSplits)
     val mergeGroups = mergeGroupsResult.groupsToMerge
     val directUploadSplits = mergeGroupsResult.directUploadSplits
 
-    logger.info(s"Created ${mergeGroups.size} merge groups from ${shuffledSplits.size} splits")
+    logger.info(s"Created ${mergeGroups.size} merge groups from ${stagedSplits.size} splits")
     mergeGroups.take(5).foreach { group =>
       logger.info(s"  Group ${group.groupId}: ${group.splits.size} splits, " +
         s"${group.estimatedSize / 1024 / 1024}MB, partition: ${group.partition}")
@@ -402,18 +383,10 @@ class ShuffleBasedMergeOrchestrator(
     val directUploadActions = if (directUploadSplits.nonEmpty) {
       logger.info(s"Processing ${directUploadSplits.size} direct upload splits...")
 
-      // Create lookup map from UUID to ShuffledSplitData
-      val splitsByUUID = shuffledSplits.map(s => s.info.uuid -> s).toMap
-
-      // Get ShuffledSplitData for direct uploads
-      val directUploadShuffledSplits = directUploadSplits.flatMap { splitInfo =>
-        splitsByUUID.get(splitInfo.uuid)
-      }
-
-      val directUploadsRDD = spark.sparkContext.parallelize(directUploadShuffledSplits, directUploadShuffledSplits.size).mapPartitions { splits =>
-        splits.flatMap { shuffledSplit =>
-          ShuffleBasedMergeOrchestrator.uploadSplitDirectly(
-            shuffledSplit,  // Pass ShuffledSplitData (with bytes)
+      val directUploadsRDD = spark.sparkContext.parallelize(directUploadSplits, directUploadSplits.size).mapPartitions { splits =>
+        splits.flatMap { splitInfo =>
+          MergeOnWriteOrchestrator.uploadSplitDirectly(
+            splitInfo,  // Pass StagedSplitInfo (metadata only)
             broadcastTablePath.value,
             broadcastOptionsMap.value
           )
@@ -432,7 +405,7 @@ class ShuffleBasedMergeOrchestrator(
       // Use broadcast variables to avoid closure capture
       val mergedSplitsRDD = shuffledGroups.mapPartitions { groups =>
         groups.flatMap { group =>
-          ShuffleBasedMergeOrchestrator.executeMergeGroup(
+          MergeOnWriteOrchestrator.executeMergeGroup(
             group,
             broadcastTablePath.value,
             broadcastOptionsMap.value
@@ -452,10 +425,17 @@ class ShuffleBasedMergeOrchestrator(
       Seq.empty
     }
 
-    // Step 4: Combine results (no cleanup needed - files already deleted after reading bytes)
+    // Step 4: Combine results
     val allActions = directUploadActions ++ mergedActions
 
     logger.info(s"Merge-on-write completed: ${directUploadActions.size} direct uploads + ${mergedActions.size} merged splits = ${allActions.size} total")
+
+    // Step 5: Cleanup S3 staging files after successful merge/upload
+    // Only clean up if we successfully created AddActions (merge/upload succeeded)
+    if (allActions.nonEmpty) {
+      cleanupS3StagingFiles(stagedSplits)
+    }
+
     logger.info("=" * 80)
 
     allActions
@@ -579,20 +559,18 @@ class ShuffleBasedMergeOrchestrator(
   }
 
   /**
-   * Shuffle split bytes to merge executors
+   * Shuffle split metadata to merge executors
    *
-   * Uses Spark's shuffle to distribute split data. Spark will automatically:
-   * - Keep small splits in memory
-   * - Spill large splits to disk
-   * - Transfer data efficiently to merge executors
+   * Uses Spark's shuffle to distribute split metadata. Lightweight since we're only
+   * shuffling metadata (~1KB per split), not the actual split bytes.
    *
    * @param mergeGroups Merge group assignments
-   * @param splitsRDD RDD with split bytes
-   * @return RDD of merge groups with split data co-located
+   * @param splitsRDD RDD with split metadata
+   * @return RDD of merge groups with split metadata co-located
    */
   private def shuffleSplitsToMergeGroups(
     mergeGroups: Seq[MergeGroupInfo],
-    splitsRDD: RDD[ShuffledSplitData],
+    splitsRDD: RDD[StagedSplitInfo],
     spark: SparkSession
   ): RDD[ShuffledMergeGroup] = {
 
@@ -612,47 +590,35 @@ class ShuffleBasedMergeOrchestrator(
     }.toMap
     val groupMetadataBC = spark.sparkContext.broadcast(groupMetadataMap)
 
-    logger.info(s"Shuffling ${splitsRDD.count()} splits to ${mergeGroups.size} merge groups...")
+    logger.info(s"Shuffling ${splitsRDD.count()} split metadata entries to ${mergeGroups.size} merge groups...")
 
     // Map each split to its merge group ID
-    val splitsByGroup: RDD[(String, ShuffledSplitData)] = splitsRDD.flatMap { splitData =>
-      splitToGroupBC.value.get(splitData.info.uuid).map { groupId =>
-        (groupId, splitData)
+    val splitsByGroup: RDD[(String, StagedSplitInfo)] = splitsRDD.flatMap { splitInfo =>
+      splitToGroupBC.value.get(splitInfo.uuid).map { groupId =>
+        (groupId, splitInfo)
       }
     }
 
-    // CRITICAL: Configure storage level to allow disk spilling
-    // MEMORY_AND_DISK_SER will serialize data and spill to disk when memory is tight
-    splitsByGroup.persist(StorageLevel.MEMORY_AND_DISK_SER)
+    // Shuffle splits to their merge groups (lightweight - only metadata)
+    val groupedSplits: RDD[(String, Iterable[StagedSplitInfo])] = splitsByGroup.groupByKey()
 
-    try {
-      // Shuffle splits to their merge groups
-      // groupByKey will trigger shuffle, and Spark will spill to disk as needed
-      val groupedSplits: RDD[(String, Iterable[ShuffledSplitData])] = splitsByGroup.groupByKey()
+    // Convert to ShuffledMergeGroup
+    val shuffledGroups = groupedSplits.map { case (groupId, splits) =>
+      val (partition, schemaFingerprint) = groupMetadataBC.value(groupId)
+      val estimatedSize = splits.map(_.size).sum
 
-      // Convert to ShuffledMergeGroup
-      val shuffledGroups = groupedSplits.map { case (groupId, splits) =>
-        val (partition, schemaFingerprint) = groupMetadataBC.value(groupId)
-        val estimatedSize = splits.map(_.size).sum
-
-        ShuffledMergeGroup(
-          groupId = groupId,
-          splits = splits.toSeq,
-          partition = partition,
-          estimatedSize = estimatedSize,
-          schemaFingerprint = schemaFingerprint
-        )
-      }
-
-      // Repartition to ensure good parallelism across executors
-      val numPartitions = Math.min(mergeGroups.size, spark.sparkContext.defaultParallelism * 2)
-      shuffledGroups.repartition(numPartitions)
-
-    } finally {
-      // CRITICAL: Unpersist after shuffle completes to prevent memory leak
-      // This frees memory/disk used by the persisted (groupId, splitData) pairs
-      splitsByGroup.unpersist(blocking = false)
+      ShuffledMergeGroup(
+        groupId = groupId,
+        splits = splits.toSeq,
+        partition = partition,
+        estimatedSize = estimatedSize,
+        schemaFingerprint = schemaFingerprint
+      )
     }
+
+    // Repartition to ensure good parallelism across executors
+    val numPartitions = Math.min(mergeGroups.size, spark.sparkContext.defaultParallelism * 2)
+    shuffledGroups.repartition(numPartitions)
   }
 
   /**
@@ -666,7 +632,85 @@ class ShuffleBasedMergeOrchestrator(
   }
 
   /**
+   * Cleanup S3 staging files after successful merge/upload
+   *
+   * After merge-on-write completes and uploads merged/promoted splits to final location,
+   * the original split files in S3 staging (_staging/) are no longer needed.
+   * This method deletes them to free S3 storage and avoid costs.
+   *
+   * SAFETY: Only deletes split files that belong to THIS merge job (based on stagedSplits UUID).
+   * Concurrent merge jobs will have different UUIDs and won't interfere.
+   *
+   * IMPORTANT: Only called after successful merge/upload to avoid data loss.
+   *
+   * ERROR HANDLING: Best-effort deletion - failures are logged but don't fail the merge.
+   * S3 staging files have TTL/lifecycle policies as backup cleanup mechanism.
+   */
+  private def cleanupS3StagingFiles(stagedSplits: Seq[StagedSplitInfo]): Unit = {
+    if (stagedSplits.isEmpty) {
+      logger.debug("No S3 staging files to clean up (empty split list)")
+      return
+    }
+
+    logger.info(s"Cleaning up ${stagedSplits.size} S3 staging files after successful merge/upload...")
+
+    var deletedCount = 0
+    var deletedBytes = 0L
+    var failedCount = 0
+
+    // Create cloud provider for S3 operations
+    val cloudProvider = try {
+      CloudStorageProviderFactory.createProvider(tablePath, options, hadoopConf)
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to create cloud provider for S3 staging cleanup: ${e.getMessage}")
+        return
+    }
+
+    try {
+      stagedSplits.foreach { splitInfo =>
+        if (splitInfo.stagingPath.nonEmpty && splitInfo.stagingAvailable) {
+          try {
+            // Delete split file from S3 staging
+            cloudProvider.deleteFile(splitInfo.stagingPath)
+            deletedCount += 1
+            deletedBytes += splitInfo.size
+            logger.debug(s"Deleted S3 staging file: ${splitInfo.stagingPath} (${splitInfo.size / 1024}KB)")
+          } catch {
+            case e: Exception =>
+              // Log but don't fail - S3 cleanup is best-effort
+              logger.warn(s"Failed to delete S3 staging file: ${splitInfo.stagingPath}: ${e.getMessage}")
+              failedCount += 1
+          }
+        } else {
+          logger.debug(s"Skipping S3 cleanup for split ${splitInfo.uuid} (no staging path or not available)")
+        }
+      }
+
+      logger.info(s"S3 staging cleanup complete: deleted $deletedCount files (${deletedBytes / 1024 / 1024}MB), " +
+        s"$failedCount failures")
+
+      if (failedCount > 0) {
+        logger.warn(s"Some S3 staging files could not be deleted. Consider setting up S3 lifecycle policies " +
+          s"to automatically delete files in _staging/ after 7 days.")
+      }
+
+    } finally {
+      // Always close cloud provider
+      try {
+        cloudProvider.close()
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to close cloud provider during S3 staging cleanup: ${e.getMessage}")
+      }
+    }
+  }
+
+  /**
    * Cleanup local split files after successful merge/upload
+   *
+   * OBSOLETE: Local files are now cleaned up immediately after S3 upload in createLocalSplitForMergeOnWrite().
+   * This method is kept for backwards compatibility but should not be called in S3 staging mode.
    *
    * After shuffle-based merge completes and uploads merged splits to S3,
    * the original split files in merge-on-write-staging are no longer needed.
