@@ -51,20 +51,38 @@ class IndexTables4SparkStandardWrite(
 
   // Extract serializable values from transient fields during construction
   private val writeSchema = writeInfo.schema()
-  private val serializedHadoopConf = {
-    // Serialize only the tantivy4spark config properties from hadoopConf
-    val props = scala.collection.mutable.Map[String, String]()
-    val iter  = hadoopConf.iterator()
-    while (iter.hasNext) {
-      val entry = iter.next()
-      if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
-        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-          entry.getKey.replace("spark.indextables.", "spark.indextables.")
-        } else entry.getKey
-        props.put(normalizedKey, entry.getValue)
-      }
+
+  // Validate schema for duplicate column names
+  private def validateSchema(schema: org.apache.spark.sql.types.StructType): Unit = {
+    val fieldNames = schema.fieldNames
+    val duplicates = fieldNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
+
+    if (duplicates.nonEmpty) {
+      val duplicateList = duplicates.mkString(", ")
+      val errorMsg = s"Schema contains duplicate column names: [$duplicateList]. " +
+        s"Please ensure all column names are unique. Duplicate columns can cause JVM crashes."
+      logger.error(errorMsg)
+      throw new IllegalArgumentException(errorMsg)
     }
-    props.toMap
+
+    // Also check for case-insensitive duplicates (warn only, don't fail)
+    val lowerCaseNames = fieldNames.map(_.toLowerCase)
+    val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
+
+    if (caseInsensitiveDuplicates.nonEmpty) {
+      val originalNames = caseInsensitiveDuplicates.flatMap { lower =>
+        fieldNames.filter(_.toLowerCase == lower)
+      }.distinct.mkString(", ")
+      logger.warn(s"Schema contains columns that differ only in case: [$originalNames]. " +
+        s"This may cause issues with case-insensitive storage systems.")
+    }
+  }
+
+  // Validate the write schema
+  validateSchema(writeSchema)
+  private val serializedHadoopConf = {
+    // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
+    io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
   }
   private val partitionColumns =
     // Extract partition columns from write options (set by .partitionBy())
@@ -106,9 +124,6 @@ class IndexTables4SparkStandardWrite(
 
   override def toBatch: BatchWrite = this
 
-  // Store staging uploader for use in commit()
-  @transient private var stagingUploader: Option[io.indextables.spark.merge.SplitStagingUploader] = None
-
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating standard batch writer factory for ${info.numPartitions} partitions")
     logger.info(s"Using Spark's default partitioning (no optimization)")
@@ -142,54 +157,12 @@ class IndexTables4SparkStandardWrite(
         }
     }
 
-    // Check if merge-on-write is enabled
-    import io.indextables.spark.merge._
-    import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
-
-    val options = new CaseInsensitiveStringMap(serializedOptions.asJava)
-    val mergeOnWriteEnabled = MergeOnWriteHelper.isMergeOnWriteEnabled(options)
-
-    // Create merge-on-write config if enabled
-    val mergeOnWriteConfigOpt = if (mergeOnWriteEnabled) {
-      logger.info("🔀 Merge-on-write is ENABLED - creating serializable config")
-      val basePath = MergeOnWriteHelper.getStagingBasePath(tablePath.toString, options)
-
-      // Create serializable config instead of non-serializable uploader
-      val config = io.indextables.spark.merge.MergeOnWriteConfig(
-        enabled = true,
-        stagingBasePath = basePath,
-        serializedHadoopConfig = combinedHadoopConfig,
-        serializedOptions = serializedOptions
-      )
-
-      // Create uploader on driver for use in commit() only
-      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-        tablePath.toString, options, hadoopConf
-      )
-      val numThreads = options.getOrDefault("spark.indextables.mergeOnWrite.stagingThreads", "4").toInt
-      val maxRetries = options.getOrDefault("spark.indextables.mergeOnWrite.stagingRetries", "3").toInt
-      val uploader = new SplitStagingUploader(
-        cloudProvider,
-        basePath,
-        numThreads,
-        maxRetries
-      )
-      stagingUploader = Some(uploader)
-
-      Some(config)
-    } else {
-      logger.info("Traditional write mode (merge-on-write disabled)")
-      None
-    }
-
     new IndexTables4SparkWriterFactory(
       tablePath,
       writeSchema,
       serializedOptions,
       combinedHadoopConfig,
-      partitionColumns,
-      mergeOnWriteConfigOpt
+      partitionColumns
     )
   }
 
@@ -216,72 +189,70 @@ class IndexTables4SparkStandardWrite(
       validateIndexingConfigurationForAppend()
     }
 
-    // Extract both AddActions (traditional) and StagedSplitInfo (merge-on-write)
-    import io.indextables.spark.merge._
-
+    // Extract AddActions from commit messages
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions
       case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _                                   => Seq.empty[AddAction]
     }
 
-    val stagedSplits: Seq[StagedSplitInfo] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.stagedSplits
-      case _                                                => Seq.empty[StagedSplitInfo]
-    }
-
-    // Check if merge-on-write is being used
-    val mergeOnWriteActive = stagedSplits.nonEmpty
-
-    if (mergeOnWriteActive) {
-      logger.info(s"🔀 Merge-on-write ACTIVE: ${stagedSplits.size} staged splits, ${addActions.size} direct AddActions")
-    }
-
     // Log how many empty partitions were filtered out
-    val totalItems = addActions.size + stagedSplits.size
-    val emptyPartitionsCount = messages.length - totalItems
+    val emptyPartitionsCount = messages.length - addActions.size
     if (emptyPartitionsCount > 0) {
       println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
       logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
     }
 
     // Determine if this should be an overwrite based on existing table state and mode
+    logger.debug(s"SAVEMODE DEBUG: isOverwrite flag = $isOverwrite")
+    logger.debug(s"SAVEMODE DEBUG: serializedOptions.get(saveMode) = ${serializedOptions.get("saveMode")}")
+
     val shouldOverwrite = if (isOverwrite) {
       // Explicit overwrite flag from truncate() or overwrite() call
-      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
-      logger.debug(s"DEBUG: Using explicit isOverwrite=true flag")
+      logger.debug(s"SAVEMODE DEBUG: Using isOverwrite=true from truncate/overwrite call")
       true
     } else {
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
-        case Some("Overwrite")     => true
-        case Some("ErrorIfExists") => false
-        case Some("Ignore")        => false
-        case Some("Append")        => false
+        case Some("Overwrite")     =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Overwrite in options, returning true")
+          true
+        case Some("ErrorIfExists") =>
+          logger.debug("SAVEMODE DEBUG: saveMode=ErrorIfExists in options, returning false")
+          false
+        case Some("Ignore")        =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Ignore in options, returning false")
+          false
+        case Some("Append")        =>
+          logger.debug("SAVEMODE DEBUG: saveMode=Append in options, returning false")
+          false
         case None                  =>
           // Check if this looks like an initial write (no existing files) - treat as overwrite
+          logger.debug("SAVEMODE DEBUG: No saveMode in options, checking existing files")
           try {
             val existingFiles = transactionLog.listFiles()
             if (existingFiles.isEmpty) {
-              logger.info("No existing files found - treating as initial write (overwrite semantics)")
+              logger.debug("SAVEMODE DEBUG: No existing files, treating as initial write (append)")
               false // Initial write doesn't need overwrite semantics, just add files
             } else {
-              logger.info(s"Found ${existingFiles.length} existing files - need to determine write mode")
+              logger.debug(s"SAVEMODE DEBUG: Found ${existingFiles.length} existing files, defaulting to append")
               // Without explicit mode info, default to append to be safe
               false
             }
           } catch {
-            case _: Exception => false // If we can't read transaction log, assume append
+            case e: Exception =>
+              logger.debug(s"SAVEMODE DEBUG: Exception reading transaction log: ${e.getMessage}, assuming append")
+              false // If we can't read transaction log, assume append
           }
         case Some(other) =>
-          logger.warn(s"Unknown saveMode: $other, defaulting to append")
+          logger.debug(s"SAVEMODE DEBUG: Unknown saveMode: $other, defaulting to append")
           false
       }
-      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
-      logger.debug(s"DEBUG: Final saveMode decision: $saveMode")
+      logger.debug(s"SAVEMODE DEBUG: Final saveMode decision = $saveMode")
       saveMode
     }
+
+    logger.debug(s"SAVEMODE DEBUG: shouldOverwrite = $shouldOverwrite")
 
     // Initialize transaction log with schema if this is the first commit
     transactionLog.initialize(writeSchema, partitionColumns)
@@ -296,51 +267,41 @@ class IndexTables4SparkStandardWrite(
     TransactionLog.setWriteOptions(writeOptions)
 
     try {
-      // Determine final AddActions (either direct or from merge-on-write)
-      val finalAddActions = if (mergeOnWriteActive && stagingUploader.isDefined) {
-        logger.info("🔀 Executing merge-on-write orchestration...")
-
-        // Create orchestrator
-        val orchestrator = new LocalityAwareSplitMergeOrchestrator(
-          tablePath = tablePath.toString,
-          options = writeOptions,
-          hadoopConf = hadoopConf,
-          sparkSession = org.apache.spark.sql.SparkSession.active,
-          schema = writeSchema
-        )
-
-        // Execute merge-on-write
-        val mergedActions = orchestrator.executeMergeOnWrite(
-          stagedSplits,
-          stagingUploader.get,
-          if (shouldOverwrite) org.apache.spark.sql.SaveMode.Overwrite else org.apache.spark.sql.SaveMode.Append
-        )
-
-        // Shutdown staging uploader
-        stagingUploader.foreach(_.shutdown())
-
-        // Combine with any direct AddActions
-        addActions ++ mergedActions
-      } else {
-        // Traditional mode - use AddActions directly
-        addActions
-      }
-
-      // Commit the changes
+      // Commit the changes to transaction log
       if (shouldOverwrite) {
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
-        logger.debug(s"DEBUG: Performing OVERWRITE with ${finalAddActions.length} new files")
-        val version = transactionLog.overwriteFiles(finalAddActions)
-        logger.info(s"Overwrite completed in transaction version $version, added ${finalAddActions.length} files")
+        logger.debug(s"COMMIT DEBUG: Performing OVERWRITE with ${addActions.length} new files")
+        val version = transactionLog.overwriteFiles(addActions)
+        logger.debug(s"COMMIT DEBUG: Overwrite completed in transaction version $version")
+
+        // Log what's in the transaction log after this operation
+        val filesAfter = transactionLog.listFiles()
+        logger.debug(s"COMMIT DEBUG: After OVERWRITE, transaction log contains ${filesAfter.length} files:")
+        filesAfter.foreach { action =>
+          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
+        }
+
+        logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
       } else {
-        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
-        logger.debug(s"DEBUG: Performing APPEND with ${finalAddActions.length} new files")
+        logger.debug(s"COMMIT DEBUG: Performing APPEND with ${addActions.length} new files")
         // Standard append operation
-        val version = transactionLog.addFiles(finalAddActions)
-        logger.info(s"Added ${finalAddActions.length} files in transaction version $version")
+        val version = transactionLog.addFiles(addActions)
+        logger.debug(s"COMMIT DEBUG: Append completed in transaction version $version")
+
+        // Log what's in the transaction log after this operation
+        val filesAfter = transactionLog.listFiles()
+        logger.debug(s"COMMIT DEBUG: After APPEND, transaction log contains ${filesAfter.length} files:")
+        filesAfter.foreach { action =>
+          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
+        }
+
+        logger.info(s"Added ${addActions.length} files in transaction version $version")
       }
 
-      logger.info(s"Successfully committed ${finalAddActions.length} files")
+      logger.debug(s"COMMIT DEBUG: Successfully committed ${addActions.length} files")
+      logger.info(s"Successfully committed ${addActions.length} files")
+
+      // POST-COMMIT EVALUATION: Check if merge-on-write should run
+      evaluateAndExecuteMergeOnWrite(writeOptions)
     } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
@@ -386,7 +347,7 @@ class IndexTables4SparkStandardWrite(
 
         // The docMappingJson is directly an array of field definitions
         if (existingMapping.isArray) {
-          logger.warn(
+          logger.debug(
             s"VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
           )
           val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(
@@ -422,8 +383,17 @@ class IndexTables4SparkStandardWrite(
                   val currentType = currentConfig.fieldType.get
                   logger.debug(s"VALIDATION DEBUG: Current type: $currentType")
 
-                  // Strict validation: field types must match exactly
-                  if (existingType.isDefined && existingType.get != currentType) {
+                  // Check for type compatibility
+                  // Note: "json" config maps to "object" type in tantivy, these are equivalent
+                  val typesCompatible = existingType.isEmpty || {
+                    val existing = existingType.get
+                    val current = currentType
+                    existing == current ||
+                    (existing == "object" && current == "json") ||
+                    (existing == "json" && current == "object")
+                  }
+
+                  if (!typesCompatible) {
                     logger.debug(s"VALIDATION DEBUG: CONFLICT DETECTED for field '$fieldName'!")
                     errors += s"Field '$fieldName' type mismatch: existing table has ${existingType.get} field, cannot append with $currentType configuration"
                   } else {
@@ -459,5 +429,171 @@ class IndexTables4SparkStandardWrite(
         logger.debug(s"VALIDATION DEBUG: Validation failed with exception: ${e.getMessage}")
       // Don't fail the write for other types of errors
     }
+
+  /**
+   * Evaluate if merge-on-write should run after transaction commit.
+   *
+   * This method:
+   * 1. Checks if merge-on-write is enabled
+   * 2. Counts mergeable groups from the transaction log
+   * 3. Compares against threshold (defaultParallelism * mergeGroupMultiplier)
+   * 4. Invokes MERGE SPLITS command if worthwhile
+   */
+  private def evaluateAndExecuteMergeOnWrite(
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
+  ): Unit = {
+    try {
+      // Check if merge-on-write is enabled
+      val mergeOnWriteEnabled = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.enabled", "false").toBoolean
+
+      if (!mergeOnWriteEnabled) {
+        logger.debug("Merge-on-write is disabled, skipping post-commit evaluation")
+        return
+      }
+
+      logger.info("🔀 Merge-on-write enabled - evaluating if merge is worthwhile...")
+
+      // Get configuration
+      val mergeGroupMultiplier = writeOptions.getOrDefault(
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0"
+      ).toDouble
+      val targetSize = writeOptions.getOrDefault(
+        "spark.indextables.mergeOnWrite.targetSize", "4G"
+      )
+
+      // Get Spark session for default parallelism
+      val spark = org.apache.spark.sql.SparkSession.active
+      val defaultParallelism = spark.sparkContext.defaultParallelism
+      val threshold = (defaultParallelism * mergeGroupMultiplier).toInt
+
+      logger.info(s"Merge threshold: $threshold merge groups (parallelism: $defaultParallelism × multiplier: $mergeGroupMultiplier)")
+
+      // Count mergeable groups using MergeSplitsExecutor (dry-run to get accurate count)
+      val mergeGroups = countMergeGroupsUsingExecutor(targetSize, writeOptions)
+
+      logger.info(s"Found $mergeGroups mergeable groups (threshold: $threshold)")
+
+      if (mergeGroups >= threshold) {
+        logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS")
+        executeMergeSplitsCommand(writeOptions)
+      } else {
+        logger.info(s"⏭️  Merge not worthwhile: $mergeGroups groups < $threshold threshold - skipping")
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write operation if merge evaluation fails
+        logger.warn(s"Failed to evaluate merge-on-write: ${e.getMessage}", e)
+    }
+  }
+
+  /**
+   * Count number of merge groups using MergeSplitsExecutor's dry-run logic.
+   * This ensures we use the exact same algorithm as the actual merge operation,
+   * avoiding any discrepancies between decision-making and execution.
+   */
+  private def countMergeGroupsUsingExecutor(
+    targetSizeStr: String,
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
+  ): Int = {
+    try {
+      import io.indextables.spark.sql.MergeSplitsExecutor
+      import scala.jdk.CollectionConverters._
+
+      val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
+      val spark = org.apache.spark.sql.SparkSession.active
+
+      // Extract options to pass to executor (same as executeMergeSplitsCommand)
+      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+
+      // Merge with serializedHadoopConf to include credentials
+      val optionsToPass = serializedHadoopConf ++ optionsFromWrite
+
+      // Create executor with same parameters as actual merge
+      val executor = new MergeSplitsExecutor(
+        sparkSession = spark,
+        transactionLog = transactionLog,
+        tablePath = tablePath,
+        partitionPredicates = Seq.empty, // No partition filtering for count
+        targetSize = targetSizeBytes,
+        maxGroups = None, // No limit for counting
+        preCommitMerge = false,
+        overrideOptions = Some(optionsToPass)
+      )
+
+      // Use the dry-run method to count groups
+      val count = executor.countMergeGroups()
+      logger.debug(s"MergeSplitsExecutor counted $count merge groups")
+      count
+
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to count merge groups using executor: ${e.getMessage}", e)
+        0
+    }
+  }
+
+  /**
+   * Execute MERGE SPLITS command programmatically with write options.
+   *
+   * This method passes write options directly to MergeSplitsExecutor so it has access
+   * to AWS/Azure credentials, temp directories, heap size, and all other write-time configuration.
+   */
+  private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit = {
+    try {
+      import io.indextables.spark.sql.MergeSplitsExecutor
+      import scala.jdk.CollectionConverters._
+
+      val targetSizeStr = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
+      val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
+
+      logger.info(s"Executing MERGE SPLITS for table: ${tablePath.toString} with target size: $targetSizeStr ($targetSizeBytes bytes)")
+
+      val spark = org.apache.spark.sql.SparkSession.active
+
+      // Extract all indextables options from writeOptions to pass to merge executor
+      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+
+      // CRITICAL FIX: Merge with serializedHadoopConf to include credentials from enrichedHadoopConf
+      // Write options take precedence over hadoopConf
+      val optionsToPass = serializedHadoopConf ++ optionsFromWrite
+
+      logger.info(s"Passing ${optionsToPass.size} options to MERGE SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
+      optionsToPass.foreach { case (key, value) =>
+        val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
+        logger.debug(s"  Passing option: $key = $displayValue")
+      }
+
+      // Create executor with transaction log and write options
+      val executor = new io.indextables.spark.sql.MergeSplitsExecutor(
+        sparkSession = spark,
+        transactionLog = transactionLog,
+        tablePath = tablePath,
+        partitionPredicates = Seq.empty, // Merge all partitions
+        targetSize = targetSizeBytes,
+        maxGroups = None, // No limit on groups for auto-merge
+        preCommitMerge = false,
+        overrideOptions = Some(optionsToPass) // Pass write options directly
+      )
+
+      // Execute merge
+      val results = executor.merge()
+
+      // Log first row of results (contains metrics)
+      if (results.nonEmpty) {
+        val firstRow = results.head
+        logger.info(s"✅ MERGE SPLITS completed: ${firstRow.getString(0)} - merged ${firstRow.getStruct(1).getLong(1)} files")
+      } else {
+        logger.info(s"✅ MERGE SPLITS completed with no results")
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write if merge fails
+        logger.warn(s"Failed to execute MERGE SPLITS: ${e.getMessage}", e)
+    }
+  }
 
 }

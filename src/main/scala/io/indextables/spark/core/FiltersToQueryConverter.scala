@@ -1096,10 +1096,10 @@ object FiltersToQueryConverter {
     // Try to translate as JSON field filter using parseQuery syntax
     jsonTranslator.translateFilterToParseQuery(filter) match {
       case Some(queryString) =>
-        logger.warn(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
+        logger.debug(s"JSON FILTER: Translating nested field filter to parseQuery: $queryString")
         try {
           val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          logger.warn(s"JSON FILTER: Successfully parsed query: $queryString")
+          logger.debug(s"JSON FILTER: Successfully parsed query: $queryString")
           return Some(parsedQuery)
         } catch {
           case e: Exception =>
@@ -1107,7 +1107,7 @@ object FiltersToQueryConverter {
             // Fall through to regular filter handling
         }
       case None =>
-        logger.warn(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
+        logger.debug(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
         // Not a nested field filter, continue with regular filter handling
     }
 

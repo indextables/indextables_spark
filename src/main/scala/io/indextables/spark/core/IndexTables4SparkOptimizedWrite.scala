@@ -61,6 +61,35 @@ class IndexTables4SparkOptimizedWrite(
 
   // Extract serializable values from transient fields during construction
   private val writeSchema = writeInfo.schema()
+
+  // Validate schema for duplicate column names
+  private def validateSchema(schema: org.apache.spark.sql.types.StructType): Unit = {
+    val fieldNames = schema.fieldNames
+    val duplicates = fieldNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
+
+    if (duplicates.nonEmpty) {
+      val duplicateList = duplicates.mkString(", ")
+      val errorMsg = s"Schema contains duplicate column names: [$duplicateList]. " +
+        s"Please ensure all column names are unique. Duplicate columns can cause JVM crashes."
+      logger.error(errorMsg)
+      throw new IllegalArgumentException(errorMsg)
+    }
+
+    // Also check for case-insensitive duplicates (warn only, don't fail)
+    val lowerCaseNames = fieldNames.map(_.toLowerCase)
+    val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
+
+    if (caseInsensitiveDuplicates.nonEmpty) {
+      val originalNames = caseInsensitiveDuplicates.flatMap { lower =>
+        fieldNames.filter(_.toLowerCase == lower)
+      }.distinct.mkString(", ")
+      logger.warn(s"Schema contains columns that differ only in case: [$originalNames]. " +
+        s"This may cause issues with case-insensitive storage systems.")
+    }
+  }
+
+  // Validate the write schema
+  validateSchema(writeSchema)
   private val serializedHadoopConf = {
     // Serialize only the tantivy4spark config properties from hadoopConf
     val props = scala.collection.mutable.Map[String, String]()
@@ -386,8 +415,8 @@ class IndexTables4SparkOptimizedWrite(
         }
     }
 
-    // OptimizedWrite does NOT support merge-on-write - always pass None
-    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns, None)
+    // OptimizedWrite does NOT support merge-on-write
+    new IndexTables4SparkWriterFactory(tablePath, writeSchema, serializedOptions, combinedHadoopConfig, partitionColumns)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {
@@ -408,10 +437,8 @@ class IndexTables4SparkOptimizedWrite(
         logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
     }
 
-    // OptimizedWrite handles commit messages - extract AddActions only (no merge-on-write orchestration)
-    import io.indextables.spark.merge._
+    // OptimizedWrite handles commit messages - extract AddActions only
     val addActions: Seq[AddAction] = messages.flatMap {
-      case msg: IndexTables4SparkMergeOnWriteCommitMessage => msg.addActions  // Extract addActions from merge-on-write message
       case msg: IndexTables4SparkCommitMessage => msg.addActions
       case _ => Seq.empty[AddAction]
     }

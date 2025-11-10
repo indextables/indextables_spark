@@ -53,11 +53,9 @@ object BroadcastSplitLocalityManager {
       val updatedHosts = currentHosts + hostname
       localSplitAccess.update(splitPath, updatedHosts)
 
-      println(s"🏠 [LOCALITY] Recording split access: $splitPath on host $hostname")
-      println(s"🏠 [LOCALITY] Total hosts for this split: ${updatedHosts.size} (${updatedHosts.mkString(", ")})")
-      println(s"🏠 [LOCALITY] Total tracked splits: ${localSplitAccess.size}")
-
-      logger.debug(s"Recorded local split access: $splitPath on host $hostname")
+      logger.debug(s"Recording split access: $splitPath on host $hostname")
+      logger.debug(s"Total hosts for this split: ${updatedHosts.size} (${updatedHosts.mkString(", ")})")
+      logger.debug(s"Total tracked splits: ${localSplitAccess.size}")
     }
 
   /**
@@ -71,21 +69,18 @@ object BroadcastSplitLocalityManager {
           val localityMap = broadcast.value
           val hosts       = localityMap.getOrElse(splitPath, Array.empty)
           if (hosts.nonEmpty) {
-            println(s"📍 [DRIVER-LOCALITY] Found broadcast preferred hosts for $splitPath: ${hosts.mkString(", ")}")
-            println(s"📍 [DRIVER-LOCALITY] Broadcast contains locality info for ${localityMap.size} splits")
             logger.debug(s"Found broadcast preferred hosts for $splitPath: ${hosts.mkString(", ")}")
+            logger.debug(s"Broadcast contains locality info for ${localityMap.size} splits")
           } else {
-            println(s"📍 [DRIVER-LOCALITY] No preferred hosts found for $splitPath in broadcast (${localityMap.size} splits tracked)")
+            logger.debug(s"No preferred hosts found for $splitPath in broadcast (${localityMap.size} splits tracked)")
           }
           hosts
         } catch {
           case ex: Exception =>
-            println(s"❌ [DRIVER-LOCALITY] Error accessing broadcast locality info for $splitPath: ${ex.getMessage}")
             logger.warn(s"Error accessing broadcast locality info for $splitPath: ${ex.getMessage}")
             Array.empty
         }
       case None =>
-        println(s"📍 [DRIVER-LOCALITY] No broadcast locality info available for $splitPath (broadcast not initialized)")
         logger.debug(s"No broadcast locality info available for $splitPath")
         Array.empty
     }
@@ -95,7 +90,7 @@ object BroadcastSplitLocalityManager {
    * periodically by the driver to refresh locality information.
    */
   def updateBroadcastLocality(sc: SparkContext): Broadcast[Map[String, Array[String]]] = {
-    println(s"🚀 [DRIVER-LOCALITY] Starting broadcast locality update with ${sc.defaultParallelism} partitions")
+    logger.debug(s"Starting broadcast locality update with ${sc.defaultParallelism} partitions")
     logger.info("Collecting split locality information from all executors")
 
     // Set descriptive names for Spark UI
@@ -122,10 +117,10 @@ object BroadcastSplitLocalityManager {
               .toIterator
               .toList
 
-            println(s"🔧 [EXECUTOR-LOCALITY] Partition ${partitionId.mkString(",")} on host $hostname contributing ${localData.size} split records")
+            logger.debug(s"Partition ${partitionId.mkString(",")} on host $hostname contributing ${localData.size} split records")
             localData.foreach {
               case (splitPath, hosts) =>
-                println(s"🔧 [EXECUTOR-LOCALITY]   Split: $splitPath -> hosts: ${hosts.mkString(", ")}")
+                logger.debug(s"  Split: $splitPath -> hosts: ${hosts.mkString(", ")}")
             }
 
             localData.iterator
@@ -135,7 +130,7 @@ object BroadcastSplitLocalityManager {
       finally
         sc.clearJobGroup()
 
-    println(s"🔄 [DRIVER-LOCALITY] Collected ${executorLocalityInfo.length} locality records from executors")
+    logger.debug(s"Collected ${executorLocalityInfo.length} locality records from executors")
 
     // Merge locality information from all executors
     val mergedLocalityMap = executorLocalityInfo
@@ -145,16 +140,10 @@ object BroadcastSplitLocalityManager {
         case (splitPath, entries) =>
           // Merge all hosts that have accessed this split
           val allHosts = entries.flatMap(_._2).distinct
-          println(s"🔗 [DRIVER-LOCALITY] Merging split $splitPath: ${allHosts.mkString(", ")} (from ${entries.length} sources)")
+          logger.debug(s"Merging split $splitPath: ${allHosts.mkString(", ")} (from ${entries.length} sources)")
           splitPath -> allHosts
       }
       .toMap
-
-    println(s"📊 [DRIVER-LOCALITY] Merged locality information for ${mergedLocalityMap.size} splits:")
-    mergedLocalityMap.foreach {
-      case (splitPath, hosts) =>
-        println(s"📊 [DRIVER-LOCALITY]   $splitPath -> ${hosts.mkString(", ")}")
-    }
 
     logger.info(s"Merged locality information for ${mergedLocalityMap.size} splits")
     mergedLocalityMap.foreach {
@@ -164,7 +153,7 @@ object BroadcastSplitLocalityManager {
 
     // Unpersist old broadcast variable if it exists
     localityBroadcast.foreach { oldBroadcast =>
-      println(s"🗑️  [DRIVER-LOCALITY] Unpersisting old broadcast variable (id=${oldBroadcast.id})")
+      logger.debug(s"Unpersisting old broadcast variable (id=${oldBroadcast.id})")
       oldBroadcast.unpersist(blocking = false)
     }
 
@@ -172,8 +161,7 @@ object BroadcastSplitLocalityManager {
     val newBroadcast = sc.broadcast(mergedLocalityMap)
     localityBroadcast = Some(newBroadcast)
 
-    println(s"📡 [DRIVER-LOCALITY] Created new locality broadcast variable (id=${newBroadcast.id}) with ${mergedLocalityMap.size} splits")
-    logger.info(s"Created new locality broadcast variable (id=${newBroadcast.id})")
+    logger.info(s"Created new locality broadcast variable (id=${newBroadcast.id}) with ${mergedLocalityMap.size} splits")
     newBroadcast
   }
 
@@ -208,9 +196,9 @@ object BroadcastSplitLocalityManager {
     val broadcastSplits = localityBroadcast.map(_.value.size).getOrElse(0)
     val broadcastId     = localityBroadcast.map(_.id)
 
-    println(s"📈 [LOCALITY-STATS] Local splits tracked: $localSplits")
-    println(s"📈 [LOCALITY-STATS] Broadcast splits tracked: $broadcastSplits")
-    println(s"📈 [LOCALITY-STATS] Broadcast ID: ${broadcastId.getOrElse("None")}")
+    logger.debug(s"Local splits tracked: $localSplits")
+    logger.debug(s"Broadcast splits tracked: $broadcastSplits")
+    logger.debug(s"Broadcast ID: ${broadcastId.getOrElse("None")}")
 
     BroadcastLocalityStats(
       localTrackedSplits = localSplits,
@@ -221,9 +209,9 @@ object BroadcastSplitLocalityManager {
 
   /** Force an immediate update of broadcast locality information. Useful for testing and debugging. */
   def forceBroadcastUpdate(sc: SparkContext): Unit = {
-    println(s"🔧 [FORCE-UPDATE] Manually triggering broadcast locality update...")
+    logger.debug(s"Manually triggering broadcast locality update...")
     updateBroadcastLocality(sc)
-    println(s"🔧 [FORCE-UPDATE] Broadcast update completed")
+    logger.debug(s"Broadcast update completed")
   }
 
   /** Get current hostname for this JVM. */

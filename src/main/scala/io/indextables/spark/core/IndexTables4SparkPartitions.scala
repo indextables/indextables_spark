@@ -340,9 +340,11 @@ class IndexTables4SparkPartitionReader(
         // Since partition values are stored in splits, we can apply all filters at the split level
         // (no need to exclude partition filters since they're queryable in the split data)
         val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.warn(s"PARTITION: Combined Filters: ${allFilters.length} total filters")
-        filters.foreach(f => logger.warn(s"PARTITION:   - Regular filter: $f"))
-        indexQueryFilters.foreach(f => logger.warn(s"PARTITION:   - IndexQuery filter: $f"))
+        logger.debug(s"Combined filters: ${allFilters.length} total (${filters.length} regular + ${indexQueryFilters.length} IndexQuery)")
+        if (logger.isDebugEnabled) {
+          filters.foreach(f => logger.debug(s"  - Regular filter: $f"))
+          indexQueryFilters.foreach(f => logger.debug(s"  - IndexQuery filter: $f"))
+        }
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
@@ -434,9 +436,7 @@ class IndexTables4SparkWriterFactory(
   writeSchema: StructType,
   serializedOptions: Map[String, String],
   serializedHadoopConfig: Map[String, String], // Use serializable Map instead of Configuration
-  partitionColumns: Seq[String] = Seq.empty,
-  // Merge-on-write support (serializable config instead of objects)
-  mergeOnWriteConfig: Option[io.indextables.spark.merge.MergeOnWriteConfig] = None)
+  partitionColumns: Seq[String] = Seq.empty)
     extends DataWriterFactory {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkWriterFactory])
@@ -445,9 +445,6 @@ class IndexTables4SparkWriterFactory(
     logger.info(s"Creating writer for partition $partitionId, task $taskId")
     if (partitionColumns.nonEmpty) {
       logger.info(s"Creating partitioned writer with columns: ${partitionColumns.mkString(", ")}")
-    }
-    if (mergeOnWriteConfig.exists(_.enabled)) {
-      logger.info(s"Merge-on-write ENABLED for partition $partitionId")
     }
 
     // Reconstruct Hadoop Configuration from serialized properties
@@ -464,8 +461,7 @@ class IndexTables4SparkWriterFactory(
       taskId,
       serializedOptions,
       reconstructedHadoopConf,
-      partitionColumns,
-      mergeOnWriteConfig
+      partitionColumns
     )
   }
 }
@@ -477,51 +473,10 @@ class IndexTables4SparkDataWriter(
   taskId: Long,
   serializedOptions: Map[String, String],
   hadoopConf: org.apache.hadoop.conf.Configuration,
-  partitionColumns: Seq[String] = Seq.empty, // Partition columns from metadata
-  // Merge-on-write configuration (serializable)
-  mergeOnWriteConfig: Option[io.indextables.spark.merge.MergeOnWriteConfig] = None
+  partitionColumns: Seq[String] = Seq.empty // Partition columns from metadata
 ) extends DataWriter[InternalRow] {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkDataWriter])
-
-  // Lazily create staging uploader on executor (not serialized from driver)
-  @transient private lazy val stagingUploader: Option[io.indextables.spark.merge.SplitStagingUploader] = {
-    mergeOnWriteConfig.map { config =>
-      // Reconstruct options and cloud provider on executor
-      import scala.jdk.CollectionConverters._
-      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
-        config.serializedOptions.asJava
-      )
-
-      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
-        config.stagingBasePath,
-        options,
-        hadoopConf
-      )
-
-      val numThreads = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.stagingThreads", "4"
-      ).toInt
-      val maxRetries = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.maxRetries", "3"
-      ).toInt
-      val retryDelayMs = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.retryDelayMs", "1000"
-      ).toLong
-      val minSizeToStage = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.minSizeToStage", "10485760"  // 10MB
-      ).toLong
-
-      new io.indextables.spark.merge.SplitStagingUploader(
-        cloudProvider,
-        config.stagingBasePath,
-        numThreads,
-        maxRetries,
-        retryDelayMs,
-        minSizeToStage
-      )
-    }
-  }
 
   // Create CaseInsensitiveStringMap from serialized options for components that need it
   private lazy val options: CaseInsensitiveStringMap = {
@@ -603,46 +558,22 @@ class IndexTables4SparkDataWriter(
     }
 
   override def commit(): WriterCommitMessage = {
-    import io.indextables.spark.merge._
-
-    val allResults = scala.collection.mutable.ArrayBuffer[Either[AddAction, StagedSplitInfo]]()
+    val allActions = scala.collection.mutable.ArrayBuffer[AddAction]()
 
     // Handle non-partitioned writes
     if (singleWriter.isDefined) {
       val (searchEngine, statistics, recordCount) = singleWriter.get
       if (recordCount == 0) {
         logger.info(s"⚠️  Skipping transaction log entry for partition $partitionId - no records written")
-        return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
+        return IndexTables4SparkCommitMessage(Seq.empty)
       }
 
-      val result = if (mergeOnWriteConfig.exists(_.enabled) && stagingUploader.isDefined) {
-        // Merge-on-write mode: create local split and stage
-        logger.info(s"Committing in merge-on-write mode for partition $partitionId")
-        val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
-          searchEngine,
-          writeSchema,
-          statistics,
-          recordCount,
-          partitionValues = Map.empty,
-          partitionId,
-          taskId,
-          options,
-          hadoopConf,
-          stagingUploader.get,
-          mergeOnWriteConfig.get.stagingBasePath
-        )
-        Right(stagedSplit)
-      } else {
-        // Traditional mode: upload immediately
-        logger.info(s"Committing in traditional mode for partition $partitionId")
-        val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
-        Left(addAction)
-      }
-
-      allResults += result
+      logger.info(s"Committing partition $partitionId with $recordCount records")
+      val addAction = commitWriter(searchEngine, statistics, recordCount, Map.empty, "")
+      allActions += addAction
     }
 
-    // Handle partitioned writes - similar logic for each partition
+    // Handle partitioned writes
     if (partitionWriters.nonEmpty) {
       logger.info(s"Committing ${partitionWriters.size} partition writers")
 
@@ -650,47 +581,21 @@ class IndexTables4SparkDataWriter(
         case (partitionKey, (searchEngine, statistics, recordCount)) =>
           if (recordCount > 0) {
             val partitionValues = parsePartitionKey(partitionKey)
-
-            val result = if (mergeOnWriteConfig.exists(_.enabled) && stagingUploader.isDefined) {
-              // Merge-on-write mode
-              val stagedSplit = MergeOnWriteHelper.createLocalSplitForMergeOnWrite(
-                searchEngine,
-                writeSchema,
-                statistics,
-                recordCount,
-                partitionValues,
-                partitionId,
-                taskId,
-                options,
-                hadoopConf,
-                stagingUploader.get,
-                mergeOnWriteConfig.get.stagingBasePath
-              )
-              Right(stagedSplit)
-            } else {
-              // Traditional mode
-              val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
-              Left(addAction)
-            }
-
-            allResults += result
+            val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
+            allActions += addAction
           } else {
             logger.warn(s"Skipping empty partition: $partitionKey")
           }
       }
     }
 
-    if (allResults.isEmpty) {
+    if (allActions.isEmpty) {
       logger.info(s"⚠️  No records written in partition $partitionId")
-      return IndexTables4SparkMergeOnWriteCommitMessage(Seq.empty, Seq.empty)
+      return IndexTables4SparkCommitMessage(Seq.empty)
     }
 
-    // Separate AddActions and StagedSplitInfo
-    val addActions = allResults.collect { case Left(action) => action }
-    val stagedSplits = allResults.collect { case Right(split) => split }
-
-    logger.info(s"Committed partition $partitionId with ${addActions.size} AddActions, ${stagedSplits.size} staged splits")
-    IndexTables4SparkMergeOnWriteCommitMessage(addActions.toSeq, stagedSplits.toSeq)
+    logger.info(s"Committed partition $partitionId with ${allActions.size} splits")
+    IndexTables4SparkCommitMessage(allActions.toSeq)
   }
 
   private def parsePartitionKey(partitionKey: String): Map[String, String] =

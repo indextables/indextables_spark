@@ -433,7 +433,8 @@ class MergeSplitsExecutor(
   partitionPredicates: Seq[String],
   targetSize: Long,
   maxGroups: Option[Int],
-  preCommitMerge: Boolean = false) {
+  preCommitMerge: Boolean = false,
+  overrideOptions: Option[Map[String, String]] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
@@ -451,11 +452,20 @@ class MergeSplitsExecutor(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-      // Helper function to get config from normalized configs with fallback
+      // Helper function to get config with priority: overrideOptions > mergedConfigs
+      // CASE-INSENSITIVE lookup to handle write options (lowercase) vs expected keys (camelCase)
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = mergedConfigs.get(sparkKey)
+        // Try exact match first, then case-insensitive match
+        val overrideValue = overrideOptions.flatMap { opts =>
+          opts.get(sparkKey).orElse {
+            // Case-insensitive fallback for write options
+            opts.find { case (k, _) => k.equalsIgnoreCase(sparkKey) }.map(_._2)
+          }
+        }
 
-        logger.debug(s"AWS Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        val result = overrideValue.orElse(mergedConfigs.get(sparkKey))
+
+        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideValue.getOrElse("None")}, merged=${result.getOrElse("None")}")
         result
       }
 
@@ -545,10 +555,10 @@ class MergeSplitsExecutor(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-      // Helper function to get config from normalized configs
+      // Helper function to get config with priority: overrideOptions > mergedConfigs
       def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = mergedConfigs.get(sparkKey)
-        logger.debug(s"Azure Config fallback for $sparkKey: merged=${result.getOrElse("None")}")
+        val result = overrideOptions.flatMap(_.get(sparkKey)).orElse(mergedConfigs.get(sparkKey))
+        logger.debug(s"Azure Config fallback for $sparkKey: override=${overrideOptions.flatMap(_.get(sparkKey)).getOrElse("None")}, merged=${result.getOrElse("None")}")
         result
       }
 
@@ -688,12 +698,12 @@ class MergeSplitsExecutor(
         logger.info(s"Found ${groups.length} potential merge groups in partition $partitionValues")
 
         // Double-check: filter out any single-file groups that might have slipped through
-        println(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
+        logger.debug(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
         groups.foreach { group =>
-          println(s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}")
+          logger.debug(s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}")
         }
         val validGroups = groups.filter(_.files.length >= 2)
-        println(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
+        logger.debug(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
         if (groups.length != validGroups.length) {
           logger.warn(
             s"Filtered out ${groups.length - validGroups.length} single-file groups from partition $partitionValues"
@@ -819,7 +829,7 @@ class MergeSplitsExecutor(
               // Set descriptive names for Spark UI
               val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
               val jobDescription =
-                f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits ($totalSizeGB%.2f GB)"
+                f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits merging to ${batch.length} splits ($totalSizeGB%.2f GB)"
               val stageName = f"Merge Batch $batchNum/${batches.length}: ${batch.length} groups, $totalSplits splits"
 
               sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
@@ -1227,23 +1237,23 @@ class MergeSplitsExecutor(
       }
     }
 
-    println(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $targetSize bytes)")
+    logger.debug(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $targetSize bytes)")
 
     // If we have fewer than 2 mergeable files, no groups can be created
     if (mergeableFiles.length < 2) {
-      println(s"MERGE DEBUG: Cannot create merge groups - need at least 2 files but found ${mergeableFiles.length}")
+      logger.debug(s"MERGE DEBUG: Cannot create merge groups - need at least 2 files but found ${mergeableFiles.length}")
       return groups.toSeq
     }
 
     for ((file, index) <- mergeableFiles.zipWithIndex) {
-      println(s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)")
+      logger.debug(s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)")
 
       // Check if adding this file would exceed target size
       if (currentGroupSize > 0 && currentGroupSize + file.size > targetSize) {
-        println(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
+        logger.debug(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
 
         // Current group is full, save it if it has multiple files
-        println(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
+        logger.debug(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
         if (currentGroup.length > 1) {
           // VALIDATION: Ensure all files in the group have identical partition values
           val groupFiles        = currentGroup.clone().toSeq
@@ -1259,21 +1269,21 @@ class MergeSplitsExecutor(
           }
 
           groups += MergeGroup(partitionValues, groupFiles)
-          println(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files ($currentGroupSize bytes): ${currentGroup.map(_.path).mkString(", ")}")
+          logger.debug(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files ($currentGroupSize bytes): ${currentGroup.map(_.path).mkString(", ")}")
         } else {
-          println(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)")
+          logger.debug(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)")
         }
 
         // Start new group
         currentGroup.clear()
         currentGroup += file
         currentGroupSize = file.size
-        println(s"MERGE DEBUG: Started new group with ${file.path} (${file.size} bytes)")
+        logger.debug(s"MERGE DEBUG: Started new group with ${file.path} (${file.size} bytes)")
       } else {
         // Add file to current group
         currentGroup += file
         currentGroupSize += file.size
-        println(s"MERGE DEBUG: Added ${file.path} (${file.size} bytes) to current group. Group now has ${currentGroup.length} files ($currentGroupSize bytes total)")
+        logger.debug(s"MERGE DEBUG: Added ${file.path} (${file.size} bytes) to current group. Group now has ${currentGroup.length} files ($currentGroupSize bytes total)")
       }
     }
 
@@ -1309,9 +1319,63 @@ class MergeSplitsExecutor(
       }
     }
 
-    println(s"MERGE DEBUG: Created ${groups.length} merge groups from ${mergeableFiles.length} mergeable files")
+    logger.debug(s"MERGE DEBUG: Created ${groups.length} merge groups from ${mergeableFiles.length} mergeable files")
     logger.info(s"✅ All ${groups.length} merge groups passed partition consistency validation")
     groups.toSeq
+  }
+
+  /**
+   * Count the number of valid merge groups that would be created without performing the actual merge.
+   * This is used by merge-on-write evaluation to determine if merge is worthwhile.
+   *
+   * This method uses the exact same logic as merge() to ensure consistency.
+   *
+   * @return Number of valid merge groups (with >= 2 files each)
+   */
+  def countMergeGroups(): Int = {
+    try {
+      // Get current metadata
+      val metadata = transactionLog.getMetadata()
+
+      // Get current files from transaction log
+      val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
+
+      // Filter out files in cooldown period (if tracking enabled)
+      val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
+      val currentFiles = if (trackingEnabled) {
+        transactionLog.filterFilesInCooldown(allFiles)
+      } else {
+        allFiles
+      }
+
+      // Group files by partition
+      val partitionsToMerge = currentFiles.groupBy(_.partitionValues).toSeq
+
+      // Apply partition predicates if specified
+      val filteredPartitions = if (partitionPredicates.nonEmpty) {
+        val partitionSchema = StructType(
+          metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
+        )
+        applyPartitionPredicates(partitionsToMerge, partitionSchema)
+      } else {
+        partitionsToMerge
+      }
+
+      // Count merge groups in each partition
+      val totalGroups = filteredPartitions.map {
+        case (partitionValues, files) =>
+          val groups = findMergeableGroups(partitionValues, files)
+          // Filter to valid groups (>= 2 files)
+          groups.count(_.files.length >= 2)
+      }.sum
+
+      totalGroups
+
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to count merge groups: ${e.getMessage}")
+        0
+    }
   }
 
 

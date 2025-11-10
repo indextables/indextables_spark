@@ -70,13 +70,11 @@ class IndexTables4SparkScan(
     try {
       // Access the SparkContext from the SparkSession
       val sparkContext = sparkSession.sparkContext
-      println(s"🔄 [DRIVER-SCAN] Updating broadcast locality before partition planning")
+      logger.debug("Updating broadcast locality before partition planning")
       BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      println(s"🔄 [DRIVER-SCAN] Broadcast locality update completed")
-      logger.debug("Updated broadcast locality information for partition planning")
+      logger.debug("Broadcast locality update completed")
     } catch {
       case ex: Exception =>
-        logger.warn(s"❌ [DRIVER-SCAN] Failed to update broadcast locality information: ${ex.getMessage}")
         logger.warn("Failed to update broadcast locality information", ex)
     }
 
@@ -105,40 +103,33 @@ class IndexTables4SparkScan(
         )
 
         if (preWarmResult.warmupInitiated) {
-          logger.info(s"🔥 Pre-warm completed: ${preWarmResult.totalWarmupsCreated} warmup tasks across ${preWarmResult.warmupAssignments.size} hosts")
-          println(s"🔥 [DRIVER-PREWARM] Pre-warm completed: ${preWarmResult.totalWarmupsCreated} tasks across ${preWarmResult.warmupAssignments.size} hosts")
+          logger.info(s"Pre-warm completed: ${preWarmResult.totalWarmupsCreated} warmup tasks across ${preWarmResult.warmupAssignments.size} hosts")
         }
       } catch {
         case ex: Exception =>
           logger.warn(s"Pre-warm failed but continuing with query execution: ${ex.getMessage}", ex)
-          println(s"⚠️  [DRIVER-PREWARM] Pre-warm failed but continuing: ${ex.getMessage}")
       }
     }
 
     logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
 
-    println(s"🗺️  [DRIVER-SCAN] Planning ${filteredActions.length} partitions")
-
     val partitions = filteredActions.zipWithIndex.map {
       case (addAction, index) =>
-        println(s"🗺️  [DRIVER-SCAN] Creating partition $index for split: ${addAction.path}")
+        logger.debug(s"Creating partition $index for split: ${addAction.path}")
         logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
         pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
           new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()
         if (preferredHosts.nonEmpty) {
-          println(s"🗺️  [DRIVER-SCAN] Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
           logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
         } else {
-          println(s"🗺️  [DRIVER-SCAN] Partition $index (${addAction.path}) has no cache locality information")
           logger.debug(s"Partition $index (${addAction.path}) has no cache locality information")
         }
         partition
     }
 
     val totalPreferred = partitions.count(_.preferredLocations().nonEmpty)
-    println(s"🗺️  [DRIVER-SCAN] Split cache locality summary: $totalPreferred of ${partitions.length} partitions have preferred host assignments")
     logger.info(
       s"Split cache locality: $totalPreferred of ${partitions.length} partitions have preferred host assignments"
     )

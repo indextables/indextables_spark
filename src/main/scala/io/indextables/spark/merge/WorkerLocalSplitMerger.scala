@@ -28,16 +28,31 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.TaskContext
 
+/**
+ * Metadata extracted from a merged split file
+ */
+case class MergedSplitMetadata(
+  size: Long,
+  numRecords: Long,
+  minValues: Map[String, String],
+  maxValues: Map[String, String],
+  footerStartOffset: Option[Long],
+  footerEndOffset: Option[Long],
+  timeRangeStart: Option[String],
+  timeRangeEnd: Option[String],
+  splitTags: Option[Set[String]],
+  deleteOpstamp: Option[Long],
+  docMappingJson: Option[String],
+  uncompressedSizeBytes: Option[Long]
+) extends Serializable
+
 import org.apache.hadoop.conf.Configuration
 
-import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.util.SizeParser
 import org.slf4j.LoggerFactory
 
 /**
- * Merges split files on workers, preferring local files to minimize network I/O.
- * Falls back to downloading from staging when splits are not available locally.
+ * Merges split files on workers using local split files from shuffle-based merge.
  *
  * GAP MITIGATIONS:
  * - Gap #3 (Memory Management): Implements per-worker merge concurrency control via semaphore
@@ -297,37 +312,4 @@ class WorkerLocalSplitMerger(
     }
   }
 
-  /**
-   * Download a split file from staging to local temporary location
-   *
-   * @param stagingPath Path in cloud storage
-   * @param cloudProvider Cloud storage provider
-   * @return Local temporary file
-   */
-  def downloadToTemp(stagingPath: String, cloudProvider: CloudStorageProvider): File = {
-    val tempDownloadDir = SplitCacheConfig.getDefaultTempPath()
-      .getOrElse(System.getProperty("java.io.tmpdir"))
-
-    val downloadDir = new File(tempDownloadDir, "merge-downloads")
-    downloadDir.mkdirs()
-
-    val tempFile = new File(downloadDir, s"download-${UUID.randomUUID()}.tmp")
-
-    logger.info(s"Downloading split from staging: $stagingPath → ${tempFile.getAbsolutePath}")
-
-    val startTime = System.currentTimeMillis()
-    val inputStream = cloudProvider.openInputStream(stagingPath)
-    try {
-      Files.copy(inputStream, tempFile.toPath)
-      val duration = System.currentTimeMillis() - startTime
-      val size = tempFile.length()
-
-      logger.info(s"Downloaded split: ${size / 1024 / 1024}MB in ${duration}ms " +
-        s"(${size / 1024 / (duration + 1)}KB/s)")
-    } finally {
-      inputStream.close()
-    }
-
-    tempFile
-  }
 }

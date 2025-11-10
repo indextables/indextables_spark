@@ -27,12 +27,16 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Azure-specific integration tests for merge-on-write feature.
  *
- * These tests validate:
- * 1. Staging uploads to Azure Blob Storage
- * 2. Worker downloads from Azure for remote merges
- * 3. Final split uploads to Azure
- * 4. Transaction log in Azure
- * 5. Azure-specific authentication (account key, OAuth)
+ * These tests validate shuffle-based merge-on-write with Azure Blob Storage:
+ * 1. Write phase: Split creation on executors
+ * 2. Shuffle phase: RDD-based split distribution (no Azure staging)
+ * 3. Merge phase: Executor-side merge using local split bytes
+ * 4. Upload phase: Final merged splits uploaded to Azure
+ * 5. Transaction log: Azure-based transaction log operations
+ * 6. Authentication: Azure account key and OAuth (Service Principal)
+ * 7. Data integrity: Verify all data survives shuffle and merge
+ *
+ * ARCHITECTURE: Shuffle-based (no Azure staging, 100% locality via Spark shuffle)
  *
  * NOTE: These tests require Azure credentials and a storage account.
  * Set environment variables:

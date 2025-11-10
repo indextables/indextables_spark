@@ -191,6 +191,16 @@ class IndexTables4SparkScanBuilder(
     val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
     logger.debug(s"SCAN BUILDER: Number of IndexQuery filters: ${indexQueryFilters.length}")
 
+    // Transaction log optimization requires:
+    // 1. Exactly ONE aggregate expression (no mixing COUNT with MAX, AVG, SUM, MIN)
+    // 2. That expression must be COUNT or COUNT(*)
+    // 3. Filters must be only on partition columns (or no filters)
+    //
+    // IMPORTANT: If there are multiple aggregates (e.g., SELECT COUNT(*), MAX(field)),
+    // we CANNOT use transaction log for COUNT because:
+    // - MAX/AVG/MIN/SUM require searching tantivy
+    // - COUNT must count the SAME documents that MAX/AVG/MIN/SUM operate on
+    // - Therefore, ALL aggregates must go to tantivy together
     val result = aggregation.aggregateExpressions.length == 1 && {
       aggregation.aggregateExpressions.head match {
         case _: Count =>
@@ -212,6 +222,11 @@ class IndexTables4SparkScanBuilder(
           false
       }
     }
+
+    if (!result && aggregation.aggregateExpressions.length > 1) {
+      logger.debug(s"SCAN BUILDER: Multiple aggregates present (${aggregation.aggregateExpressions.length}) - routing all aggregates to tantivy including COUNT")
+    }
+
     logger.debug(s"SCAN BUILDER: canUseTransactionLogCount returning: $result")
     result
   }
@@ -229,12 +244,18 @@ class IndexTables4SparkScanBuilder(
     }
 
     // Check 2: Only COUNT aggregations are supported
+    // IMPORTANT: If there are ANY non-COUNT aggregates (MAX, AVG, MIN, SUM),
+    // we CANNOT use transaction log because:
+    // - MAX/AVG/MIN/SUM require searching tantivy
+    // - COUNT must count the SAME documents that MAX/AVG/MIN/SUM operate on
+    // - Therefore, ALL aggregates must go to tantivy together
     val onlyCountAggregations = aggregation.aggregateExpressions.forall {
       case _: Count | _: CountStar => true
       case _                       => false
     }
 
     if (!onlyCountAggregations) {
+      logger.debug(s"SCAN BUILDER: GROUP BY has non-COUNT aggregates - routing all aggregates to tantivy")
       return false
     }
 
