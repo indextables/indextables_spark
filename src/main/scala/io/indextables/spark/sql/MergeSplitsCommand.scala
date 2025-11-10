@@ -1324,6 +1324,60 @@ class MergeSplitsExecutor(
     groups.toSeq
   }
 
+  /**
+   * Count the number of valid merge groups that would be created without performing the actual merge.
+   * This is used by merge-on-write evaluation to determine if merge is worthwhile.
+   *
+   * This method uses the exact same logic as merge() to ensure consistency.
+   *
+   * @return Number of valid merge groups (with >= 2 files each)
+   */
+  def countMergeGroups(): Int = {
+    try {
+      // Get current metadata
+      val metadata = transactionLog.getMetadata()
+
+      // Get current files from transaction log
+      val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
+
+      // Filter out files in cooldown period (if tracking enabled)
+      val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
+      val currentFiles = if (trackingEnabled) {
+        transactionLog.filterFilesInCooldown(allFiles)
+      } else {
+        allFiles
+      }
+
+      // Group files by partition
+      val partitionsToMerge = currentFiles.groupBy(_.partitionValues).toSeq
+
+      // Apply partition predicates if specified
+      val filteredPartitions = if (partitionPredicates.nonEmpty) {
+        val partitionSchema = StructType(
+          metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
+        )
+        applyPartitionPredicates(partitionsToMerge, partitionSchema)
+      } else {
+        partitionsToMerge
+      }
+
+      // Count merge groups in each partition
+      val totalGroups = filteredPartitions.map {
+        case (partitionValues, files) =>
+          val groups = findMergeableGroups(partitionValues, files)
+          // Filter to valid groups (>= 2 files)
+          groups.count(_.files.length >= 2)
+      }.sum
+
+      totalGroups
+
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to count merge groups: ${e.getMessage}")
+        0
+    }
+  }
+
 
 
 

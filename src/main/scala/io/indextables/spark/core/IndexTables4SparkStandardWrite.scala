@@ -468,8 +468,8 @@ class IndexTables4SparkStandardWrite(
 
       logger.info(s"Merge threshold: $threshold merge groups (parallelism: $defaultParallelism × multiplier: $mergeGroupMultiplier)")
 
-      // Count mergeable groups from transaction log
-      val mergeGroups = countMergeGroupsFromTransactionLog(targetSize)
+      // Count mergeable groups using MergeSplitsExecutor (dry-run to get accurate count)
+      val mergeGroups = countMergeGroupsUsingExecutor(targetSize, writeOptions)
 
       logger.info(s"Found $mergeGroups mergeable groups (threshold: $threshold)")
 
@@ -488,51 +488,48 @@ class IndexTables4SparkStandardWrite(
   }
 
   /**
-   * Count number of merge groups that would be created based on current transaction log state.
-   * Uses the same logic as MERGE SPLITS command to determine groups.
+   * Count number of merge groups using MergeSplitsExecutor's dry-run logic.
+   * This ensures we use the exact same algorithm as the actual merge operation,
+   * avoiding any discrepancies between decision-making and execution.
    */
-  private def countMergeGroupsFromTransactionLog(targetSizeStr: String): Int = {
+  private def countMergeGroupsUsingExecutor(
+    targetSizeStr: String,
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
+  ): Int = {
     try {
+      import io.indextables.spark.sql.MergeSplitsExecutor
+      import scala.jdk.CollectionConverters._
+
       val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
-      val allFiles = transactionLog.listFiles()
+      val spark = org.apache.spark.sql.SparkSession.active
 
-      // Group by partition
-      val partitionedFiles = allFiles.groupBy(_.partitionValues)
+      // Extract options to pass to executor (same as executeMergeSplitsCommand)
+      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
 
-      var totalGroups = 0
+      // Merge with serializedHadoopConf to include credentials
+      val optionsToPass = serializedHadoopConf ++ optionsFromWrite
 
-      // Count groups in each partition
-      partitionedFiles.foreach { case (partitionValues, files) =>
-        // Filter files that are below target size (candidates for merging)
-        val mergeableSplits = files.filter(_.size < targetSizeBytes).sortBy(_.modificationTime)
+      // Create executor with same parameters as actual merge
+      val executor = new MergeSplitsExecutor(
+        sparkSession = spark,
+        transactionLog = transactionLog,
+        tablePath = tablePath,
+        partitionPredicates = Seq.empty, // No partition filtering for count
+        targetSize = targetSizeBytes,
+        maxGroups = None, // No limit for counting
+        preCommitMerge = false,
+        overrideOptions = Some(optionsToPass)
+      )
 
-        // Simulate bin-packing to count groups
-        var currentGroupSize = 0L
-        var groupCount = 0
-
-        mergeableSplits.foreach { file =>
-          if (currentGroupSize + file.size <= targetSizeBytes) {
-            currentGroupSize += file.size
-          } else {
-            // Start new group
-            groupCount += 1
-            currentGroupSize = file.size
-          }
-        }
-
-        // Count the last group if it has content
-        if (currentGroupSize > 0) {
-          groupCount += 1
-        }
-
-        totalGroups += groupCount
-      }
-
-      totalGroups
+      // Use the dry-run method to count groups
+      val count = executor.countMergeGroups()
+      logger.debug(s"MergeSplitsExecutor counted $count merge groups")
+      count
 
     } catch {
       case e: Exception =>
-        logger.warn(s"Failed to count merge groups: ${e.getMessage}")
+        logger.warn(s"Failed to count merge groups using executor: ${e.getMessage}", e)
         0
     }
   }
