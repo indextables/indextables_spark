@@ -336,15 +336,10 @@ class AzureCloudStorageProvider(
     val results = ArrayBuffer[CloudFileInfo]()
 
     try {
-      val blobs: PagedIterable[BlobItem] =
-        if (recursive) {
-          containerClient.listBlobs()
-        } else {
-          // Non-recursive: list only blobs with matching prefix
-          import com.azure.storage.blob.models.ListBlobsOptions
-          val options = new ListBlobsOptions().setPrefix(prefix)
-          containerClient.listBlobs(options, null)
-        }
+      // Always use prefix filter to only list blobs under the specified path
+      import com.azure.storage.blob.models.ListBlobsOptions
+      val options = new ListBlobsOptions().setPrefix(prefix)
+      val blobs: PagedIterable[BlobItem] = containerClient.listBlobs(options, null)
 
       blobs.forEach { blobItem =>
         val properties = blobItem.getProperties

@@ -218,6 +218,39 @@ MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;
 MERGE SPLITS 's3://bucket/path' WHERE date = '2024-01-01' TARGET SIZE 100M;
 ```
 
+### Purge Orphaned Splits
+```sql
+-- Register extensions (same as above)
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Purge operations (removes split files not referenced in transaction log)
+PURGE ORPHANED SPLITS 's3://bucket/path' DRY RUN;  -- Preview what would be deleted
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 7 DAYS;  -- Delete files older than 7 days
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS;  -- Same as above (7*24=168)
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 14 DAYS DRY RUN;  -- Preview with custom retention
+
+-- Configuration
+spark.indextables.purge.defaultRetentionHours: 168 (7 days)
+spark.indextables.purge.minRetentionHours: 24 (safety check)
+spark.indextables.purge.retentionCheckEnabled: true
+spark.indextables.purge.parallelism: <auto>
+spark.indextables.purge.maxFilesToDelete: 1000000
+spark.indextables.purge.deleteRetries: 3
+```
+
+**Common scenarios:**
+- After failed writes that leave orphaned split files
+- After MERGE SPLITS operations
+- Regular maintenance (weekly/monthly cleanup)
+- Before archiving or migrating tables
+
+**Safety features:**
+- Minimum retention period enforced (default 24 hours)
+- DRY RUN mode shows preview before deletion
+- Distributed deletion across executors for scalability
+- Retry logic handles transient cloud storage errors
+- LEFT ANTI JOIN ensures only truly orphaned files deleted
+
 ## Azure Multi-Cloud Examples
 
 ### Basic Azure Write/Read

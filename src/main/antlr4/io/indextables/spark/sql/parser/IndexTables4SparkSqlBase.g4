@@ -47,6 +47,9 @@ statement
         (TARGET SIZE targetSize=alphanumericValue)?
         (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
+    | PURGE ORPHANED SPLITS (path=STRING | table=qualifiedName)
+        (OLDER THAN retentionNumber=INTEGER_VALUE retentionUnit=(DAYS | HOURS))?
+        (DRY RUN)?                                              #purgeOrphanedSplits
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
@@ -83,7 +86,7 @@ quotedIdentifier
 
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | FOR | TRANSACTION | LOG | MAX | GROUPS
-    | REPAIR | INDEXFILES | AT | LOCATION
+    | REPAIR | INDEXFILES | AT | LOCATION | PURGE | ORPHANED | OLDER | THAN | DAYS | HOURS | DRY | RUN
     ;
 
 // Keywords (case-insensitive)
@@ -108,6 +111,14 @@ REPAIR: [Rr][Ee][Pp][Aa][Ii][Rr];
 INDEXFILES: [Ii][Nn][Dd][Ee][Xx][Ff][Ii][Ll][Ee][Ss];
 AT: [Aa][Tt];
 LOCATION: [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn];
+PURGE: [Pp][Uu][Rr][Gg][Ee];
+ORPHANED: [Oo][Rr][Pp][Hh][Aa][Nn][Ee][Dd];
+OLDER: [Oo][Ll][Dd][Ee][Rr];
+THAN: [Tt][Hh][Aa][Nn];
+DAYS: [Dd][Aa][Yy][Ss];
+HOURS: [Hh][Oo][Uu][Rr][Ss];
+DRY: [Dd][Rr][Yy];
+RUN: [Rr][Uu][Nn];
 
 // Literals
 STRING

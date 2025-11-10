@@ -27,6 +27,7 @@ import io.indextables.spark.sql.{
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
+  PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
@@ -149,6 +150,65 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     } catch {
       case e: Exception =>
         logger.error(s"Exception in visitMergeSplitsTable: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitPurgeOrphanedSplits(ctx: PurgeOrphanedSplitsContext): LogicalPlan = {
+    logger.debug(s"visitPurgeOrphanedSplits called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val tablePath = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        pathStr
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("PURGE ORPHANED SPLITS requires either a path or table identifier")
+      }
+
+      // Extract retention period (convert to hours)
+      val retentionHours: Option[Long] = if (ctx.retentionNumber != null && ctx.retentionUnit != null) {
+        val number = ctx.retentionNumber.getText.toLong
+        val unit = ctx.retentionUnit.getText.toUpperCase
+
+        val hours = unit match {
+          case "DAYS" => number * 24
+          case "HOURS" => number
+          case other => throw new IllegalArgumentException(s"Invalid retention unit: $other")
+        }
+
+        logger.debug(s"Found retention: $number $unit = $hours hours")
+        Some(hours)
+      } else {
+        logger.debug("No retention period specified, will use default")
+        None
+      }
+
+      // Extract DRY RUN flag
+      val dryRun = ctx.DRY() != null && ctx.RUN() != null
+      logger.debug(s"DRY RUN flag: $dryRun")
+
+      // Create command (use OneRowRelation as child - standard pattern for commands that don't have logical plan children)
+      logger.debug(s"Creating PurgeOrphanedSplitsCommand with tablePath=$tablePath, retentionHours=$retentionHours, dryRun=$dryRun")
+      val result = PurgeOrphanedSplitsCommand(
+        child = org.apache.spark.sql.catalyst.plans.logical.OneRowRelation(),
+        tablePath = tablePath,
+        retentionHours = retentionHours,
+        dryRun = dryRun
+      )
+      logger.debug(s"Created PurgeOrphanedSplitsCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitPurgeOrphanedSplits: ${e.getMessage}", e)
         throw e
     }
   }
