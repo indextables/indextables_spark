@@ -698,12 +698,12 @@ class MergeSplitsExecutor(
         logger.info(s"Found ${groups.length} potential merge groups in partition $partitionValues")
 
         // Double-check: filter out any single-file groups that might have slipped through
-        println(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
+        logger.debug(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
         groups.foreach { group =>
-          println(s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}")
+          logger.debug(s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}")
         }
         val validGroups = groups.filter(_.files.length >= 2)
-        println(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
+        logger.debug(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
         if (groups.length != validGroups.length) {
           logger.warn(
             s"Filtered out ${groups.length - validGroups.length} single-file groups from partition $partitionValues"
@@ -829,7 +829,7 @@ class MergeSplitsExecutor(
               // Set descriptive names for Spark UI
               val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
               val jobDescription =
-                f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits ($totalSizeGB%.2f GB)"
+                f"MERGE SPLITS Batch $batchNum/${batches.length}: $totalSplits splits merging to ${batch.length} splits ($totalSizeGB%.2f GB)"
               val stageName = f"Merge Batch $batchNum/${batches.length}: ${batch.length} groups, $totalSplits splits"
 
               sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
@@ -1237,23 +1237,23 @@ class MergeSplitsExecutor(
       }
     }
 
-    println(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $targetSize bytes)")
+    logger.debug(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $targetSize bytes)")
 
     // If we have fewer than 2 mergeable files, no groups can be created
     if (mergeableFiles.length < 2) {
-      println(s"MERGE DEBUG: Cannot create merge groups - need at least 2 files but found ${mergeableFiles.length}")
+      logger.debug(s"MERGE DEBUG: Cannot create merge groups - need at least 2 files but found ${mergeableFiles.length}")
       return groups.toSeq
     }
 
     for ((file, index) <- mergeableFiles.zipWithIndex) {
-      println(s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)")
+      logger.debug(s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)")
 
       // Check if adding this file would exceed target size
       if (currentGroupSize > 0 && currentGroupSize + file.size > targetSize) {
-        println(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
+        logger.debug(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
 
         // Current group is full, save it if it has multiple files
-        println(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
+        logger.debug(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
         if (currentGroup.length > 1) {
           // VALIDATION: Ensure all files in the group have identical partition values
           val groupFiles        = currentGroup.clone().toSeq
@@ -1269,21 +1269,21 @@ class MergeSplitsExecutor(
           }
 
           groups += MergeGroup(partitionValues, groupFiles)
-          println(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files ($currentGroupSize bytes): ${currentGroup.map(_.path).mkString(", ")}")
+          logger.debug(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files ($currentGroupSize bytes): ${currentGroup.map(_.path).mkString(", ")}")
         } else {
-          println(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)")
+          logger.debug(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)")
         }
 
         // Start new group
         currentGroup.clear()
         currentGroup += file
         currentGroupSize = file.size
-        println(s"MERGE DEBUG: Started new group with ${file.path} (${file.size} bytes)")
+        logger.debug(s"MERGE DEBUG: Started new group with ${file.path} (${file.size} bytes)")
       } else {
         // Add file to current group
         currentGroup += file
         currentGroupSize += file.size
-        println(s"MERGE DEBUG: Added ${file.path} (${file.size} bytes) to current group. Group now has ${currentGroup.length} files ($currentGroupSize bytes total)")
+        logger.debug(s"MERGE DEBUG: Added ${file.path} (${file.size} bytes) to current group. Group now has ${currentGroup.length} files ($currentGroupSize bytes total)")
       }
     }
 
@@ -1319,7 +1319,7 @@ class MergeSplitsExecutor(
       }
     }
 
-    println(s"MERGE DEBUG: Created ${groups.length} merge groups from ${mergeableFiles.length} mergeable files")
+    logger.debug(s"MERGE DEBUG: Created ${groups.length} merge groups from ${mergeableFiles.length} mergeable files")
     logger.info(s"✅ All ${groups.length} merge groups passed partition consistency validation")
     groups.toSeq
   }

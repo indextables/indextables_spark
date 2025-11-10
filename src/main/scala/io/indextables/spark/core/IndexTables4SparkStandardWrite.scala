@@ -347,7 +347,7 @@ class IndexTables4SparkStandardWrite(
 
         // The docMappingJson is directly an array of field definitions
         if (existingMapping.isArray) {
-          logger.warn(
+          logger.debug(
             s"VALIDATION DEBUG: Found existing fields array with ${existingMapping.size()} fields, processing..."
           )
           val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(
