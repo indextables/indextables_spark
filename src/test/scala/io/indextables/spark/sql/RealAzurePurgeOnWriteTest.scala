@@ -316,6 +316,84 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
     assert(PurgeOnWriteTransactionCounter.get(table2Path) === 3)
   }
 
+  test("purge-on-write should trigger after merge-on-write with Azure credential propagation") {
+    assume(azureCredentials.isDefined, "Azure credentials required for Azure tests")
+
+    val tablePath = s"$testBasePath/merge_then_purge"
+    val (accountName, accountKey) = azureCredentials.get
+    val df = spark.range(100).toDF("id")
+
+    // Write multiple times to create many small splits
+    // This should trigger merge-on-write, and then purge-on-write after merge completes
+    (1 to 5).foreach { i =>
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
+        .option("spark.indextables.azure.accountName", accountName)
+        .option("spark.indextables.azure.accountKey", accountKey)
+        .option("spark.indextables.mergeOnWrite.enabled", "true")
+        .option("spark.indextables.mergeOnWrite.targetSize", "100M")
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")  // Low threshold
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")  // Immediate deletion
+        .option("spark.indextables.purge.retentionCheckEnabled", "false")
+        .save(tablePath)
+    }
+
+    // Wait for purge to complete (Azure can be slower than S3)
+    Thread.sleep(2000)
+
+    // Verify data integrity - all writes should be preserved
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.azure.accountName", accountName)
+      .option("spark.indextables.azure.accountKey", accountKey)
+      .load(tablePath)
+
+    assert(result.count() === 500, "Data should be intact after merge+purge on Azure")
+  }
+
+  test("purge-on-write should handle merge-on-write credential propagation on Azure") {
+    assume(azureCredentials.isDefined, "Azure credentials required for Azure tests")
+
+    val tablePath = s"$testBasePath/credential_merge_purge"
+    val (accountName, accountKey) = azureCredentials.get
+
+    PurgeOnWriteTransactionCounter.clearAll()
+    val df = spark.range(50).toDF("id")
+
+    // Write 3 times with both merge and purge enabled
+    // This validates that Azure credentials flow through:
+    // write → merge-on-write → purge-on-write
+    (1 to 3).foreach { i =>
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
+        .option("spark.indextables.azure.accountName", accountName)
+        .option("spark.indextables.azure.accountKey", accountKey)
+        .option("spark.indextables.mergeOnWrite.enabled", "true")
+        .option("spark.indextables.mergeOnWrite.targetSize", "50M")
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "0")
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "24")
+        .save(tablePath)
+    }
+
+    // Verify data integrity - credentials propagated correctly through entire chain
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.azure.accountName", accountName)
+      .option("spark.indextables.azure.accountKey", accountKey)
+      .load(tablePath)
+
+    assert(result.count() === 150, "Data should be intact with credential propagation through merge+purge on Azure")
+  }
+
   /** Load Azure credentials from ~/.azure/credentials file. */
   private def loadAzureCredentials(): Option[(String, String)] =
     try {

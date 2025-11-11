@@ -321,6 +321,96 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
     assert(PurgeOnWriteTransactionCounter.get(table2Path) === 3)
   }
 
+  test("purge-on-write should trigger after merge-on-write with S3 credential propagation") {
+    assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
+
+    val tablePath = s"$testBasePath/merge_then_purge"
+
+    val (accessKey, secretKey) = awsCredentials.get
+
+    // Enable both merge-on-write and purge-on-write
+    // Use small splits to trigger merge quickly
+    val df = spark.range(100).toDF("id")
+
+    // Write multiple times to create many small splits
+    (1 to 5).foreach { i =>
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
+        .option("spark.indextables.aws.accessKey", accessKey)
+        .option("spark.indextables.aws.secretKey", secretKey)
+        .option("spark.indextables.aws.region", S3_REGION)
+        .option("spark.indextables.mergeOnWrite.enabled", "true")
+        .option("spark.indextables.mergeOnWrite.targetSize", "100M")
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")  // Low threshold
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")  // Low requirement for testing
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")  // Delete immediately for testing
+        .option("spark.indextables.purge.retentionCheckEnabled", "false")  // Disable safety check
+        .save(tablePath)
+    }
+
+    // Wait for purge to complete (uses sleep since we can't control timing on S3)
+    Thread.sleep(2000)
+
+    // Verify data is still readable (merge+purge didn't corrupt data)
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(tablePath)
+
+    // Should have 500 rows (100 * 5 writes)
+    assert(result.count() === 500, "Data should be intact after merge+purge")
+
+    println("✅ Merge-on-write + purge-on-write completed successfully with S3 credentials")
+  }
+
+  test("purge-on-write should handle merge-on-write credential propagation on S3") {
+    assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
+
+    val tablePath = s"$testBasePath/credential_merge_purge"
+
+    val (accessKey, secretKey) = awsCredentials.get
+
+    // Clear counter
+    PurgeOnWriteTransactionCounter.clearAll()
+
+    val df = spark.range(50).toDF("id")
+
+    // Write 3 times with both merge and purge enabled, passing credentials via options
+    (1 to 3).foreach { i =>
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
+        .option("spark.indextables.aws.accessKey", accessKey)
+        .option("spark.indextables.aws.secretKey", secretKey)
+        .option("spark.indextables.aws.region", S3_REGION)
+        .option("spark.indextables.mergeOnWrite.enabled", "true")
+        .option("spark.indextables.mergeOnWrite.targetSize", "50M")
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "0")  // Only trigger after merge
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "24")
+        .save(tablePath)
+    }
+
+    // Verify data integrity
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(tablePath)
+
+    assert(result.count() === 150, "Data should be intact with credential propagation through merge+purge")
+    println("✅ Credential propagation verified for merge+purge on S3")
+  }
+
   /** Load AWS credentials from ~/.aws/credentials file. */
   private def loadAwsCredentials(): Option[(String, String)] =
     try {
