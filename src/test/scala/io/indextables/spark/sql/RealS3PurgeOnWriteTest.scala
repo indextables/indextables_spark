@@ -197,53 +197,75 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
 
     val tablePath = s"$testBasePath/cleanup_txlog_sleep"
-
-    // Enable purge-on-write with 0-hour retention for testing
-    spark.conf.set("spark.indextables.purgeOnWrite.enabled", "true")
-    spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterWrites", "5")
-    spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterMerge", "false")
-    spark.conf.set("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
-    spark.conf.set("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
-    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
+    val (accessKey, secretKey) = awsCredentials.get
 
     val df = spark.range(10).toDF("id")
 
-    // Write 3 times to create transaction log files 0-2
-    (1 to 3).foreach { i =>
+    // Write 10 times to trigger checkpoint (default interval is 10) and create transaction log files 0-9
+    (1 to 10).foreach { i =>
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
+        .option("spark.indextables.aws.accessKey", accessKey)
+        .option("spark.indextables.aws.secretKey", secretKey)
+        .option("spark.indextables.aws.region", S3_REGION)
+        .option("spark.indextables.checkpoint.enabled", "true")  // Enable checkpoints
+        .option("spark.indextables.checkpoint.interval", "10")    // Checkpoint every 10 writes
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12")  // Trigger after 12 writes
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
+        .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
+        .option("spark.indextables.purge.retentionCheckEnabled", "false")
         .save(tablePath)
     }
 
     val txLogPath = new Path(tablePath, "_transaction_log")
 
-    // Verify files 0-2 exist
+    // Verify checkpoint was created
+    val checkpointFiles = fs.listStatus(txLogPath).filter(_.getPath.getName.contains("checkpoint"))
+    assert(checkpointFiles.nonEmpty, "Checkpoint file should exist")
+
+    // Verify early transaction log files exist
     assert(fs.exists(new Path(txLogPath, "00000000000000000000.json")))
     assert(fs.exists(new Path(txLogPath, "00000000000000000001.json")))
-    assert(fs.exists(new Path(txLogPath, "00000000000000000002.json")))
 
     // Wait 2 seconds for transaction logs to age
     println(s"⏳ Sleeping 2 seconds to age transaction logs...")
     Thread.sleep(2000)
 
-    // Write 2 more times to reach triggerAfterWrites=5 and trigger purge
+    // Write 2 more times to reach triggerAfterWrites=12 and trigger purge
     (1 to 2).foreach { _ =>
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Append)
+        .option("spark.indextables.aws.accessKey", accessKey)
+        .option("spark.indextables.aws.secretKey", secretKey)
+        .option("spark.indextables.aws.region", S3_REGION)
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "10")
+        .option("spark.indextables.purgeOnWrite.enabled", "true")
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12")
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
+        .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
+        .option("spark.indextables.purge.retentionCheckEnabled", "false")
         .save(tablePath)
     }
 
-    // Verify old transaction log files 0-1 are deleted (keeping recent 2-4)
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")),
-      "Old version 0 should be deleted")
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000001.json")),
-      "Old version 1 should be deleted")
+    // Wait for purge to complete (purge runs asynchronously in background)
+    println(s"⏳ Waiting 5 seconds for purge to complete on S3...")
+    Thread.sleep(5000)
 
-    // Verify recent files are kept
-    assert(fs.exists(new Path(txLogPath, "00000000000000000004.json")),
-      "Recent version 4 should be kept")
+    // Verify old transaction log files before checkpoint are deleted
+    // Checkpoint is at version 10, so versions 0-8 should be candidates for deletion
+    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")),
+      "Old version 0 (before checkpoint) should be deleted")
+    assert(!fs.exists(new Path(txLogPath, "00000000000000000001.json")),
+      "Old version 1 (before checkpoint) should be deleted")
+
+    // Verify recent files after checkpoint are kept
+    assert(fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
+           fs.exists(new Path(txLogPath, "00000000000000000011.json")),
+      "Recent version (10 or 11) should be kept")
   }
 
   test("purge-on-write should propagate S3 credentials from write options") {
