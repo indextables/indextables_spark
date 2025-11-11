@@ -864,16 +864,39 @@ class OptimizedTransactionLog(
     val addActions = if (parallelReadEnabled && versionsToProcess.size > 10) {
       // Use parallel reconstruction for remaining versions
       val newFiles = parallelOps.reconstructStateParallel(versionsToProcess)
-      // Merge checkpoint state with new files
-      (initialFiles.values.toSeq ++ newFiles).groupBy(_.path).values.map(_.last).toSeq
+      // BUG FIX: Apply the changes from versionsToProcess on top of checkpoint state
+      // Don't just concatenate and take .last - we need to handle REMOVE actions properly
+      val finalFiles = scala.collection.mutable.HashMap[String, AddAction]()
+      finalFiles ++= initialFiles
+      // Now apply changes from versionsToProcess - this will override adds and handle removes
+      for (version <- versionsToProcess.sorted) {
+        val actions = readVersionOptimized(version)
+        actions.foreach {
+          case add: AddAction       => finalFiles(add.path) = add
+          case remove: RemoveAction => finalFiles.remove(remove.path)
+          case _                    => // Ignore other actions
+        }
+      }
+      finalFiles.values.toSeq
     } else {
       // Standard reconstruction with consistent versions
       // Note: reconstructStateStandard handles checkpoint internally, so we pass all versions
       // but also pass initial files from checkpoint
       if (initialFiles.nonEmpty) {
-        // Merge checkpoint state with reconstructed state
-        val newFiles = reconstructStateFromVersions(versionsToProcess)
-        (initialFiles.values.toSeq ++ newFiles).groupBy(_.path).values.map(_.last).toSeq
+        // BUG FIX: Apply the changes from versionsToProcess on top of checkpoint state
+        // Don't use reconstructStateFromVersions and merge - that loses REMOVE information
+        val finalFiles = scala.collection.mutable.HashMap[String, AddAction]()
+        finalFiles ++= initialFiles
+        // Now apply changes from versionsToProcess
+        for (version <- versionsToProcess.sorted) {
+          val actions = readVersionOptimized(version)
+          actions.foreach {
+            case add: AddAction       => finalFiles(add.path) = add
+            case remove: RemoveAction => finalFiles.remove(remove.path)
+            case _                    => // Ignore other actions
+          }
+        }
+        finalFiles.values.toSeq
       } else {
         reconstructStateStandard(versions)
       }
