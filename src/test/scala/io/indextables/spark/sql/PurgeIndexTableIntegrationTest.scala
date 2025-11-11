@@ -27,10 +27,10 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.{FileSystem, Path}
 
 /**
- * Integration tests for PURGE ORPHANED SPLITS command.
+ * Integration tests for PURGE INDEXTABLE command.
  * Tests actual file operations with orphaned splits.
  */
-class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
+class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
   var tempDir: String = _
@@ -71,7 +71,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     file.delete()
   }
 
-  test("PURGE ORPHANED SPLITS should identify and delete orphaned split files") {
+  test("PURGE INDEXTABLE should identify and delete orphaned split files") {
     val tablePath = s"$tempDir/test_table"
 
     // Write initial data
@@ -114,12 +114,12 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(fs.exists(orphanedCrc1))
 
     // Run DRY RUN first to preview
-    val dryRunResult = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' DRY RUN").collect()
+    val dryRunResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     assert(dryRunResult.length == 1)
     val dryRunMetrics = dryRunResult(0).getStruct(1)
     assert(dryRunMetrics.getString(0) == "DRY_RUN")
     assert(dryRunMetrics.getLong(1) == 3) // Found 3 orphaned files
-    assert(dryRunMetrics.getBoolean(5) == true) // dry_run flag
+    assert(dryRunMetrics.getBoolean(6) == true) // dry_run flag (field index 6)
 
     // Files should still exist after DRY RUN
     assert(fs.exists(orphanedSplit1))
@@ -127,7 +127,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(fs.exists(orphanedCrc1))
 
     // Now actually purge
-    val purgeResult = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     assert(purgeResult.length == 1)
     val metrics = purgeResult(0).getStruct(1)
     assert(metrics.getString(0) == "SUCCESS")
@@ -144,7 +144,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(afterRead.count() == 3)
   }
 
-  test("PURGE ORPHANED SPLITS should respect retention period") {
+  test("PURGE INDEXTABLE should respect retention period") {
 
     val tablePath = s"$tempDir/retention_test"
 
@@ -169,7 +169,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     fs.setTimes(recentOrphan, recentTime, -1)
 
     // Purge with 7 day retention
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete old file but keep recent file
@@ -181,20 +181,20 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(metrics.getLong(2) == 1) // Deleted only 1 (the old one)
   }
 
-  test("PURGE ORPHANED SPLITS should handle empty tables") {
+  test("PURGE INDEXTABLE should handle empty tables") {
     val tablePath = s"$tempDir/empty_table"
 
     // Create empty table directory (no transaction log)
     fs.mkdirs(new Path(tablePath))
 
     // Should handle gracefully
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' DRY RUN").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     val metrics = result(0).getStruct(1)
     assert(metrics.getString(0) == "DRY_RUN")
     // Should not fail, just report no files
   }
 
-  test("PURGE ORPHANED SPLITS should not delete files referenced in transaction log") {
+  test("PURGE INDEXTABLE should not delete files referenced in transaction log") {
 
     val tablePath = s"$tempDir/protected_files_test"
 
@@ -227,7 +227,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     validFiles.foreach(f => fs.setTimes(f, oldTime, -1))
 
     // Purge
-    spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
 
     // Valid files should still exist
     validFiles.foreach { file =>
@@ -242,7 +242,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(afterRead.count() == 2)
   }
 
-  test("PURGE ORPHANED SPLITS should enforce minimum retention period") {
+  test("PURGE INDEXTABLE should enforce minimum retention period") {
 
     val tablePath = s"$tempDir/min_retention_test"
 
@@ -254,14 +254,14 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
 
     // Try to purge with less than minimum retention (24 hours)
     val exception = intercept[IllegalArgumentException] {
-      spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 12 HOURS").collect()
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 12 HOURS").collect()
     }
 
     assert(exception.getMessage.contains("less than minimum"))
     assert(exception.getMessage.contains("24 hours"))
   }
 
-  test("PURGE ORPHANED SPLITS should allow override of retention check") {
+  test("PURGE INDEXTABLE should allow override of retention check") {
 
     val tablePath = s"$tempDir/override_retention_test"
 
@@ -275,13 +275,13 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
 
     // Should now allow short retention period
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 1 HOURS DRY RUN").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
     assert(metrics.getString(0) == "DRY_RUN")
     // Should succeed without error
   }
 
-  test("PURGE ORPHANED SPLITS should handle tables with no orphaned files") {
+  test("PURGE INDEXTABLE should handle tables with no orphaned files") {
 
     val tablePath = s"$tempDir/no_orphans_test"
 
@@ -292,16 +292,16 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Purge (should find no orphaned files)
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "SUCCESS")
     assert(metrics.getLong(1) == 0) // Found 0 orphaned files
     assert(metrics.getLong(2) == 0) // Deleted 0 files
-    assert(metrics.getString(7).contains("No orphaned files found"))
+    assert(metrics.getString(8).contains("No orphaned files found")) // message field is at index 8
   }
 
-  test("PURGE ORPHANED SPLITS should respect maxFilesToDelete limit") {
+  test("PURGE INDEXTABLE should respect maxFilesToDelete limit") {
 
     val tablePath = s"$tempDir/max_files_test"
 
@@ -324,7 +324,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     spark.conf.set("spark.indextables.purge.maxFilesToDelete", "5")
 
     // Purge
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete only 5 files
@@ -335,7 +335,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(remainingCount == 5, "Should have 5 remaining orphaned files")
   }
 
-  test("PURGE ORPHANED SPLITS should handle partitioned tables") {
+  test("PURGE INDEXTABLE should handle partitioned tables") {
 
     val tablePath = s"$tempDir/partitioned_test"
 
@@ -365,7 +365,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     fs.setTimes(orphan2, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete orphans from all partitions
@@ -379,7 +379,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(afterRead.count() == 3)
   }
 
-  test("PURGE ORPHANED SPLITS should include both .split and .crc files") {
+  test("PURGE INDEXTABLE should include both .split and .crc files") {
 
     val tablePath = s"$tempDir/split_crc_test"
 
@@ -402,7 +402,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     fs.setTimes(orphanedCrc, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete both .split and .crc
@@ -412,7 +412,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(!fs.exists(orphanedCrc))
   }
 
-  test("PURGE ORPHANED SPLITS should handle multiple writes and orphaned files") {
+  test("PURGE INDEXTABLE should handle multiple writes and orphaned files") {
 
     val tablePath = s"$tempDir/multi_write_test"
 
@@ -440,7 +440,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     fs.setTimes(orphan2, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete both orphaned files
@@ -450,7 +450,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     assert(afterRead.count() == 2)
   }
 
-  test("PURGE ORPHANED SPLITS DRY RUN should not modify any files") {
+  test("PURGE INDEXTABLE DRY RUN should not modify any files") {
 
     val tablePath = s"$tempDir/dry_run_test"
 
@@ -473,7 +473,7 @@ class PurgeOrphanedSplitsIntegrationTest extends AnyFunSuite with BeforeAndAfter
     val beforeCount = fs.listStatus(new Path(tablePath)).length
 
     // Run DRY RUN
-    val result = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 7 DAYS DRY RUN").collect()
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "DRY_RUN")

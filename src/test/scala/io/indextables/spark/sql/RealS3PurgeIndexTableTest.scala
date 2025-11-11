@@ -27,7 +27,7 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import io.indextables.spark.RealS3TestBase
 
 /**
- * Real AWS S3 integration tests for PURGE ORPHANED SPLITS command.
+ * Real AWS S3 integration tests for PURGE INDEXTABLE command.
  *
  * Tests critical functionality specific to S3:
  *   - Modification time handling from S3 API
@@ -38,7 +38,7 @@ import io.indextables.spark.RealS3TestBase
  *
  * Credentials are loaded from ~/.aws/credentials file.
  */
-class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
+class RealS3PurgeIndexTableTest extends RealS3TestBase {
 
   private val S3_BUCKET    = "test-tantivy4sparkbucket"
   private val S3_REGION    = "us-east-2"
@@ -139,7 +139,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
         None
     }
 
-  test("PURGE ORPHANED SPLITS should receive and use S3 modification times correctly") {
+  test("PURGE INDEXTABLE should receive and use S3 modification times correctly") {
     assume(awsCredentials.isDefined, "AWS credentials required for this test")
 
     val tablePath = s"$testBasePath/mod_time_test"
@@ -172,7 +172,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     )
 
     // Purge with 24 hour retention (minimum) - files are too recent to delete
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify purge found orphaned files but didn't delete them (too recent)
@@ -193,7 +193,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     println("✅ S3 modification times correctly received and used for retention filtering")
   }
 
-  test("PURGE ORPHANED SPLITS should handle S3 partitioned tables correctly") {
+  test("PURGE INDEXTABLE should handle S3 partitioned tables correctly") {
     assume(awsCredentials.isDefined, "AWS credentials required for this test")
 
     val tablePath = s"$testBasePath/partitioned_test"
@@ -237,7 +237,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
 
     // Use DRY RUN to verify recursive listing finds files in partitions
     // Note: S3 doesn't support setTimes(), so we can't test with old files
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify both orphaned files were found via recursive S3 listing in partitions
@@ -255,7 +255,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     println("✅ S3 partitioned table recursive listing works correctly")
   }
 
-  test("PURGE ORPHANED SPLITS should handle S3 recursive listing correctly") {
+  test("PURGE INDEXTABLE should handle S3 recursive listing correctly") {
     assume(awsCredentials.isDefined, "AWS credentials required for this test")
 
     val tablePath = s"$testBasePath/recursive_test"
@@ -297,7 +297,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
 
     // Use DRY RUN to verify recursive listing finds files at all depths
     // Note: S3 doesn't support setTimes(), so we can't test with old files
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify both files were found via recursive S3 listing
@@ -314,7 +314,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     println("✅ S3 recursive listing works correctly at all path depths")
   }
 
-  test("PURGE ORPHANED SPLITS DRY RUN should not delete files from S3") {
+  test("PURGE INDEXTABLE DRY RUN should not delete files from S3") {
     assume(awsCredentials.isDefined, "AWS credentials required for this test")
 
     val tablePath = s"$testBasePath/dry_run_test"
@@ -341,7 +341,7 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     )
 
     // Run DRY RUN purge with 24 hour retention (file is too recent)
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify DRY RUN found the orphan but didn't delete it from S3
@@ -353,5 +353,66 @@ class RealS3PurgeOrphanedSplitsTest extends RealS3TestBase {
     assert(fs.exists(orphan), "Orphaned file should still exist in S3 after DRY RUN")
 
     println("✅ S3 DRY RUN mode works correctly")
+  }
+
+  test("PURGE INDEXTABLE should delete old files from S3 using short retention and sleep") {
+    assume(awsCredentials.isDefined, "AWS credentials required for this test")
+
+    val tablePath = s"$testBasePath/short_retention_test"
+
+    // Set very short retention period (1 second = 1000ms)
+    spark.conf.set("spark.indextables.logRetention.duration", "1000")
+
+    // Write data
+    val sparkSession = spark
+    import sparkSession.implicits._
+    val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+
+    // Create orphaned files in S3
+    val orphan1 = new Path(s"$tablePath/orphan1_${UUID.randomUUID()}.split")
+    val orphan2 = new Path(s"$tablePath/orphan2_${UUID.randomUUID()}.split")
+
+    fs.create(orphan1).close()
+    fs.create(orphan2).close()
+
+    // Verify files were created and have recent modification times
+    val orphan1Status = fs.getFileStatus(orphan1)
+    val orphan2Status = fs.getFileStatus(orphan2)
+
+    println(s"📅 Created orphaned files in S3:")
+    println(s"   - $orphan1 (modified: ${new java.util.Date(orphan1Status.getModificationTime)})")
+    println(s"   - $orphan2 (modified: ${new java.util.Date(orphan2Status.getModificationTime)})")
+
+    // Wait 2 seconds for files to exceed 1-second retention period
+    println(s"⏳ Sleeping 2 seconds to age files past 1-second retention period...")
+    Thread.sleep(2000)
+
+    // Purge with OLDER THAN 1 HOURS (files are 2+ seconds old, which is > 1 hour)
+    // NOTE: The retention period check compares file age against the HOURS parameter
+    // Using 1 HOURS means files must be older than 1 hour, but our files are only 2 seconds old
+    // Let's use a very small value: OLDER THAN 0 HOURS means delete immediately if age > 0
+    // Actually, minimum is enforced, so we need to disable the check
+    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
+    val metrics = result(0).getStruct(1)
+
+    println(s"📊 Purge results:")
+    println(s"   - Found: ${metrics.getLong(1)}")
+    println(s"   - Deleted: ${metrics.getLong(2)}")
+
+    // Verify purge found and deleted both orphaned files
+    assert(metrics.getLong(1) == 2, s"Expected 2 orphaned files found, got ${metrics.getLong(1)}")
+    assert(metrics.getLong(2) == 2, s"Expected 2 files deleted (aged past 1 second), got ${metrics.getLong(2)}")
+
+    // Verify both files no longer exist in S3
+    assert(!fs.exists(orphan1), "Old orphan1 should be deleted from S3")
+    assert(!fs.exists(orphan2), "Old orphan2 should be deleted from S3")
+
+    // Verify table data is intact
+    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(afterRead.count() == 3, "Table should still have 3 rows")
+
+    println("✅ S3 purge with short retention and sleep successfully deleted old files")
   }
 }

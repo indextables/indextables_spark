@@ -321,24 +321,38 @@ class TransactionLog(
   def getSchema(): Option[StructType] =
     // Legacy Hadoop implementation
     Try {
-      val versions = getVersions()
-      if (versions.nonEmpty) {
-        val actions = readVersion(versions.head)
-        actions.collectFirst {
+      // Try checkpoint first if available - this allows reading even when early versions are deleted
+      val metadataOpt = checkpoint.flatMap(_.getActionsFromCheckpoint()).flatMap { checkpointActions =>
+        checkpointActions.collectFirst {
           case metadata: MetadataAction =>
-            // DEBUG: Log the schema being read from transaction log
-            logger.info(s"Reading schema from transaction log: ${metadata.schemaString}")
+            logger.info(s"Reading schema from checkpoint: ${metadata.schemaString}")
             val deserializedSchema = DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
-            logger.info(s"Deserialized schema: ${deserializedSchema.prettyJson}")
-            deserializedSchema.fields.foreach { field =>
-              logger.info(
-                s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}"
-              )
-            }
+            logger.info(s"Deserialized schema from checkpoint: ${deserializedSchema.prettyJson}")
             deserializedSchema
         }
-      } else {
-        None
+      }
+
+      metadataOpt.orElse {
+        // Fallback to reading from version files
+        val versions = getVersions()
+        if (versions.nonEmpty) {
+          val actions = readVersion(versions.head)
+          actions.collectFirst {
+            case metadata: MetadataAction =>
+              // DEBUG: Log the schema being read from transaction log
+              logger.info(s"Reading schema from transaction log: ${metadata.schemaString}")
+              val deserializedSchema = DataType.fromJson(metadata.schemaString).asInstanceOf[StructType]
+              logger.info(s"Deserialized schema: ${deserializedSchema.prettyJson}")
+              deserializedSchema.fields.foreach { field =>
+                logger.info(
+                  s"Field: ${field.name}, Type: ${field.dataType}, DataType class: ${field.dataType.getClass.getName}"
+                )
+              }
+              deserializedSchema
+          }
+        } else {
+          None
+        }
       }
     }.getOrElse(None)
 
@@ -430,8 +444,9 @@ class TransactionLog(
           val allCurrentActions = getAllCurrentActions(version)
           cp.createCheckpoint(version, allCurrentActions)
 
-          // Clean up old transaction log files after successful checkpoint
-          cp.cleanupOldVersions(version)
+          // Note: Cleanup of old transaction log files is handled explicitly via
+          // PURGE ORPHANED SPLITS command, not automatically during writes.
+          // This gives users control over when cleanup occurs.
         } catch {
           case e: Exception =>
             logger.warn(s"Failed to create checkpoint at version $version", e)
@@ -450,8 +465,36 @@ class TransactionLog(
 
     val versions = getVersions().filter(_ <= upToVersion)
 
-    // Process all versions to get the current state
-    for (version <- versions.sorted) {
+    // Try to start from checkpoint if available - this allows reading even when early versions are deleted
+    val versionsToProcess = checkpoint.flatMap(_.getLastCheckpointVersion()) match {
+      case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
+        logger.info(s"Loading initial state from checkpoint at version $checkpointVersion")
+
+        // Load state from checkpoint
+        checkpoint.flatMap(_.getActionsFromCheckpoint()).foreach { checkpointActions =>
+          checkpointActions.foreach {
+            case protocol: ProtocolAction =>
+              latestProtocol = Some(protocol)
+            case metadata: MetadataAction =>
+              latestMetadata = Some(metadata)
+            case add: AddAction =>
+              activeFiles += add
+            case remove: RemoveAction =>
+              activeFiles --= activeFiles.filter(_.path == remove.path)
+            case _: SkipAction => // Skip actions are transient
+          }
+        }
+
+        logger.info(s"Loaded ${activeFiles.size} files from checkpoint, processing versions after $checkpointVersion")
+        // Only process versions after checkpoint
+        versions.filter(_ > checkpointVersion)
+      case _ =>
+        // No checkpoint or checkpoint not in version range, process all versions
+        versions
+    }
+
+    // Process remaining versions to get the current state
+    for (version <- versionsToProcess.sorted) {
       val actions = readVersion(version)
       actions.foreach {
         case protocol: ProtocolAction =>

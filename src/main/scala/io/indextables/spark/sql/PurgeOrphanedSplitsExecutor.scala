@@ -56,6 +56,7 @@ class PurgeOrphanedSplitsExecutor(
     spark: SparkSession,
     tablePath: String,
     retentionHours: Long,
+    txLogRetentionDuration: Option[Long],
     dryRun: Boolean) {
 
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
@@ -66,6 +67,10 @@ class PurgeOrphanedSplitsExecutor(
     // Step 1: Get transaction log
     val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     val txLog = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
+
+    // Step 2: Clean up old transaction log files FIRST (before orphaned splits)
+    val transactionLogsDeleted = cleanupOldTransactionLogFiles(txLog)
+    logger.info(s"Transaction log cleanup: deleted $transactionLogsDeleted old log files")
 
     val allFiles = txLog.listFiles()
     logger.info(s"Active files in transaction log: ${allFiles.size}")
@@ -82,7 +87,8 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        message = Some("No split files found in table directory")
+        transactionLogsDeleted = transactionLogsDeleted,
+        message = Some(s"No split files found in table directory. Deleted $transactionLogsDeleted old transaction log files.")
       )
     }
 
@@ -103,7 +109,8 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = 0,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        message = Some("No orphaned files found")
+        transactionLogsDeleted = transactionLogsDeleted,
+        message = Some(s"No orphaned files found. Deleted $transactionLogsDeleted old transaction log files.")
       )
     }
 
@@ -121,7 +128,8 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesFound = orphanedCount,
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
-        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours)")
+        transactionLogsDeleted = transactionLogsDeleted,
+        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours). Deleted $transactionLogsDeleted old transaction log files.")
       )
     }
 
@@ -138,11 +146,116 @@ class PurgeOrphanedSplitsExecutor(
       eligibleForDeletion
     }
 
-    // Step 7: Delete or preview
+    // Step 7: Delete or preview orphaned splits
     if (dryRun) {
-      previewDeletion(filesToDelete, eligibleCount, orphanedCount)
+      previewDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
     } else {
-      executeDeletion(filesToDelete, eligibleCount, orphanedCount)
+      executeDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
+    }
+  }
+
+  /**
+   * Clean up old transaction log files based on checkpoint and retention policy.
+   * This is called BEFORE purging orphaned splits.
+   *
+   * @return Number of transaction log files deleted (or would be deleted in DRY RUN)
+   */
+  private def cleanupOldTransactionLogFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long = {
+    try {
+      logger.info(s"Cleaning up old transaction log files (dryRun=$dryRun)...")
+
+      // Get checkpoint version using public API
+      val checkpointVersionOpt = txLog.getLastCheckpointVersion()
+
+      checkpointVersionOpt match {
+        case Some(checkpointVersion) =>
+          // Get retention configuration - use explicit parameter if provided, otherwise fall back to config
+          val logRetentionDuration = txLogRetentionDuration.getOrElse {
+            spark.conf
+              .getOption("spark.indextables.logRetention.duration")
+              .map(_.toLong)
+              .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+          }
+
+          val currentTime = System.currentTimeMillis()
+          val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+          // Use CloudStorageProvider for multi-cloud support
+          val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+          val provider = CloudStorageProviderFactory.createProvider(
+            transactionLogPath.toString,
+            emptyMap,
+            spark.sparkContext.hadoopConfiguration
+          )
+
+          try {
+            // List all transaction log files and determine current version
+            val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+
+            // Extract version numbers from .json files (excluding checkpoints)
+            val versions = allFiles
+              .map(f => new Path(f.path).getName)
+              .filter(_.endsWith(".json"))
+              .filterNot(_.contains("checkpoint"))
+              .filterNot(_.startsWith("_"))
+              .map(_.replace(".json", "").toLong)
+
+            val currentVersion = if (versions.nonEmpty) versions.max else 0L
+
+            logger.info(s"Cleanup: checkpoint=$checkpointVersion, current=$currentVersion, retention=${logRetentionDuration}ms")
+
+            // Only cleanup versions older than checkpoint
+            val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
+
+            var deletedCount = 0L
+
+            versionsToCheck.foreach { version =>
+              val versionFileName = f"$version%020d.json"
+
+              allFiles.find(f => new Path(f.path).getName == versionFileName) match {
+                case Some(fileInfo) =>
+                  val fileAge = currentTime - fileInfo.modificationTime
+
+                  if (fileAge > logRetentionDuration) {
+                    if (dryRun) {
+                      logger.info(s"DRY RUN: Would delete transaction log file: $versionFileName (age: ${fileAge / 1000}s)")
+                      deletedCount += 1
+                    } else {
+                      if (provider.deleteFile(fileInfo.path)) {
+                        deletedCount += 1
+                        logger.info(s"Deleted transaction log file: $versionFileName (age: ${fileAge / 1000}s)")
+                      }
+                    }
+                  } else {
+                    logger.debug(s"Skipping transaction log file $versionFileName (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)")
+                  }
+                case None =>
+                  // File doesn't exist, skip
+                  ()
+              }
+            }
+
+            if (deletedCount > 0) {
+              val action = if (dryRun) "Would delete" else "Deleted"
+              logger.info(s"$action $deletedCount old transaction log files (retention: ${logRetentionDuration / 1000}s)")
+            } else {
+              logger.info("No old transaction log files to delete")
+            }
+
+            deletedCount
+          } finally {
+            provider.close()
+          }
+
+        case None =>
+          logger.info("No checkpoint available - skipping transaction log cleanup")
+          0L
+      }
+    } catch {
+      case e: Exception =>
+        // Don't fail the entire purge operation if transaction log cleanup fails
+        logger.warn(s"Failed to clean up old transaction log files: ${e.getMessage}", e)
+        0L
     }
   }
 
@@ -235,7 +348,7 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Preview deletion (DRY RUN mode).
    */
-  private def previewDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long): PurgeResult = {
+  private def previewDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long, transactionLogsDeleted: Long): PurgeResult = {
     val filesToPreview = files.collect()
     val totalSizeBytes = filesToPreview.map(_.size).sum
     val totalSizeMB = totalSizeBytes / (1024.0 * 1024.0)
@@ -267,14 +380,15 @@ class PurgeOrphanedSplitsExecutor(
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = 0,
       sizeMBDeleted = totalSizeMB,
-      message = Some(s"Dry run completed. $count files would be deleted (${totalSizeMB} MB)")
+      transactionLogsDeleted = transactionLogsDeleted,
+      message = Some(s"Dry run completed. $count split files would be deleted (${totalSizeMB} MB). ${transactionLogsDeleted} transaction log files would be deleted.")
     )
   }
 
   /**
    * Execute file deletion (distributed across executors).
    */
-  private def executeDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long): PurgeResult = {
+  private def executeDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long, transactionLogsDeleted: Long): PurgeResult = {
     import spark.implicits._
 
     val filesToDelete = files.collect()
@@ -379,10 +493,11 @@ class PurgeOrphanedSplitsExecutor(
       orphanedFilesFound = orphanedCount,
       orphanedFilesDeleted = totalSuccess,
       sizeMBDeleted = deletedSizeMB,
+      transactionLogsDeleted = transactionLogsDeleted,
       message = if (totalFailed > 0) {
-        Some(s"Successfully deleted $totalSuccess files, $totalFailed files failed to delete")
+        Some(s"Successfully deleted $totalSuccess split files, $totalFailed files failed to delete. Deleted $transactionLogsDeleted transaction log files.")
       } else {
-        Some(s"Successfully deleted $totalSuccess orphaned files (${deletedSizeMB} MB)")
+        Some(s"Successfully deleted $totalSuccess orphaned split files (${deletedSizeMB} MB) and $transactionLogsDeleted transaction log files.")
       }
     )
   }

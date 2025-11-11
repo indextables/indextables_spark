@@ -55,6 +55,7 @@ case class PurgeOrphanedSplitsCommand(
     override val child: LogicalPlan,
     tablePath: String,
     retentionHours: Option[Long],
+    txLogRetentionDuration: Option[Long],
     dryRun: Boolean)
     extends RunnableCommand
     with UnaryNode {
@@ -81,6 +82,7 @@ case class PurgeOrphanedSplitsCommand(
           StructField("orphaned_files_deleted", LongType, nullable = true),
           StructField("size_mb_deleted", DoubleType, nullable = true),
           StructField("retention_hours", LongType, nullable = true),
+          StructField("transaction_logs_deleted", LongType, nullable = true),
           StructField("dry_run", BooleanType, nullable = false),
           StructField("duration_ms", LongType, nullable = true),
           StructField("message", StringType, nullable = true)
@@ -106,6 +108,7 @@ case class PurgeOrphanedSplitsCommand(
       sparkSession,
       normalizedPath,
       effectiveRetention,
+      txLogRetentionDuration,
       dryRun
     )
 
@@ -131,6 +134,7 @@ case class PurgeOrphanedSplitsCommand(
           result.orphanedFilesDeleted,
           result.sizeMBDeleted,
           effectiveRetention,
+          result.transactionLogsDeleted,
           dryRun,
           duration,
           result.message.orNull
@@ -163,9 +167,10 @@ case class PurgeOrphanedSplitsCommand(
  * Result of purge operation.
  *
  * @param status Status string: "SUCCESS", "DRY_RUN", "PARTIAL_SUCCESS", "FAILED"
- * @param orphanedFilesFound Total number of orphaned files found
- * @param orphanedFilesDeleted Number of files successfully deleted
- * @param sizeMBDeleted Total size in MB of deleted files
+ * @param orphanedFilesFound Total number of orphaned split files found
+ * @param orphanedFilesDeleted Number of split files successfully deleted
+ * @param sizeMBDeleted Total size in MB of deleted split files
+ * @param transactionLogsDeleted Number of old transaction log files deleted
  * @param message Optional message with details
  */
 case class PurgeResult(
@@ -173,4 +178,5 @@ case class PurgeResult(
     orphanedFilesFound: Long,
     orphanedFilesDeleted: Long,
     sizeMBDeleted: Double,
+    transactionLogsDeleted: Long,
     message: Option[String])

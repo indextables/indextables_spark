@@ -154,8 +154,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     }
   }
 
-  override def visitPurgeOrphanedSplits(ctx: PurgeOrphanedSplitsContext): LogicalPlan = {
-    logger.debug(s"visitPurgeOrphanedSplits called with context: $ctx")
+  override def visitPurgeIndexTable(ctx: PurgeIndexTableContext): LogicalPlan = {
+    logger.debug(s"visitPurgeIndexTable called with context: $ctx")
     logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
 
     try {
@@ -171,7 +171,7 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         logger.debug(s"Parsed table ID: $tableId")
         tableId.mkString(".")
       } else {
-        throw new IllegalArgumentException("PURGE ORPHANED SPLITS requires either a path or table identifier")
+        throw new IllegalArgumentException("PURGE INDEXTABLE requires either a path or table identifier")
       }
 
       // Extract retention period (convert to hours)
@@ -192,23 +192,42 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         None
       }
 
+      // Extract transaction log retention period (convert to milliseconds)
+      val txLogRetentionDuration: Option[Long] = if (ctx.txLogRetentionNumber != null && ctx.txLogRetentionUnit != null) {
+        val number = ctx.txLogRetentionNumber.getText.toLong
+        val unit = ctx.txLogRetentionUnit.getText.toUpperCase
+
+        val milliseconds = unit match {
+          case "DAYS" => number * 24 * 60 * 60 * 1000
+          case "HOURS" => number * 60 * 60 * 1000
+          case other => throw new IllegalArgumentException(s"Invalid transaction log retention unit: $other")
+        }
+
+        logger.debug(s"Found transaction log retention: $number $unit = $milliseconds ms")
+        Some(milliseconds)
+      } else {
+        logger.debug("No transaction log retention period specified, will use default")
+        None
+      }
+
       // Extract DRY RUN flag
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
 
       // Create command (use OneRowRelation as child - standard pattern for commands that don't have logical plan children)
-      logger.debug(s"Creating PurgeOrphanedSplitsCommand with tablePath=$tablePath, retentionHours=$retentionHours, dryRun=$dryRun")
+      logger.debug(s"Creating PurgeOrphanedSplitsCommand with tablePath=$tablePath, retentionHours=$retentionHours, txLogRetentionDuration=$txLogRetentionDuration, dryRun=$dryRun")
       val result = PurgeOrphanedSplitsCommand(
         child = org.apache.spark.sql.catalyst.plans.logical.OneRowRelation(),
         tablePath = tablePath,
         retentionHours = retentionHours,
+        txLogRetentionDuration = txLogRetentionDuration,
         dryRun = dryRun
       )
       logger.debug(s"Created PurgeOrphanedSplitsCommand: $result")
       result
     } catch {
       case e: Exception =>
-        logger.error(s"Exception in visitPurgeOrphanedSplits: ${e.getMessage}", e)
+        logger.error(s"Exception in visitPurgeIndexTable: ${e.getMessage}", e)
         throw e
     }
   }

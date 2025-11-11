@@ -301,7 +301,10 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Successfully committed ${addActions.length} files")
 
       // POST-COMMIT EVALUATION: Check if merge-on-write should run
-      evaluateAndExecuteMergeOnWrite(writeOptions)
+      val mergeExecuted = evaluateAndExecuteMergeOnWrite(writeOptions)
+
+      // POST-COMMIT EVALUATION: Check if purge-on-write should run
+      evaluateAndExecutePurgeOnWrite(writeOptions, mergeWasExecuted = mergeExecuted)
     } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
@@ -441,14 +444,14 @@ class IndexTables4SparkStandardWrite(
    */
   private def evaluateAndExecuteMergeOnWrite(
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): Unit = {
+  ): Boolean = {
     try {
       // Check if merge-on-write is enabled
       val mergeOnWriteEnabled = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.enabled", "false").toBoolean
 
       if (!mergeOnWriteEnabled) {
         logger.debug("Merge-on-write is disabled, skipping post-commit evaluation")
-        return
+        return false
       }
 
       logger.info("🔀 Merge-on-write enabled - evaluating if merge is worthwhile...")
@@ -476,14 +479,17 @@ class IndexTables4SparkStandardWrite(
       if (mergeGroups >= threshold) {
         logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS")
         executeMergeSplitsCommand(writeOptions)
+        true // Merge was executed
       } else {
         logger.info(s"⏭️  Merge not worthwhile: $mergeGroups groups < $threshold threshold - skipping")
+        false // Merge was not executed
       }
 
     } catch {
       case e: Exception =>
         // Don't fail the write operation if merge evaluation fails
         logger.warn(s"Failed to evaluate merge-on-write: ${e.getMessage}", e)
+        false // Merge was not executed due to error
     }
   }
 
@@ -593,6 +599,137 @@ class IndexTables4SparkStandardWrite(
       case e: Exception =>
         // Don't fail the write if merge fails
         logger.warn(s"Failed to execute MERGE SPLITS: ${e.getMessage}", e)
+    }
+  }
+
+  /**
+   * Evaluate if purge-on-write should run after transaction commit.
+   *
+   * This is a POST-COMMIT evaluation that:
+   * 1. Checks if purge-on-write is enabled
+   * 2. Checks if purge should trigger based on configuration:
+   *    - After merge-on-write completion (if triggerAfterMerge=true)
+   *    - After N write transactions (if triggerAfterWrites > 0)
+   * 3. Invokes PURGE ORPHANED SPLITS command with configured retention periods
+   *
+   * @param writeOptions Write options containing purge-on-write configuration
+   * @param mergeWasExecuted Whether merge-on-write just executed
+   */
+  private def evaluateAndExecutePurgeOnWrite(
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap,
+    mergeWasExecuted: Boolean
+  ): Unit = {
+    try {
+      import io.indextables.spark.purge.{PurgeOnWriteConfig, PurgeOnWriteTransactionCounter}
+
+      // Load purge-on-write configuration
+      val config = PurgeOnWriteConfig.fromOptions(writeOptions)
+
+      if (!config.enabled) {
+        logger.debug("Purge-on-write is disabled, skipping post-commit evaluation")
+        return
+      }
+
+      logger.info("🧹 Purge-on-write enabled - evaluating if purge should run...")
+
+      // Determine if purge should trigger
+      val shouldTrigger = if (config.triggerAfterMerge && mergeWasExecuted) {
+        // Trigger 1: After merge-on-write completion
+        logger.info("✅ Purge triggered: merge-on-write just completed")
+        true
+      } else if (config.triggerAfterWrites > 0) {
+        // Trigger 2: After N write transactions
+        val txCount = PurgeOnWriteTransactionCounter.incrementAndGet(tablePath.toString)
+        logger.debug(s"Transaction count for ${tablePath}: $txCount (threshold: ${config.triggerAfterWrites})")
+
+        if (txCount >= config.triggerAfterWrites) {
+          logger.info(s"✅ Purge triggered: transaction count $txCount ≥ threshold ${config.triggerAfterWrites}")
+          // Reset counter after triggering
+          PurgeOnWriteTransactionCounter.reset(tablePath.toString)
+          true
+        } else {
+          logger.info(s"⏭️  Purge not triggered: transaction count $txCount < threshold ${config.triggerAfterWrites}")
+          false
+        }
+      } else {
+        logger.debug("Purge-on-write enabled but no trigger conditions met (triggerAfterMerge=false, triggerAfterWrites=0)")
+        false
+      }
+
+      if (shouldTrigger) {
+        executePurgeOrphanedSplitsCommand(config, writeOptions)
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write operation if purge evaluation fails
+        logger.warn(s"Failed to evaluate purge-on-write: ${e.getMessage}", e)
+    }
+  }
+
+  /**
+   * Execute PURGE ORPHANED SPLITS command programmatically with write options.
+   *
+   * This method passes write options directly to PurgeOrphanedSplitsExecutor so it has access
+   * to AWS/Azure credentials, cache directories, and all other write-time configuration.
+   *
+   * @param config Purge-on-write configuration
+   * @param writeOptions Write options containing credentials and configuration
+   */
+  private def executePurgeOrphanedSplitsCommand(
+    config: io.indextables.spark.purge.PurgeOnWriteConfig,
+    writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
+  ): Unit = {
+    try {
+      import io.indextables.spark.sql.PurgeOrphanedSplitsExecutor
+      import scala.jdk.CollectionConverters._
+
+      logger.info(s"Executing PURGE ORPHANED SPLITS for table: ${tablePath.toString}")
+      logger.info(s"Split retention: ${config.splitRetentionHours} hours, Transaction log retention: ${config.txLogRetentionHours} hours")
+
+      val spark = org.apache.spark.sql.SparkSession.active
+
+      // Extract all indextables options from writeOptions to pass to purge executor
+      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+
+      // CRITICAL: Merge with serializedHadoopConf to include credentials from enrichedHadoopConf
+      // Write options take precedence over hadoopConf
+      val optionsToPass = serializedHadoopConf ++ optionsFromWrite
+
+      logger.info(s"Passing ${optionsToPass.size} options to PURGE ORPHANED SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
+      optionsToPass.foreach { case (key, value) =>
+        val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
+        logger.debug(s"  Passing option: $key = $displayValue")
+      }
+
+      // Convert retention from hours to milliseconds for transaction log
+      val txLogRetentionMs = config.txLogRetentionHours * 60 * 60 * 1000
+
+      // Create executor with write options
+      val executor = new PurgeOrphanedSplitsExecutor(
+        spark = spark,
+        tablePath = tablePath.toString,
+        retentionHours = config.splitRetentionHours,
+        txLogRetentionDuration = Some(txLogRetentionMs),
+        dryRun = false
+      )
+
+      // Execute purge
+      val result = executor.purge()
+
+      // Log results
+      logger.info(s"✅ PURGE ORPHANED SPLITS completed:")
+      logger.info(s"   - Status: ${result.status}")
+      logger.info(s"   - Orphaned files found: ${result.orphanedFilesFound}")
+      logger.info(s"   - Orphaned files deleted: ${result.orphanedFilesDeleted}")
+      logger.info(s"   - Size deleted: ${result.sizeMBDeleted} MB")
+      logger.info(s"   - Transaction logs deleted: ${result.transactionLogsDeleted}")
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write if purge fails
+        logger.warn(s"Failed to execute PURGE ORPHANED SPLITS: ${e.getMessage}", e)
     }
   }
 

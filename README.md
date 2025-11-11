@@ -1376,9 +1376,9 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.azure.accountKey", "your-account-key")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
 
-// Alternative: azure:// scheme (simpler URLs, also supported)
+// Alternative: abfss:// scheme without full DNS name (simpler URLs)
 df.write.format("io.indextables.provider.IndexTablesProvider")
-  .save("azure://mycontainer/data")
+  .save("abfss://mycontainer/data")
 ```
 
 ##### OAuth Service Principal (Azure AD) Authentication
@@ -1463,11 +1463,11 @@ IndexTables supports all standard Spark Azure URL schemes with automatic normali
 
 - ✅ `abfss://container@account.dfs.core.windows.net/path` - **Recommended** - Spark standard for ADLS Gen2 with security
 - ✅ `abfs://container@account.dfs.core.windows.net/path` - Spark standard for ADLS Gen2
-- ✅ `azure://container/path` - Simplified URLs (tantivy4java native format)
+- ✅ `abfss://container/path` - Simplified URLs (automatically resolves account name from configuration)
 - ✅ `wasbs://container@account.blob.core.windows.net/path` - Spark legacy secure (deprecated, use abfss instead)
 - ✅ `wasb://container@account.blob.core.windows.net/path` - Spark legacy (deprecated, use abfss instead)
 
-**Best Practice**: Use `abfss://` for consistency with Spark conventions and ADLS Gen2 features. All schemes are automatically normalized to `azure://` format internally when passing URLs to tantivy4java.
+**Best Practice**: Use `abfss://` for consistency with Spark conventions and ADLS Gen2 features.
 
 ##### Azure with Partitioned Datasets
 
@@ -1781,10 +1781,14 @@ spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 
 #### Cleaning Up Orphaned Files with PURGE ORPHANED SPLITS
 
-IndexTables4Spark provides SQL-based orphaned file cleanup to remove `.split` files that are no longer referenced in the transaction log. This helps reclaim storage space and maintain table health.
+IndexTables4Spark provides SQL-based cleanup to remove orphaned `.split` files and old transaction log files. This helps reclaim storage space and maintain table health.
+
+**What Does This Command Clean Up?**
+1. **Orphaned split files**: `.split` files that exist in storage but are not referenced in the transaction log
+2. **Old transaction log files**: Transaction log JSON files older than checkpoints (respects 30-day retention by default)
 
 **What are Orphaned Files?**
-Orphaned files are `.split` files that exist in storage but are not referenced in the transaction log. These can occur due to:
+Orphaned split files can occur due to:
 - Failed write operations that didn't complete transaction log updates
 - Concurrent write conflicts where some splits were created but not committed
 - Manual file operations outside of the transaction log
@@ -1817,7 +1821,7 @@ PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS;
 PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN;
 
 -- Works with all storage systems
-PURGE ORPHANED SPLITS 'azure://container/path' OLDER THAN 24 HOURS;
+PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS;
 PURGE ORPHANED SPLITS '/local/path' OLDER THAN 24 HOURS;
 ```
 
@@ -1836,7 +1840,7 @@ preview.show()  // Shows what would be deleted without actually deleting
 spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS")
 
 // Azure Blob Storage
-spark.sql("PURGE ORPHANED SPLITS 'azure://container/path' OLDER THAN 24 HOURS")
+spark.sql("PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS")
 ```
 
 ##### Configuration Options

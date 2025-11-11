@@ -20,6 +20,8 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Aggregate pushdown**: COUNT(), SUM(), AVG(), MIN(), MAX() with transaction log optimization
 - **Partitioned datasets**: Full support with partition pruning
 - **Merge operations**: SQL-based split consolidation (`MERGE SPLITS`)
+- **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
+- **Purge-on-write**: Automatic table hygiene during write operations
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
 - **Auto-sizing**: Intelligent DataFrame partitioning based on historical split analysis
 - **V2 DataSource API**: Recommended for partition column indexing
@@ -57,6 +59,13 @@ spark.indextables.mergeOnWrite.mergeGroupMultiplier: 2.0 (default: 2.0, threshol
 spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
 spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker: <auto> (default: auto-calculated based on heap size)
 spark.indextables.mergeOnWrite.memoryOverheadFactor: 3.0 (default: 3.0, memory overhead multiplier for merge size)
+
+// Purge-On-Write (automatic cleanup of orphaned files and old transaction logs)
+spark.indextables.purgeOnWrite.enabled: false (default: false)
+spark.indextables.purgeOnWrite.triggerAfterMerge: true (default: true, run purge after merge-on-write)
+spark.indextables.purgeOnWrite.triggerAfterWrites: 0 (default: 0 = disabled, run purge after N writes)
+spark.indextables.purgeOnWrite.splitRetentionHours: 168 (default: 168 = 7 days)
+spark.indextables.purgeOnWrite.txLogRetentionHours: 720 (default: 720 = 30 days)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)
@@ -91,7 +100,7 @@ spark.indextables.azure.tenantId: <tenant>
 spark.indextables.azure.clientId: <client>
 spark.indextables.azure.clientSecret: <secret>
 
-// Supports: azure://, wasbs://, abfss:// URLs
+// Supports: abfss://, wasbs://, abfs:// URLs
 // Uses ~/.azure/credentials file or environment variables
 ```
 
@@ -218,19 +227,22 @@ MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;
 MERGE SPLITS 's3://bucket/path' WHERE date = '2024-01-01' TARGET SIZE 100M;
 ```
 
-### Purge Orphaned Splits
+### Purge IndexTable
 ```sql
 -- Register extensions (same as above)
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Purge operations (removes split files not referenced in transaction log)
-PURGE ORPHANED SPLITS 's3://bucket/path' DRY RUN;  -- Preview what would be deleted
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 7 DAYS;  -- Delete files older than 7 days
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS;  -- Same as above (7*24=168)
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 14 DAYS DRY RUN;  -- Preview with custom retention
+-- Purge operations (removes orphaned split files and old transaction logs)
+PURGE INDEXTABLE 's3://bucket/path' DRY RUN;  -- Preview what would be deleted
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS;  -- Delete split files older than 7 days
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 168 HOURS;  -- Same as above (7*24=168)
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 14 DAYS DRY RUN;  -- Preview with custom retention
+
+-- Purge with transaction log cleanup (keeps logs for longer than splits)
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS TRANSACTION LOG RETENTION 30 DAYS;
 
 -- Configuration
-spark.indextables.purge.defaultRetentionHours: 168 (7 days)
+spark.indextables.purge.defaultRetentionHours: 168 (7 days for splits)
 spark.indextables.purge.minRetentionHours: 24 (safety check)
 spark.indextables.purge.retentionCheckEnabled: true
 spark.indextables.purge.parallelism: <auto>
@@ -243,6 +255,7 @@ spark.indextables.purge.deleteRetries: 3
 - After MERGE SPLITS operations
 - Regular maintenance (weekly/monthly cleanup)
 - Before archiving or migrating tables
+- Transaction log cleanup to reclaim storage
 
 **Safety features:**
 - Minimum retention period enforced (default 24 hours)
@@ -250,6 +263,59 @@ spark.indextables.purge.deleteRetries: 3
 - Distributed deletion across executors for scalability
 - Retry logic handles transient cloud storage errors
 - LEFT ANTI JOIN ensures only truly orphaned files deleted
+- Transaction log files referenced by checkpoints are never deleted
+
+### Purge-On-Write (Automatic Table Hygiene)
+```scala
+// Enable automatic purge after every 10 writes
+df.write.format("indextables")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "10")
+  .option("spark.indextables.purgeOnWrite.splitRetentionHours", "168")  // 7 days
+  .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "720")  // 30 days
+  .save("s3://bucket/path")
+
+// Enable purge after merge-on-write completes
+df.write.format("indextables")
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+  .save("s3://bucket/path")
+```
+
+**Purge-On-Write Features:**
+- **Disabled by default** - Must be explicitly enabled
+- **Two trigger modes:**
+  1. After merge-on-write completes (default: enabled)
+  2. After N write operations (default: disabled, set triggerAfterWrites > 0)
+- **Automatic credential propagation** - Write options passed to purge executor
+- **Per-session counters** - Transaction counts tracked per table path
+- **Separate retention periods** - Different retention for splits vs transaction logs
+- **Graceful failure handling** - Purge failures don't fail writes
+- **Session-scoped** - Counters reset between Spark sessions
+
+**When to use:**
+- High-frequency write workloads that generate many small splits
+- Tables with frequent merge operations
+- Long-running Spark applications with periodic writes
+- Development/testing environments with rapid iteration
+
+**Example: Automatic Hygiene Configuration**
+```scala
+// Complete automatic table hygiene (merge + purge)
+df.write.format("indextables")
+  // Enable merge-on-write
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.mergeOnWrite.targetSize", "4G")
+  .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0")
+  // Enable purge-on-write
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")  // Run after each merge
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "20")   // Also run every 20 writes
+  .option("spark.indextables.purgeOnWrite.splitRetentionHours", "168") // Keep splits 7 days
+  .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "720") // Keep logs 30 days
+  .save("s3://bucket/path")
+```
 
 ## Azure Multi-Cloud Examples
 
@@ -259,11 +325,11 @@ spark.indextables.purge.deleteRetries: 3
 spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
 spark.conf.set("spark.indextables.azure.accountKey", "your-account-key")
 
-// Write (supports azure://, wasbs://, abfss://)
-df.write.format("indextables").save("azure://container/path")
+// Write (supports abfss://, wasbs://, abfs://)
+df.write.format("indextables").save("abfss://container/path")
 
 // Read
-val df = spark.read.format("indextables").load("azure://container/path")
+val df = spark.read.format("indextables").load("abfss://container/path")
 ```
 
 ### Azure OAuth (Service Principal)
@@ -312,7 +378,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
 
 ## Test Status
-- ✅ **300+ tests passing**: Complete coverage for all major features
+- ✅ **350+ tests passing**: Complete coverage for all major features
 - ⚠️  **Merge-on-write**: Tests need updating for new post-commit design
   - Previous shuffle-based implementation removed
   - New design: post-commit evaluation with MERGE SPLITS invocation
@@ -322,6 +388,9 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - ✅ **JSON aggregates**: 9/9 tests passing (aggregates on nested fields with filter pushdown)
 - ✅ **Partitioned datasets**: 7/7 tests
 - ✅ **Transaction log**: All checkpoint and compression tests passing
+- ✅ **PURGE INDEXTABLE**: 40/40 tests passing (integration, parsing, error handling, transaction log cleanup)
+- ✅ **Purge-on-write**: 8/8 tests passing (local/Hadoop integration)
+  - Real S3/Azure purge-on-write tests available but require credentials
 
 ## Important Notes
 - **V2 DataSource API recommended**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for partition column indexing
@@ -334,6 +403,9 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Merge-on-write**: Post-commit evaluation architecture - writes complete normally, then evaluates if merge is worthwhile based on merge group count vs parallelism threshold
 - **Merge-on-write threshold**: Merge runs if merge groups ≥ (defaultParallelism × mergeGroupMultiplier), default multiplier is 2.0
 - **Merge-on-write delegation**: Invokes existing MERGE SPLITS command programmatically after transaction commit
+- **Purge-on-write**: Automatic cleanup of orphaned splits and old transaction logs during write operations
+- **Purge-on-write triggers**: Can run after merge-on-write or after N writes per table (per-session counters)
+- **Purge-on-write safety**: Disabled by default, respects minimum retention periods, propagates credentials, graceful failure handling
 
 ---
 

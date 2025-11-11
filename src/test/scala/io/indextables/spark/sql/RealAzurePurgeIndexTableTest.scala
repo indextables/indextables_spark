@@ -22,7 +22,7 @@ import java.util.UUID
 import io.indextables.spark.RealAzureTestBase
 
 /**
- * Real Azure Blob Storage integration tests for PURGE ORPHANED SPLITS command.
+ * Real Azure Blob Storage integration tests for PURGE INDEXTABLE command.
  *
  * Tests critical functionality specific to Azure Blob Storage:
  *   - Modification time handling from Azure Blob Storage API
@@ -33,7 +33,7 @@ import io.indextables.spark.RealAzureTestBase
  *
  * Credentials are loaded from ~/.azure/credentials file or environment variables.
  */
-class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
+class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
 
   // Generate unique test run ID to avoid conflicts
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
@@ -78,7 +78,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     super.afterAll()
   }
 
-  test("PURGE ORPHANED SPLITS should handle Azure Blob Storage modification times correctly") {
+  test("PURGE INDEXTABLE should handle Azure Blob Storage modification times correctly") {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
@@ -113,7 +113,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     )
 
     // Purge with 24 hour retention (minimum) - files are too recent to delete
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify purge found orphaned files but didn't delete them (too recent)
@@ -134,7 +134,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     println("✅ Azure Blob Storage modification times correctly received and used for retention filtering")
   }
 
-  test("PURGE ORPHANED SPLITS should handle Azure partitioned tables correctly") {
+  test("PURGE INDEXTABLE should handle Azure partitioned tables correctly") {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
@@ -180,7 +180,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
 
     // Use DRY RUN to verify recursive listing finds files in partitions
     // Note: Azure may not support setTimes(), so we use DRY RUN
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify both orphaned files were found via recursive Azure listing in partitions
@@ -201,7 +201,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     println("✅ Azure partitioned table recursive listing works correctly")
   }
 
-  test("PURGE ORPHANED SPLITS should handle Azure recursive listing correctly") {
+  test("PURGE INDEXTABLE should handle Azure recursive listing correctly") {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
@@ -242,7 +242,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
 
     // Use DRY RUN to verify recursive listing finds files at all depths
     // Note: Azure may not support setTimes(), so we use DRY RUN
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify both files were found via recursive Azure listing
@@ -259,7 +259,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     println("✅ Azure recursive listing works correctly at all path depths")
   }
 
-  test("PURGE ORPHANED SPLITS DRY RUN should not delete files from Azure") {
+  test("PURGE INDEXTABLE DRY RUN should not delete files from Azure") {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
@@ -288,7 +288,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     )
 
     // Run DRY RUN purge with 24 hour retention (file is too recent)
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify DRY RUN found the orphan but didn't delete it from Azure
@@ -302,7 +302,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     println("✅ Azure DRY RUN mode works correctly")
   }
 
-  test("PURGE ORPHANED SPLITS should handle Azure OAuth credentials correctly") {
+  test("PURGE INDEXTABLE should handle Azure OAuth credentials correctly") {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
     assume(hasOAuthCredentials(), "Azure OAuth credentials required for this test")
 
@@ -332,7 +332,7 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     )
 
     // Use DRY RUN to verify OAuth credentials work with purge
-    val result  = spark.sql(s"PURGE ORPHANED SPLITS '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify purge worked with OAuth
@@ -343,5 +343,64 @@ class RealAzurePurgeOrphanedSplitsTest extends RealAzureTestBase {
     assert(provider.exists(orphanPath), "Orphan should still exist after DRY RUN with OAuth")
 
     println("✅ Azure OAuth credentials handled correctly")
+  }
+
+  test("PURGE INDEXTABLE should delete old files from Azure using short retention and sleep") {
+    assume(hasAzureCredentials(), "Azure credentials required for this test")
+
+    // Use unique subdirectory for this specific test
+    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val tablePath = s"$testPath/short_retention_test"
+
+    // Set very short retention period (1 second = 1000ms) for transaction logs
+    spark.conf.set("spark.indextables.logRetention.duration", "1000")
+
+    // Write data
+    val sparkSession = spark
+    import sparkSession.implicits._
+    val data = Seq((1, "test1"), (2, "test2"), (3, "test3")).toDF("id", "value")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
+
+    // Create orphaned files in Azure
+    val orphan1Path = s"$tablePath/orphan1_${UUID.randomUUID()}.split"
+    val orphan2Path = s"$tablePath/orphan2_${UUID.randomUUID()}.split"
+
+    provider.writeFile(orphan1Path, new Array[Byte](0))
+    provider.writeFile(orphan2Path, new Array[Byte](0))
+
+    // Verify files were created and have recent modification times
+    val orphan1Info = provider.getFileInfo(orphan1Path).get
+    val orphan2Info = provider.getFileInfo(orphan2Path).get
+
+    println(s"📅 Created orphaned files in Azure:")
+    println(s"   - $orphan1Path (modified: ${new java.util.Date(orphan1Info.modificationTime)})")
+    println(s"   - $orphan2Path (modified: ${new java.util.Date(orphan2Info.modificationTime)})")
+
+    // Wait 2 seconds for files to age
+    println(s"⏳ Sleeping 2 seconds to age files...")
+    Thread.sleep(2000)
+
+    // Purge with OLDER THAN 0 HOURS (delete immediately) - disable retention check
+    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
+    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
+    val metrics = result(0).getStruct(1)
+
+    println(s"📊 Purge results:")
+    println(s"   - Found: ${metrics.getLong(1)}")
+    println(s"   - Deleted: ${metrics.getLong(2)}")
+
+    // Verify purge found and deleted both orphaned files
+    assert(metrics.getLong(1) == 2, s"Expected 2 orphaned files found, got ${metrics.getLong(1)}")
+    assert(metrics.getLong(2) == 2, s"Expected 2 files deleted (aged past 0 hours), got ${metrics.getLong(2)}")
+
+    // Verify both files no longer exist in Azure
+    assert(!provider.exists(orphan1Path), "Old orphan1 should be deleted from Azure")
+    assert(!provider.exists(orphan2Path), "Old orphan2 should be deleted from Azure")
+
+    // Verify table data is intact
+    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    assert(afterRead.count() == 3, "Table should still have 3 rows")
+
+    println("✅ Azure purge with short retention and sleep successfully deleted old files")
   }
 }
