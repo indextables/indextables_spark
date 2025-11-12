@@ -51,13 +51,17 @@ case class FileInfo(
  *  - Retention-based safety filtering
  *  - Graceful partial failure handling
  *  - Retry logic for transient cloud storage errors
+ *
+ * @param overrideOptions Optional map of configuration overrides (e.g., from write options).
+ *                        Used to pass AWS/Azure credentials and other settings from write operations.
  */
 class PurgeOrphanedSplitsExecutor(
     spark: SparkSession,
     tablePath: String,
     retentionHours: Long,
     txLogRetentionDuration: Option[Long],
-    dryRun: Boolean) {
+    dryRun: Boolean,
+    overrideOptions: Option[Map[String, String]] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
@@ -180,11 +184,15 @@ class PurgeOrphanedSplitsExecutor(
           val currentTime = System.currentTimeMillis()
           val transactionLogPath = new Path(tablePath, "_transaction_log")
 
-          // Use CloudStorageProvider for multi-cloud support
-          val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+          // Use CloudStorageProvider for multi-cloud support with credentials
+          val cloudConfigs = extractCloudStorageConfigs()
+          val optionsMap = new java.util.HashMap[String, String]()
+          cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+          val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
           val provider = CloudStorageProviderFactory.createProvider(
             transactionLogPath.toString,
-            emptyMap,
+            configOptions,
             spark.sparkContext.hadoopConfiguration
           )
 
@@ -260,17 +268,50 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
+   * Extract all spark.indextables.* configuration from Spark configuration.
+   * Returns a map of configuration keys/values to broadcast to executors.
+   * This includes AWS credentials, Azure credentials, and any other indextables settings.
+   *
+   * Priority order (highest to lowest):
+   *   1. overrideOptions (from write options)
+   *   2. Spark session configuration
+   */
+  private def extractCloudStorageConfigs(): Map[String, String] = {
+    // Get configs from Spark session
+    val sparkConfigs = spark.conf.getAll
+      .filter { case (key, _) => key.startsWith("spark.indextables.") }
+      .toMap
+
+    // Merge with override options (override takes precedence)
+    val configs = overrideOptions match {
+      case Some(overrides) =>
+        val merged = sparkConfigs ++ overrides.filter { case (key, _) => key.startsWith("spark.indextables.") }
+        logger.info(s"Extracted ${merged.size} spark.indextables.* configuration keys (${sparkConfigs.size} from Spark session, ${overrides.size} from override options)")
+        merged
+      case None =>
+        logger.info(s"Extracted ${sparkConfigs.size} spark.indextables.* configuration keys from Spark session")
+        sparkConfigs
+    }
+
+    configs
+  }
+
+  /**
    * List all .split and .crc files from the table directory.
    * Uses distributed listing across executors (Iceberg pattern).
    */
   private def listAllSplitFiles(basePath: String): Dataset[FileInfo] = {
     import spark.implicits._
 
-    // Use CloudStorageProvider for multi-cloud support
-    val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+    // Use CloudStorageProvider for multi-cloud support with credentials
+    val cloudConfigs = extractCloudStorageConfigs()
+    val optionsMap = new java.util.HashMap[String, String]()
+    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+    val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
     val provider = CloudStorageProviderFactory.createProvider(
       basePath,
-      emptyMap,
+      configOptions,
       spark.sparkContext.hadoopConfiguration
     )
 
@@ -410,6 +451,11 @@ class PurgeOrphanedSplitsExecutor(
       .map(_.toInt)
       .getOrElse(3)
 
+    // CRITICAL FIX: Extract cloud storage credentials from Spark config and broadcast to executors
+    // This allows executors to authenticate with S3/Azure when deleting files
+    val cloudStorageConfigs = extractCloudStorageConfigs()
+    val broadcastConfigs = spark.sparkContext.broadcast(cloudStorageConfigs)
+
     // Distribute deletion across executors using CloudStorageProvider
     val hadoopConf = spark.sparkContext.broadcast(
       new org.apache.spark.util.SerializableConfiguration(spark.sparkContext.hadoopConfiguration)
@@ -420,13 +466,16 @@ class PurgeOrphanedSplitsExecutor(
       .repartition(parallelism)
       .mapPartitions { fileIter =>
         val conf = hadoopConf.value.value
+        val configs = broadcastConfigs.value
         var successCount = 0L
         var failCount = 0L
         var deletedBytes = 0L
         val retries = maxRetries
 
-        // Create CloudStorageProvider for this partition
-        val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+        // Create CloudStorageProvider for this partition WITH credentials
+        val optionsMap = new java.util.HashMap[String, String]()
+        configs.foreach { case (k, v) => optionsMap.put(k, v) }
+        val configOptions = new CaseInsensitiveStringMap(optionsMap)
         var provider: CloudStorageProvider = null
 
         try {
@@ -435,7 +484,7 @@ class PurgeOrphanedSplitsExecutor(
             if (provider == null) {
               // Extract base path from file path (everything before the filename)
               val basePath = fileInfo.path.substring(0, fileInfo.path.lastIndexOf('/'))
-              provider = CloudStorageProviderFactory.createProvider(basePath, emptyMap, conf)
+              provider = CloudStorageProviderFactory.createProvider(basePath, configOptions, conf)
             }
 
             // Inline retry logic to avoid serialization issues

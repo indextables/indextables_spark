@@ -706,13 +706,14 @@ class IndexTables4SparkStandardWrite(
       // Convert retention from hours to milliseconds for transaction log
       val txLogRetentionMs = config.txLogRetentionHours * 60 * 60 * 1000
 
-      // Create executor with write options
+      // Create executor with write options (including credentials)
       val executor = new PurgeOrphanedSplitsExecutor(
         spark = spark,
         tablePath = tablePath.toString,
         retentionHours = config.splitRetentionHours,
         txLogRetentionDuration = Some(txLogRetentionMs),
-        dryRun = false
+        dryRun = false,
+        overrideOptions = Some(optionsToPass)
       )
 
       // Execute purge
