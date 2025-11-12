@@ -72,12 +72,24 @@ class PurgeOrphanedSplitsExecutor(
     val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     val txLog = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
 
-    // Step 2: Clean up old transaction log files FIRST (before orphaned splits)
+    // Step 2: Determine which transaction log files will be deleted
+    // Get the list of versions that will remain after cleanup (for time travel support)
+    val versionsBeforeCleanup = txLog.getVersions()
+    val versionsToDelete = getTransactionLogVersionsToDelete(txLog)
+    val versionsToKeep = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
+    logger.info(s"Transaction log versions: ${versionsBeforeCleanup.size} total, ${versionsToDelete.size} to delete, ${versionsToKeep.size} to keep")
+
+    // Step 3: Clean up old transaction log files
+    // In DRY RUN mode, this reports what WOULD be deleted without actually deleting.
     val transactionLogsDeleted = cleanupOldTransactionLogFiles(txLog)
     logger.info(s"Transaction log cleanup: deleted $transactionLogsDeleted old log files")
 
-    val allFiles = txLog.listFiles()
-    logger.info(s"Active files in transaction log: ${allFiles.size}")
+    // Step 4: Get ALL files referenced in ANY transaction log version that will REMAIN
+    // CRITICAL: We must consider files from ALL remaining transaction log versions (not just current state)
+    // to support time travel queries. A file is only orphaned if it's NOT referenced in
+    // any transaction log version that remains after cleanup.
+    val allFiles = getAllFilesFromVersions(txLog, versionsToKeep)
+    logger.info(s"Files referenced in remaining transaction log versions: ${allFiles.size}")
 
     // Step 2: List all .split and .crc files from filesystem (distributed)
     val allSplitFiles = listAllSplitFiles(tablePath)
@@ -265,6 +277,107 @@ class PurgeOrphanedSplitsExecutor(
         logger.warn(s"Failed to clean up old transaction log files: ${e.getMessage}", e)
         0L
     }
+  }
+
+  /**
+   * Determine which transaction log versions will be deleted based on checkpoint and retention policy.
+   * This duplicates the logic from cleanupOldTransactionLogFiles but doesn't actually delete.
+   *
+   * Returns: Set of version numbers that will be deleted
+   */
+  private def getTransactionLogVersionsToDelete(txLog: io.indextables.spark.transaction.TransactionLog): Set[Long] = {
+    val checkpointVersionOpt = txLog.getLastCheckpointVersion()
+
+    checkpointVersionOpt match {
+      case Some(checkpointVersion) =>
+        val logRetentionDuration = txLogRetentionDuration.getOrElse {
+          spark.conf
+            .getOption("spark.indextables.logRetention.duration")
+            .map(_.toLong)
+            .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+        }
+
+        val currentTime = System.currentTimeMillis()
+        val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+        val cloudConfigs = extractCloudStorageConfigs()
+        val optionsMap = new java.util.HashMap[String, String]()
+        cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+        val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+        val provider = CloudStorageProviderFactory.createProvider(
+          transactionLogPath.toString,
+          configOptions,
+          spark.sparkContext.hadoopConfiguration
+        )
+
+        try {
+          val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+          val versions = allFiles
+            .map(f => new Path(f.path).getName)
+            .filter(_.endsWith(".json"))
+            .filterNot(_.contains("checkpoint"))
+            .filterNot(_.startsWith("_"))
+            .map(_.replace(".json", "").toLong)
+
+          val currentVersion = if (versions.nonEmpty) versions.max else 0L
+          val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
+
+          val toDelete = versionsToCheck.filter { version =>
+            val versionFileName = f"$version%020d.json"
+            allFiles.find(f => new Path(f.path).getName == versionFileName) match {
+              case Some(fileInfo) =>
+                val fileAge = currentTime - fileInfo.modificationTime
+                fileAge > logRetentionDuration
+              case None => false
+            }
+          }.toSet
+
+          logger.debug(s"Identified ${toDelete.size} transaction log versions to delete (< checkpoint v$checkpointVersion, older than retention)")
+          toDelete
+        } finally {
+          provider.close()
+        }
+
+      case None =>
+        logger.debug("No checkpoint available - no transaction logs will be deleted")
+        Set.empty[Long]
+    }
+  }
+
+  /**
+   * Get ALL files referenced in ANY of the specified transaction log versions.
+   * This is critical for time travel support - we can't delete files that might be
+   * referenced by historical versions within the retention window.
+   *
+   * @param versionsToScan The specific versions to scan (typically versions that will remain after cleanup)
+   * Returns: Seq[AddAction] containing all files that appear in any of the specified versions
+   */
+  private def getAllFilesFromVersions(txLog: io.indextables.spark.transaction.TransactionLog, versionsToScan: Seq[Long]): Seq[AddAction] = {
+    logger.info(s"Scanning ${versionsToScan.size} transaction log versions for file references (time travel support)")
+
+    // Collect all unique file paths that appear in ANY of the specified versions
+    val allFilePaths = scala.collection.mutable.Set[String]()
+    val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
+
+    versionsToScan.sorted.foreach { version =>
+      try {
+        val actions = txLog.readVersion(version)
+        actions.foreach {
+          case add: AddAction =>
+            allFilePaths += add.path
+            // Keep the most recent AddAction for each path (for metadata like size)
+            filePathToAction(add.path) = add
+          case _ => // Ignore remove, protocol, metadata for this purpose
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to read version $version while scanning for file references: ${e.getMessage}")
+      }
+    }
+
+    logger.info(s"Found ${allFilePaths.size} unique files referenced across ${versionsToScan.size} transaction log versions")
+    filePathToAction.values.toSeq
   }
 
   /**
