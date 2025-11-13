@@ -36,9 +36,10 @@ class S3MultipartUploaderTest extends AnyFunSuite with TestBase {
   test("S3MultipartConfig should have correct default values") {
     val defaultConfig = S3MultipartConfig()
 
-    assert(defaultConfig.partSize == 64L * 1024 * 1024, "Default part size should be 64MB")
-    assert(defaultConfig.multipartThreshold == 100L * 1024 * 1024, "Default threshold should be 100MB")
+    assert(defaultConfig.partSize == 128L * 1024 * 1024, "Default part size should be 128MB")
+    assert(defaultConfig.multipartThreshold == 200L * 1024 * 1024, "Default threshold should be 200MB")
     assert(defaultConfig.maxConcurrency == 4, "Default concurrency should be 4")
+    assert(defaultConfig.maxQueueSize == 3, "Default queue size should be 3")
     assert(defaultConfig.maxRetries == 3, "Default retries should be 3")
     assert(defaultConfig.baseRetryDelay == 1000, "Default retry delay should be 1000ms")
     assert(defaultConfig.uploadTimeout == 30.minutes, "Default timeout should be 30 minutes")

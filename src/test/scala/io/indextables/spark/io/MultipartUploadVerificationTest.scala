@@ -28,8 +28,8 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
   test("S3MultipartConfig should provide sensible defaults") {
     val config = S3MultipartConfig.default
 
-    assert(config.partSize == 64L * 1024 * 1024)            // 64MB parts
-    assert(config.multipartThreshold == 100L * 1024 * 1024) // 100MB threshold
+    assert(config.partSize == 128L * 1024 * 1024)           // 128MB parts (updated default)
+    assert(config.multipartThreshold == 200L * 1024 * 1024) // 200MB threshold (updated default)
     assert(config.maxConcurrency == 4)                      // 4 parallel uploads
     assert(config.maxRetries == 3)                          // 3 retry attempts
     assert(config.baseRetryDelay == 1000)                   // 1 second base delay
@@ -94,10 +94,10 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
   }
 
   test("multipart upload should be enabled for files above threshold") {
-    val threshold = 100L * 1024 * 1024 // 100MB
+    val threshold = 200L * 1024 * 1024 // 200MB (updated default threshold)
 
     val smallFile   = 50L * 1024 * 1024       // 50MB
-    val largeFile   = 150L * 1024 * 1024      // 150MB
+    val largeFile   = 250L * 1024 * 1024      // 250MB (updated to be above threshold)
     val massiveFile = 5L * 1024 * 1024 * 1024 // 5GB
 
     assert(smallFile < threshold, "Small file should use single-part upload")
@@ -121,17 +121,17 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
     val maxParts    = 10000L
     val maxFileSize = 5L * 1024 * 1024 * 1024 * 1024 // 5TB
 
-    // For a 5GB file with 64MB parts: 5120MB / 64MB = 80 parts (OK)
+    // For a 5GB file with 128MB parts: 5120MB / 128MB = 40 parts (OK)
     val file5GB         = 5L * 1024 * 1024 * 1024
-    val parts64MB       = 64L * 1024 * 1024
-    val calculatedParts = (file5GB + parts64MB - 1) / parts64MB
+    val parts128MB      = 128L * 1024 * 1024
+    val calculatedParts = (file5GB + parts128MB - 1) / parts128MB
 
     assert(calculatedParts < maxParts, "Part count should be within AWS limits")
-    assert(parts64MB >= minPartSize, "Part size should meet minimum requirement")
+    assert(parts128MB >= minPartSize, "Part size should meet minimum requirement")
 
     println(s"✅ AWS limits validation:")
     println(s"  - Min part size: ${minPartSize / (1024 * 1024)}MB")
     println(s"  - Max parts: $maxParts")
-    println(s"  - 5GB file with 64MB parts: $calculatedParts parts")
+    println(s"  - 5GB file with 128MB parts: $calculatedParts parts")
   }
 }

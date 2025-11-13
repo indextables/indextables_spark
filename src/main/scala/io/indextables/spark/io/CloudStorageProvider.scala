@@ -150,8 +150,10 @@ case class CloudStorageConfig(
   bufferSize: Int = 16 * 1024 * 1024, // 16MB default
 
   // Multipart upload configuration
-  multipartUploadThreshold: Option[Long] = None, // Defaults to 100MB if not specified
-  maxConcurrency: Option[Int] = None             // Defaults to 4 if not specified
+  multipartUploadThreshold: Option[Long] = None, // Defaults to 200MB if not specified
+  partSize: Option[Long] = None,                 // Defaults to 128MB if not specified
+  maxConcurrency: Option[Int] = None,            // Defaults to 4 if not specified
+  maxQueueSize: Option[Int] = None               // Defaults to 3 if not specified (3 * 128MB = 384MB max buffered)
 )
 
 /** Factory for creating cloud storage providers */
@@ -617,11 +619,19 @@ object CloudStorageProviderFactory {
       // Multipart upload configuration
       multipartUploadThreshold =
         if (options.containsKey("spark.indextables.s3.multipartThreshold"))
-          Some(options.getLong("spark.indextables.s3.multipartThreshold", 100L * 1024 * 1024))
+          Some(options.getLong("spark.indextables.s3.multipartThreshold", 200L * 1024 * 1024))
+        else None,
+      partSize =
+        if (options.containsKey("spark.indextables.s3.partSize"))
+          Some(options.getLong("spark.indextables.s3.partSize", 128L * 1024 * 1024))
         else None,
       maxConcurrency =
         if (options.containsKey("spark.indextables.s3.maxConcurrency"))
           Some(options.getInt("spark.indextables.s3.maxConcurrency", 4))
+        else None,
+      maxQueueSize =
+        if (options.containsKey("spark.indextables.s3.maxQueueSize"))
+          Some(options.getInt("spark.indextables.s3.maxQueueSize", 3))
         else None
     )
   }

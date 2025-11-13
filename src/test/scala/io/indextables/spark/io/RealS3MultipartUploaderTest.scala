@@ -72,8 +72,14 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
         .credentialsProvider(StaticCredentialsProvider.create(credentials))
         .build()
 
+      val s3AsyncClientInstance = software.amazon.awssdk.services.s3.S3AsyncClient
+        .builder()
+        .region(Region.of(S3_REGION))
+        .credentialsProvider(StaticCredentialsProvider.create(credentials))
+        .build()
+
       s3Client = Some(s3ClientInstance)
-      multipartUploader = Some(new S3MultipartUploader(s3ClientInstance))
+      multipartUploader = Some(new S3MultipartUploader(s3ClientInstance, s3AsyncClientInstance))
 
       println(s"🔐 AWS credentials loaded successfully")
       println(s"🌊 S3Client configured for bucket: $S3_BUCKET in region: $S3_REGION")
@@ -168,7 +174,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
         println(s"⚠️  Warning: Could not clean up test objects: ${e.getMessage}")
     }
 
-  ignore("Real S3: Small files should use single-part upload") {
+  test("Real S3: Small files should use single-part upload") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
@@ -208,13 +214,13 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     println(s"✅ Verified object exists in S3 with correct size: ${headResponse.contentLength()} bytes")
   }
 
-  ignore("Real S3: Large files should use multipart upload") {
+  test("Real S3: Large files should use multipart upload") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
 
     val uploader = multipartUploader.get
-    val content  = new Array[Byte](150 * 1024 * 1024) // 150MB - above default 100MB threshold
+    val content  = new Array[Byte](250 * 1024 * 1024) // 250MB - above default 200MB threshold
 
     // Fill with random data
     val random = new Random(54321) // Fixed seed for reproducibility
@@ -237,8 +243,8 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     assert(result.etag.nonEmpty, "ETag should not be empty")
     assert(result.uploadId.isDefined, "Upload ID should be defined for multipart upload")
 
-    // Expected parts: 150MB / 64MB (default part size) = 3 parts (2 full + 1 partial)
-    val expectedParts = math.ceil(content.length.toDouble / (64 * 1024 * 1024)).toInt
+    // Expected parts: 250MB / 128MB (default part size) = 2 parts (1 full + 1 partial)
+    val expectedParts = math.ceil(content.length.toDouble / (128 * 1024 * 1024)).toInt
     assert(result.partCount == expectedParts, s"Expected $expectedParts parts, got: ${result.partCount}")
 
     // Verify the object exists in S3 with correct size
@@ -254,7 +260,7 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     println(s"✅ Verified object exists in S3 with correct size: ${headResponse.contentLength()} bytes")
   }
 
-  ignore("Real S3: Custom configuration should be respected") {
+  test("Real S3: Custom configuration should be respected") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
 
@@ -264,7 +270,14 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       maxConcurrency = 2                      // 2 parallel uploads
     )
 
-    val customUploader = new S3MultipartUploader(s3Client.get, config)
+    // Create async client for this test
+    val asyncClient = software.amazon.awssdk.services.s3.S3AsyncClient
+      .builder()
+      .region(Region.of(S3_REGION))
+      .credentialsProvider(s3Client.get.serviceClientConfiguration().credentialsProvider())
+      .build()
+
+    val customUploader = new S3MultipartUploader(s3Client.get, asyncClient, config)
 
     try {
       val content = new Array[Byte](80 * 1024 * 1024) // 80MB - above custom 50MB threshold
@@ -308,13 +321,13 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       customUploader.shutdown()
   }
 
-  ignore("Real S3: Streaming upload should work with input stream") {
+  test("Real S3: Streaming upload should work with input stream") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
     assume(multipartUploader.isDefined, "S3MultipartUploader required for test")
 
     val uploader = multipartUploader.get
-    val content  = new Array[Byte](120 * 1024 * 1024) // 120MB - above 100MB threshold for multipart
+    val content  = new Array[Byte](220 * 1024 * 1024) // 220MB - above 200MB threshold for multipart
 
     // Fill with random data
     val random = new Random(11111)
@@ -331,12 +344,10 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       s"✅ Stream upload completed: strategy=${result.strategy}, parts=${result.partCount}, size=${result.totalSize}"
     )
 
-    // Should use multipart-stream strategy
-    assert(result.strategy == "multipart-stream", s"Expected multipart-stream, got: ${result.strategy}")
-    assert(result.totalSize == content.length, s"Expected size ${content.length}, got: ${result.totalSize}")
-    assert(result.partCount > 0, "Should have at least one part")
+    // Should use multipart-stream-parallel strategy (new parallel async implementation)
+    assert(result.strategy == "multipart-stream-parallel", s"Expected multipart-stream-parallel, got: ${result.strategy}")
 
-    // Verify object in S3
+    // Verify actual object in S3 BEFORE checking reported size
     val headRequest = HeadObjectRequest
       .builder()
       .bucket(S3_BUCKET)
@@ -344,17 +355,36 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       .build()
 
     val headResponse = s3Client.get.headObject(headRequest)
-    assert(headResponse.contentLength() == content.length, "S3 object size mismatch")
+    val actualS3Size = headResponse.contentLength()
 
-    println(s"✅ Streaming upload verified in S3 with correct size: ${headResponse.contentLength()} bytes")
+    println(s"✅ S3 object actual size: ${actualS3Size} bytes")
+    println(s"📊 Expected size: ${content.length} bytes")
+    println(s"📊 Reported size: ${result.totalSize} bytes")
+
+    // First verify the ACTUAL upload was correct
+    assert(actualS3Size == content.length, s"S3 object size mismatch - actual: $actualS3Size, expected: ${content.length}")
+
+    // Then check the reported size (this may be a reporting bug)
+    assert(result.totalSize == content.length, s"Reported size mismatch - reported: ${result.totalSize}, expected: ${content.length}")
+    assert(result.partCount > 0, "Should have at least one part")
+
+    println(s"✅ Streaming upload verified in S3 with correct size: ${actualS3Size} bytes")
   }
 
-  ignore("Real S3: Upload performance with large merged splits config") {
+  test("Real S3: Upload performance with large merged splits config") {
     assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
     assume(s3Client.isDefined, "S3Client required for test")
 
-    val config              = S3MultipartConfig.forLargeMergedSplits
-    val performanceUploader = new S3MultipartUploader(s3Client.get, config)
+    val config = S3MultipartConfig.forLargeMergedSplits
+
+    // Create async client for this test
+    val asyncClient = software.amazon.awssdk.services.s3.S3AsyncClient
+      .builder()
+      .region(Region.of(S3_REGION))
+      .credentialsProvider(s3Client.get.serviceClientConfiguration().credentialsProvider())
+      .build()
+
+    val performanceUploader = new S3MultipartUploader(s3Client.get, asyncClient, config)
 
     try {
       val content = new Array[Byte](300 * 1024 * 1024) // 300MB - large merge scenario

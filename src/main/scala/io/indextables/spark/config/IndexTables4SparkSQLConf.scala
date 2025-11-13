@@ -48,6 +48,7 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_S3_MULTIPART_THRESHOLD = "spark.indextables.s3.multipartThreshold"
   val TANTIVY4SPARK_S3_MAX_CONCURRENCY     = "spark.indextables.s3.maxConcurrency"
   val TANTIVY4SPARK_S3_PART_SIZE           = "spark.indextables.s3.partSize"
+  val TANTIVY4SPARK_S3_MAX_QUEUE_SIZE      = "spark.indextables.s3.maxQueueSize"
 
   /////////////////////
   // Working Directory Configuration
