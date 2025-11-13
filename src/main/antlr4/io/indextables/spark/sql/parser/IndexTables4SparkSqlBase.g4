@@ -56,6 +56,8 @@ statement
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
     | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
+    | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
+        (INCLUDE ALL)?                                          #describeTransactionLog
     | .*?                                                       #passThrough
     ;
 
@@ -88,7 +90,7 @@ quotedIdentifier
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
-    | RETENTION
+    | RETENTION | DESCRIBE | INCLUDE | ALL
     ;
 
 // Keywords (case-insensitive)
@@ -122,6 +124,9 @@ HOURS: [Hh][Oo][Uu][Rr][Ss];
 DRY: [Dd][Rr][Yy];
 RUN: [Rr][Uu][Nn];
 RETENTION: [Rr][Ee][Tt][Ee][Nn][Tt][Ii][Oo][Nn];
+DESCRIBE: [Dd][Ee][Ss][Cc][Rr][Ii][Bb][Ee];
+INCLUDE: [Ii][Nn][Cc][Ll][Uu][Dd][Ee];
+ALL: [Aa][Ll][Ll];
 
 // Literals
 STRING

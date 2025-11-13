@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
+  DescribeTransactionLogCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
@@ -284,6 +285,46 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     val result = RepairIndexFilesTransactionLogCommand(sourcePath, targetPath)
     logger.debug(s"Created RepairIndexFilesTransactionLogCommand: $result")
     result
+  }
+
+  override def visitDescribeTransactionLog(ctx: DescribeTransactionLogContext): LogicalPlan = {
+    logger.debug(s"visitDescribeTransactionLog called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val tablePath = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        pathStr
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("DESCRIBE INDEXTABLES TRANSACTION LOG requires either a path or table identifier")
+      }
+
+      // Extract INCLUDE ALL flag
+      val includeAll = ctx.INCLUDE() != null && ctx.ALL() != null
+      logger.debug(s"INCLUDE ALL flag: $includeAll")
+
+      // Create command (use OneRowRelation as child - standard pattern for commands that don't have logical plan children)
+      logger.debug(s"Creating DescribeTransactionLogCommand with tablePath=$tablePath, includeAll=$includeAll")
+      val result = DescribeTransactionLogCommand(
+        child = org.apache.spark.sql.catalyst.plans.logical.OneRowRelation(),
+        tablePath = tablePath,
+        includeAll = includeAll
+      )
+      logger.debug(s"Created DescribeTransactionLogCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitDescribeTransactionLog: ${e.getMessage}", e)
+        throw e
+    }
   }
 
   override def visitPassThrough(ctx: PassThroughContext): AnyRef = {

@@ -1005,7 +1005,7 @@ class TransactionLog(
     val version = getNextVersion()
     writeActions(version, Seq(skipAction))
 
-    logger.info(s"Recorded skipped file: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
+    logger.debug(s"Recorded skipped file: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
     version
   }
 
@@ -1046,7 +1046,7 @@ class TransactionLog(
     val version = getNextVersion()
     writeActions(version, Seq(skipAction))
 
-    logger.info(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
+    logger.debug(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
     version
   }
 
