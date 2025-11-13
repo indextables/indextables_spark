@@ -435,4 +435,88 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     } finally
       performanceUploader.shutdown()
   }
+
+  test("Real S3: Memory-mapped upload with zero-copy I/O (300MB)") {
+    assume(awsCredentials.isDefined, "AWS credentials required for real S3 test")
+    assume(s3Client.isDefined, "S3Client required for test")
+
+    val config = S3MultipartConfig.forLargeMergedSplits
+
+    // Create async client for this test
+    val asyncClient = software.amazon.awssdk.services.s3.S3AsyncClient
+      .builder()
+      .region(Region.of(S3_REGION))
+      .credentialsProvider(s3Client.get.serviceClientConfiguration().credentialsProvider())
+      .build()
+
+    val mmapUploader = new S3MultipartUploader(s3Client.get, asyncClient, config)
+
+    try {
+      // Create a temp file with random data
+      val tempFile = java.nio.file.Files.createTempFile("mmap-test-", ".dat")
+      val fileSize = 300L * 1024 * 1024 // 300MB
+
+      println(s"📝 Creating temporary file: ${tempFile}")
+      println(s"   Size: ${fileSize / (1024 * 1024)}MB")
+
+      // Write random data to file
+      Using.resource(new java.io.FileOutputStream(tempFile.toFile)) { fos =>
+        val random = new Random(88888)
+        val buffer = new Array[Byte](64 * 1024) // 64KB write buffer
+        var remaining = fileSize
+
+        while (remaining > 0) {
+          val writeSize = math.min(buffer.length, remaining).toInt
+          random.nextBytes(buffer)
+          fos.write(buffer, 0, writeSize)
+          remaining -= writeSize
+        }
+      }
+
+      val key = s"$testKeyPrefix/memory-mapped-test.dat"
+
+      println(s"🗺️  Testing memory-mapped upload (zero-copy) to s3://$S3_BUCKET/$key")
+      println(s"   File: ${tempFile}")
+      println(s"   Size: ${fileSize / (1024 * 1024)}MB")
+      println(s"   Config: part size=${config.partSize / (1024 * 1024)}MB, concurrency=${config.maxConcurrency}")
+
+      val startTime = System.currentTimeMillis()
+      val result = mmapUploader.uploadFileWithMemoryMapping(S3_BUCKET, key, tempFile)
+      val uploadTime = System.currentTimeMillis() - startTime
+
+      val throughputMBps = (fileSize.toDouble / (1024 * 1024)) / (uploadTime / 1000.0)
+
+      println(f"✅ Memory-mapped upload completed in ${uploadTime}ms ($throughputMBps%.2f MB/s)")
+      println(s"   Strategy: ${result.strategy}, Parts: ${result.partCount}, Size: ${result.totalSize}")
+
+      // Assertions
+      assert(result.strategy == "multipart-mmap", "Should use multipart-mmap strategy")
+      assert(result.totalSize == fileSize, "Reported size should match file size")
+      assert(uploadTime > 0, "Upload should take measurable time")
+      assert(throughputMBps > 0, "Should have positive throughput")
+
+      // Expected parts: 300MB / 128MB = 3 parts
+      val expectedParts = math.ceil(fileSize.toDouble / config.partSize).toInt
+      assert(result.partCount == expectedParts, s"Expected $expectedParts parts, got: ${result.partCount}")
+
+      // Verify object exists in S3 with correct size
+      val headRequest = HeadObjectRequest
+        .builder()
+        .bucket(S3_BUCKET)
+        .key(key)
+        .build()
+
+      val headResponse = s3Client.get.headObject(headRequest)
+      assert(headResponse.contentLength() == fileSize, s"S3 object size mismatch: expected $fileSize, got ${headResponse.contentLength()}")
+
+      println(f"✅ Memory-mapped upload verified in S3: ${headResponse.contentLength()} bytes")
+      println(f"✅ Throughput: $throughputMBps%.2f MB/s")
+      println(s"✅ Zero-copy I/O successfully tested - file never loaded into JVM heap!")
+
+      // Clean up temp file
+      java.nio.file.Files.deleteIfExists(tempFile)
+
+    } finally
+      mmapUploader.shutdown()
+  }
 }

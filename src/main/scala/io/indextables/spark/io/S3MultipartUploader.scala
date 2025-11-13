@@ -18,6 +18,8 @@
 package io.indextables.spark.io
 
 import java.io.{ByteArrayInputStream, InputStream}
+import java.nio.channels.FileChannel
+import java.nio.file.{Path, StandardOpenOption}
 import java.security.MessageDigest
 import java.util.concurrent.{CompletableFuture, Executors, ForkJoinPool, ThreadFactory}
 import java.util.concurrent.atomic.AtomicInteger
@@ -127,6 +129,329 @@ class S3MultipartUploader(
         logger.info(s"Using multipart upload for stream: s3://$bucket/$key")
         uploadMultipartFromStream(bucket, key, inputStream, contentLength)
     }
+
+  /**
+   * Upload a local file using memory-mapped I/O for zero-copy uploads. This is the most efficient upload method as it:
+   *   - Never loads the file into JVM heap
+   *   - Uses OS-level page cache for I/O
+   *   - Creates zero-copy ByteBuffer views for each part
+   *   - Leverages async S3 client for true non-blocking uploads
+   *
+   * @param bucket
+   *   S3 bucket name
+   * @param key
+   *   S3 object key
+   * @param filePath
+   *   Local file path to upload
+   * @return
+   *   Upload result with metadata
+   */
+  def uploadFileWithMemoryMapping(
+    bucket: String,
+    key: String,
+    filePath: Path
+  ): S3UploadResult = {
+    val fileSize = filePath.toFile.length()
+
+    if (fileSize < config.multipartThreshold) {
+      // For small files, use single-part upload (still memory-mapped, just one part)
+      logger.info(s"Using single-part memory-mapped upload: s3://$bucket/$key (${formatBytes(fileSize)})")
+      uploadSinglePartMemoryMapped(bucket, key, filePath, fileSize)
+    } else {
+      // For large files, use multipart with memory-mapped I/O
+      logger.info(s"Using multipart memory-mapped upload: s3://$bucket/$key (${formatBytes(fileSize)})")
+      uploadMultipartMemoryMapped(bucket, key, filePath, fileSize)
+    }
+  }
+
+  /** Single-part upload using memory-mapped I/O (zero-copy) */
+  private def uploadSinglePartMemoryMapped(
+    bucket: String,
+    key: String,
+    filePath: Path,
+    fileSize: Long
+  ): S3UploadResult = {
+    val startTime = System.currentTimeMillis()
+
+    var fileChannel: FileChannel = null
+    try {
+      // Open file channel and memory-map the file
+      fileChannel = FileChannel.open(filePath, StandardOpenOption.READ)
+      val mappedBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize)
+
+      // Create request
+      val request = PutObjectRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .contentLength(fileSize)
+        .build()
+
+      // Upload using AsyncRequestBody with mapped buffer (zero-copy!)
+      val asyncBody = AsyncRequestBody.fromByteBuffer(mappedBuffer)
+      val uploadFuture = s3AsyncClient.putObject(request, asyncBody)
+
+      // Wait for completion
+      val response = uploadFuture.get()
+      val uploadTime = System.currentTimeMillis() - startTime
+
+      logger.info(s"✅ Single-part memory-mapped upload completed: s3://$bucket/$key in ${uploadTime}ms")
+
+      S3UploadResult(
+        bucket = bucket,
+        key = key,
+        etag = response.eTag(),
+        uploadId = None,
+        partCount = 1,
+        totalSize = fileSize,
+        uploadTimeMs = uploadTime,
+        strategy = "single-part-mmap"
+      )
+    } catch {
+      case ex: Exception =>
+        logger.error(s"❌ Single-part memory-mapped upload failed: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Single-part memory-mapped upload failed: ${ex.getMessage}", ex)
+    } finally {
+      if (fileChannel != null) fileChannel.close()
+    }
+  }
+
+  /** Multipart upload using memory-mapped I/O with zero-copy parts */
+  private def uploadMultipartMemoryMapped(
+    bucket: String,
+    key: String,
+    filePath: Path,
+    fileSize: Long
+  ): S3UploadResult = {
+    val startTime = System.currentTimeMillis()
+
+    // Calculate part size and count
+    val partSize = calculateOptimalPartSize(fileSize)
+    val partCount = ((fileSize + partSize - 1) / partSize).toInt
+
+    logger.info(s"🚀 Starting memory-mapped multipart upload: s3://$bucket/$key")
+    logger.info(s"   Total size: ${formatBytes(fileSize)}")
+    logger.info(s"   Part size: ${formatBytes(partSize)}")
+    logger.info(s"   Part count: $partCount")
+    logger.info(s"   Max concurrency: ${config.maxConcurrency}")
+
+    var uploadId: String = null
+    var fileChannel: FileChannel = null
+
+    try {
+      // Open file channel for memory mapping
+      fileChannel = FileChannel.open(filePath, StandardOpenOption.READ)
+
+      // 1. Initiate multipart upload
+      val createRequest = CreateMultipartUploadRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+
+      uploadId = s3Client.createMultipartUpload(createRequest).uploadId()
+      logger.debug(s"✅ Multipart upload initiated: uploadId=$uploadId")
+
+      // 2. Upload all parts in parallel using memory-mapped buffers (zero-copy!)
+      val etags = uploadMemoryMappedPartsInParallel(
+        bucket,
+        key,
+        uploadId,
+        fileChannel,
+        fileSize,
+        partSize,
+        partCount
+      )
+
+      // 3. Complete multipart upload
+      val completedParts = etags.zipWithIndex.map { case (etag, index) =>
+        CompletedPart.builder().partNumber(index + 1).eTag(etag).build()
+      }
+
+      val completeRequest = CompleteMultipartUploadRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .uploadId(uploadId)
+        .multipartUpload(CompletedMultipartUpload.builder().parts(completedParts: _*).build())
+        .build()
+
+      val completeResponse = s3Client.completeMultipartUpload(completeRequest)
+      val uploadTime = System.currentTimeMillis() - startTime
+
+      logger.info(s"✅ Memory-mapped multipart upload completed: s3://$bucket/$key")
+      logger.info(s"   Upload time: ${uploadTime}ms")
+      logger.info(s"   Upload rate: ${formatBytes((fileSize.toDouble / (uploadTime / 1000.0)).toLong)}/s")
+
+      S3UploadResult(
+        bucket = bucket,
+        key = key,
+        etag = completeResponse.eTag(),
+        uploadId = Some(uploadId),
+        partCount = partCount,
+        totalSize = fileSize,
+        uploadTimeMs = uploadTime,
+        strategy = "multipart-mmap"
+      )
+    } catch {
+      case ex: Exception =>
+        // Abort the multipart upload on failure
+        if (uploadId != null) {
+          try {
+            val abortRequest = AbortMultipartUploadRequest
+              .builder()
+              .bucket(bucket)
+              .key(key)
+              .uploadId(uploadId)
+              .build()
+            s3Client.abortMultipartUpload(abortRequest)
+            logger.info(s"⚠️ Multipart upload aborted: uploadId=$uploadId")
+          } catch {
+            case abortEx: Exception =>
+              logger.error(s"❌ Failed to abort multipart upload: uploadId=$uploadId", abortEx)
+          }
+        }
+
+        logger.error(s"❌ Memory-mapped multipart upload failed: s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Memory-mapped multipart upload failed: ${ex.getMessage}", ex)
+    } finally {
+      if (fileChannel != null) fileChannel.close()
+    }
+  }
+
+  /**
+   * Upload parts in parallel using memory-mapped ByteBuffers (zero-copy). Creates slice views of the mapped file
+   * without copying data into JVM heap.
+   */
+  private def uploadMemoryMappedPartsInParallel(
+    bucket: String,
+    key: String,
+    uploadId: String,
+    fileChannel: FileChannel,
+    fileSize: Long,
+    partSize: Long,
+    partCount: Int
+  ): Array[String] = {
+
+    // Create CompletableFutures for all parts using memory-mapped buffers
+    val futures = (0 until partCount).map { partIndex =>
+      val partNumber = partIndex + 1
+      val startOffset = partIndex * partSize
+      val currentPartSize = math.min(partSize, fileSize - startOffset)
+
+      // Memory-map this specific part (zero-copy view!)
+      val partBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, currentPartSize)
+
+      // Upload this part asynchronously
+      uploadPartFromMemoryMappedBuffer(bucket, key, uploadId, partNumber, partBuffer, currentPartSize)
+    }.toArray
+
+    // Wait for all uploads to complete
+    try {
+      CompletableFuture.allOf(futures: _*).get()
+      futures.map(_.get())
+    } catch {
+      case ex: Exception =>
+        logger.error(s"❌ Memory-mapped parallel upload failed for s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Memory-mapped parallel upload failed: ${ex.getMessage}", ex)
+    }
+  }
+
+  /** Upload a single part from a memory-mapped ByteBuffer with retry logic - TRUE ASYNC */
+  private def uploadPartFromMemoryMappedBuffer(
+    bucket: String,
+    key: String,
+    uploadId: String,
+    partNumber: Int,
+    partBuffer: java.nio.MappedByteBuffer,
+    partSize: Long
+  ): CompletableFuture[String] = {
+
+    def attemptUpload(attemptNum: Int, startTime: Long): CompletableFuture[String] = {
+      // Reset buffer position for retry attempts
+      partBuffer.rewind()
+
+      val request = UploadPartRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .uploadId(uploadId)
+        .partNumber(partNumber)
+        .contentLength(partSize)
+        .build()
+
+      // Create async body from memory-mapped buffer (zero-copy!)
+      val asyncBody = AsyncRequestBody.fromByteBuffer(partBuffer)
+
+      // Start async upload - NO BLOCKING!
+      val uploadFuture = s3AsyncClient.uploadPart(request, asyncBody)
+
+      // Chain callbacks without blocking
+      val resultFuture = new CompletableFuture[String]()
+
+      uploadFuture.whenComplete(new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
+        override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable): Unit = {
+          if (ex != null) {
+            // Upload failed - retry if we have attempts left
+            if (attemptNum < config.maxRetries) {
+              val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
+              logger.warn(
+                s"⚠️ Part $partNumber memory-mapped upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
+                ex
+              )
+
+              // Schedule retry asynchronously (no thread blocking!)
+              val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
+              scheduler.schedule(
+                new Runnable {
+                  override def run(): Unit = {
+                    try {
+                      // Retry upload (recursive call)
+                      attemptUpload(attemptNum + 1, startTime).whenComplete(
+                        new java.util.function.BiConsumer[String, Throwable] {
+                          override def accept(retryResult: String, retryEx: Throwable): Unit = {
+                            if (retryEx != null) resultFuture.completeExceptionally(retryEx)
+                            else resultFuture.complete(retryResult)
+                            scheduler.shutdown()
+                          }
+                        }
+                      )
+                    } catch {
+                      case retryEx: Exception =>
+                        resultFuture.completeExceptionally(retryEx)
+                        scheduler.shutdown()
+                    }
+                  }
+                },
+                delay,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+              )
+            } else {
+              // All retries exhausted
+              resultFuture.completeExceptionally(
+                new RuntimeException(
+                  s"Part $partNumber memory-mapped upload failed after ${config.maxRetries} attempts",
+                  ex
+                )
+              )
+            }
+          } else {
+            // Success!
+            val partTime = System.currentTimeMillis() - startTime
+            logger.debug(
+              s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC ZERO-COPY): ${formatBytes(partSize)} in ${partTime}ms"
+            )
+            resultFuture.complete(response.eTag())
+          }
+        }
+      })
+
+      resultFuture
+    }
+
+    // Start first attempt
+    attemptUpload(1, System.currentTimeMillis())
+  }
 
   /** Single-part upload for small files */
   private def uploadSinglePart(
@@ -267,7 +592,10 @@ class S3MultipartUploader(
     }
   }
 
-  /** Upload parts in parallel using futures */
+  /**
+   * Upload parts in parallel using CompletableFuture for true async I/O.
+   * Uses S3AsyncClient with CompletableFuture.allOf() to avoid blocking.
+   */
   private def uploadPartsInParallel(
     bucket: String,
     key: String,
@@ -277,28 +605,28 @@ class S3MultipartUploader(
     partCount: Int
   ): Array[String] = {
 
+    // Create CompletableFutures for all parts (no blocking!)
     val futures = (0 until partCount).map { partIndex =>
-      Future {
-        val partNumber  = partIndex + 1
-        val startOffset = partIndex * partSize
-        val endOffset   = math.min(startOffset + partSize, content.length)
-        val partData    = java.util.Arrays.copyOfRange(content, startOffset.toInt, endOffset.toInt)
+      val partNumber  = partIndex + 1
+      val startOffset = partIndex * partSize
+      val endOffset   = math.min(startOffset + partSize, content.length)
+      val partData    = java.util.Arrays.copyOfRange(content, startOffset.toInt, endOffset.toInt)
 
-        uploadSinglePart(bucket, key, uploadId, partNumber, partData)
-      }
-    }
+      // Return CompletableFuture that uploads this part asynchronously
+      uploadSinglePartAsyncNonBlocking(bucket, key, uploadId, partNumber, partData)
+    }.toArray
 
-    // Use a custom ForkJoinPool to limit parallelism
-    val pool = new ForkJoinPool(config.maxConcurrency)
-
+    // Wait for all uploads to complete (only blocks here at the end, not per-part)
     try {
-      import scala.concurrent.duration._
-      import scala.concurrent.Await
+      CompletableFuture.allOf(futures: _*).get()
 
-      val allFutures = Future.sequence(futures)
-      Await.result(allFutures, config.uploadTimeout).toArray
-    } finally
-      pool.shutdown()
+      // Extract ETags from completed futures
+      futures.map(_.get())
+    } catch {
+      case ex: Exception =>
+        logger.error(s"❌ Parallel upload failed for s3://$bucket/$key", ex)
+        throw new RuntimeException(s"Parallel upload failed: ${ex.getMessage}", ex)
+    }
   }
 
   /** Upload a single part with retry logic (synchronous - for byte array uploads) */
@@ -360,6 +688,7 @@ class S3MultipartUploader(
   /**
    * Upload a single part using ASYNC S3 client with retry logic.
    * This provides true async I/O instead of just threading.
+   * DEPRECATED: Blocks on .get() - use uploadSinglePartAsyncNonBlocking instead
    */
   private def uploadSinglePartAsync(
     bucket: String,
@@ -419,6 +748,98 @@ class S3MultipartUploader(
       }
 
     throw new RuntimeException(s"Part $partNumber async upload failed after ${config.maxRetries} attempts", lastException)
+  }
+
+  /**
+   * Upload a single part using ASYNC S3 client with retry logic - NON-BLOCKING version.
+   * Returns CompletableFuture[String] to allow true async composition without blocking.
+   */
+  private def uploadSinglePartAsyncNonBlocking(
+    bucket: String,
+    key: String,
+    uploadId: String,
+    partNumber: Int,
+    partData: Array[Byte]
+  ): CompletableFuture[String] = {
+
+    def attemptUpload(attemptNum: Int, startTime: Long): CompletableFuture[String] = {
+      val request = UploadPartRequest
+        .builder()
+        .bucket(bucket)
+        .key(key)
+        .uploadId(uploadId)
+        .partNumber(partNumber)
+        .contentLength(partData.length.toLong)
+        .build()
+
+      val asyncBody = AsyncRequestBody.fromBytes(partData)
+
+      // Start async upload - NO BLOCKING!
+      val uploadFuture = s3AsyncClient.uploadPart(request, asyncBody)
+
+      // Chain callbacks without blocking
+      val resultFuture = new CompletableFuture[String]()
+
+      uploadFuture.whenComplete(new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
+        override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable): Unit = {
+          if (ex != null) {
+            // Upload failed - retry if we have attempts left
+            if (attemptNum < config.maxRetries) {
+              val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
+              logger.warn(
+                s"⚠️ Part $partNumber async upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
+                ex
+              )
+
+              // Schedule retry asynchronously (no thread blocking!)
+              val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
+              scheduler.schedule(
+                new Runnable {
+                  override def run(): Unit = {
+                    try {
+                      // Retry upload (recursive call)
+                      attemptUpload(attemptNum + 1, startTime).whenComplete(
+                        new java.util.function.BiConsumer[String, Throwable] {
+                          override def accept(retryResult: String, retryEx: Throwable): Unit = {
+                            if (retryEx != null) resultFuture.completeExceptionally(retryEx)
+                            else resultFuture.complete(retryResult)
+                            scheduler.shutdown()
+                          }
+                        }
+                      )
+                    } catch {
+                      case retryEx: Exception =>
+                        resultFuture.completeExceptionally(retryEx)
+                        scheduler.shutdown()
+                    }
+                  }
+                },
+                delay,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+              )
+            } else {
+              // All retries exhausted
+              resultFuture.completeExceptionally(
+                new RuntimeException(
+                  s"Part $partNumber async upload failed after ${config.maxRetries} attempts",
+                  ex
+                )
+              )
+            }
+          } else {
+            // Success!
+            val partTime = System.currentTimeMillis() - startTime
+            logger.debug(s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC): ${formatBytes(partData.length)} in ${partTime}ms")
+            resultFuture.complete(response.eTag())
+          }
+        }
+      })
+
+      resultFuture
+    }
+
+    // Start first attempt
+    attemptUpload(1, System.currentTimeMillis())
   }
 
   /**
