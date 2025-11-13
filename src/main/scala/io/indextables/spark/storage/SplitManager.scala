@@ -34,6 +34,72 @@ import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFact
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
 import org.slf4j.LoggerFactory
+import java.util.concurrent.Semaphore
+
+/**
+ * Throttle for controlling parallelism of tantivy index to quickwit split conversions.
+ *
+ * The conversion process (QuickwitSplit.convertIndexFromPath) is CPU and I/O intensive, so we limit
+ * how many can run concurrently across the executor to prevent resource exhaustion.
+ *
+ * Configuration:
+ *   - spark.indextables.splitConversion.maxParallelism: Maximum concurrent conversions
+ *   - Default: max(1, defaultParallelism / 2)
+ */
+object SplitConversionThrottle {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  @volatile private var semaphore: Option[Semaphore] = None
+  @volatile private var currentMaxParallelism: Int = -1
+  private val lock = new Object
+
+  /**
+   * Initialize or update the throttle with the given max parallelism.
+   *
+   * @param maxParallelism Maximum number of concurrent split conversions
+   */
+  def initialize(maxParallelism: Int): Unit = lock.synchronized {
+    if (maxParallelism <= 0) {
+      throw new IllegalArgumentException(s"maxParallelism must be positive, got: $maxParallelism")
+    }
+
+    if (currentMaxParallelism != maxParallelism) {
+      logger.info(s"Initializing split conversion throttle with maxParallelism=$maxParallelism")
+      semaphore = Some(new Semaphore(maxParallelism, true)) // fair=true for FIFO ordering
+      currentMaxParallelism = maxParallelism
+    }
+  }
+
+  /**
+   * Execute a block of code with throttling applied.
+   * Acquires a permit before execution and releases it after completion.
+   */
+  def withThrottle[T](block: => T): T = {
+    val sem = semaphore.getOrElse {
+      throw new IllegalStateException("SplitConversionThrottle not initialized. Call initialize() first.")
+    }
+
+    logger.debug(s"Acquiring split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
+    sem.acquire()
+    try {
+      logger.debug(s"Acquired split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
+      block
+    } finally {
+      sem.release()
+      logger.debug(s"Released split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
+    }
+  }
+
+  /**
+   * Get the current max parallelism setting.
+   */
+  def getMaxParallelism: Int = currentMaxParallelism
+
+  /**
+   * Get the number of available permits.
+   */
+  def getAvailablePermits: Int = semaphore.map(_.availablePermits()).getOrElse(0)
+}
 
 /**
  * Manager for IndexTables4Spark split operations using tantivy4java's QuickwitSplit functionality.
@@ -126,8 +192,10 @@ object SplitManager {
       val tempSplitPath = s"/tmp/tantivy4spark-split-${UUID.randomUUID()}.split"
 
       try {
-        // Create split file locally
-        val metadata = QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
+        // Create split file locally with throttling to limit concurrent conversions
+        val metadata = SplitConversionThrottle.withThrottle {
+          QuickwitSplit.convertIndexFromPath(indexPath, tempSplitPath, config)
+        }
         logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
@@ -180,9 +248,11 @@ object SplitManager {
           throw e
       }
     } else {
-      // For non-S3 paths, create directly
+      // For non-S3 paths, create directly with throttling to limit concurrent conversions
       try {
-        val metadata = QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
+        val metadata = SplitConversionThrottle.withThrottle {
+          QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
+        }
         logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
 
         // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS

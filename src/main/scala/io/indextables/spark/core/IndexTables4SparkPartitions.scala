@@ -484,6 +484,22 @@ class IndexTables4SparkDataWriter(
     new CaseInsensitiveStringMap(serializedOptions.asJava)
   }
 
+  // Initialize split conversion throttle (first access per executor)
+  // This limits the parallelism of tantivy index -> quickwit split conversions
+  {
+    // Get configured max parallelism. If not set, we'll use a conservative default of 1
+    // The driver should set this configuration based on defaultParallelism
+    val defaultMaxParallelism = 1
+    val maxParallelism = options.getLong(
+      io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM,
+      defaultMaxParallelism
+    ).toInt
+
+    // Initialize throttle (idempotent - only initializes once per parallelism value)
+    io.indextables.spark.storage.SplitConversionThrottle.initialize(maxParallelism)
+    logger.info(s"Split conversion throttle initialized: maxParallelism=$maxParallelism")
+  }
+
   // Normalize table path for consistent S3 protocol handling (s3a:// -> s3://)
   private val normalizedTablePath = {
     val pathStr       = tablePath.toString

@@ -69,10 +69,11 @@ object IndexTables4SparkSQLConf {
   // Index Writer Configuration
   /////////////////////
 
-  val TANTIVY4SPARK_INDEX_WRITER_HEAP_SIZE  = "spark.indextables.indexWriter.heapSize"
-  val TANTIVY4SPARK_INDEX_WRITER_THREADS    = "spark.indextables.indexWriter.threads"
-  val TANTIVY4SPARK_INDEX_WRITER_BATCH_SIZE = "spark.indextables.indexWriter.batchSize"
-  val TANTIVY4SPARK_INDEX_WRITER_USE_BATCH  = "spark.indextables.indexWriter.useBatch"
+  val TANTIVY4SPARK_INDEX_WRITER_HEAP_SIZE             = "spark.indextables.indexWriter.heapSize"
+  val TANTIVY4SPARK_INDEX_WRITER_THREADS               = "spark.indextables.indexWriter.threads"
+  val TANTIVY4SPARK_INDEX_WRITER_BATCH_SIZE            = "spark.indextables.indexWriter.batchSize"
+  val TANTIVY4SPARK_INDEX_WRITER_USE_BATCH             = "spark.indextables.indexWriter.useBatch"
+  val TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM   = "spark.indextables.splitConversion.maxParallelism"
 
   /////////////////////
   // General Configuration

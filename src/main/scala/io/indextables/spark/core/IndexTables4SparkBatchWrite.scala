@@ -69,11 +69,25 @@ class IndexTables4SparkBatchWrite(
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
 
+    // Set split conversion max parallelism if not already configured
+    // Default: max(1, availableProcessors / 4)
+    import org.apache.spark.sql.SparkSession
+    import scala.jdk.CollectionConverters._
+
+    val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
+    val computedMaxParallelism = if (options.get(configKey) == null) {
+      val availableProcessors = Runtime.getRuntime.availableProcessors()
+      val maxParallelism = Math.max(1, availableProcessors / 4)
+      logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
+      Some(maxParallelism)
+    } else {
+      None
+    }
+
     // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
     val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
 
     // Copy all tantivy4spark options to hadoop config to ensure they reach executors
-    import scala.jdk.CollectionConverters._
     val serializedOptions = scala.collection.mutable.Map[String, String]()
     options.entrySet().asScala.foreach { entry =>
       val key   = entry.getKey
@@ -89,6 +103,13 @@ class IndexTables4SparkBatchWrite(
             else value}"
         )
       }
+    }
+
+    // Add computed split conversion max parallelism if we calculated it
+    computedMaxParallelism.foreach { maxPar =>
+      serializedOptions.put(configKey, maxPar.toString)
+      enrichedHadoopConf.set(configKey, maxPar.toString)
+      logger.info(s"Added computed split conversion max parallelism to executor config: $maxPar")
     }
 
     // Serialize hadoop config properties to avoid Configuration serialization issues

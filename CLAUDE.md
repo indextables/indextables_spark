@@ -38,6 +38,9 @@ spark.indextables.indexWriter.heapSize: "100M" (supports "2G", "500M", "1024K")
 spark.indextables.indexWriter.batchSize: 10000
 spark.indextables.indexWriter.threads: 2
 
+// Split Conversion (controls parallelism of tantivy index -> quickwit split conversion)
+spark.indextables.splitConversion.maxParallelism: <auto> (default: max(1, availableProcessors / 4))
+
 // Auto-sizing
 spark.indextables.autoSize.enabled: false
 spark.indextables.autoSize.targetSplitSize: "100M"
