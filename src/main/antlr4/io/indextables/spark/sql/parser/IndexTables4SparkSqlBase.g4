@@ -47,11 +47,17 @@ statement
         (TARGET SIZE targetSize=alphanumericValue)?
         (MAX GROUPS maxGroups=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
+    | PURGE INDEXTABLE (path=STRING | table=qualifiedName)
+        (OLDER THAN retentionNumber=INTEGER_VALUE retentionUnit=(DAYS | HOURS))?
+        (TRANSACTION LOG RETENTION txLogRetentionNumber=INTEGER_VALUE txLogRetentionUnit=(DAYS | HOURS))?
+        (DRY RUN)?                                              #purgeIndexTable
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
     | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
+    | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
+        (INCLUDE ALL)?                                          #describeTransactionLog
     | .*?                                                       #passThrough
     ;
 
@@ -82,8 +88,9 @@ quotedIdentifier
     ;
 
 nonReserved
-    : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | FOR | TRANSACTION | LOG | MAX | GROUPS
-    | REPAIR | INDEXFILES | AT | LOCATION
+    : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
+    | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
+    | RETENTION | DESCRIBE | INCLUDE | ALL
     ;
 
 // Keywords (case-insensitive)
@@ -100,6 +107,7 @@ LOG: [Ll][Oo][Gg];
 FOR: [Ff][Oo][Rr];
 TANTIVY4SPARK: [Tt][Aa][Nn][Tt][Ii][Vv][Yy]'4'[Ss][Pp][Aa][Rr][Kk];
 INDEXTABLES: [Ii][Nn][Dd][Ee][Xx][Tt][Aa][Bb][Ll][Ee][Ss];
+INDEXTABLE: [Ii][Nn][Dd][Ee][Xx][Tt][Aa][Bb][Ll][Ee];
 SEARCHER: [Ss][Ee][Aa][Rr][Cc][Hh][Ee][Rr];
 CACHE: [Cc][Aa][Cc][Hh][Ee];
 MAX: [Mm][Aa][Xx];
@@ -108,6 +116,17 @@ REPAIR: [Rr][Ee][Pp][Aa][Ii][Rr];
 INDEXFILES: [Ii][Nn][Dd][Ee][Xx][Ff][Ii][Ll][Ee][Ss];
 AT: [Aa][Tt];
 LOCATION: [Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn];
+PURGE: [Pp][Uu][Rr][Gg][Ee];
+OLDER: [Oo][Ll][Dd][Ee][Rr];
+THAN: [Tt][Hh][Aa][Nn];
+DAYS: [Dd][Aa][Yy][Ss];
+HOURS: [Hh][Oo][Uu][Rr][Ss];
+DRY: [Dd][Rr][Yy];
+RUN: [Rr][Uu][Nn];
+RETENTION: [Rr][Ee][Tt][Ee][Nn][Tt][Ii][Oo][Nn];
+DESCRIBE: [Dd][Ee][Ss][Cc][Rr][Ii][Bb][Ee];
+INCLUDE: [Ii][Nn][Cc][Ll][Uu][Dd][Ee];
+ALL: [Aa][Ll][Ll];
 
 // Literals
 STRING

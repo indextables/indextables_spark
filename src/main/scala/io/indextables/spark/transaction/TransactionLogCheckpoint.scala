@@ -299,11 +299,11 @@ class TransactionLogCheckpoint(
 
   def cleanupOldVersions(currentVersion: Long): Unit =
     getLastCheckpointVersion() match {
-      case Some(checkpointVersion) if checkpointVersion < currentVersion =>
+      case Some(checkpointVersion) if checkpointVersion <= currentVersion =>
         val currentTime = System.currentTimeMillis()
 
         // Clean up old log files based on retention policy
-        val versionsToCheck = (0L until currentVersion).filter(_ <= checkpointVersion)
+        val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
         var deletedCount    = 0
 
         versionsToCheck.foreach { version =>

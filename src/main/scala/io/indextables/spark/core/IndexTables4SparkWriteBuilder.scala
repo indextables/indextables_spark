@@ -59,11 +59,21 @@ class IndexTables4SparkWriteBuilder(
     // Serialize options to Map[String, String] to avoid CaseInsensitiveStringMap serialization issues
     // Use the enhanced options that may contain partition information, not info.options()
     import scala.jdk.CollectionConverters._
-    val serializedOptions = options.entrySet().asScala.map(entry => entry.getKey -> entry.getValue).toMap
+    var serializedOptions = options.entrySet().asScala.map(entry => entry.getKey -> entry.getValue).toMap
 
     // Check if optimized write is enabled
     val tantivyOptions = IndexTables4SparkOptions(options)
     val spark          = org.apache.spark.sql.SparkSession.active
+
+    // Set split conversion max parallelism if not already configured
+    // Default: max(1, availableProcessors / 4)
+    val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
+    if (!serializedOptions.contains(configKey)) {
+      val availableProcessors = Runtime.getRuntime.availableProcessors()
+      val maxParallelism = Math.max(1, availableProcessors / 4)
+      logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
+      serializedOptions = serializedOptions + (configKey -> maxParallelism.toString)
+    }
 
     // Check DataFrame write options first
     val optimizeWriteEnabled = tantivyOptions.optimizeWrite.getOrElse {

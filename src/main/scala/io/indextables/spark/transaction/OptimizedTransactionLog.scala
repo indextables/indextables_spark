@@ -344,6 +344,18 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing metadata from transaction log")
 
+        // Try checkpoint first if available - this allows reading even when early versions are deleted
+        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+          case Some(checkpointActions) =>
+            checkpointActions.collectFirst { case metadata: MetadataAction => metadata } match {
+              case Some(metadata) =>
+                logger.info("Found metadata in checkpoint")
+                return metadata
+              case None => // Continue searching in version files
+            }
+          case None => // No checkpoint, continue with version files
+        }
+
         // Look for metadata in reverse chronological order
         val latestVersion = getLatestVersion()
         for (version <- latestVersion to 0L by -1) {
@@ -363,6 +375,18 @@ class OptimizedTransactionLog(
     enhancedCache.getOrComputeProtocol(
       tablePath.toString, {
         logger.info("Computing protocol from transaction log")
+
+        // Try checkpoint first if available - this allows reading even when early versions are deleted
+        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+          case Some(checkpointActions) =>
+            checkpointActions.collectFirst { case protocol: ProtocolAction => protocol } match {
+              case Some(protocol) =>
+                logger.info("Found protocol in checkpoint")
+                return protocol
+              case None => // Continue searching in version files
+            }
+          case None => // No checkpoint, continue with version files
+        }
 
         // Look for protocol in reverse chronological order
         val latestVersion = getLatestVersion()
@@ -801,8 +825,9 @@ class OptimizedTransactionLog(
       // Use standard checkpoint creation to ensure _last_checkpoint file is written
       checkpoint.foreach(_.createCheckpoint(version, allActions))
 
-      // Clean up old versions
-      checkpoint.foreach(_.cleanupOldVersions(version))
+      // Note: Cleanup of old transaction log files is handled explicitly via
+      // PURGE ORPHANED SPLITS command, not automatically during writes.
+      // This gives users control over when cleanup occurs.
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint at version $version", e)
@@ -811,12 +836,70 @@ class OptimizedTransactionLog(
   private def getAllCurrentActions(upToVersion: Long): Seq[Action] = {
     val versions = getVersions().filter(_ <= upToVersion)
 
-    val addActions = if (parallelReadEnabled && versions.size > 10) {
-      // Use parallel reconstruction for many versions
-      parallelOps.reconstructStateParallel(versions)
+    // Load initial state from checkpoint if available - this allows reading even when early versions are deleted
+    val initialFiles = scala.collection.mutable.HashMap[String, AddAction]()
+    val versionsToProcess = checkpoint.flatMap(_.getLastCheckpointVersion()) match {
+      case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
+        logger.info(s"Loading initial state from checkpoint at version $checkpointVersion for getAllCurrentActions")
+
+        // Load state from checkpoint
+        checkpoint.flatMap(_.getActionsFromCheckpoint()).foreach { checkpointActions =>
+          checkpointActions.foreach {
+            case add: AddAction =>
+              initialFiles(add.path) = add
+            case remove: RemoveAction =>
+              initialFiles.remove(remove.path)
+            case _ => // Ignore other actions (protocol, metadata)
+          }
+        }
+
+        logger.info(s"Loaded ${initialFiles.size} files from checkpoint, processing versions after $checkpointVersion")
+        // Only process versions after checkpoint
+        versions.filter(_ > checkpointVersion)
+      case _ =>
+        // No checkpoint or checkpoint not in version range, process all versions
+        versions
+    }
+
+    val addActions = if (parallelReadEnabled && versionsToProcess.size > 10) {
+      // Use parallel reconstruction for remaining versions
+      val newFiles = parallelOps.reconstructStateParallel(versionsToProcess)
+      // BUG FIX: Apply the changes from versionsToProcess on top of checkpoint state
+      // Don't just concatenate and take .last - we need to handle REMOVE actions properly
+      val finalFiles = scala.collection.mutable.HashMap[String, AddAction]()
+      finalFiles ++= initialFiles
+      // Now apply changes from versionsToProcess - this will override adds and handle removes
+      for (version <- versionsToProcess.sorted) {
+        val actions = readVersionOptimized(version)
+        actions.foreach {
+          case add: AddAction       => finalFiles(add.path) = add
+          case remove: RemoveAction => finalFiles.remove(remove.path)
+          case _                    => // Ignore other actions
+        }
+      }
+      finalFiles.values.toSeq
     } else {
       // Standard reconstruction with consistent versions
-      reconstructStateStandard(versions)
+      // Note: reconstructStateStandard handles checkpoint internally, so we pass all versions
+      // but also pass initial files from checkpoint
+      if (initialFiles.nonEmpty) {
+        // BUG FIX: Apply the changes from versionsToProcess on top of checkpoint state
+        // Don't use reconstructStateFromVersions and merge - that loses REMOVE information
+        val finalFiles = scala.collection.mutable.HashMap[String, AddAction]()
+        finalFiles ++= initialFiles
+        // Now apply changes from versionsToProcess
+        for (version <- versionsToProcess.sorted) {
+          val actions = readVersionOptimized(version)
+          actions.foreach {
+            case add: AddAction       => finalFiles(add.path) = add
+            case remove: RemoveAction => finalFiles.remove(remove.path)
+            case _                    => // Ignore other actions
+          }
+        }
+        finalFiles.values.toSeq
+      } else {
+        reconstructStateStandard(versions)
+      }
     }
 
     // Build complete action sequence: protocol + metadata + add actions (with truncated stats)
@@ -895,13 +978,58 @@ class OptimizedTransactionLog(
     }
   }
 
+  /** Helper method to reconstruct state from a sequence of versions without checkpoint handling */
+  private def reconstructStateFromVersions(versions: Seq[Long]): Seq[AddAction] = {
+    val files = scala.collection.mutable.HashMap[String, AddAction]()
+
+    for (version <- versions.sorted) {
+      val actions = readVersionOptimized(version)
+      actions.foreach {
+        case add: AddAction =>
+          files(add.path) = add
+        case remove: RemoveAction =>
+          files.remove(remove.path)
+        case _ => // Ignore other actions
+      }
+    }
+
+    files.values.toSeq
+  }
+
   private def reconstructStateStandard(versions: Seq[Long]): Seq[AddAction] = {
     val files = scala.collection.mutable.HashMap[String, AddAction]()
 
     logger.debug(s" Reconstructing state from versions: ${versions.sorted}")
     logger.info(s"Reconstructing state from versions: ${versions.sorted}")
 
-    for (version <- versions.sorted) {
+    // Try to start from checkpoint if available - this allows reading even when early versions are deleted
+    val (startVersion, versionsToProcess) = checkpoint.flatMap(_.getLastCheckpointVersion()) match {
+      case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
+        logger.info(s"Starting reconstruction from checkpoint at version $checkpointVersion")
+
+        // Load state from checkpoint
+        checkpoint.flatMap(_.getActionsFromCheckpoint()).foreach { checkpointActions =>
+          checkpointActions.foreach {
+            case add: AddAction =>
+              files(add.path) = add
+              logger.debug(s"Loaded from checkpoint: ${add.path}")
+            case remove: RemoveAction =>
+              files.remove(remove.path)
+              logger.debug(s"Removed from checkpoint: ${remove.path}")
+            case _ => // Ignore other actions (protocol, metadata)
+          }
+        }
+
+        // Only process versions after checkpoint
+        (checkpointVersion, versions.filter(_ > checkpointVersion).sorted)
+      case _ =>
+        // No checkpoint or checkpoint not in version range, process all versions
+        (0L, versions.sorted)
+    }
+
+    logger.info(s"Processing ${versionsToProcess.size} versions starting from version $startVersion")
+
+    for (version <- versionsToProcess) {
       val actions = readVersionOptimized(version)
       logger.debug(
         s"Version $version has ${actions.size} actions: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"

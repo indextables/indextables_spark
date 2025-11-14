@@ -40,8 +40,18 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
     try {
       val fs = hadoopPath.getFileSystem(hadoopConf)
 
-      val statuses = fs.listStatus(hadoopPath)
-      statuses.map(convertFileStatus).toSeq
+      if (recursive) {
+        // Use RemoteIterator for recursive listing
+        val files = scala.collection.mutable.ArrayBuffer[CloudFileInfo]()
+        val iter = fs.listFiles(hadoopPath, true)
+        while (iter.hasNext) {
+          files += convertFileStatus(iter.next())
+        }
+        files.toSeq
+      } else {
+        val statuses = fs.listStatus(hadoopPath)
+        statuses.map(convertFileStatus).toSeq
+      }
     } catch {
       case ex: java.io.FileNotFoundException =>
         logger.debug(s"Directory does not exist (normal when creating new table): $path")

@@ -1376,9 +1376,9 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.azure.accountKey", "your-account-key")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
 
-// Alternative: azure:// scheme (simpler URLs, also supported)
+// Alternative: abfss:// scheme without full DNS name (simpler URLs)
 df.write.format("io.indextables.provider.IndexTablesProvider")
-  .save("azure://mycontainer/data")
+  .save("abfss://mycontainer/data")
 ```
 
 ##### OAuth Service Principal (Azure AD) Authentication
@@ -1463,11 +1463,11 @@ IndexTables supports all standard Spark Azure URL schemes with automatic normali
 
 - ✅ `abfss://container@account.dfs.core.windows.net/path` - **Recommended** - Spark standard for ADLS Gen2 with security
 - ✅ `abfs://container@account.dfs.core.windows.net/path` - Spark standard for ADLS Gen2
-- ✅ `azure://container/path` - Simplified URLs (tantivy4java native format)
+- ✅ `abfss://container/path` - Simplified URLs (automatically resolves account name from configuration)
 - ✅ `wasbs://container@account.blob.core.windows.net/path` - Spark legacy secure (deprecated, use abfss instead)
 - ✅ `wasb://container@account.blob.core.windows.net/path` - Spark legacy (deprecated, use abfss instead)
 
-**Best Practice**: Use `abfss://` for consistency with Spark conventions and ADLS Gen2 features. All schemes are automatically normalized to `azure://` format internally when passing URLs to tantivy4java.
+**Best Practice**: Use `abfss://` for consistency with Spark conventions and ADLS Gen2 features.
 
 ##### Azure with Partitioned Datasets
 
@@ -1777,6 +1777,144 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 4G MAX GROUPS 5")
 
 // With partition filtering
 spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
+```
+
+#### Cleaning Up Orphaned Files with PURGE ORPHANED SPLITS
+
+IndexTables4Spark provides SQL-based cleanup to remove orphaned `.split` files and old transaction log files. This helps reclaim storage space and maintain table health.
+
+**What Does This Command Clean Up?**
+1. **Orphaned split files**: `.split` files that exist in storage but are not referenced in the transaction log
+2. **Old transaction log files**: Transaction log JSON files older than checkpoints (respects 30-day retention by default)
+
+**What are Orphaned Files?**
+Orphaned split files can occur due to:
+- Failed write operations that didn't complete transaction log updates
+- Concurrent write conflicts where some splits were created but not committed
+- Manual file operations outside of the transaction log
+
+**Safety Features:**
+- **Retention period**: Minimum 24-hour retention to protect against concurrent operations
+- **Transaction log protection**: Never deletes files referenced in the transaction log
+- **DRY RUN mode**: Preview deletions before executing
+- **Distributed execution**: Parallel deletion across Spark executors for large-scale cleanup
+
+**Cloud Storage Support:**
+- ✅ **S3**: Full support with native S3 SDK (no Hadoop dependencies)
+- ✅ **Azure Blob Storage**: Full support with native Azure SDK (no Hadoop dependencies)
+- ✅ **Local/HDFS**: Full support with Hadoop FileSystem API
+- ✅ **Partitioned tables**: Recursive directory traversal for partition hierarchies
+
+##### SQL Syntax
+
+```sql
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Basic purge with minimum retention (24 hours)
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS;
+
+-- With longer retention for extra safety (7 days)
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS;
+
+-- DRY RUN mode - preview what would be deleted without actually deleting
+PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN;
+
+-- Works with all storage systems
+PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS;
+PURGE ORPHANED SPLITS '/local/path' OLDER THAN 24 HOURS;
+```
+
+##### Scala/DataFrame API
+
+```scala
+// Basic purge operation with 24-hour retention
+val result = spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS")
+result.show()  // Shows metrics: orphaned files found, deleted, size reclaimed
+
+// DRY RUN to preview deletions
+val preview = spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN")
+preview.show()  // Shows what would be deleted without actually deleting
+
+// With longer retention for extra safety
+spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS")
+
+// Azure Blob Storage
+spark.sql("PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS")
+```
+
+##### Configuration Options
+
+```scala
+// Maximum files to delete in a single operation (default: 1,000,000)
+spark.conf.set("spark.indextables.purge.maxFilesToDelete", "500000")
+
+// Parallelism for distributed deletion (default: spark.sparkContext.defaultParallelism)
+spark.conf.set("spark.indextables.purge.parallelism", "16")
+
+// Retry attempts for transient cloud storage errors (default: 3)
+spark.conf.set("spark.indextables.purge.deleteRetries", "5")
+```
+
+##### Operation Metrics
+
+The command returns a DataFrame with the following metrics:
+
+```
++--------+-------------------+---------------------+---------------+
+| status | orphanedFilesFound | orphanedFilesDeleted | sizeMBDeleted |
++--------+-------------------+---------------------+---------------+
+| SUCCESS|                 42|                   42|        1024.5 |
++--------+-------------------+---------------------+---------------+
+```
+
+- **status**: `SUCCESS`, `PARTIAL_SUCCESS`, or `DRY_RUN`
+- **orphanedFilesFound**: Total orphaned files discovered (before retention filter)
+- **orphanedFilesDeleted**: Files actually deleted (after retention filter)
+- **sizeMBDeleted**: Total storage reclaimed in megabytes
+
+##### Best Practices
+
+1. **Always start with DRY RUN**: Preview deletions before executing
+   ```scala
+   spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN")
+   ```
+
+2. **Use appropriate retention periods**:
+   - Minimum: 24 hours (enforced by the system)
+   - Recommended: 48-72 hours for production tables with frequent writes
+   - Safe for old tables: 168 hours (7 days)
+
+3. **Monitor metrics**: Check the returned DataFrame for deletion statistics
+
+4. **Run during off-peak hours**: Large-scale deletions can generate significant API calls to cloud storage
+
+5. **Test on non-production tables first**: Validate behavior before running on production data
+
+##### Example: Complete Cleanup Workflow
+
+```scala
+// Step 1: Enable SQL extensions
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+// Step 2: DRY RUN to preview
+val preview = spark.sql("""
+  PURGE ORPHANED SPLITS 's3://my-bucket/production-table'
+  OLDER THAN 48 HOURS
+  DRY RUN
+""")
+preview.show()
+
+// Step 3: Review output, then execute if safe
+val result = spark.sql("""
+  PURGE ORPHANED SPLITS 's3://my-bucket/production-table'
+  OLDER THAN 48 HOURS
+""")
+result.show()
+
+// Step 4: Verify metrics
+val metrics = result.collect()(0)
+println(s"Deleted ${metrics.getLong(2)} files, reclaimed ${metrics.getDouble(3)} MB")
 ```
 
 ## File Format

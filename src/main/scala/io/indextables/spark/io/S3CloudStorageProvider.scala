@@ -36,7 +36,7 @@ import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.core.ResponseInputStream
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.model._
-import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.{S3AsyncClient, S3Client}
 
 /**
  * High-performance S3 storage provider using AWS SDK directly. Bypasses Hadoop filesystem for better performance and
@@ -51,16 +51,18 @@ class S3CloudStorageProvider(
   private val logger   = LoggerFactory.getLogger(classOf[S3CloudStorageProvider])
   private val executor = Executors.newCachedThreadPool()
 
-  // Configurable multipart upload threshold (default 100MB)
-  private val multipartThreshold = config.multipartUploadThreshold.getOrElse(100L * 1024 * 1024)
+  // Configurable multipart upload threshold (default 200MB)
+  private val multipartThreshold = config.multipartUploadThreshold.getOrElse(200L * 1024 * 1024)
 
-  // Multipart uploader for large files
+  // Multipart uploader for large files with parallel streaming using ASYNC S3 client
   private lazy val multipartUploader = new S3MultipartUploader(
     s3Client,
+    s3AsyncClient, // TRUE async I/O for non-blocking uploads
     S3MultipartConfig(
       multipartThreshold = multipartThreshold,
-      partSize = math.min(64L * 1024 * 1024, multipartThreshold / 4), // 64MB or 1/4 of threshold
-      maxConcurrency = config.maxConcurrency.getOrElse(4),
+      partSize = config.partSize.getOrElse(128L * 1024 * 1024),      // 128MB default (configurable)
+      maxConcurrency = config.maxConcurrency.getOrElse(4),           // 4 parallel uploads
+      maxQueueSize = config.maxQueueSize.getOrElse(3),               // 3 parts buffered = 384MB max memory
       maxRetries = config.maxRetries.getOrElse(3)
     )
   )
@@ -231,6 +233,99 @@ class S3CloudStorageProvider(
 
       case None =>
         createFallbackCredentialsProvider()
+    }
+
+    builder.credentialsProvider(credentialsProvider).build()
+  }
+
+  // Create async S3 client for true async I/O (non-blocking uploads)
+  private val s3AsyncClient: S3AsyncClient = {
+    val builder = S3AsyncClient.builder()
+
+    // Configure region (same as sync client)
+    config.awsRegion.foreach { region =>
+      logger.info(s"🔧 S3AsyncClient: Setting region to $region")
+      builder.region(Region.of(region))
+    }
+
+    // Configure endpoint (same as sync client)
+    config.awsEndpoint.foreach { endpoint =>
+      val isStandardAwsEndpoint = endpoint.contains("s3.amazonaws.com") || endpoint.contains("amazonaws.com")
+
+      if (!isStandardAwsEndpoint || config.awsRegion.isEmpty) {
+        try {
+          val endpointUri = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            URI.create(endpoint)
+          } else {
+            URI.create(s"https://$endpoint")
+          }
+
+          logger.info(s"Configuring async S3 client with endpoint: $endpointUri")
+          builder.endpointOverride(endpointUri)
+
+          if (config.awsPathStyleAccess) {
+            builder.forcePathStyle(true)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to parse S3 endpoint for async client: $endpoint", ex)
+        }
+      }
+    }
+
+    // Use same credentials provider as sync client
+    val credentialsProvider = config.awsCredentialsProviderClass match {
+      case Some(providerClassName) =>
+        try {
+          val normalizedTablePathForAsync = normalizeToTablePath(tablePath)
+          val customProvider = CredentialProviderFactory.createCredentialProvider(
+            providerClassName,
+            new URI(normalizedTablePathForAsync),
+            if (hadoopConf != null) hadoopConf else new org.apache.hadoop.conf.Configuration()
+          )
+
+          val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(customProvider)
+
+          if (basicCredentials.hasSessionToken) {
+            val credentials = AwsSessionCredentials.create(
+              basicCredentials.accessKey,
+              basicCredentials.secretKey,
+              basicCredentials.sessionToken.get
+            )
+            StaticCredentialsProvider.create(credentials)
+          } else {
+            val credentials = AwsBasicCredentials.create(
+              basicCredentials.accessKey,
+              basicCredentials.secretKey
+            )
+            StaticCredentialsProvider.create(credentials)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn("Async client falling back to explicit credentials or default provider chain")
+            (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
+              case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
+                val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+                StaticCredentialsProvider.create(credentials)
+              case (Some(accessKey), Some(secretKey), None) =>
+                val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+                StaticCredentialsProvider.create(credentials)
+              case _ =>
+                DefaultCredentialsProvider.create()
+            }
+        }
+
+      case None =>
+        (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
+          case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
+            val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+            StaticCredentialsProvider.create(credentials)
+          case (Some(accessKey), Some(secretKey), None) =>
+            val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+            StaticCredentialsProvider.create(credentials)
+          case _ =>
+            DefaultCredentialsProvider.create()
+        }
     }
 
     builder.credentialsProvider(credentialsProvider).build()

@@ -918,8 +918,6 @@ class MergeSplitsExecutor(
 
                   if (trackingEnabled) {
                     skippedSplitPaths.foreach { skippedPath =>
-                      logger.warn(s"⚠️  Recording skipped file in transaction log: $skippedPath")
-
                       // Find the corresponding file in merge group to get partition info and size
                       val correspondingFile = result.mergeGroup.files.find { file =>
                         val fullPath =
@@ -942,7 +940,7 @@ class MergeSplitsExecutor(
                         size = correspondingFile.map(_.size),
                         cooldownHours = cooldownHours
                       )
-                      logger.warn(s"⚠️  Recorded skipped file with ${cooldownHours}h cooldown: ${correspondingFile.map(_.path).getOrElse(skippedPath)}")
+                      logger.debug(s"Recorded skipped file with ${cooldownHours}h cooldown: ${correspondingFile.map(_.path).getOrElse(skippedPath)}")
                     }
                   }
                 }

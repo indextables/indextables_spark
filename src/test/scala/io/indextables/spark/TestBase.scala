@@ -54,6 +54,11 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
+
+    // Initialize SplitConversionThrottle for tests
+    _root_.io.indextables.spark.storage.SplitConversionThrottle.initialize(
+      maxParallelism = Runtime.getRuntime.availableProcessors() / 4 max 1
+    )
   }
 
   override def afterAll(): Unit =
