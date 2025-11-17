@@ -197,9 +197,9 @@ class SparkToTantivyConverter(
         java.lang.Long.valueOf(days.toLong * 86400000L)
 
       case TimestampType =>
-        // Convert microseconds to milliseconds
+        // Store microseconds directly (Spark's internal timestamp representation)
         val micros = value.asInstanceOf[Long]
-        java.lang.Long.valueOf(micros / 1000L)
+        java.lang.Long.valueOf(micros)
 
       case BinaryType =>
         // Store binary data as base64 string in JSON

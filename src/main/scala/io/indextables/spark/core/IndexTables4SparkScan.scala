@@ -33,6 +33,7 @@ import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+import io.indextables.spark.util.TimestampUtils
 import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -52,6 +53,10 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
+  // CRITICAL DEBUG: Log filters received by Scan
+  println(s"[Scan Construction] IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
+  pushedFilters.foreach(f => println(s"[Scan Construction]   - Filter: $f"))
+
   logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
   pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
 
@@ -60,10 +65,14 @@ class IndexTables4SparkScan(
   override def toBatch: Batch = this
 
   override def planInputPartitions(): Array[InputPartition] = {
+    println(s"[planInputPartitions] Called with ${pushedFilters.length} pushed filters")
+    pushedFilters.foreach(f => println(s"[planInputPartitions]   - Filter: $f"))
+
     logger.debug(s"PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
     pushedFilters.foreach(f => logger.debug(s"PLAN PARTITIONS:   - Filter: $f"))
 
     val addActions = transactionLog.listFiles()
+    println(s"[planInputPartitions] Found ${addActions.length} files in transaction log")
 
     // Update broadcast locality information for better scheduling
     // This helps ensure preferred locations are accurate during partition planning
@@ -80,6 +89,7 @@ class IndexTables4SparkScan(
 
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
+    println(s"[planInputPartitions] After data skipping: ${filteredActions.length} splits remaining (started with ${addActions.length})")
 
     // Check if pre-warm is enabled
     val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
@@ -486,6 +496,7 @@ class IndexTables4SparkScan(
   ): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
     import java.time.LocalDate
     import java.sql.Date
+    import org.apache.spark.sql.types.TimestampType
 
     // Find the field data type in the schema
     val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
@@ -572,6 +583,36 @@ class IndexTables4SparkScan(
 
       case Some(DoubleType) =>
         convertNumericValues[Double]("DOUBLE", filterValue, minValue, maxValue, (s: String) => s.toDouble, (n: Double) => Double.box(n).asInstanceOf[Comparable[Any]], logger)
+
+      case Some(TimestampType) =>
+        // Convert timestamps to microseconds since epoch for numeric comparison
+        import java.sql.Timestamp
+        println(s"[convertValuesForComparison] TIMESTAMP: attribute=$attribute, filterValue=$filterValue")
+        println(s"[convertValuesForComparison] TIMESTAMP: minValue=$minValue, maxValue=$maxValue")
+
+        // Convert filter value to microseconds
+        val filterMicros: Long = filterValue match {
+          case ts: Timestamp =>
+            // Spark stores timestamps as microseconds since epoch
+            TimestampUtils.toMicros(ts)
+          case l: Long => l
+          case _ =>
+            // Try to parse as timestamp string
+            val ts = Timestamp.valueOf(filterValue.toString)
+            TimestampUtils.toMicros(ts)
+        }
+
+        // Min/max values are stored as Long strings (microseconds since epoch)
+        val minMicros = if (minValue.isEmpty) 0L else minValue.toLong
+        val maxMicros = if (maxValue.isEmpty) 0L else maxValue.toLong
+
+        println(s"[convertValuesForComparison] TIMESTAMP: filterMicros=$filterMicros, minMicros=$minMicros, maxMicros=$maxMicros")
+
+        (
+          Long.box(filterMicros).asInstanceOf[Comparable[Any]],
+          Long.box(minMicros).asInstanceOf[Comparable[Any]],
+          Long.box(maxMicros).asInstanceOf[Comparable[Any]]
+        )
 
       case _ =>
         // For other data types (strings, etc.), use string comparison

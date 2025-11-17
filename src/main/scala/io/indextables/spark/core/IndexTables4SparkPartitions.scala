@@ -177,6 +177,10 @@ class IndexTables4SparkPartitionReader(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
 
+  // CRITICAL DEBUG: Log filters received by PartitionReader
+  println(s"[PartitionReader] Created for split ${addAction.path} with ${filters.length} filters")
+  filters.foreach(f => println(s"[PartitionReader]   - Filter: $f"))
+
   // Calculate effective limit: use pushed limit or fall back to default 250
   private val effectiveLimit: Int = limit.getOrElse(250)
 

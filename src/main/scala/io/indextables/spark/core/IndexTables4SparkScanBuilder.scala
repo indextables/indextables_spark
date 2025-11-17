@@ -62,21 +62,55 @@ class IndexTables4SparkScanBuilder(
   private var _pushedAggregation: Option[Aggregation] = None
   private var _pushedGroupBy: Option[Array[String]]   = None
 
-  // Get relation object from ThreadLocal (set by V2IndexQueryExpressionRule)
-  // ThreadLocal is cleared at the start of V2IndexQueryExpressionRule to ensure fresh state per query
-  private val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
+  // IMPORTANT: Do NOT capture relation at construction time!
+  // ScanBuilders may be created before V2IndexQueryExpressionRule runs.
+  // Instead, look up the relation from ThreadLocal at usage time (in build() and pushFilters()).
+  // ThreadLocal is set by V2IndexQueryExpressionRule during optimization.
 
   override def build(): Scan = {
     val aggregation = _pushedAggregation
 
+    // Look up relation from ThreadLocal at usage time (not at construction time!)
+    val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
+
+    println(s"[ScanBuilder.build()] Called on instance ${System.identityHashCode(this)} - table: ${transactionLog.getTablePath()}")
+    println(s"[ScanBuilder.build()] relationForIndexQuery: ${relationForIndexQuery.map(r => System.identityHashCode(r))}")
+    println(s"[ScanBuilder.build()] _pushedFilters.length: ${_pushedFilters.length}")
     logger.debug(s"BUILD: ScanBuilder.build() called on instance ${System.identityHashCode(this)}")
     logger.debug(s"BUILD: Aggregation present: ${aggregation.isDefined}, filters: ${_pushedFilters.length}")
+
+    // CRITICAL: Handle multiple optimization passes
+    // Spark runs V2ScanRelationPushDown multiple times, creating fresh ScanBuilders each time
+    // Only builders with Filter nodes get pushFilters() called
+    // The FINAL builder (which might not have pushFilters called) is the one executed
+    // Solution: If instance filters are empty, try retrieving from relation object storage
+    val effectiveFilters = if (_pushedFilters.nonEmpty) {
+      println(s"[ScanBuilder.build()] Using instance filters: ${_pushedFilters.length}")
+      logger.debug(s"BUILD: Using instance variable filters: ${_pushedFilters.length}")
+      _pushedFilters
+    } else {
+      // Instance filters empty - try relation object storage
+      relationForIndexQuery match {
+        case Some(relation) =>
+          val relationFilters = IndexTables4SparkScanBuilder.getPushedFilters(relation)
+          println(s"[ScanBuilder.build()] Instance filters empty, retrieved ${relationFilters.length} from relation object: ${System.identityHashCode(relation)}")
+          logger.debug(s"BUILD: Instance filters empty, retrieved ${relationFilters.length} from relation object: ${System.identityHashCode(relation)}")
+          relationFilters
+        case None =>
+          println(s"[ScanBuilder.build()] Instance filters empty and no relation in ThreadLocal, using empty filters")
+          logger.warn(s"BUILD: Instance filters empty and no relation in ThreadLocal, cannot retrieve stored filters")
+          Array.empty[Filter]
+      }
+    }
+
+    logger.debug(s"BUILD: Effective filters count: ${effectiveFilters.length}")
+    effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Effective filter: $filter"))
 
     // Check if we have aggregate pushdown
     aggregation match {
       case Some(agg) =>
         logger.debug(s"BUILD: Creating aggregate scan for pushed aggregation")
-        createAggregateScan(agg)
+        createAggregateScan(agg, effectiveFilters)
       case None =>
         // Regular scan
         logger.debug(s"BUILD: Creating regular scan (no aggregation pushdown)")
@@ -88,13 +122,15 @@ class IndexTables4SparkScanBuilder(
         )
         extractedIndexQueryFilters.foreach(filter => logger.debug(s"  - Extracted IndexQuery: $filter"))
 
-        logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${_pushedFilters.length} pushed filters")
-        _pushedFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
+        logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${effectiveFilters.length} pushed filters")
+        effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
+        println(s"[ScanBuilder.build()] Creating Scan with ${effectiveFilters.length} filters")
+        effectiveFilters.foreach(f => println(s"[ScanBuilder.build()]   - Filter: $f"))
         new IndexTables4SparkScan(
           sparkSession,
           transactionLog,
           requiredSchema,
-          _pushedFilters,
+          effectiveFilters,
           options,
           _limit,
           config,
@@ -104,34 +140,34 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Create an aggregate scan for pushed aggregations. */
-  private def createAggregateScan(aggregation: Aggregation): Scan =
+  private def createAggregateScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan =
     _pushedGroupBy match {
       case Some(groupByColumns) =>
         // GROUP BY aggregation
         logger.info(
           s"AGGREGATE SCAN: Creating GROUP BY aggregation scan for columns: ${groupByColumns.mkString(", ")}"
         )
-        createGroupByAggregateScan(aggregation, groupByColumns)
+        createGroupByAggregateScan(aggregation, groupByColumns, effectiveFilters)
       case None =>
         // Simple aggregation without GROUP BY
         // Check if we can use transaction log count optimization
-        if (canUseTransactionLogCount(aggregation)) {
+        if (canUseTransactionLogCount(aggregation, effectiveFilters)) {
           logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
           logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
-          createTransactionLogCountScan(aggregation)
+          createTransactionLogCountScan(aggregation, effectiveFilters)
         } else {
           logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
           logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
-          createSimpleAggregateScan(aggregation)
+          createSimpleAggregateScan(aggregation, effectiveFilters)
         }
     }
 
   /** Create a GROUP BY aggregation scan. */
-  private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String]): Scan = {
+  private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String], effectiveFilters: Array[Filter]): Scan = {
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
     // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
-    if (canUseTransactionLogGroupByCount(aggregation, groupByColumns)) {
+    if (canUseTransactionLogGroupByCount(aggregation, groupByColumns, effectiveFilters)) {
       val hasAggregations = aggregation.aggregateExpressions().nonEmpty
       logger.info(
         s"Using transaction log optimization for partition-only GROUP BY COUNT, hasAggregations=$hasAggregations"
@@ -139,7 +175,7 @@ class IndexTables4SparkScanBuilder(
       new TransactionLogCountScan(
         sparkSession,
         transactionLog,
-        _pushedFilters,
+        effectiveFilters,
         options,
         config,
         Some(groupByColumns), // Pass GROUP BY columns for grouped aggregation
@@ -151,7 +187,7 @@ class IndexTables4SparkScanBuilder(
         sparkSession,
         transactionLog,
         schema,
-        _pushedFilters,
+        effectiveFilters,
         options,
         config,
         aggregation,
@@ -162,14 +198,14 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Create a simple aggregation scan (no GROUP BY). */
-  private def createSimpleAggregateScan(aggregation: Aggregation): Scan = {
+  private def createSimpleAggregateScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan = {
 
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
     new IndexTables4SparkSimpleAggregateScan(
       sparkSession,
       transactionLog,
       schema,
-      _pushedFilters,
+      effectiveFilters,
       options,
       config,
       aggregation,
@@ -178,14 +214,14 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Check if we can optimize COUNT queries using transaction log. */
-  private def canUseTransactionLogCount(aggregation: Aggregation): Boolean = {
+  private def canUseTransactionLogCount(aggregation: Aggregation, effectiveFilters: Array[Filter]): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
     aggregation.aggregateExpressions.foreach(expr =>
       logger.debug(s"SCAN BUILDER: Aggregate expression: $expr (${expr.getClass.getSimpleName})")
     )
-    logger.debug(s"SCAN BUILDER: Number of pushed filters: ${_pushedFilters.length}")
-    _pushedFilters.foreach(filter => logger.debug(s"SCAN BUILDER: Pushed filter: $filter"))
+    logger.debug(s"SCAN BUILDER: Number of effective filters: ${effectiveFilters.length}")
+    effectiveFilters.foreach(filter => logger.debug(s"SCAN BUILDER: Effective filter: $filter"))
 
     // Extract IndexQuery filters to check if we have any
     val indexQueryFilters = extractIndexQueriesFromCurrentPlan()
@@ -207,15 +243,15 @@ class IndexTables4SparkScanBuilder(
           // Transaction log optimization works when filters are only on partition columns
           // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
           // ensures all documents in a split have the same partition value
-          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
+          val hasOnlyPartitionFilters = effectiveFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
+          logger.debug(s"SCAN BUILDER: COUNT - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${effectiveFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _: CountStar =>
           // Transaction log optimization works when filters are only on partition columns
           // Range filters (>=, <=, <, >) on partition columns are valid because partition pruning
           // ensures all documents in a split have the same partition value
-          val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
-          logger.debug(s"SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${_pushedFilters.mkString(", ")})")
+          val hasOnlyPartitionFilters = effectiveFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
+          logger.debug(s"SCAN BUILDER: COUNT(*) - Can use transaction log optimization: $hasOnlyPartitionFilters (filters: ${effectiveFilters.mkString(", ")})")
           hasOnlyPartitionFilters
         case _ =>
           logger.debug(s"SCAN BUILDER: Not a COUNT aggregation, cannot use transaction log")
@@ -232,7 +268,7 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Check if we can optimize GROUP BY partition columns COUNT using transaction log. */
-  private def canUseTransactionLogGroupByCount(aggregation: Aggregation, groupByColumns: Array[String]): Boolean = {
+  private def canUseTransactionLogGroupByCount(aggregation: Aggregation, groupByColumns: Array[String], effectiveFilters: Array[Filter]): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
     // Check 1: All GROUP BY columns must be partition columns
@@ -261,7 +297,7 @@ class IndexTables4SparkScanBuilder(
 
     // Check 3: Only partition filters are allowed (or no filters), AND no IndexQuery filters
     val indexQueryFilters       = extractIndexQueriesFromCurrentPlan()
-    val hasOnlyPartitionFilters = _pushedFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
+    val hasOnlyPartitionFilters = effectiveFilters.forall(isPartitionFilter) && indexQueryFilters.isEmpty
 
     if (!hasOnlyPartitionFilters) {
       return false
@@ -271,10 +307,15 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Create a specialized scan that returns count from transaction log. */
-  private def createTransactionLogCountScan(aggregation: Aggregation): Scan =
-    new TransactionLogCountScan(sparkSession, transactionLog, _pushedFilters, options, config)
+  private def createTransactionLogCountScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan =
+    new TransactionLogCountScan(sparkSession, transactionLog, effectiveFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
+    println(s"[pushFilters] Called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
+    filters.foreach { filter =>
+      println(s"[pushFilters]   - Input filter: $filter")
+    }
+
     logger.debug(s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
     filters.foreach { filter =>
       logger.debug(s"PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
@@ -284,8 +325,25 @@ class IndexTables4SparkScanBuilder(
     // we only need to handle regular Spark filters here.
     val (supported, unsupported) = filters.partition(isSupportedFilter)
 
-    // Store supported filters
+    // Store supported filters in instance variable
     _pushedFilters = supported
+
+    // CRITICAL FIX: Store by relation object (not table path) to survive across multiple optimization passes
+    // Spark runs V2ScanRelationPushDown multiple times, creating fresh ScanBuilders each time
+    // Only the builders that have Filter nodes get pushFilters() called
+    // But the final ScanBuilder (which might not have pushFilters called) is the one executed
+    // Different optimization passes may use different Table instances with different paths
+    // Solution: Store filters by DataSourceV2Relation object (same approach as IndexQueries)
+    // All ScanBuilders share the same relation object even across optimization passes
+    IndexTables4SparkScanBuilder.getCurrentRelation() match {
+      case Some(relation) =>
+        IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
+        println(s"[pushFilters] Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}")
+        logger.debug(s"PUSHFILTERS: Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}")
+      case None =>
+        println(s"[pushFilters] WARNING: No relation in ThreadLocal, cannot store filters")
+        logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
+    }
 
     logger.debug(s"PUSHFILTERS: Supported=${supported.length}, Unsupported=${unsupported.length}")
     supported.foreach(filter => logger.debug(s"PUSHFILTERS:   ✓ SUPPORTED: $filter"))
@@ -525,6 +583,9 @@ class IndexTables4SparkScanBuilder(
    */
   private def extractIndexQueriesFromCurrentPlan(): Array[Any] = {
     logger.debug(s"EXTRACT DEBUG: Starting direct IndexQuery extraction")
+
+    // Look up relation from ThreadLocal at usage time (not at construction time!)
+    val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
 
     // Method 1: Get IndexQueries stored by V2IndexQueryExpressionRule for this relation object
     relationForIndexQuery match {
@@ -1207,6 +1268,11 @@ object IndexTables4SparkScanBuilder {
   // WeakHashMap allows GC to clean up entries when relations are no longer referenced
   private val relationIndexQueries: WeakHashMap[AnyRef, Seq[Any]] = new WeakHashMap[AnyRef, Seq[Any]]()
 
+  // SOLUTION: Store regular pushed filters by relation object (same approach as IndexQueries)
+  // This solves the multi-pass optimization issue where different ScanBuilder instances
+  // are created across optimization passes, but they all share the same DataSourceV2Relation
+  private val relationPushedFilters: WeakHashMap[AnyRef, Array[Filter]] = new WeakHashMap[AnyRef, Array[Filter]]()
+
   // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
   // This works even with AQE because the same relation object is used throughout planning
   // Lifecycle: V2 rule checks relation identity → clears if different → sets new relation → ScanBuilder gets it
@@ -1240,12 +1306,13 @@ object IndexTables4SparkScanBuilder {
       // Different relation - clear the old one
       currentRelation.remove()
       currentRelationId.remove()
-    } else if (currentId.isDefined && newId.isEmpty) {
-      // New query with no IndexQuery - clear
-      currentRelation.remove()
-      currentRelationId.remove()
     }
-    // else: same relation - keep ThreadLocal for reuse across optimization phases
+    // else if (currentId.isDefined && newId.isEmpty): Don't clear!
+    // The V2IndexQueryExpressionRule is called on many plan types (LocalRelation, Project, etc.)
+    // that don't contain DataSourceV2Relation. We should NOT clear the ThreadLocal just because
+    // the current plan node doesn't have a relation - it was set by an earlier plan node that did.
+    // Only clear when we encounter a DIFFERENT relation.
+    // else: same relation or no new relation - keep ThreadLocal for reuse
   }
 
   /** Clear the current relation object for this thread (for tests). */
@@ -1277,5 +1344,23 @@ object IndexTables4SparkScanBuilder {
     val size = relationIndexQueries.synchronized(relationIndexQueries.size())
     s"IndexQuery Cache Stats - Size: $size (WeakHashMap)"
   }
+
+  /** Store pushed filters for a specific relation object. */
+  def storePushedFilters(relation: AnyRef, filters: Array[Filter]): Unit =
+    relationPushedFilters.synchronized {
+      relationPushedFilters.put(relation, filters)
+    }
+
+  /** Retrieve pushed filters for a specific relation object. */
+  def getPushedFilters(relation: AnyRef): Array[Filter] =
+    relationPushedFilters.synchronized {
+      Option(relationPushedFilters.get(relation)).getOrElse(Array.empty)
+    }
+
+  /** Clear pushed filters for a specific relation object. */
+  def clearPushedFilters(relation: AnyRef): Unit =
+    relationPushedFilters.synchronized {
+      relationPushedFilters.remove(relation)
+    }
 
 }

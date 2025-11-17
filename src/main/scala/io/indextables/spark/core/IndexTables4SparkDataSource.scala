@@ -1510,6 +1510,11 @@ class IndexTables4SparkTable(
     })
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
+    // CRITICAL DEBUG: Track when ScanBuilders are created and from where
+    val stackTrace = Thread.currentThread().getStackTrace.take(6).drop(2).map(_.toString).mkString("\n    ")
+    println(s"[Table.newScanBuilder] Creating new ScanBuilder")
+    println(s"[Table.newScanBuilder] Stack:\n    $stackTrace")
+
     // Create broadcast variable with proper precedence: read options > Spark config > Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
