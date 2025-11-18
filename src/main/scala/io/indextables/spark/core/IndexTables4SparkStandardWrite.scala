@@ -198,7 +198,6 @@ class IndexTables4SparkStandardWrite(
     // Log how many empty partitions were filtered out
     val emptyPartitionsCount = messages.length - addActions.size
     if (emptyPartitionsCount > 0) {
-      println(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
       logger.info(s"⚠️  Filtered out $emptyPartitionsCount empty partitions (0 records) from transaction log")
     }
 

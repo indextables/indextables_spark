@@ -15,6 +15,7 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       .appName("SimpleTimestampTest")
       .master("local[*]")
       .config("spark.ui.enabled", "false")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -57,22 +58,24 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       println("All data:")
       readData.show(false)
 
-      // DEBUG: Check transaction log for footer offsets
+      // DEBUG: Check transaction log for footer offsets using DESCRIBE syntax
       println("\n=== DEBUG: Checking transaction log ===")
-      val txLogDir = new java.io.File(tempPath, "_transaction_log")
-      if (txLogDir.exists()) {
-        val txLogFiles = txLogDir.listFiles().filter(_.getName.endsWith(".json")).sortBy(_.getName)
-        txLogFiles.foreach { file =>
-          println(s"Transaction log file: ${file.getName}")
-          val content = scala.io.Source.fromFile(file).getLines().mkString("\n")
-          if (content.contains("footerStartOffset")) {
-            println("✅ Found footerStartOffset in transaction log")
-            // Print the specific line with footer offsets
-            content.split("\n").filter(line => line.contains("footerStartOffset") || line.contains("footerEndOffset")).foreach(println)
-          } else {
-            println("❌ No footerStartOffset found in transaction log")
-          }
-        }
+      val txLogInfo = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tempPath'")
+      println("Transaction log entries:")
+      txLogInfo.show(false)
+
+      // Check for footerStartOffset in the output
+      val txLogRows = txLogInfo.collect()
+      val hasFooterOffsets = txLogRows.exists { row =>
+        val actionType = row.getAs[String]("action_type")
+        val hasFooter = row.getAs[Boolean]("has_footer_offsets")
+        actionType == "add" && hasFooter
+      }
+
+      if (hasFooterOffsets) {
+        println("✅ Found footerStartOffset in transaction log")
+      } else {
+        println("❌ No footerStartOffset found in transaction log")
       }
 
       println("\nTesting equality filter...")
@@ -80,42 +83,6 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       val count = filtered.count()
       println(s"Filtered count: $count")
       filtered.show(false)
-
-      // DEBUG: Try querying the split file directly with tantivy4java to isolate the issue
-      println("\n=== DEBUG: Querying split directly with tantivy4java ===")
-      val splitFiles = new java.io.File(tempPath).listFiles().filter(_.getName.endsWith(".split"))
-      if (splitFiles.nonEmpty) {
-        val splitPath = splitFiles(0).getAbsolutePath
-        println(s"Split file: $splitPath")
-
-        import io.indextables.tantivy4java.split._
-        import io.indextables.tantivy4java.split.merge._
-
-        val metadata = QuickwitSplit.readSplitMetadata(splitPath)
-        println(s"Split metadata: ${metadata.getNumDocs} documents")
-
-        val cacheConfig = new SplitCacheManager.CacheConfig("debug-cache")
-        val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-        val searcher = cacheManager.createSplitSearcher("file://" + splitPath, metadata)
-
-        val queryString = "ts:[2025-11-07T05:00:00Z TO 2025-11-07T05:00:01Z}"
-        println(s"Direct query: $queryString")
-
-        val query = searcher.parseQuery(queryString)
-        val result = searcher.search(query, 10)
-        val directHits = result.getHits.size()
-
-        println(s"Direct query hits: $directHits")
-
-        result.close()
-        searcher.close()
-
-        if (directHits != 1) {
-          println(s"❌ Direct query also returns 0 rows - issue is in how data is written!")
-        } else {
-          println(s"✅ Direct query works - issue is in Spark query layer!")
-        }
-      }
 
       assert(count == 1, s"Expected 1 row, got $count")
       println("✅ Test passed!")

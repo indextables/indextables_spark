@@ -392,7 +392,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     // Write with text field configuration for IndexQuery support
     testData.write
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "string")     // String for exact match
       .option("spark.indextables.indexing.typemap.description", "text") // Text for IndexQuery
       .option("spark.indextables.indexWriter.batchSize", "2000")
@@ -402,7 +402,7 @@ class IndexTablesValidationTest extends RealS3TestBase {
 
     // Read and test IndexQuery operations
     val readData = spark.read
-      .format("io.indextables.provider.IndexTablesProvider")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.cache.maxSize", "50000000")
       .load(testPath)
 

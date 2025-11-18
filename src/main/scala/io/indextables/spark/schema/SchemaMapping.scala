@@ -267,20 +267,12 @@ object SchemaMapping {
 
         // INTEGER -> TimestampType (stored as microseconds in tantivy, return directly)
         case (FieldType.INTEGER, TimestampType) =>
-          val result = rawValue match {
-            case l: java.lang.Long    =>
-              println(s"[convertFieldValueToSpark] TIMESTAMP INTEGER: rawValue=$l (Long)")
-              l.longValue() // Already in microseconds, return as-is
-            case i: java.lang.Integer =>
-              println(s"[convertFieldValueToSpark] TIMESTAMP INTEGER: rawValue=$i (Integer)")
-              i.longValue() // Convert to Long
-            case s: String            =>
-              println(s"[convertFieldValueToSpark] TIMESTAMP INTEGER: rawValue=$s (String)")
-              s.toLong      // Parse as Long (microseconds)
+          rawValue match {
+            case l: java.lang.Long    => l.longValue() // Already in microseconds, return as-is
+            case i: java.lang.Integer => i.longValue() // Convert to Long
+            case s: String            => s.toLong      // Parse as Long (microseconds)
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
-          println(s"[convertFieldValueToSpark] TIMESTAMP INTEGER: returning $result")
-          result
 
         // FLOAT -> DoubleType
         case (FieldType.FLOAT, DoubleType) =>

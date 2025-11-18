@@ -357,8 +357,8 @@ case class SerializableAwsConfig(
         } catch {
           case ex: Exception =>
             // Fall back to explicit credentials if provider fails
-            println(s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}")
-            println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
+            System.err.println(s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}")
+            System.err.println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
             new QuickwitSplit.AwsConfig(
               accessKey,
               secretKey,
@@ -387,9 +387,6 @@ case class SerializableAwsConfig(
     import org.apache.hadoop.conf.Configuration
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    println(s"[EXECUTOR] Resolving credentials using custom provider: $providerClassName")
-    println(s"[EXECUTOR] Using table path for credential provider: $tablePath")
-
     // Use the provided table path for the credential provider constructor
     val tableUri   = new URI(tablePath)
     val hadoopConf = new Configuration()
@@ -397,10 +394,6 @@ case class SerializableAwsConfig(
     // Use CredentialProviderFactory to instantiate and extract credentials
     val provider         = CredentialProviderFactory.createCredentialProvider(providerClassName, tableUri, hadoopConf)
     val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(provider)
-
-    println(s"✅ [EXECUTOR] Successfully resolved credentials from $providerClassName")
-    println(s"[EXECUTOR] Resolved credentials: accessKey=${basicCredentials.accessKey
-        .take(4)}***, sessionToken=${basicCredentials.sessionToken.map(_ => "***").getOrElse("None")}")
 
     (basicCredentials.accessKey, basicCredentials.secretKey, basicCredentials.sessionToken)
   }
@@ -488,7 +481,7 @@ class MergeSplitsExecutor(
 
       // Extract merge operation configuration (default heap size: 1GB)
       val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
-        .map(_.toLong)
+        .map(io.indextables.spark.util.SizeParser.parseSize)
         .map(java.lang.Long.valueOf)
         .getOrElse(java.lang.Long.valueOf(1073741824L)) // 1GB default
       val debugEnabled =
@@ -661,7 +654,6 @@ class MergeSplitsExecutor(
       val filteredCount = allFiles.length - filtered.length
       if (filteredCount > 0) {
         logger.info(s"Filtered out $filteredCount files in cooldown period")
-        println(s"📝 [DRIVER] Skipping $filteredCount files currently in cooldown period")
       }
       filtered
     } else {
@@ -865,7 +857,7 @@ class MergeSplitsExecutor(
               )
 
               // CRITICAL: Validate all merged files actually exist before updating transaction log
-              println(
+              logger.debug(
                 s"[DRIVER] Batch $batchNum: Validating ${physicalMergeResults.length} merged files"
               )
               physicalMergeResults.foreach { result =>
@@ -906,9 +898,6 @@ class MergeSplitsExecutor(
                 // Always record skipped files regardless of whether merge was performed
                 if (skippedSplitPaths.nonEmpty) {
                   logger.warn(s"⚠️  Merge operation skipped ${skippedSplitPaths.size} files (due to corruption/missing files): ${skippedSplitPaths.mkString(", ")}")
-                  println(
-                    s"⚠️  [DRIVER] Merge operation skipped ${skippedSplitPaths.size} files: ${skippedSplitPaths.mkString(", ")}"
-                  )
 
                   // Record skipped files in transaction log with cooldown period
                   val cooldownHours =
@@ -948,9 +937,6 @@ class MergeSplitsExecutor(
                 // Check if no merge was performed (null or empty indexUid indicates this)
                 if (indexUid.isEmpty || indexUid.contains(null) || indexUid.exists(_.trim.isEmpty)) {
                   logger.warn(s"⚠️  No merge was performed for group with ${result.mergeGroup.files.length} files (null/empty indexUid) - skipping ADD/REMOVE operations but preserving skipped files tracking")
-                  println(
-                    s"⚠️  [DRIVER] No merge performed (null/empty indexUid) - skipping transaction log ADD/REMOVE operations"
-                  )
 
                   // Return without performing ADD/REMOVE operations
                   // Note: We still recorded the skipped files above, which is the desired behavior
@@ -980,7 +966,6 @@ class MergeSplitsExecutor(
                       val wasSkipped = skippedSplitPaths.contains(fullPath) || skippedSplitPaths.contains(file.path)
                       if (wasSkipped) {
                         logger.info(s"Preserving skipped file in transaction log (not marking as removed): ${file.path}")
-                        println(s"📝 [DRIVER] Preserving skipped file: ${file.path}")
                       }
                       !wasSkipped
                     }
@@ -1155,7 +1140,6 @@ class MergeSplitsExecutor(
     logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits across ${batches.length} batches")
     logger.info(s"Batch summary: $successfulBatchCount successful, $failedBatchCount failed")
     logger.info(s"Size change: $totalOriginalSize bytes -> $totalMergedSize bytes")
-    println(s"🎉 [DRIVER] $statusMessage")
 
     Seq(
       Row(
@@ -1734,22 +1718,21 @@ object MergeSplitsExecutor {
     // CRITICAL: Verify the merged file actually exists at the expected location
     try
       if (isS3Path) {
-        println(s"[EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
-        println(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
+        logger.debug(s"[EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
+        logger.debug(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else if (isAzurePath) {
-        println(s"[EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
-        println(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
+        logger.debug(s"[EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
+        logger.debug(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else {
         val outputFile = new java.io.File(outputSplitPath)
         val exists     = outputFile.exists()
-        println(s"[EXECUTOR] File verification: $outputSplitPath exists = $exists")
+        logger.debug(s"[EXECUTOR] File verification: $outputSplitPath exists = $exists")
         if (!exists) {
           throw new RuntimeException(s"CRITICAL: Merged file was not created at expected location: $outputSplitPath")
         }
       }
     catch {
       case ex: Exception =>
-        println(s"⚠️  [EXECUTOR] File existence check failed: ${ex.getMessage}")
         logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
 

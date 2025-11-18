@@ -42,9 +42,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
   private val logger = LoggerFactory.getLogger(V2IndexQueryExpressionRule.getClass)
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    // CRITICAL DEBUG: Add visible logging to verify rule is executing
-    println(s"[V2IndexQueryExpressionRule] apply() called on plan: ${plan.getClass.getSimpleName}")
-    logger.info(s"V2IndexQueryExpressionRule: apply() called on plan: ${plan.getClass.getSimpleName}")
+    logger.debug(s"V2IndexQueryExpressionRule: apply() called on plan: ${plan.getClass.getSimpleName}")
 
     // Find the relation in this plan (if any) to check if we need to clear ThreadLocal
     import io.indextables.spark.core.IndexTables4SparkScanBuilder
@@ -57,8 +55,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
     val result = plan.transformUp {
       case filter @ Filter(condition, child: DataSourceV2Relation) =>
-        println(s"[V2IndexQueryExpressionRule] Found Filter with DataSourceV2Relation - table: ${child.table.name()}")
-        logger.info(s"V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation")
+        logger.debug(s"V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation - table: ${child.table.name()}")
         logger.debug(s"V2IndexQueryExpressionRule: Condition: $condition")
         logger.debug(s"V2IndexQueryExpressionRule: Child table: ${child.table.name()}")
 
@@ -270,8 +267,7 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
     // This is needed for BOTH IndexQuery expressions AND regular filter pushdown
     // This works because Catalyst optimization and ScanBuilder creation happen on same thread
     // Even with AQE, the same relation object is reused throughout planning
-    println(s"[V2IndexQueryExpressionRule] Setting current relation: ${System.identityHashCode(relation)}")
-    logger.info(s"V2IndexQueryExpressionRule: Setting current relation: ${System.identityHashCode(relation)}")
+    logger.debug(s"V2IndexQueryExpressionRule: Setting current relation: ${System.identityHashCode(relation)}")
     IndexTables4SparkScanBuilder.setCurrentRelation(relation)
 
     // Store the collected IndexQueries for this relation object (if any)

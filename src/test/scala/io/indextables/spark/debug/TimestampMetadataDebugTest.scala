@@ -15,6 +15,7 @@ class TimestampMetadataDebugTest extends AnyFunSuite with BeforeAndAfterAll {
       .appName("TimestampMetadataDebugTest")
       .master("local[*]")
       .config("spark.ui.enabled", "false")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
 
     spark.sparkContext.setLogLevel("WARN")
@@ -62,44 +63,24 @@ class TimestampMetadataDebugTest extends AnyFunSuite with BeforeAndAfterAll {
     println("Files created:")
     tempDir.listFiles().foreach(f => println(s"  - ${f.getName}"))
 
-    // Check transaction log with proper GZIP handling
+    // Check transaction log using DESCRIBE syntax
     println("\n=== CHECKING TRANSACTION LOG ===")
-    val txLogDir = new java.io.File(tempPath, "_transaction_log")
-    if (txLogDir.exists()) {
-      val txLogFiles = txLogDir.listFiles().filter(_.getName.endsWith(".json")).sortBy(_.getName)
-      txLogFiles.foreach { file =>
-        println(s"\nTransaction log file: ${file.getName}")
+    val txLogInfo = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tempPath'")
+    println("Transaction log entries:")
+    txLogInfo.show(false)
 
-        // Read GZIP-compressed JSON
-        import java.io.{FileInputStream, InputStreamReader, BufferedReader}
-        import java.util.zip.GZIPInputStream
+    // Check for footerStartOffset in the output
+    val txLogRows = txLogInfo.collect()
+    val hasFooterOffsets = txLogRows.exists { row =>
+      val actionType = row.getAs[String]("action_type")
+      val hasFooter = row.getAs[Boolean]("has_footer_offsets")
+      actionType == "add" && hasFooter
+    }
 
-        val reader = new BufferedReader(
-          new InputStreamReader(new GZIPInputStream(new FileInputStream(file)))
-        )
-
-        try {
-          var line = reader.readLine()
-          var lineNum = 0
-          while (line != null) {
-            lineNum += 1
-            if (line.contains("footerStartOffset") || line.contains("footerEndOffset")) {
-              println(s"  Line $lineNum: $line")
-            }
-            if (line.contains("add") && line.contains("path")) {
-              // This is an AddAction - check if it has footer offsets
-              if (line.contains("footerStartOffset")) {
-                println(s"  ✅ AddAction has footerStartOffset")
-              } else {
-                println(s"  ❌ AddAction missing footerStartOffset")
-              }
-            }
-            line = reader.readLine()
-          }
-        } finally {
-          reader.close()
-        }
-      }
+    if (hasFooterOffsets) {
+      println("✅ AddAction has footerStartOffset")
+    } else {
+      println("❌ AddAction missing footerStartOffset")
     }
 
     println("\n=== READING DATA BACK ===")

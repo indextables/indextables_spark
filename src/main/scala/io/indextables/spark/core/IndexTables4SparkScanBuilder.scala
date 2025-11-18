@@ -73,9 +73,6 @@ class IndexTables4SparkScanBuilder(
     // Look up relation from ThreadLocal at usage time (not at construction time!)
     val relationForIndexQuery = IndexTables4SparkScanBuilder.getCurrentRelation()
 
-    println(s"[ScanBuilder.build()] Called on instance ${System.identityHashCode(this)} - table: ${transactionLog.getTablePath()}")
-    println(s"[ScanBuilder.build()] relationForIndexQuery: ${relationForIndexQuery.map(r => System.identityHashCode(r))}")
-    println(s"[ScanBuilder.build()] _pushedFilters.length: ${_pushedFilters.length}")
     logger.debug(s"BUILD: ScanBuilder.build() called on instance ${System.identityHashCode(this)}")
     logger.debug(s"BUILD: Aggregation present: ${aggregation.isDefined}, filters: ${_pushedFilters.length}")
 
@@ -85,7 +82,6 @@ class IndexTables4SparkScanBuilder(
     // The FINAL builder (which might not have pushFilters called) is the one executed
     // Solution: If instance filters are empty, try retrieving from relation object storage
     val effectiveFilters = if (_pushedFilters.nonEmpty) {
-      println(s"[ScanBuilder.build()] Using instance filters: ${_pushedFilters.length}")
       logger.debug(s"BUILD: Using instance variable filters: ${_pushedFilters.length}")
       _pushedFilters
     } else {
@@ -93,11 +89,9 @@ class IndexTables4SparkScanBuilder(
       relationForIndexQuery match {
         case Some(relation) =>
           val relationFilters = IndexTables4SparkScanBuilder.getPushedFilters(relation)
-          println(s"[ScanBuilder.build()] Instance filters empty, retrieved ${relationFilters.length} from relation object: ${System.identityHashCode(relation)}")
           logger.debug(s"BUILD: Instance filters empty, retrieved ${relationFilters.length} from relation object: ${System.identityHashCode(relation)}")
           relationFilters
         case None =>
-          println(s"[ScanBuilder.build()] Instance filters empty and no relation in ThreadLocal, using empty filters")
           logger.warn(s"BUILD: Instance filters empty and no relation in ThreadLocal, cannot retrieve stored filters")
           Array.empty[Filter]
       }
@@ -106,8 +100,8 @@ class IndexTables4SparkScanBuilder(
     logger.debug(s"BUILD: Effective filters count: ${effectiveFilters.length}")
     effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Effective filter: $filter"))
 
-    // Check if we have aggregate pushdown
-    aggregation match {
+    // Create the scan
+    val scan = aggregation match {
       case Some(agg) =>
         logger.debug(s"BUILD: Creating aggregate scan for pushed aggregation")
         createAggregateScan(agg, effectiveFilters)
@@ -124,8 +118,6 @@ class IndexTables4SparkScanBuilder(
 
         logger.debug(s"BUILD: Creating IndexTables4SparkScan on instance ${System.identityHashCode(this)} with ${effectiveFilters.length} pushed filters")
         effectiveFilters.foreach(filter => logger.debug(s"BUILD:   - Creating scan with filter: $filter"))
-        println(s"[ScanBuilder.build()] Creating Scan with ${effectiveFilters.length} filters")
-        effectiveFilters.foreach(f => println(s"[ScanBuilder.build()]   - Filter: $f"))
         new IndexTables4SparkScan(
           sparkSession,
           transactionLog,
@@ -137,6 +129,17 @@ class IndexTables4SparkScanBuilder(
           extractedIndexQueryFilters
         )
     }
+
+    // CRITICAL: Clear stored filters AND IndexQueries after scan is created to prevent filter pollution across queries
+    // The relation-based storage is meant to share filters across optimization passes of the SAME query,
+    // not to carry filters from one query to the next query on the same DataFrame
+    relationForIndexQuery.foreach { relation =>
+      IndexTables4SparkScanBuilder.clearPushedFilters(relation)
+      IndexTables4SparkScanBuilder.clearIndexQueries(relation)
+      logger.debug(s"BUILD: Cleared stored filters and IndexQueries for relation: ${System.identityHashCode(relation)}")
+    }
+
+    scan
   }
 
   /** Create an aggregate scan for pushed aggregations. */
@@ -311,11 +314,6 @@ class IndexTables4SparkScanBuilder(
     new TransactionLogCountScan(sparkSession, transactionLog, effectiveFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    println(s"[pushFilters] Called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
-    filters.foreach { filter =>
-      println(s"[pushFilters]   - Input filter: $filter")
-    }
-
     logger.debug(s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
     filters.foreach { filter =>
       logger.debug(s"PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
@@ -338,10 +336,8 @@ class IndexTables4SparkScanBuilder(
     IndexTables4SparkScanBuilder.getCurrentRelation() match {
       case Some(relation) =>
         IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
-        println(s"[pushFilters] Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}")
         logger.debug(s"PUSHFILTERS: Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}")
       case None =>
-        println(s"[pushFilters] WARNING: No relation in ThreadLocal, cannot store filters")
         logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
     }
 
@@ -362,11 +358,6 @@ class IndexTables4SparkScanBuilder(
 
   override def pushPredicates(predicates: Array[Predicate]): Array[Predicate] = {
     logger.debug(s"PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
-    logger.debug(s"PUSHPREDICATES DEBUG: pushPredicates called with ${predicates.length} predicates")
-    predicates.foreach { predicate =>
-      println(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
-      logger.info(s"  - V2 Predicate: $predicate (${predicate.getClass.getSimpleName})")
-    }
     predicates.foreach(predicate => logger.info(s"  - Input predicate: $predicate (${predicate.getClass.getSimpleName})"))
 
     // Convert predicates that we can handle and extract IndexQuery information
@@ -993,9 +984,6 @@ class IndexTables4SparkScanBuilder(
                 logger.info(
                   s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
                 )
-                println(
-                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
-                )
                 false
               }
             case IntegerType | LongType =>
@@ -1099,9 +1087,6 @@ class IndexTables4SparkScanBuilder(
             false
           }
         case other =>
-          println(
-            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
-          )
           logger.info(
             s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
           )
