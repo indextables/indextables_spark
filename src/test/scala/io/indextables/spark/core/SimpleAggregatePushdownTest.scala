@@ -395,7 +395,8 @@ class SimpleAggregatePushdownTest extends TestBase {
     // Verify the createSimpleAggregateScan method exists
     val method = scanBuilder.getClass.getDeclaredMethod(
       "createSimpleAggregateScan",
-      classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation]
+      classOf[org.apache.spark.sql.connector.expressions.aggregate.Aggregation],
+      classOf[Array[org.apache.spark.sql.sources.Filter]]
     )
     assert(method != null, "createSimpleAggregateScan method should exist")
 

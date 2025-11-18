@@ -160,7 +160,7 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     result shouldBe (100L * 86400000L)  // Days to milliseconds
   }
 
-  test("convertToJsonValue converts TimestampType to milliseconds") {
+  test("convertToJsonValue converts TimestampType to microseconds") {
     val mapper = new SparkSchemaToTantivyMapper(createOptions())
     val schema = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
@@ -168,7 +168,7 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     val micros = 1000000L  // 1 second in microseconds
     val result = converter.convertToJsonValue(micros, TimestampType)
 
-    result shouldBe 1000L  // Microseconds to milliseconds
+    result shouldBe 1000000L  // Microseconds stored directly (no conversion)
   }
 
   test("jsonMapToRow converts simple map to Row") {

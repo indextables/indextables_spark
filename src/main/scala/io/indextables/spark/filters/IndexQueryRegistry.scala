@@ -38,13 +38,11 @@ object IndexQueryRegistry {
   def startNewQuery(): String = {
     val queryId = UUID.randomUUID().toString
     currentQueryId.set(queryId)
-    println(s"IndexQueryRegistry: Started new query with ID: $queryId")
     queryId
   }
 
   def setCurrentQuery(queryId: String): Unit = {
     currentQueryId.set(queryId)
-    println(s"IndexQueryRegistry: Set current query ID: $queryId")
   }
 
   def getCurrentQueryId(): Option[String] =
@@ -55,11 +53,8 @@ object IndexQueryRegistry {
       case Some(queryId) =>
         val filters = queryIndexQueries.getOrElseUpdate(queryId, mutable.Buffer.empty)
         filters += IndexQueryFilter(columnName, queryString)
-        println(
-          s"IndexQueryRegistry: Registered IndexQuery for query $queryId - column: $columnName, query: $queryString"
-        )
       case None =>
-        println(s"IndexQueryRegistry: WARNING - No current query ID, cannot register IndexQuery")
+        // Silently skip if no current query ID
     }
 
   def registerIndexQueryAll(queryString: String): Unit =
@@ -67,23 +62,19 @@ object IndexQueryRegistry {
       case Some(queryId) =>
         val filters = queryIndexQueryAlls.getOrElseUpdate(queryId, mutable.Buffer.empty)
         filters += IndexQueryAllFilter(queryString)
-        println(s"IndexQueryRegistry: Registered IndexQueryAll for query $queryId - query: $queryString")
       case None =>
-        println(s"IndexQueryRegistry: WARNING - No current query ID, cannot register IndexQueryAll")
+        // Silently skip if no current query ID
     }
 
   def getIndexQueriesForQuery(queryId: String): Seq[Any] = {
     val indexQueries   = queryIndexQueries.getOrElse(queryId, mutable.Buffer.empty).toSeq
     val indexQueryAlls = queryIndexQueryAlls.getOrElse(queryId, mutable.Buffer.empty).toSeq
-    val result         = indexQueries ++ indexQueryAlls
-    println(s"IndexQueryRegistry: Retrieved ${result.length} IndexQuery filters for query $queryId")
-    result
+    indexQueries ++ indexQueryAlls
   }
 
   def clearQuery(queryId: String): Unit = {
     queryIndexQueries.remove(queryId)
     queryIndexQueryAlls.remove(queryId)
-    println(s"IndexQueryRegistry: Cleared IndexQuery data for query $queryId")
   }
 
   def clearCurrentQuery(): Unit = {

@@ -24,6 +24,7 @@ import org.apache.spark.sql.sources._
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.json.{JsonPredicateTranslator, SparkSchemaToTantivyMapper}
+import io.indextables.spark.util.TimestampUtils
 import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
 import io.indextables.tantivy4java.query.{Occur, Query}
 import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitMatchAllQuery, SplitQuery, SplitTermQuery}
@@ -1037,7 +1038,7 @@ object FiltersToQueryConverter {
       case FieldType.INTEGER =>
         // Keep original types for range queries - tantivy4java handles type conversion internally
         val result = value match {
-          case ts: java.sql.Timestamp => ts.getTime                            // Convert to milliseconds as Long
+          case ts: java.sql.Timestamp => TimestampUtils.toMicros(ts)           // Convert to microseconds as Long
           case date: java.sql.Date    => date.getTime / (24 * 60 * 60 * 1000L) // Convert to days since epoch as Long
           case i: java.lang.Integer   => i                                     // Keep as Integer for range queries
           case l: java.lang.Long      => l                                     // Keep as Long

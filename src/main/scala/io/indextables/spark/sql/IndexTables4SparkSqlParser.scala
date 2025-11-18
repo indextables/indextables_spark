@@ -71,9 +71,9 @@ class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterf
 
             // Debug: Log the SQL preprocessing
             if (sqlText != preprocessedSql) {
-              println(s"SQL PARSER: Converting indexquery syntax")
-              println(s"SQL PARSER: Original: $sqlText")
-              println(s"SQL PARSER: Preprocessed: $preprocessedSql")
+              logger.debug(s"SQL PARSER: Converting indexquery syntax")
+              logger.debug(s"SQL PARSER: Original: $sqlText")
+              logger.debug(s"SQL PARSER: Preprocessed: $preprocessedSql")
             }
 
             delegate.parsePlan(preprocessedSql)

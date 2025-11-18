@@ -775,10 +775,9 @@ class TantivyDirectInterface(
         case org.apache.spark.sql.types.BinaryType =>
           document.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
         case org.apache.spark.sql.types.TimestampType =>
-          // Spark uses microseconds internally, but we store as milliseconds for efficiency
+          // Spark uses microseconds internally, store directly for full precision
           val microseconds = value.asInstanceOf[Long]
-          val milliseconds = microseconds / 1000L
-          document.addInteger(fieldName, milliseconds)
+          document.addInteger(fieldName, microseconds)
         case org.apache.spark.sql.types.DateType =>
           // Convert days since epoch to LocalDateTime for proper date storage
           import java.time.LocalDateTime
@@ -878,10 +877,9 @@ class TantivyDirectInterface(
         case org.apache.spark.sql.types.BinaryType =>
           batchDocument.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
         case org.apache.spark.sql.types.TimestampType =>
-          // Spark uses microseconds internally, but we store as milliseconds for efficiency
+          // Spark uses microseconds internally, store directly for full precision
           val microseconds = value.asInstanceOf[Long]
-          val milliseconds = microseconds / 1000L
-          batchDocument.addInteger(fieldName, milliseconds)
+          batchDocument.addInteger(fieldName, microseconds)
         case org.apache.spark.sql.types.DateType =>
           // Convert days since epoch to LocalDateTime for proper date storage
           import java.time.LocalDateTime

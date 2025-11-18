@@ -21,6 +21,7 @@ import org.apache.spark.sql.types._
 
 import io.indextables.tantivy4java.core.{FieldType, Schema}
 import io.indextables.spark.json.{SparkSchemaToTantivyMapper, TantivyToSparkConverter}
+import io.indextables.spark.util.TimestampUtils
 import org.slf4j.LoggerFactory
 
 /**
@@ -264,12 +265,12 @@ object SchemaMapping {
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Date")
           }
 
-        // INTEGER -> TimestampType (stored as milliseconds in tantivy, convert to microseconds for Spark)
+        // INTEGER -> TimestampType (stored as microseconds in tantivy, return directly)
         case (FieldType.INTEGER, TimestampType) =>
           rawValue match {
-            case l: java.lang.Long    => l.longValue() * 1000L // Convert milliseconds to microseconds
-            case i: java.lang.Integer => i.longValue() * 1000L // Convert to Long and to microseconds
-            case s: String            => s.toLong * 1000L      // Parse and convert to microseconds
+            case l: java.lang.Long    => l.longValue() // Already in microseconds, return as-is
+            case i: java.lang.Integer => i.longValue() // Convert to Long
+            case s: String            => s.toLong      // Parse as Long (microseconds)
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
 
@@ -318,12 +319,12 @@ object SchemaMapping {
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Date")
           }
 
-        // DATE -> TimestampType
+        // DATE -> TimestampType (DATE fields store microseconds, return directly)
         case (FieldType.DATE, TimestampType) =>
           rawValue match {
-            case l: java.lang.Long    => l.longValue() * 1000L // Convert to microseconds
-            case i: java.lang.Integer => i.longValue() * 1000L
-            case s: String            => s.toLong * 1000L
+            case l: java.lang.Long    => l.longValue() // Already in microseconds
+            case i: java.lang.Integer => i.longValue() // Convert to Long
+            case s: String            => s.toLong      // Parse as microseconds
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
 
@@ -364,7 +365,7 @@ object SchemaMapping {
           rawValue match {
             case ldt: java.time.LocalDateTime =>
               // Convert LocalDateTime to microseconds since epoch
-              ldt.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+              TimestampUtils.toMicros(ldt)
             case ld: java.time.LocalDate =>
               // Convert LocalDate to microseconds since epoch (start of day)
               ld.atStartOfDay(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
@@ -372,9 +373,9 @@ object SchemaMapping {
               // Parse date/timestamp string and convert to microseconds since epoch
               try
                 if (s.contains("T")) {
-                  // Parse as LocalDateTime
+                  // Parse as LocalDateTime and convert to microseconds
                   val localDateTime = java.time.LocalDateTime.parse(s)
-                  localDateTime.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+                  TimestampUtils.toMicros(localDateTime)
                 } else {
                   // Parse as LocalDate
                   val localDate = java.time.LocalDate.parse(s)
