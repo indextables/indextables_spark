@@ -22,8 +22,8 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.sources._
 
 import io.indextables.spark.filters.{IndexQueryAllFilter, IndexQueryFilter}
-import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.json.{JsonPredicateTranslator, SparkSchemaToTantivyMapper}
+import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.util.TimestampUtils
 import io.indextables.tantivy4java.core.{FieldType, Index, Schema}
 import io.indextables.tantivy4java.query.{Occur, Query}
@@ -552,7 +552,7 @@ object FiltersToQueryConverter {
 
     val filterFields = getFilterFieldNames(filter)
     // For nested JSON fields (e.g., "user.name"), check if the root field exists (e.g., "user")
-    val isValid      = filterFields.forall { fieldName =>
+    val isValid = filterFields.forall { fieldName =>
       if (fieldName.contains(".")) {
         // Nested field: check if root field exists in schema
         val rootField = fieldName.split("\\.", 2)(0)
@@ -1089,9 +1089,9 @@ object FiltersToQueryConverter {
 
     // Check if this is a nested field filter (JSON field) first
     // Create JSON predicate translator with Spark schema and options
-    val sparkSchema = splitSearchEngine.getSparkSchema()
+    val sparkSchema    = splitSearchEngine.getSparkSchema()
     val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
-    val jsonMapper = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
+    val jsonMapper     = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
     val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
 
     // Try to translate as JSON field filter using parseQuery syntax
@@ -1105,11 +1105,11 @@ object FiltersToQueryConverter {
         } catch {
           case e: Exception =>
             logger.warn(s"JSON FILTER: Failed to parse JSON field query '$queryString': ${e.getMessage}")
-            // Fall through to regular filter handling
+          // Fall through to regular filter handling
         }
       case None =>
         logger.debug(s"JSON FILTER: Filter not recognized as nested field filter: $filter")
-        // Not a nested field filter, continue with regular filter handling
+      // Not a nested field filter, continue with regular filter handling
     }
 
     filter match {
@@ -1247,12 +1247,13 @@ object FiltersToQueryConverter {
 
         // Check if field is configured as a fast field - range queries only work on fast fields
         // First, check the Tantivy schema directly (most reliable source)
-        val isFastFieldInSchema = try {
-          val fieldInfo = schema.getFieldInfo(attribute)
-          fieldInfo != null && fieldInfo.isFast()
-        } catch {
-          case _: Exception => false
-        }
+        val isFastFieldInSchema =
+          try {
+            val fieldInfo = schema.getFieldInfo(attribute)
+            fieldInfo != null && fieldInfo.isFast()
+          } catch {
+            case _: Exception => false
+          }
 
         // Fall back to checking options (for backward compatibility)
         val isFastFieldInOptions = options
@@ -1272,7 +1273,9 @@ object FiltersToQueryConverter {
         logger.debug(s"LessThan range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
-          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(
+            s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering"
+          )
           return None
         }
 
@@ -1304,12 +1307,13 @@ object FiltersToQueryConverter {
 
         // Check if field is configured as a fast field - range queries only work on fast fields
         // First, check the Tantivy schema directly (most reliable source)
-        val isFastFieldInSchema = try {
-          val fieldInfo = schema.getFieldInfo(attribute)
-          fieldInfo != null && fieldInfo.isFast()
-        } catch {
-          case _: Exception => false
-        }
+        val isFastFieldInSchema =
+          try {
+            val fieldInfo = schema.getFieldInfo(attribute)
+            fieldInfo != null && fieldInfo.isFast()
+          } catch {
+            case _: Exception => false
+          }
 
         // Fall back to checking options (for backward compatibility)
         val isFastFieldInOptions = options
@@ -1329,7 +1333,9 @@ object FiltersToQueryConverter {
         logger.debug(s"LessThanOrEqual range query check for '$attribute': isFastFieldInSchema=$isFastFieldInSchema, isFastFieldInOptions=$isFastFieldInOptions, isDateField=$isDateFieldWorkaround, shouldAllow=$shouldAllowQuery")
 
         if (!shouldAllowQuery) {
-          logger.warn(s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering")
+          logger.warn(
+            s"Range query on field '$attribute' requires fast field configuration - deferring to Spark filtering"
+          )
           return None
         }
 

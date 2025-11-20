@@ -51,15 +51,16 @@ class IndexTables4SparkBatchWrite(
     }
 
     // Also check for case-insensitive duplicates (warn only, don't fail)
-    val lowerCaseNames = fieldNames.map(_.toLowerCase)
+    val lowerCaseNames            = fieldNames.map(_.toLowerCase)
     val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
 
     if (caseInsensitiveDuplicates.nonEmpty) {
-      val originalNames = caseInsensitiveDuplicates.flatMap { lower =>
-        fieldNames.filter(_.toLowerCase == lower)
-      }.distinct.mkString(", ")
-      logger.warn(s"Schema contains columns that differ only in case: [$originalNames]. " +
-        s"This may cause issues with case-insensitive storage systems.")
+      val originalNames =
+        caseInsensitiveDuplicates.flatMap(lower => fieldNames.filter(_.toLowerCase == lower)).distinct.mkString(", ")
+      logger.warn(
+        s"Schema contains columns that differ only in case: [$originalNames]. " +
+          s"This may cause issues with case-insensitive storage systems."
+      )
     }
   }
 
@@ -77,7 +78,7 @@ class IndexTables4SparkBatchWrite(
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     val computedMaxParallelism = if (options.get(configKey) == null) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
-      val maxParallelism = Math.max(1, availableProcessors / 4)
+      val maxParallelism      = Math.max(1, availableProcessors / 4)
       logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
       Some(maxParallelism)
     } else {
@@ -129,7 +130,13 @@ class IndexTables4SparkBatchWrite(
     }
 
     // BatchWrite does NOT support merge-on-write - pass empty partition columns
-    new IndexTables4SparkWriterFactory(tablePath, writeInfo.schema(), serializedOptions.toMap, serializedHadoopConfig, Seq.empty)
+    new IndexTables4SparkWriterFactory(
+      tablePath,
+      writeInfo.schema(),
+      serializedOptions.toMap,
+      serializedHadoopConfig,
+      Seq.empty
+    )
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {

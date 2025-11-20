@@ -23,19 +23,21 @@ import java.time.LocalDateTime
 /**
  * Utility functions for timestamp conversions.
  *
- * Spark internally stores timestamps as microseconds since epoch (Long).
- * This object provides consistent conversion functions to avoid duplication.
+ * Spark internally stores timestamps as microseconds since epoch (Long). This object provides consistent conversion
+ * functions to avoid duplication.
  */
 object TimestampUtils {
 
   /**
    * Convert java.sql.Timestamp to microseconds since epoch.
    *
-   * Spark's internal representation for timestamps is microseconds since epoch.
-   * This function converts a java.sql.Timestamp (milliseconds + nanoseconds) to microseconds.
+   * Spark's internal representation for timestamps is microseconds since epoch. This function converts a
+   * java.sql.Timestamp (milliseconds + nanoseconds) to microseconds.
    *
-   * @param ts java.sql.Timestamp to convert
-   * @return microseconds since epoch as Long
+   * @param ts
+   *   java.sql.Timestamp to convert
+   * @return
+   *   microseconds since epoch as Long
    */
   def toMicros(ts: Timestamp): Long =
     ts.getTime * 1000L + (ts.getNanos / 1000L) % 1000L
@@ -45,8 +47,10 @@ object TimestampUtils {
    *
    * Converts a LocalDateTime (assuming UTC timezone) to microseconds since epoch.
    *
-   * @param ldt java.time.LocalDateTime to convert
-   * @return microseconds since epoch as Long
+   * @param ldt
+   *   java.time.LocalDateTime to convert
+   * @return
+   *   microseconds since epoch as Long
    */
   def toMicros(ldt: LocalDateTime): Long = {
     val millis = ldt.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli

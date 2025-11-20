@@ -22,41 +22,38 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types._
+
 import org.apache.hadoop.fs.Path
+
 import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
 /**
  * SQL command to purge orphaned split files from IndexTables4Spark tables.
  *
- * Syntax:
- *   PURGE ORPHANED SPLITS '/path/to/table'
- *   PURGE ORPHANED SPLITS '/path/to/table' OLDER THAN 7 DAYS
- *   PURGE ORPHANED SPLITS '/path/to/table' OLDER THAN 168 HOURS
- *   PURGE ORPHANED SPLITS '/path/to/table' DRY RUN
- *   PURGE ORPHANED SPLITS '/path/to/table' OLDER THAN 14 DAYS DRY RUN
+ * Syntax: PURGE ORPHANED SPLITS '/path/to/table' PURGE ORPHANED SPLITS '/path/to/table' OLDER THAN 7 DAYS PURGE
+ * ORPHANED SPLITS '/path/to/table' OLDER THAN 168 HOURS PURGE ORPHANED SPLITS '/path/to/table' DRY RUN PURGE ORPHANED
+ * SPLITS '/path/to/table' OLDER THAN 14 DAYS DRY RUN
  *
  * This command:
- *  1. Lists all .split and .crc files in the table directory (distributed across executors)
- *  2. Loads all referenced split files from transaction log (includes checkpoints)
- *  3. Computes orphaned files (files in filesystem but not in transaction log)
- *  4. Applies retention filter (only delete files older than retention period)
- *  5. Deletes orphaned files (or returns preview if DRY RUN)
- *  6. Returns metrics (deleted count, size, duration)
+ *   1. Lists all .split and .crc files in the table directory (distributed across executors) 2. Loads all referenced
+ *      split files from transaction log (includes checkpoints) 3. Computes orphaned files (files in filesystem but not
+ *      in transaction log) 4. Applies retention filter (only delete files older than retention period) 5. Deletes
+ *      orphaned files (or returns preview if DRY RUN) 6. Returns metrics (deleted count, size, duration)
  *
  * Safety features:
- *  - Minimum retention period enforced (default 24 hours)
- *  - DRY RUN mode shows preview before deletion
- *  - LEFT ANTI JOIN ensures only truly orphaned files are deleted
- *  - Retry logic handles transient cloud storage errors
- *  - Graceful partial failure (continues deleting even if some files fail)
+ *   - Minimum retention period enforced (default 24 hours)
+ *   - DRY RUN mode shows preview before deletion
+ *   - LEFT ANTI JOIN ensures only truly orphaned files are deleted
+ *   - Retry logic handles transient cloud storage errors
+ *   - Graceful partial failure (continues deleting even if some files fail)
  */
 case class PurgeOrphanedSplitsCommand(
-    override val child: LogicalPlan,
-    tablePath: String,
-    retentionHours: Option[Long],
-    txLogRetentionDuration: Option[Long],
-    dryRun: Boolean)
+  override val child: LogicalPlan,
+  tablePath: String,
+  retentionHours: Option[Long],
+  txLogRetentionDuration: Option[Long],
+  dryRun: Boolean)
     extends RunnableCommand
     with UnaryNode {
 
@@ -112,13 +109,14 @@ case class PurgeOrphanedSplitsCommand(
       dryRun
     )
 
-    val result = try {
-      executor.purge()
-    } catch {
-      case e: Exception =>
-        logger.error(s"PURGE ORPHANED SPLITS failed: ${e.getMessage}", e)
-        throw e
-    }
+    val result =
+      try
+        executor.purge()
+      catch {
+        case e: Exception =>
+          logger.error(s"PURGE ORPHANED SPLITS failed: ${e.getMessage}", e)
+          throw e
+      }
 
     val duration = System.currentTimeMillis() - startTime
     logger.info(s"PURGE ORPHANED SPLITS completed in ${duration}ms")
@@ -144,8 +142,9 @@ case class PurgeOrphanedSplitsCommand(
   }
 
   private def validateRetentionPeriod(
-      spark: SparkSession,
-      retentionHours: Long): Unit = {
+    spark: SparkSession,
+    retentionHours: Long
+  ): Unit = {
     require(retentionHours >= 0, s"Retention period cannot be negative: $retentionHours")
 
     val checkEnabled = spark.conf
@@ -166,17 +165,23 @@ case class PurgeOrphanedSplitsCommand(
 /**
  * Result of purge operation.
  *
- * @param status Status string: "SUCCESS", "DRY_RUN", "PARTIAL_SUCCESS", "FAILED"
- * @param orphanedFilesFound Total number of orphaned split files found
- * @param orphanedFilesDeleted Number of split files successfully deleted
- * @param sizeMBDeleted Total size in MB of deleted split files
- * @param transactionLogsDeleted Number of old transaction log files deleted
- * @param message Optional message with details
+ * @param status
+ *   Status string: "SUCCESS", "DRY_RUN", "PARTIAL_SUCCESS", "FAILED"
+ * @param orphanedFilesFound
+ *   Total number of orphaned split files found
+ * @param orphanedFilesDeleted
+ *   Number of split files successfully deleted
+ * @param sizeMBDeleted
+ *   Total size in MB of deleted split files
+ * @param transactionLogsDeleted
+ *   Number of old transaction log files deleted
+ * @param message
+ *   Optional message with details
  */
 case class PurgeResult(
-    status: String,
-    orphanedFilesFound: Long,
-    orphanedFilesDeleted: Long,
-    sizeMBDeleted: Double,
-    transactionLogsDeleted: Long,
-    message: Option[String])
+  status: String,
+  orphanedFilesFound: Long,
+  orphanedFilesDeleted: Long,
+  sizeMBDeleted: Double,
+  transactionLogsDeleted: Long,
+  message: Option[String])

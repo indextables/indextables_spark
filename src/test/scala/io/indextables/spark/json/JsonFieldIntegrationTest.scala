@@ -17,9 +17,9 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
 
 import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
@@ -27,23 +27,26 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 /**
  * Integration tests for JSON field support (Struct, Array, JSON strings).
  *
- * Tests end-to-end write/read functionality with automatic JSON field detection
- * and conversion.
+ * Tests end-to-end write/read functionality with automatic JSON field detection and conversion.
  */
 class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with BeforeAndAfterEach {
 
   test("should write and read simple Struct field") {
     withTempPath { path =>
       // Define schema with nested Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("age", IntegerType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("age", IntegerType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data with nested structure
       val data = Seq(
@@ -106,10 +109,12 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should write and read Array field") {
     withTempPath { path =>
       // Define schema with Array
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("scores", ArrayType(IntegerType, containsNull = false), nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("scores", ArrayType(IntegerType, containsNull = false), nullable = false)
+        )
+      )
 
       // Create test data with arrays
       val data = Seq(
@@ -170,17 +175,21 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should write and read nested Struct with multiple fields") {
     withTempPath { path =>
       // Define complex nested schema
-      val addressSchema = StructType(Seq(
-        StructField("street", StringType, nullable = false),
-        StructField("city", StringType, nullable = false),
-        StructField("zipcode", StringType, nullable = false)
-      ))
+      val addressSchema = StructType(
+        Seq(
+          StructField("street", StringType, nullable = false),
+          StructField("city", StringType, nullable = false),
+          StructField("zipcode", StringType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("name", StringType, nullable = false),
-        StructField("address", addressSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("name", StringType, nullable = false),
+          StructField("address", addressSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -230,20 +239,24 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should handle null values in Struct fields") {
     withTempPath { path =>
       // Define schema with nullable Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = true),
-        StructField("age", IntegerType, nullable = true)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = true),
+          StructField("age", IntegerType, nullable = true)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = true)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = true)
+        )
+      )
 
       // Create test data with some nulls
       val data = Seq(
         Row(1, Row("Alice", 30)),
-        Row(2, null), // Null struct
+        Row(2, null),         // Null struct
         Row(3, Row(null, 25)) // Null field within struct
       )
 
@@ -299,16 +312,20 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should push down equality filter on nested struct field") {
     withTempPath { path =>
       // Define schema with nested Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("age", IntegerType, nullable = false),
-        StructField("city", StringType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("age", IntegerType, nullable = false),
+          StructField("city", StringType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -352,15 +369,19 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should filter range on nested struct field (Spark-level filtering)") {
     withTempPath { path =>
       // Define schema with nested Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("age", IntegerType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("age", IntegerType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -385,7 +406,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
         .filter(col("user.age") > 28)
 
       result1.show(false)
-      result1.collect().length shouldBe 2  // Alice (30) and Charlie (35)
+      result1.collect().length shouldBe 2 // Alice (30) and Charlie (35)
 
       // Test LessThan filter
       val result2 = spark.read
@@ -393,7 +414,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
         .load(path)
         .filter(col("user.age") < 30)
 
-      result2.collect().length shouldBe 2  // Bob (25) and Diana (28)
+      result2.collect().length shouldBe 2 // Bob (25) and Diana (28)
 
       println("✅ Range filtering on nested fields verified (Spark-level)!")
     }
@@ -402,16 +423,20 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should push down combined filters on nested fields") {
     withTempPath { path =>
       // Define schema with nested Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("age", IntegerType, nullable = false),
-        StructField("city", StringType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("age", IntegerType, nullable = false),
+          StructField("city", StringType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -427,7 +452,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
       // Write data with fast field configuration for range queries
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.fastfields", "user.age")  // Configure fast field for range query
+        .option("spark.indextables.indexing.fastfields", "user.age") // Configure fast field for range query
         .mode("overwrite")
         .save(path)
 
@@ -440,7 +465,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
       result.show(false)
 
       val rows = result.collect()
-      rows.length shouldBe 2  // Alice (30, NYC) and Charlie (35, NYC)
+      rows.length shouldBe 2 // Alice (30, NYC) and Charlie (35, NYC)
       val ids = rows.map(_.getInt(0)).sorted
       ids shouldBe Array(1, 3)
 
@@ -451,15 +476,19 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should push down IsNotNull filter on nested field") {
     withTempPath { path =>
       // Define schema with nullable nested field
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = true),
-        StructField("age", IntegerType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = true),
+          StructField("age", IntegerType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data with some null names
       val data = Seq(
@@ -483,7 +512,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
         .filter(col("user.name").isNotNull)
 
       result.show(false)
-      result.collect().length shouldBe 2  // Alice and Charlie
+      result.collect().length shouldBe 2 // Alice and Charlie
 
       println("✅ IsNotNull filter pushdown verified!")
     }
@@ -492,16 +521,20 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should filter with complex boolean combinations (Spark-level filtering)") {
     withTempPath { path =>
       // Define schema with nested Struct
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("age", IntegerType, nullable = false),
-        StructField("city", StringType, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("age", IntegerType, nullable = false),
+          StructField("city", StringType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -529,7 +562,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
       result.show(false)
 
       val rows = result.collect()
-      rows.length shouldBe 3  // Charlie (35, NYC), Eve (32, NYC), Bob
+      rows.length shouldBe 3 // Charlie (35, NYC), Eve (32, NYC), Bob
       val ids = rows.map(_.getInt(0)).sorted
       ids shouldBe Array(2, 3, 5)
 
@@ -540,20 +573,26 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
   test("should read deep nested struct data") {
     withTempPath { path =>
       // Define deep nested schema
-      val addressSchema = StructType(Seq(
-        StructField("street", StringType, nullable = false),
-        StructField("city", StringType, nullable = false)
-      ))
+      val addressSchema = StructType(
+        Seq(
+          StructField("street", StringType, nullable = false),
+          StructField("city", StringType, nullable = false)
+        )
+      )
 
-      val userSchema = StructType(Seq(
-        StructField("name", StringType, nullable = false),
-        StructField("address", addressSchema, nullable = false)
-      ))
+      val userSchema = StructType(
+        Seq(
+          StructField("name", StringType, nullable = false),
+          StructField("address", addressSchema, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("user", userSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("user", userSchema, nullable = false)
+        )
+      )
 
       // Create test data
       val data = Seq(
@@ -581,7 +620,7 @@ class JsonFieldIntegrationTest extends TestBase with BeforeAndAfterAll with Befo
       rows.length shouldBe 3
 
       // Verify deep nested data access
-      val aliceRow = rows.find(_.getInt(0) == 1).get
+      val aliceRow  = rows.find(_.getInt(0) == 1).get
       val aliceUser = aliceRow.getStruct(1)
       aliceUser.getString(0) shouldBe "Alice"
       val aliceAddress = aliceUser.getStruct(1)

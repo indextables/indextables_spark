@@ -17,15 +17,16 @@
 
 package io.indextables.spark.json
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+import io.indextables.spark.TestBase
 
 /**
- * Test suite for aggregate operations on JSON/Struct fields with filter pushdown.
- * Validates that SUM, AVG, MIN, MAX, COUNT work correctly on nested field values
- * and that WHERE clauses on JSON fields are properly pushed down with aggregates.
+ * Test suite for aggregate operations on JSON/Struct fields with filter pushdown. Validates that SUM, AVG, MIN, MAX,
+ * COUNT work correctly on nested field values and that WHERE clauses on JSON fields are properly pushed down with
+ * aggregates.
  */
 class JsonFieldAggregateTest extends TestBase {
 
@@ -268,8 +269,10 @@ class JsonFieldAggregateTest extends TestBase {
       stats.getInt(3) shouldBe 25
       stats.getInt(4) shouldBe 35
 
-      println(s"✅ Multiple aggregates: count=${stats.getLong(0)}, sum=${stats.getLong(1)}, " +
-             s"avg=${stats.getDouble(2)}, min=${stats.getInt(3)}, max=${stats.getInt(4)}")
+      println(
+        s"✅ Multiple aggregates: count=${stats.getLong(0)}, sum=${stats.getLong(1)}, " +
+          s"avg=${stats.getDouble(2)}, min=${stats.getInt(3)}, max=${stats.getInt(4)}"
+      )
     }
   }
 
@@ -319,7 +322,7 @@ class JsonFieldAggregateTest extends TestBase {
         )
         .collect()(0)
 
-      nycStats.getLong(0) shouldBe 3L // Alice, Charlie, Eve
+      nycStats.getLong(0) shouldBe 3L                          // Alice, Charlie, Eve
       math.abs(nycStats.getDouble(1) - 32.33) should be < 0.01 // (30 + 35 + 32) / 3 = 32.33
 
       println(s"✅ Aggregate with WHERE user.city='NYC': count=${nycStats.getLong(0)}, avg_age=${nycStats.getDouble(1)}")
@@ -373,12 +376,14 @@ class JsonFieldAggregateTest extends TestBase {
         )
         .collect()(0)
 
-      seniorStats.getLong(0) shouldBe 2L // Charlie (35), Eve (32)
-      seniorStats.getLong(1) shouldBe 175000L // 90000 + 85000
+      seniorStats.getLong(0) shouldBe 2L        // Charlie (35), Eve (32)
+      seniorStats.getLong(1) shouldBe 175000L   // 90000 + 85000
       seniorStats.getDouble(2) shouldBe 87500.0 // 175000 / 2
 
-      println(s"✅ Aggregate with WHERE user.age>30: count=${seniorStats.getLong(0)}, " +
-             s"sum_salary=${seniorStats.getLong(1)}, avg_salary=${seniorStats.getDouble(2)}")
+      println(
+        s"✅ Aggregate with WHERE user.age>30: count=${seniorStats.getLong(0)}, " +
+          s"sum_salary=${seniorStats.getLong(1)}, avg_salary=${seniorStats.getDouble(2)}"
+      )
     }
   }
 
@@ -433,16 +438,18 @@ class JsonFieldAggregateTest extends TestBase {
         )
         .collect()(0)
 
-      nycSeniorStats.getLong(0) shouldBe 2L // Charlie (35), Eve (32)
+      nycSeniorStats.getLong(0) shouldBe 2L      // Charlie (35), Eve (32)
       nycSeniorStats.getLong(1) shouldBe 175000L // 90000 + 85000
-      nycSeniorStats.getDouble(2) shouldBe 33.5 // (35 + 32) / 2
-      nycSeniorStats.getInt(3) shouldBe 85000 // Eve's salary
-      nycSeniorStats.getInt(4) shouldBe 90000 // Charlie's salary
+      nycSeniorStats.getDouble(2) shouldBe 33.5  // (35 + 32) / 2
+      nycSeniorStats.getInt(3) shouldBe 85000    // Eve's salary
+      nycSeniorStats.getInt(4) shouldBe 90000    // Charlie's salary
 
-      println(s"✅ Aggregate with WHERE user.city='NYC' AND user.age>30: " +
-             s"count=${nycSeniorStats.getLong(0)}, sum=${nycSeniorStats.getLong(1)}, " +
-             s"avg_age=${nycSeniorStats.getDouble(2)}, min_sal=${nycSeniorStats.getInt(3)}, " +
-             s"max_sal=${nycSeniorStats.getInt(4)}")
+      println(
+        s"✅ Aggregate with WHERE user.city='NYC' AND user.age>30: " +
+          s"count=${nycSeniorStats.getLong(0)}, sum=${nycSeniorStats.getLong(1)}, " +
+          s"avg_age=${nycSeniorStats.getDouble(2)}, min_sal=${nycSeniorStats.getInt(3)}, " +
+          s"max_sal=${nycSeniorStats.getInt(4)}"
+      )
     }
   }
 
@@ -493,11 +500,13 @@ class JsonFieldAggregateTest extends TestBase {
         )
         .collect()(0)
 
-      complexStats.getLong(0) shouldBe 3L // Charlie (35, NYC), Eve (32, NYC), Frank (40, LA)
+      complexStats.getLong(0) shouldBe 3L                          // Charlie (35, NYC), Eve (32, NYC), Frank (40, LA)
       math.abs(complexStats.getDouble(1) - 35.67) should be < 0.01 // (35 + 32 + 40) / 3 = 35.67
 
-      println(s"✅ Aggregate with complex WHERE ((city='NYC' AND age>30) OR city='LA'): " +
-             s"count=${complexStats.getLong(0)}, avg_age=${complexStats.getDouble(1)}")
+      println(
+        s"✅ Aggregate with complex WHERE ((city='NYC' AND age>30) OR city='LA'): " +
+          s"count=${complexStats.getLong(0)}, avg_age=${complexStats.getDouble(1)}"
+      )
     }
   }
 
@@ -513,9 +522,7 @@ class JsonFieldAggregateTest extends TestBase {
       )
 
       // Generate 5000 rows
-      val data = (1 to 5000).map { i =>
-        Row(i, System.currentTimeMillis() + i, i * 10, s"name_$i")
-      }
+      val data = (1 to 5000).map(i => Row(i, System.currentTimeMillis() + i, i * 10, s"name_$i"))
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
@@ -552,9 +559,11 @@ class JsonFieldAggregateTest extends TestBase {
         .collect()(0)
 
       stats.getLong(0) shouldBe 5000L
-      println(s"✅ Multiple aggregates: count=${stats.getLong(0)}, " +
-             s"min_timestamp=${stats.getLong(1)}, max_timestamp=${stats.getLong(2)}, " +
-             s"sum_value=${stats.getLong(3)}, avg_value=${stats.getDouble(4)}")
+      println(
+        s"✅ Multiple aggregates: count=${stats.getLong(0)}, " +
+          s"min_timestamp=${stats.getLong(1)}, max_timestamp=${stats.getLong(2)}, " +
+          s"sum_value=${stats.getLong(3)}, avg_value=${stats.getDouble(4)}"
+      )
 
       // Verify the actual values
       val expectedSumValue = (1 to 5000).map(_ * 10).sum.toLong
@@ -574,11 +583,13 @@ class JsonFieldAggregateTest extends TestBase {
         .collect()(0)
 
       filteredStats.getLong(0) shouldBe 1000L // 4001 to 5000
-      filteredStats.getInt(1) shouldBe 40010 // 4001 * 10
-      filteredStats.getInt(2) shouldBe 50000 // 5000 * 10
+      filteredStats.getInt(1) shouldBe 40010  // 4001 * 10
+      filteredStats.getInt(2) shouldBe 50000  // 5000 * 10
 
-      println(s"✅ Filtered aggregates (value > 40000): count=${filteredStats.getLong(0)}, " +
-             s"min=${filteredStats.getInt(1)}, max=${filteredStats.getInt(2)}")
+      println(
+        s"✅ Filtered aggregates (value > 40000): count=${filteredStats.getLong(0)}, " +
+          s"min=${filteredStats.getInt(1)}, max=${filteredStats.getInt(2)}"
+      )
     }
   }
 
@@ -601,9 +612,7 @@ class JsonFieldAggregateTest extends TestBase {
       )
 
       // Generate 5000 rows
-      val data = (1 to 5000).map { i =>
-        Row(i, i * 10, Row(i, i * 2, s"name_$i"))
-      }
+      val data = (1 to 5000).map(i => Row(i, i * 10, Row(i, i * 2, s"name_$i")))
 
       val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
@@ -640,14 +649,16 @@ class JsonFieldAggregateTest extends TestBase {
         .collect()(0)
 
       stats.getLong(0) shouldBe 5000L
-      stats.getInt(1) shouldBe 1 // min(field1) = 1
-      stats.getInt(2) shouldBe 5000 // max(field1) = 5000
-      stats.getLong(3) shouldBe (1 to 5000).map(_ * 2).sum.toLong // sum(field2)
+      stats.getInt(1) shouldBe 1                                              // min(field1) = 1
+      stats.getInt(2) shouldBe 5000                                           // max(field1) = 5000
+      stats.getLong(3) shouldBe (1 to 5000).map(_ * 2).sum.toLong             // sum(field2)
       stats.getDouble(4) shouldBe (1 to 5000).map(_ * 10).sum.toDouble / 5000 // avg(value)
 
-      println(s"✅ Multiple aggregates: count=${stats.getLong(0)}, " +
-             s"min_field1=${stats.getInt(1)}, max_field1=${stats.getInt(2)}, " +
-             s"sum_field2=${stats.getLong(3)}, avg_value=${stats.getDouble(4)}")
+      println(
+        s"✅ Multiple aggregates: count=${stats.getLong(0)}, " +
+          s"min_field1=${stats.getInt(1)}, max_field1=${stats.getInt(2)}, " +
+          s"sum_field2=${stats.getLong(3)}, avg_value=${stats.getDouble(4)}"
+      )
 
       // Test 3: Aggregates with filter on nested JSON field
       val filteredStats = result
@@ -663,8 +674,10 @@ class JsonFieldAggregateTest extends TestBase {
       filteredStats.getInt(1) shouldBe 4001
       filteredStats.getInt(2) shouldBe 5000
 
-      println(s"✅ Filtered aggregates (metadata.field1 > 4000): count=${filteredStats.getLong(0)}, " +
-             s"min=${filteredStats.getInt(1)}, max=${filteredStats.getInt(2)}")
+      println(
+        s"✅ Filtered aggregates (metadata.field1 > 4000): count=${filteredStats.getLong(0)}, " +
+          s"min=${filteredStats.getInt(1)}, max=${filteredStats.getInt(2)}"
+      )
 
       // Test 4: Aggregates with string filter on nested JSON field
       val stringFilterStats = result
@@ -678,8 +691,10 @@ class JsonFieldAggregateTest extends TestBase {
       stringFilterStats.getLong(0) shouldBe 1L
       stringFilterStats.getLong(1) shouldBe 5000L // 2500 * 2
 
-      println(s"✅ String filtered aggregates (metadata.name = 'name_2500'): count=${stringFilterStats.getLong(0)}, " +
-             s"sum_field2=${stringFilterStats.getLong(1)}")
+      println(
+        s"✅ String filtered aggregates (metadata.name = 'name_2500'): count=${stringFilterStats.getLong(0)}, " +
+          s"sum_field2=${stringFilterStats.getLong(1)}"
+      )
     }
   }
 
@@ -696,7 +711,7 @@ class JsonFieldAggregateTest extends TestBase {
       val schema = StructType(
         Seq(
           StructField("id", IntegerType, nullable = false),
-          StructField("category", StringType, nullable = false),  // Top-level for GROUP BY
+          StructField("category", StringType, nullable = false), // Top-level for GROUP BY
           StructField("value", IntegerType, nullable = false),
           StructField("metadata", metadataSchema, nullable = false)
         )
@@ -710,11 +725,11 @@ class JsonFieldAggregateTest extends TestBase {
         val categoryNum = i % 10
         Row(
           i,
-          s"category_$categoryNum",  // Top-level category for GROUP BY
+          s"category_$categoryNum", // Top-level category for GROUP BY
           i * 10,
           Row(
-            i * 2,      // amount
-            i + 1,      // quantity
+            i * 2, // amount
+            i + 1, // quantity
             s"desc_$i"
           )
         )
@@ -758,39 +773,42 @@ class JsonFieldAggregateTest extends TestBase {
       println(s"✅ GROUP BY returned ${groupedStats.length} groups")
 
       // Verify each group
-      groupedStats.zipWithIndex.foreach { case (row, idx) =>
-        val category = row.getString(0)
-        val count = row.getLong(1)
-        val sumAmount = row.getLong(2)
-        val avgAmount = row.getDouble(3)
-        val sumQuantity = row.getLong(4)
-        val avgQuantity = row.getDouble(5)
-        val avgValue = row.getDouble(6)
+      groupedStats.zipWithIndex.foreach {
+        case (row, idx) =>
+          val category    = row.getString(0)
+          val count       = row.getLong(1)
+          val sumAmount   = row.getLong(2)
+          val avgAmount   = row.getDouble(3)
+          val sumQuantity = row.getLong(4)
+          val avgQuantity = row.getDouble(5)
+          val avgValue    = row.getDouble(6)
 
-        // Each category should have 500 rows
-        count shouldBe 500L
+          // Each category should have 500 rows
+          count shouldBe 500L
 
-        // Calculate expected values for category_idx
-        // IDs: idx, idx+10, idx+20, ..., idx+4990
-        // metadata.amount: idx*2, (idx+10)*2, (idx+20)*2, ..., (idx+4990)*2
-        val expectedSumAmount = (0 until 500).map(j => (idx + j * 10) * 2).sum.toLong
-        val expectedAvgAmount = expectedSumAmount.toDouble / 500
+          // Calculate expected values for category_idx
+          // IDs: idx, idx+10, idx+20, ..., idx+4990
+          // metadata.amount: idx*2, (idx+10)*2, (idx+20)*2, ..., (idx+4990)*2
+          val expectedSumAmount = (0 until 500).map(j => (idx + j * 10) * 2).sum.toLong
+          val expectedAvgAmount = expectedSumAmount.toDouble / 500
 
-        // metadata.quantity: idx+1, (idx+10)+1, (idx+20)+1, ..., (idx+4990)+1
-        val expectedSumQuantity = (0 until 500).map(j => (idx + j * 10) + 1).sum.toLong
-        val expectedAvgQuantity = expectedSumQuantity.toDouble / 500
+          // metadata.quantity: idx+1, (idx+10)+1, (idx+20)+1, ..., (idx+4990)+1
+          val expectedSumQuantity = (0 until 500).map(j => (idx + j * 10) + 1).sum.toLong
+          val expectedAvgQuantity = expectedSumQuantity.toDouble / 500
 
-        // value: idx*10, (idx+10)*10, (idx+20)*10, ..., (idx+4990)*10
-        val expectedAvgValue = (0 until 500).map(j => (idx + j * 10) * 10).sum.toDouble / 500
+          // value: idx*10, (idx+10)*10, (idx+20)*10, ..., (idx+4990)*10
+          val expectedAvgValue = (0 until 500).map(j => (idx + j * 10) * 10).sum.toDouble / 500
 
-        sumAmount shouldBe expectedSumAmount
-        Math.abs(avgAmount - expectedAvgAmount) should be < 0.01
-        sumQuantity shouldBe expectedSumQuantity
-        Math.abs(avgQuantity - expectedAvgQuantity) should be < 0.01
-        Math.abs(avgValue - expectedAvgValue) should be < 0.01
+          sumAmount shouldBe expectedSumAmount
+          Math.abs(avgAmount - expectedAvgAmount) should be < 0.01
+          sumQuantity shouldBe expectedSumQuantity
+          Math.abs(avgQuantity - expectedAvgQuantity) should be < 0.01
+          Math.abs(avgValue - expectedAvgValue) should be < 0.01
 
-        println(s"✅ Category '$category': count=$count, sum_amount=$sumAmount, avg_amount=$avgAmount, " +
-               s"sum_quantity=$sumQuantity, avg_quantity=$avgQuantity, avg_value=$avgValue")
+          println(
+            s"✅ Category '$category': count=$count, sum_amount=$sumAmount, avg_amount=$avgAmount, " +
+              s"sum_quantity=$sumQuantity, avg_quantity=$avgQuantity, avg_value=$avgValue"
+          )
       }
 
       // Test 2: GROUP BY with filter on JSON field
@@ -810,10 +828,10 @@ class JsonFieldAggregateTest extends TestBase {
       println(s"✅ Filtered GROUP BY (metadata.amount > 5000) returned ${filteredGroupedStats.length} groups")
 
       filteredGroupedStats.foreach { row =>
-        val category = row.getString(0)
-        val count = row.getLong(1)
+        val category  = row.getString(0)
+        val count     = row.getLong(1)
         val sumAmount = row.getLong(2)
-        val avgValue = row.getDouble(3)
+        val avgValue  = row.getDouble(3)
 
         println(s"✅ Filtered category '$category': count=$count, sum_amount=$sumAmount, avg_value=$avgValue")
       }
@@ -838,11 +856,9 @@ class JsonFieldAggregateTest extends TestBase {
       )
 
       // Generate 50,000 rows - large enough to verify we're not hitting any limits
-      val data = (1 to 50000).map { i =>
-        Row(i, i * 10, Row(i % 1000, i / 100.0))
-      }
+      val data = (1 to 50000).map(i => Row(i, i * 10, Row(i % 1000, i / 100.0)))
 
-      val df = spark.createDataFrame(spark.sparkContext.parallelize(data, 4), schema)  // 4 partitions
+      val df = spark.createDataFrame(spark.sparkContext.parallelize(data, 4), schema) // 4 partitions
 
       println(s"📊 Writing 50,000 rows to test large split aggregation")
 
@@ -886,8 +902,10 @@ class JsonFieldAggregateTest extends TestBase {
       val expectedAvgRating = (1 to 50000).map(_ / 100.0).sum / 50000
       Math.abs(stats.getDouble(2) - expectedAvgRating) should be < 0.01
 
-      println(s"✅ Aggregates on 50K rows: count=${stats.getLong(0)}, sum_score=${stats.getLong(1)}, " +
-             s"avg_rating=${stats.getDouble(2)}, min_value=${stats.getInt(3)}, max_value=${stats.getInt(4)}")
+      println(
+        s"✅ Aggregates on 50K rows: count=${stats.getLong(0)}, sum_score=${stats.getLong(1)}, " +
+          s"avg_rating=${stats.getDouble(2)}, min_value=${stats.getInt(3)}, max_value=${stats.getInt(4)}"
+      )
 
       // Test 3: Filtered aggregation on large dataset
       val filteredStats = result
@@ -904,8 +922,10 @@ class JsonFieldAggregateTest extends TestBase {
       val expectedFilteredCount = 24950L
       filteredStats.getLong(0) shouldBe expectedFilteredCount
 
-      println(s"✅ Filtered aggregation (metadata.score > 500): count=${filteredStats.getLong(0)}, " +
-             s"sum_value=${filteredStats.getLong(1)}, avg_rating=${filteredStats.getDouble(2)}")
+      println(
+        s"✅ Filtered aggregation (metadata.score > 500): count=${filteredStats.getLong(0)}, " +
+          s"sum_value=${filteredStats.getLong(1)}, avg_rating=${filteredStats.getDouble(2)}"
+      )
       println(s"✅ All large split aggregations passed - no limits encountered!")
     }
   }

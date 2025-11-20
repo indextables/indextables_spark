@@ -227,7 +227,11 @@ object MergeSplitsCommand {
    * Retry a merge operation up to 3 times if it fails with a RuntimeException containing "streaming error" or "timed
    * out". After 3 total attempts (1 initial + 2 retries), the exception is propagated.
    */
-  def retryOnStreamingError[T](operation: () => T, operationDesc: String, logger: org.slf4j.Logger): T = {
+  def retryOnStreamingError[T](
+    operation: () => T,
+    operationDesc: String,
+    logger: org.slf4j.Logger
+  ): T = {
     val maxAttempts                     = 3
     var attempt                         = 1
     var lastException: RuntimeException = null
@@ -357,7 +361,9 @@ case class SerializableAwsConfig(
         } catch {
           case ex: Exception =>
             // Fall back to explicit credentials if provider fails
-            System.err.println(s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}")
+            System.err.println(
+              s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}"
+            )
             System.err.println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
             new QuickwitSplit.AwsConfig(
               accessKey,
@@ -692,7 +698,9 @@ class MergeSplitsExecutor(
         // Double-check: filter out any single-file groups that might have slipped through
         logger.debug(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
         groups.foreach { group =>
-          logger.debug(s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}")
+          logger.debug(
+            s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}"
+          )
         }
         val validGroups = groups.filter(_.files.length >= 2)
         logger.debug(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
@@ -1228,7 +1236,9 @@ class MergeSplitsExecutor(
     }
 
     for ((file, index) <- mergeableFiles.zipWithIndex) {
-      logger.debug(s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)")
+      logger.debug(
+        s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)"
+      )
 
       // Check if adding this file would exceed target size
       if (currentGroupSize > 0 && currentGroupSize + file.size > targetSize) {
@@ -1253,7 +1263,9 @@ class MergeSplitsExecutor(
           groups += MergeGroup(partitionValues, groupFiles)
           logger.debug(s"MERGE DEBUG: ✓ Created merge group with ${currentGroup.length} files ($currentGroupSize bytes): ${currentGroup.map(_.path).mkString(", ")}")
         } else {
-          logger.debug(s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)")
+          logger.debug(
+            s"MERGE DEBUG: ✗ Discarding single-file group: ${currentGroup.head.path} ($currentGroupSize bytes)"
+          )
         }
 
         // Start new group
@@ -1307,14 +1319,15 @@ class MergeSplitsExecutor(
   }
 
   /**
-   * Count the number of valid merge groups that would be created without performing the actual merge.
-   * This is used by merge-on-write evaluation to determine if merge is worthwhile.
+   * Count the number of valid merge groups that would be created without performing the actual merge. This is used by
+   * merge-on-write evaluation to determine if merge is worthwhile.
    *
    * This method uses the exact same logic as merge() to ensure consistency.
    *
-   * @return Number of valid merge groups (with >= 2 files each)
+   * @return
+   *   Number of valid merge groups (with >= 2 files each)
    */
-  def countMergeGroups(): Int = {
+  def countMergeGroups(): Int =
     try {
       // Get current metadata
       val metadata = transactionLog.getMetadata()
@@ -1358,11 +1371,6 @@ class MergeSplitsExecutor(
         logger.warn(s"Failed to count merge groups: ${e.getMessage}")
         0
     }
-  }
-
-
-
-
 
   /**
    * Apply partition predicates to filter which partitions should be processed. Follows Delta Lake pattern of parsing
@@ -1465,8 +1473,8 @@ class MergeSplitsExecutor(
 object MergeSplitsExecutor {
 
   /**
-   * Normalize Azure URLs to the azure:// scheme that tantivy4java expects.
-   * Handles wasb://, wasbs://, abfs://, abfss:// and converts them to azure://.
+   * Normalize Azure URLs to the azure:// scheme that tantivy4java expects. Handles wasb://, wasbs://, abfs://, abfss://
+   * and converts them to azure://.
    */
   private def normalizeAzureUrl(url: String): String = {
     import io.indextables.spark.io.CloudStorageProviderFactory

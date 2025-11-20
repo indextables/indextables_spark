@@ -19,9 +19,9 @@ package io.indextables.spark.schema
 
 import org.apache.spark.sql.types._
 
-import io.indextables.tantivy4java.core.{FieldType, Schema}
 import io.indextables.spark.json.{SparkSchemaToTantivyMapper, TantivyToSparkConverter}
 import io.indextables.spark.util.TimestampUtils
+import io.indextables.tantivy4java.core.{FieldType, Schema}
 import org.slf4j.LoggerFactory
 
 /**
@@ -165,9 +165,8 @@ object SchemaMapping {
 
       // Create JSON field mapper and converter if options provided
       val jsonMapper: Option[SparkSchemaToTantivyMapper] = options.map(new SparkSchemaToTantivyMapper(_))
-      val jsonConverter: Option[TantivyToSparkConverter] = jsonMapper.map(mapper =>
-        new TantivyToSparkConverter(sparkSchema, mapper)
-      )
+      val jsonConverter: Option[TantivyToSparkConverter] =
+        jsonMapper.map(mapper => new TantivyToSparkConverter(sparkSchema, mapper))
 
       val result = sparkSchema.fields.map { sparkField =>
         val convertedValue = convertField(splitDocument, sparkField, splitSchema, jsonMapper, jsonConverter)

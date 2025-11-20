@@ -43,10 +43,9 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
       if (recursive) {
         // Use RemoteIterator for recursive listing
         val files = scala.collection.mutable.ArrayBuffer[CloudFileInfo]()
-        val iter = fs.listFiles(hadoopPath, true)
-        while (iter.hasNext) {
+        val iter  = fs.listFiles(hadoopPath, true)
+        while (iter.hasNext)
           files += convertFileStatus(iter.next())
-        }
         files.toSeq
       } else {
         val statuses = fs.listStatus(hadoopPath)

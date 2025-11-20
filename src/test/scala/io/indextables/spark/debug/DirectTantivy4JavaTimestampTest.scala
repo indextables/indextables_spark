@@ -1,14 +1,15 @@
 package io.indextables.spark.debug
 
+import java.time.LocalDateTime
+
 import io.indextables.tantivy4java.core._
 import io.indextables.tantivy4java.split._
 import io.indextables.tantivy4java.split.merge._
 import org.scalatest.funsuite.AnyFunSuite
-import java.time.LocalDateTime
 
 /**
- * Direct test using tantivy4java API to isolate the issue.
- * This bypasses all Spark/IndexTables4Spark code and tests the split query directly.
+ * Direct test using tantivy4java API to isolate the issue. This bypasses all Spark/IndexTables4Spark code and tests the
+ * split query directly.
  */
 class DirectTantivy4JavaTimestampTest extends AnyFunSuite {
 
@@ -22,11 +23,11 @@ class DirectTantivy4JavaTimestampTest extends AnyFunSuite {
       // Create schema
       val builder = new SchemaBuilder()
       builder.addIntegerField("id", true, true, true)
-      builder.addDateField("ts", true, true, true)  // stored, indexed, FAST
+      builder.addDateField("ts", true, true, true) // stored, indexed, FAST
       val schema = builder.build()
 
       // Create index
-      val index = new Index(schema, indexPath, false)
+      val index  = new Index(schema, indexPath, false)
       val writer = index.writer(Index.Memory.DEFAULT_HEAP_SIZE, 1)
 
       // Write document with timestamp
@@ -43,14 +44,14 @@ class DirectTantivy4JavaTimestampTest extends AnyFunSuite {
       println(s"✓ Written 1 document with timestamp: $dt")
 
       // Create split
-      val config = new QuickwitSplit.SplitConfig("test-split", "test-source", "test-node")
+      val config   = new QuickwitSplit.SplitConfig("test-split", "test-source", "test-node")
       val metadata = QuickwitSplit.convertIndexFromPath(indexPath, splitPath, config)
       println(s"✓ Created split with ${metadata.getNumDocs} documents")
 
       // Create searcher
-      val cacheConfig = new SplitCacheManager.CacheConfig("direct-test-cache")
+      val cacheConfig  = new SplitCacheManager.CacheConfig("direct-test-cache")
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-      val searcher = cacheManager.createSplitSearcher("file://" + splitPath, metadata)
+      val searcher     = cacheManager.createSplitSearcher("file://" + splitPath, metadata)
 
       println("\n=== Testing Query ===")
 
@@ -58,7 +59,7 @@ class DirectTantivy4JavaTimestampTest extends AnyFunSuite {
       val queryString = "ts:[2025-11-07T05:00:00Z TO 2025-11-07T05:00:01Z}"
       println(s"Query: $queryString")
 
-      val query = searcher.parseQuery(queryString)
+      val query  = searcher.parseQuery(queryString)
       val result = searcher.search(query, 10)
 
       val hitCount = result.getHits.size()
@@ -77,13 +78,15 @@ class DirectTantivy4JavaTimestampTest extends AnyFunSuite {
       import java.nio.file.{Files, Paths}
       import scala.util.Try
       Try {
-        Files.walk(Paths.get(indexPath))
+        Files
+          .walk(Paths.get(indexPath))
           .sorted(java.util.Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p))
       }
       Try {
         val splitDir = Paths.get(splitPath).getParent
-        Files.walk(splitDir)
+        Files
+          .walk(splitDir)
           .sorted(java.util.Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p))
       }

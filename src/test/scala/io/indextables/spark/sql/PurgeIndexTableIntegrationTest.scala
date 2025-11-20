@@ -21,20 +21,19 @@ import java.io.File
 import java.nio.file.{Files, Paths}
 import java.util.UUID
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
 import org.apache.spark.sql.SparkSession
+
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-/**
- * Integration tests for PURGE INDEXTABLE command.
- * Tests actual file operations with orphaned splits.
- */
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
+
+/** Integration tests for PURGE INDEXTABLE command. Tests actual file operations with orphaned splits. */
 class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: String = _
-  var fs: FileSystem = _
+  var tempDir: String     = _
+  var fs: FileSystem      = _
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -96,7 +95,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     // Create orphaned split files by directly writing to filesystem
     val orphanedSplit1 = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
     val orphanedSplit2 = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.split")
-    val orphanedCrc1 = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.crc")
+    val orphanedCrc1   = new Path(s"$tablePath/orphaned_${UUID.randomUUID()}.crc")
 
     fs.create(orphanedSplit1).close()
     fs.create(orphanedSplit2).close()
@@ -118,7 +117,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(dryRunResult.length == 1)
     val dryRunMetrics = dryRunResult(0).getStruct(1)
     assert(dryRunMetrics.getString(0) == "DRY_RUN")
-    assert(dryRunMetrics.getLong(1) == 3) // Found 3 orphaned files
+    assert(dryRunMetrics.getLong(1) == 3)       // Found 3 orphaned files
     assert(dryRunMetrics.getBoolean(6) == true) // dry_run flag (field index 6)
 
     // Files should still exist after DRY RUN
@@ -155,21 +154,21 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Create orphaned files with different ages
-    val oldOrphan = new Path(s"$tablePath/old_${UUID.randomUUID()}.split")
+    val oldOrphan    = new Path(s"$tablePath/old_${UUID.randomUUID()}.split")
     val recentOrphan = new Path(s"$tablePath/recent_${UUID.randomUUID()}.split")
 
     fs.create(oldOrphan).close()
     fs.create(recentOrphan).close()
 
     // Set modification times
-    val oldTime = System.currentTimeMillis() - (10L * 24 * 60 * 60 * 1000) // 10 days ago
-    val recentTime = System.currentTimeMillis() - (2L * 24 * 60 * 60 * 1000) // 2 days ago
+    val oldTime    = System.currentTimeMillis() - (10L * 24 * 60 * 60 * 1000) // 10 days ago
+    val recentTime = System.currentTimeMillis() - (2L * 24 * 60 * 60 * 1000)  // 2 days ago
 
     fs.setTimes(oldOrphan, oldTime, -1)
     fs.setTimes(recentOrphan, recentTime, -1)
 
     // Purge with 7 day retention
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete old file but keep recent file
@@ -188,7 +187,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     fs.mkdirs(new Path(tablePath))
 
     // Should handle gracefully
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     val metrics = result(0).getStruct(1)
     assert(metrics.getString(0) == "DRY_RUN")
     // Should not fail, just report no files
@@ -209,7 +208,8 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Get the split files from transaction log
-    val validFiles = fs.listStatus(new Path(tablePath))
+    val validFiles = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath)
 
@@ -230,9 +230,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
 
     // Valid files should still exist
-    validFiles.foreach { file =>
-      assert(fs.exists(file), s"Valid file $file should not be deleted")
-    }
+    validFiles.foreach(file => assert(fs.exists(file), s"Valid file $file should not be deleted"))
 
     // Orphaned file should be deleted
     assert(!fs.exists(orphanedFile), "Orphaned file should be deleted")
@@ -275,7 +273,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
 
     // Should now allow short retention period
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
     assert(metrics.getString(0) == "DRY_RUN")
     // Should succeed without error
@@ -292,12 +290,12 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Purge (should find no orphaned files)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "SUCCESS")
-    assert(metrics.getLong(1) == 0) // Found 0 orphaned files
-    assert(metrics.getLong(2) == 0) // Deleted 0 files
+    assert(metrics.getLong(1) == 0)                                  // Found 0 orphaned files
+    assert(metrics.getLong(2) == 0)                                  // Deleted 0 files
     assert(metrics.getString(8).contains("No orphaned files found")) // message field is at index 8
   }
 
@@ -324,7 +322,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     spark.conf.set("spark.indextables.purge.maxFilesToDelete", "5")
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete only 5 files
@@ -350,7 +348,8 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     data.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .partitionBy("date").mode("overwrite")
+      .partitionBy("date")
+      .mode("overwrite")
       .save(tablePath)
 
     // Create orphaned files in different partitions
@@ -365,7 +364,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     fs.setTimes(orphan2, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete orphans from all partitions
@@ -390,9 +389,9 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Create orphaned .split and .crc files
-    val uuid = UUID.randomUUID()
+    val uuid          = UUID.randomUUID()
     val orphanedSplit = new Path(s"$tablePath/orphaned_$uuid.split")
-    val orphanedCrc = new Path(s"$tablePath/orphaned_$uuid.crc")
+    val orphanedCrc   = new Path(s"$tablePath/orphaned_$uuid.crc")
 
     fs.create(orphanedSplit).close()
     fs.create(orphanedCrc).close()
@@ -402,7 +401,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     fs.setTimes(orphanedCrc, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete both .split and .crc
@@ -440,7 +439,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     fs.setTimes(orphan2, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getLong(2) == 2) // Should delete both orphaned files
@@ -473,7 +472,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val beforeCount = fs.listStatus(new Path(tablePath)).length
 
     // Run DRY RUN
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "DRY_RUN")
@@ -485,8 +484,6 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(afterCount == beforeCount)
 
     // Verify all orphaned files still exist
-    orphanedFiles.foreach { file =>
-      assert(fs.exists(file), s"File $file should still exist after DRY RUN")
-    }
+    orphanedFiles.foreach(file => assert(fs.exists(file), s"File $file should still exist after DRY RUN"))
   }
 }

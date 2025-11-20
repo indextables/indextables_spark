@@ -454,7 +454,9 @@ class IndexTables4SparkGroupByAggregateReader(
     import scala.collection.mutable.ArrayBuffer
     import scala.collection.JavaConverters._
 
-    logger.debug(s"GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}")
+    logger.debug(
+      s"GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}"
+    )
     logger.debug(s"GROUP BY EXECUTION: Split path: ${partition.split.path}")
     logger.debug(s"GROUP BY EXECUTION: Aggregation expressions: ${partition.aggregation.aggregateExpressions.length}")
 
@@ -704,7 +706,9 @@ class IndexTables4SparkGroupByAggregateReader(
                     calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
 
                   val keyString = fieldValues.mkString("|")
-                  logger.debug(s"GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents")
+                  logger.debug(
+                    s"GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents"
+                  )
 
                   // Combine multi-dimensional GROUP BY values with aggregation results
                   InternalRow.fromSeq(groupByValues ++ aggregationValues)
@@ -764,7 +768,9 @@ class IndexTables4SparkGroupByAggregateReader(
         }
 
       } else {
-        logger.debug(s"GROUP BY EXECUTION: Multi-column GROUP BY not yet implemented: ${partition.groupByColumns.mkString(", ")}")
+        logger.debug(
+          s"GROUP BY EXECUTION: Multi-column GROUP BY not yet implemented: ${partition.groupByColumns.mkString(", ")}"
+        )
         Array.empty[InternalRow]
       }
 
@@ -893,7 +899,9 @@ class IndexTables4SparkGroupByAggregateReader(
 
           case _: Sum | _: Avg | _: Min | _: Max =>
             // These should now be handled by separate metric aggregations
-            logger.debug(s"GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately")
+            logger.debug(
+              s"GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately"
+            )
             bucket.getDocCount.toLong // Fallback
 
           case other =>
@@ -1039,7 +1047,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   java.lang.Long.valueOf(0L)
               }
 
@@ -1078,7 +1088,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   java.lang.Double.valueOf(0.0)
               }
 
@@ -1109,7 +1121,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   java.lang.Double.valueOf(0.0)
               }
 
@@ -1169,7 +1183,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting SUM sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   0L
               }
 
@@ -1208,7 +1224,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting MIN sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   0L
               }
 
@@ -1239,7 +1257,9 @@ class IndexTables4SparkGroupByAggregateReader(
                 }
               } catch {
                 case e: Exception =>
-                  logger.warn(s"GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}")
+                  logger.warn(
+                    s"GROUP BY EXECUTION: Error extracting MAX sub-aggregation result for index $index: ${e.getMessage}"
+                  )
                   0L
               }
 

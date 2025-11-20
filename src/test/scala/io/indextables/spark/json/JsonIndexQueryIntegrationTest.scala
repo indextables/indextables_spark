@@ -17,9 +17,9 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
 
 import io.indextables.spark.TestBase
 
@@ -59,7 +59,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       // This enables full-text search with IndexQuery on JSON string content
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.json_content", "text")  // Configure as text for IndexQuery
+        .option("spark.indextables.indexing.typemap.json_content", "text") // Configure as text for IndexQuery
         .mode("overwrite")
         .save(path)
 
@@ -82,9 +82,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val sparkResults = sparkDocs.collect()
-      sparkResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      sparkResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       sparkResults.length should be >= 1
       sparkResults.exists(_.getString(1).contains("Spark")) shouldBe true
       println(s"   ✅ Found ${sparkResults.length} document(s) containing 'spark'")
@@ -99,9 +97,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val pythonDataResults = pythonDataDocs.collect()
-      pythonDataResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      pythonDataResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       pythonDataResults.length should be >= 1
       pythonDataResults.exists { row =>
         val json = row.getString(1).toLowerCase
@@ -119,9 +115,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val orResults = orQueryDocs.collect()
-      orResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      orResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       orResults.length should be >= 2
       println(s"   ✅ Found ${orResults.length} document(s) matching 'machine' OR 'distributed'")
 
@@ -135,9 +129,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val phraseResults = phraseDocs.collect()
-      phraseResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      phraseResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       phraseResults.length should be >= 1
       phraseResults.exists(_.getString(1).toLowerCase.contains("machine learning")) shouldBe true
       println(s"   ✅ Found ${phraseResults.length} document(s) with exact phrase 'machine learning'")
@@ -152,9 +144,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val complexResults = complexDocs.collect()
-      complexResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      complexResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       println(s"   ✅ Found ${complexResults.length} document(s) matching complex query")
 
       // Test 6: Wildcard query
@@ -167,9 +157,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
       """)
 
       val wildcardResults = wildcardDocs.collect()
-      wildcardResults.foreach { row =>
-        println(s"   Found: ID ${row.getInt(0)}")
-      }
+      wildcardResults.foreach(row => println(s"   Found: ID ${row.getInt(0)}"))
       wildcardResults.length should be >= 1
       println(s"   ✅ Found ${wildcardResults.length} document(s) matching 'spar*' wildcard")
 
@@ -281,14 +269,14 @@ class JsonIndexQueryIntegrationTest extends TestBase {
         // Write with TEXT type (for IndexQuery - tokenized search)
         testData.write
           .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-          .option("spark.indextables.indexing.typemap.json_field", "text")  // TEXT type enables IndexQuery
+          .option("spark.indextables.indexing.typemap.json_field", "text") // TEXT type enables IndexQuery
           .mode("overwrite")
           .save(jsonPath)
 
         // Write with STRING type (for exact matching - default)
         testData.write
           .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-          .option("spark.indextables.indexing.typemap.json_field", "string")  // STRING type (default)
+          .option("spark.indextables.indexing.typemap.json_field", "string") // STRING type (default)
           .mode("overwrite")
           .save(stringPath)
 
@@ -320,7 +308,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
         val textCount = textResults.collect()
         println(s"   TEXT type with IndexQuery found: ${textCount.length} documents")
         textCount.foreach { row =>
-          val text = row.getString(1)
+          val text    = row.getString(1)
           val preview = if (text.length > 60) text.substring(0, 60) + "..." else text
           println(s"   - ID ${row.getInt(0)}: $preview")
         }
@@ -340,7 +328,7 @@ class JsonIndexQueryIntegrationTest extends TestBase {
         val stringCount = stringResults.collect()
         println(s"   STRING type with LIKE found: ${stringCount.length} documents")
         stringCount.foreach { row =>
-          val text = row.getString(1)
+          val text    = row.getString(1)
           val preview = if (text.length > 60) text.substring(0, 60) + "..." else text
           println(s"   - ID ${row.getInt(0)}: $preview")
         }
@@ -366,15 +354,19 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
       // Create test data with actual Struct fields using Spark's Row and schema
       // Note: We simplify the schema to avoid UnsafeArrayData conversion issues
-      val docSchema = StructType(Seq(
-        StructField("title", StringType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      ))
+      val docSchema = StructType(
+        Seq(
+          StructField("title", StringType, nullable = false),
+          StructField("content", StringType, nullable = false)
+        )
+      )
 
-      val schema = StructType(Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("doc", docSchema, nullable = false)
-      ))
+      val schema = StructType(
+        Seq(
+          StructField("id", IntegerType, nullable = false),
+          StructField("doc", docSchema, nullable = false)
+        )
+      )
 
       val testData = Seq(
         Row(1, Row("Machine Learning", "Deep learning and neural networks")),

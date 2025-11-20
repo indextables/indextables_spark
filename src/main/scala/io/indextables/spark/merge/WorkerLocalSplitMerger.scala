@@ -19,8 +19,8 @@ package io.indextables.spark.merge
 
 import java.io.{File, FileInputStream}
 import java.nio.file.Files
-import java.util.UUID
 import java.util.concurrent.Semaphore
+import java.util.UUID
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -28,9 +28,7 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.TaskContext
 
-/**
- * Metadata extracted from a merged split file
- */
+/** Metadata extracted from a merged split file */
 case class MergedSplitMetadata(
   size: Long,
   numRecords: Long,
@@ -43,8 +41,8 @@ case class MergedSplitMetadata(
   splitTags: Option[Set[String]],
   deleteOpstamp: Option[Long],
   docMappingJson: Option[String],
-  uncompressedSizeBytes: Option[Long]
-) extends Serializable
+  uncompressedSizeBytes: Option[Long])
+    extends Serializable
 
 import org.apache.hadoop.conf.Configuration
 
@@ -55,14 +53,14 @@ import org.slf4j.LoggerFactory
  * Merges split files on workers using local split files from shuffle-based merge.
  *
  * GAP MITIGATIONS:
- * - Gap #3 (Memory Management): Implements per-worker merge concurrency control via semaphore
- * - Gap #6 (Merge Timeouts): Provides heartbeat mechanism and progress tracking
- * - Gap #2 (Disk Space): Checks available disk space before merge operations
+ *   - Gap #3 (Memory Management): Implements per-worker merge concurrency control via semaphore
+ *   - Gap #6 (Merge Timeouts): Provides heartbeat mechanism and progress tracking
+ *   - Gap #2 (Disk Space): Checks available disk space before merge operations
  */
 class WorkerLocalSplitMerger(
   options: CaseInsensitiveStringMap,
-  hadoopConf: Configuration
-) extends Serializable {
+  hadoopConf: Configuration)
+    extends Serializable {
 
   @transient private lazy val logger = LoggerFactory.getLogger(classOf[WorkerLocalSplitMerger])
 
@@ -74,21 +72,27 @@ class WorkerLocalSplitMerger(
     val targetMergeSize = SizeParser.parseSize(
       options.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
     )
-    val memoryOverheadFactor = options.getOrDefault(
-      "spark.indextables.mergeOnWrite.memoryOverheadFactor", "3.0"
-    ).toDouble
-    val memoryPerMerge = (targetMergeSize * memoryOverheadFactor).toLong
-    val maxConcurrentMerges = Math.max(1,
-      (maxHeap * 0.6 / memoryPerMerge).toInt
+    val memoryOverheadFactor = options
+      .getOrDefault(
+        "spark.indextables.mergeOnWrite.memoryOverheadFactor",
+        "3.0"
+      )
+      .toDouble
+    val memoryPerMerge      = (targetMergeSize * memoryOverheadFactor).toLong
+    val maxConcurrentMerges = Math.max(1, (maxHeap * 0.6 / memoryPerMerge).toInt)
+
+    logger.info(
+      s"Merge concurrency limit: $maxConcurrentMerges merges (heap: ${maxHeap / 1024 / 1024}MB, " +
+        s"target size: ${targetMergeSize / 1024 / 1024}MB, overhead factor: ${memoryOverheadFactor}x)"
     )
 
-    logger.info(s"Merge concurrency limit: $maxConcurrentMerges merges (heap: ${maxHeap / 1024 / 1024}MB, " +
-      s"target size: ${targetMergeSize / 1024 / 1024}MB, overhead factor: ${memoryOverheadFactor}x)")
-
     // Allow configuration override
-    val configuredLimit = options.getOrDefault(
-      "spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker", maxConcurrentMerges.toString
-    ).toInt
+    val configuredLimit = options
+      .getOrDefault(
+        "spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker",
+        maxConcurrentMerges.toString
+      )
+      .toInt
 
     new Semaphore(configuredLimit)
   }
@@ -96,14 +100,17 @@ class WorkerLocalSplitMerger(
   /**
    * Merge multiple split files into a single split
    *
-   * Gap #3: Uses semaphore to prevent memory pressure from concurrent merges
-   * Gap #6: Implements heartbeat mechanism to prevent task timeout
-   * Gap #2: Checks disk space before merge
+   * Gap #3: Uses semaphore to prevent memory pressure from concurrent merges Gap #6: Implements heartbeat mechanism to
+   * prevent task timeout Gap #2: Checks disk space before merge
    *
-   * @param inputSplits Paths to input .split files
-   * @param outputDir Directory for merged split
-   * @param partitionId Partition ID for naming
-   * @return Tuple of (merged split path, metadata)
+   * @param inputSplits
+   *   Paths to input .split files
+   * @param outputDir
+   *   Directory for merged split
+   * @param partitionId
+   *   Partition ID for naming
+   * @return
+   *   Tuple of (merged split path, metadata)
    */
   def mergeSplits(
     inputSplits: Seq[String],
@@ -121,17 +128,22 @@ class WorkerLocalSplitMerger(
       // Gap #2: Check available disk space
       val outputDirFile = new File(outputDir)
       outputDirFile.mkdirs()
-      val availableSpace = outputDirFile.getUsableSpace
+      val availableSpace     = outputDirFile.getUsableSpace
       val estimatedMergeSize = inputSplits.map(new File(_)).filter(_.exists()).map(_.length()).sum
 
-      val minDiskSpaceGB = options.getOrDefault(
-        "spark.indextables.mergeOnWrite.minDiskSpaceGB", "20"
-      ).toInt
+      val minDiskSpaceGB = options
+        .getOrDefault(
+          "spark.indextables.mergeOnWrite.minDiskSpaceGB",
+          "20"
+        )
+        .toInt
 
       if (availableSpace < estimatedMergeSize * 2 || availableSpace < minDiskSpaceGB * 1024L * 1024L * 1024L) {
-        logger.error(s"Insufficient disk space: ${availableSpace / 1024 / 1024}MB available, " +
-          s"estimated merge size: ${estimatedMergeSize / 1024 / 1024}MB, " +
-          s"minimum required: ${minDiskSpaceGB}GB")
+        logger.error(
+          s"Insufficient disk space: ${availableSpace / 1024 / 1024}MB available, " +
+            s"estimated merge size: ${estimatedMergeSize / 1024 / 1024}MB, " +
+            s"minimum required: ${minDiskSpaceGB}GB"
+        )
         throw new RuntimeException(
           s"Insufficient disk space for merge operation (available: ${availableSpace / 1024 / 1024}MB)"
         )
@@ -143,20 +155,17 @@ class WorkerLocalSplitMerger(
 
       // Gap #6: Start heartbeat thread to prevent task timeout
       @volatile var mergeComplete = false
-      val heartbeatThread = new Thread(() => {
-        while (!mergeComplete) {
+      val heartbeatThread = new Thread(() =>
+        while (!mergeComplete)
           try {
             // Send Spark heartbeat if task context available
-            Option(TaskContext.get()).foreach { ctx =>
-              logger.debug(s"Merge in progress, sending heartbeat...")
-            }
+            Option(TaskContext.get()).foreach(ctx => logger.debug(s"Merge in progress, sending heartbeat..."))
             Thread.sleep(30000) // Heartbeat every 30 seconds
           } catch {
             case _: InterruptedException => // Normal shutdown
-            case e: Exception => logger.warn("Heartbeat thread error", e)
+            case e: Exception            => logger.warn("Heartbeat thread error", e)
           }
-        }
-      })
+      )
       heartbeatThread.setDaemon(true)
       heartbeatThread.setName("merge-heartbeat")
       heartbeatThread.start()
@@ -192,10 +201,12 @@ class WorkerLocalSplitMerger(
         )
 
         val mergeDuration = System.currentTimeMillis() - mergeStartTime
-        val mergedSize = new File(outputPath).length()
+        val mergedSize    = new File(outputPath).length()
 
-        logger.info(s"Merged ${inputSplits.size} splits into: $outputPath " +
-          s"(${mergedSize / 1024 / 1024}MB, ${mergeDuration}ms)")
+        logger.info(
+          s"Merged ${inputSplits.size} splits into: $outputPath " +
+            s"(${mergedSize / 1024 / 1024}MB, ${mergeDuration}ms)"
+        )
 
         (outputPath, metadata)
 
@@ -218,11 +229,16 @@ class WorkerLocalSplitMerger(
   /**
    * Extract metadata from QuickwitSplit.SplitMetadata returned from merge
    *
-   * @param metadata Metadata returned from mergeSplits
-   * @param mergedSplitPath Path to merged split file
-   * @param inputMinValues Min values from input splits (to compute union)
-   * @param inputMaxValues Max values from input splits (to compute union)
-   * @return Extracted metadata
+   * @param metadata
+   *   Metadata returned from mergeSplits
+   * @param mergedSplitPath
+   *   Path to merged split file
+   * @param inputMinValues
+   *   Min values from input splits (to compute union)
+   * @param inputMaxValues
+   *   Max values from input splits (to compute union)
+   * @return
+   *   Extracted metadata
    */
   def extractMetadataFromMergeResult(
     metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
@@ -255,9 +271,7 @@ class WorkerLocalSplitMerger(
     )
   }
 
-  /**
-   * Compute union of min values across multiple splits (min of mins)
-   */
+  /** Compute union of min values across multiple splits (min of mins) */
   private def computeUnionMinValues(inputMinValues: Seq[Map[String, String]]): Map[String, String] = {
     if (inputMinValues.isEmpty) return Map.empty
 
@@ -275,9 +289,7 @@ class WorkerLocalSplitMerger(
     }.toMap
   }
 
-  /**
-   * Compute union of max values across multiple splits (max of maxes)
-   */
+  /** Compute union of max values across multiple splits (max of maxes) */
   private def computeUnionMaxValues(inputMaxValues: Seq[Map[String, String]]): Map[String, String] = {
     if (inputMaxValues.isEmpty) return Map.empty
 
@@ -300,7 +312,7 @@ class WorkerLocalSplitMerger(
    *
    * Gap #2: Progressive cleanup to free disk space
    */
-  def cleanup(): Unit = {
+  def cleanup(): Unit =
     if (tempDir != null && tempDir.exists()) {
       try {
         org.apache.commons.io.FileUtils.deleteDirectory(tempDir)
@@ -310,6 +322,5 @@ class WorkerLocalSplitMerger(
           logger.warn(s"Failed to cleanup merge temp directory: ${tempDir.getAbsolutePath}", e)
       }
     }
-  }
 
 }

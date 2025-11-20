@@ -22,11 +22,12 @@ import java.util.{Properties, UUID}
 
 import scala.util.Using
 
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql.SaveMode
 
-import io.indextables.spark.RealAzureTestBase
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import io.indextables.spark.purge.PurgeOnWriteTransactionCounter
+import io.indextables.spark.RealAzureTestBase
 
 /**
  * Real Azure Blob Storage integration tests for purge-on-write feature.
@@ -87,8 +88,8 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
     }
   }
 
-  override def afterAll(): Unit = {
-    try {
+  override def afterAll(): Unit =
+    try
       // Cleanup test directory if it exists
       if (azureCredentials.isDefined && fs != null) {
         val basePath = new Path(testBasePath)
@@ -97,10 +98,8 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
           fs.delete(basePath, true)
         }
       }
-    } finally {
+    finally
       super.afterAll()
-    }
-  }
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -141,8 +140,10 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Append)
       .save(tablePath)
-    assert(PurgeOnWriteTransactionCounter.get(tablePath) === 0,
-      "Counter should reset to 0 after purge triggers on 3rd write")
+    assert(
+      PurgeOnWriteTransactionCounter.get(tablePath) === 0,
+      "Counter should reset to 0 after purge triggers on 3rd write"
+    )
   }
 
   test("purge-on-write should clean up old orphaned split files on Azure using sleep") {
@@ -155,7 +156,7 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
     spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterWrites", "2")
     spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterMerge", "false")
     spark.conf.set("spark.indextables.purgeOnWrite.splitRetentionHours", "0") // 0 hours
-    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false") // Disable check for testing
+    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")  // Disable check for testing
 
     val df = spark.range(50).toDF("id")
 
@@ -192,7 +193,7 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
   test("purge-on-write should clean up old transaction log files on Azure using sleep") {
     assume(azureCredentials.isDefined, "Azure credentials required for Azure tests")
 
-    val tablePath = s"$testBasePath/cleanup_txlog_sleep"
+    val tablePath                 = s"$testBasePath/cleanup_txlog_sleep"
     val (accountName, accountKey) = azureCredentials.get
 
     val df = spark.range(10).toDF("id")
@@ -204,10 +205,10 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
         .mode(if (i == 1) SaveMode.Overwrite else SaveMode.Append)
         .option("spark.indextables.azure.accountName", accountName)
         .option("spark.indextables.azure.accountKey", accountKey)
-        .option("spark.indextables.checkpoint.enabled", "true")  // Enable checkpoints
-        .option("spark.indextables.checkpoint.interval", "10")    // Checkpoint every 10 writes
+        .option("spark.indextables.checkpoint.enabled", "true") // Enable checkpoints
+        .option("spark.indextables.checkpoint.interval", "10")  // Checkpoint every 10 writes
         .option("spark.indextables.purgeOnWrite.enabled", "true")
-        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12")  // Trigger after 12 writes
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12") // Trigger after 12 writes
         .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
         .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
         .option("spark.indextables.purge.retentionCheckEnabled", "false")
@@ -251,15 +252,21 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
 
     // Verify old transaction log files before checkpoint are deleted
     // Checkpoint is at version 10, so versions 0-8 should be candidates for deletion
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")),
-      "Old version 0 (before checkpoint) should be deleted")
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000001.json")),
-      "Old version 1 (before checkpoint) should be deleted")
+    assert(
+      !fs.exists(new Path(txLogPath, "00000000000000000000.json")),
+      "Old version 0 (before checkpoint) should be deleted"
+    )
+    assert(
+      !fs.exists(new Path(txLogPath, "00000000000000000001.json")),
+      "Old version 1 (before checkpoint) should be deleted"
+    )
 
     // Verify recent files after checkpoint are kept
-    assert(fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
-           fs.exists(new Path(txLogPath, "00000000000000000011.json")),
-      "Recent version (10 or 11) should be kept")
+    assert(
+      fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
+        fs.exists(new Path(txLogPath, "00000000000000000011.json")),
+      "Recent version (10 or 11) should be kept"
+    )
   }
 
   test("purge-on-write should propagate Azure credentials from write options") {
@@ -274,7 +281,7 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
     spark.conf.set("spark.indextables.purgeOnWrite.splitRetentionHours", "24")
 
     val (accountName, accountKey) = azureCredentials.get
-    val df = spark.range(50).toDF("id")
+    val df                        = spark.range(50).toDF("id")
 
     // Write with explicit Azure credentials - purge should inherit these
     df.write
@@ -339,9 +346,9 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
   test("purge-on-write should trigger after merge-on-write with Azure credential propagation") {
     assume(azureCredentials.isDefined, "Azure credentials required for Azure tests")
 
-    val tablePath = s"$testBasePath/merge_then_purge"
+    val tablePath                 = s"$testBasePath/merge_then_purge"
     val (accountName, accountKey) = azureCredentials.get
-    val df = spark.range(100).toDF("id")
+    val df                        = spark.range(100).toDF("id")
 
     // Write multiple times to create many small splits
     // This should trigger merge-on-write, and then purge-on-write after merge completes
@@ -353,11 +360,11 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
         .option("spark.indextables.azure.accountKey", accountKey)
         .option("spark.indextables.mergeOnWrite.enabled", "true")
         .option("spark.indextables.mergeOnWrite.targetSize", "100M")
-        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")  // Low threshold
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0") // Low threshold
         .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
         .option("spark.indextables.purgeOnWrite.enabled", "true")
         .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
-        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")  // Immediate deletion
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0") // Immediate deletion
         .option("spark.indextables.purge.retentionCheckEnabled", "false")
         .save(tablePath)
     }
@@ -378,7 +385,7 @@ class RealAzurePurgeOnWriteTest extends RealAzureTestBase {
   test("purge-on-write should handle merge-on-write credential propagation on Azure") {
     assume(azureCredentials.isDefined, "Azure credentials required for Azure tests")
 
-    val tablePath = s"$testBasePath/credential_merge_purge"
+    val tablePath                 = s"$testBasePath/credential_merge_purge"
     val (accountName, accountKey) = azureCredentials.get
 
     PurgeOnWriteTransactionCounter.clearAll()

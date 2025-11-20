@@ -73,8 +73,8 @@ object StatisticsCalculator {
         case (a: Boolean, b: Boolean, BooleanType) => a.compareTo(b)
         case (a: String, b: String, StringType)    => a.compareTo(b)
         case (a: Int, b: Int, DateType)            => a.compareTo(b) // DateType stores days since epoch as Int
-        case (a: Long, b: Long, TimestampType)     => a.compareTo(b) // TimestampType stores microseconds since epoch as Long
-        case _                                     => 0              // Default to equal for unsupported types
+        case (a: Long, b: Long, TimestampType) => a.compareTo(b) // TimestampType stores microseconds since epoch as Long
+        case _ => 0 // Default to equal for unsupported types
       }
   }
 

@@ -18,6 +18,7 @@
 package io.indextables.spark.json
 
 import org.apache.spark.sql.functions._
+
 import io.indextables.spark.TestBase
 
 /**
@@ -28,13 +29,11 @@ import io.indextables.spark.TestBase
  *   - Querying nested JSON properties like: json_field.property:value
  *   - Using _indexall to search across all JSON properties
  *
- * Note: Currently StringType fields configured as "json" work for IndexQuery but have
- * a conversion issue when reading data back (missing JSON → StringType conversion).
- * Struct types work end-to-end for both querying and reading.
+ * Note: Currently StringType fields configured as "json" work for IndexQuery but have a conversion issue when reading
+ * data back (missing JSON → StringType conversion). Struct types work end-to-end for both querying and reading.
  *
- * Example with Struct:
- *   case class UserData(name: String, role: String, team: String)
- *   Query: _indexall indexquery 'user_data.role:engineer'
+ * Example with Struct: case class UserData(name: String, role: String, team: String) Query: _indexall indexquery
+ * 'user_data.role:engineer'
  */
 class JsonFieldIndexQueryTest extends TestBase {
 
@@ -55,7 +54,7 @@ class JsonFieldIndexQueryTest extends TestBase {
       // Write with "json" type to enable JSON field indexing
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.user_data", "json")  // Index as JSON field
+        .option("spark.indextables.indexing.typemap.user_data", "json") // Index as JSON field
         .mode("overwrite")
         .save(path)
 
@@ -79,13 +78,9 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val engineers = engineerQuery.collect()
       println(s"   Found ${engineers.length} engineers:")
-      engineers.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      engineers.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       engineers.length should be >= 1
-      engineers.foreach { row =>
-        row.getString(1) should include("engineer")
-      }
+      engineers.foreach(row => row.getString(1) should include("engineer"))
 
       // Test 2: Query different JSON property
       println("\n🔍 Test 2: Query JSON property - user_data.team:search")
@@ -98,13 +93,9 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val searchTeam = searchTeamQuery.collect()
       println(s"   Found ${searchTeam.length} members in search team:")
-      searchTeam.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      searchTeam.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       searchTeam.length should be >= 1
-      searchTeam.foreach { row =>
-        row.getString(1) should include("search")
-      }
+      searchTeam.foreach(row => row.getString(1) should include("search"))
 
       // Test 3: Query with multiple conditions using AND
       println("\n🔍 Test 3: Query with AND - user_data.role:engineer AND user_data.team:analytics")
@@ -117,9 +108,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val combined = combinedQuery.collect()
       println(s"   Found ${combined.length} engineers in analytics team:")
-      combined.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      combined.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       combined.length should be >= 1
       combined.foreach { row =>
         val data = row.getString(1)
@@ -138,14 +127,11 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val orResults = orQuery.collect()
       println(s"   Found ${orResults.length} managers or designers:")
-      orResults.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      orResults.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       orResults.length should be >= 1
       orResults.foreach { row =>
         val data = row.getString(1)
-        assert(data.contains("manager") || data.contains("designer"),
-          s"Expected 'manager' or 'designer' in: $data")
+        assert(data.contains("manager") || data.contains("designer"), s"Expected 'manager' or 'designer' in: $data")
       }
 
       println("\n🎉 All JSON field IndexQuery tests passed!")
@@ -191,9 +177,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val results = query.collect()
       println(s"   Found ${results.length} documents where val_field.one = 'two':")
-      results.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      results.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
 
       results.length should be >= 1
       results.foreach { row =>
@@ -213,9 +197,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val results2 = query2.collect()
       println(s"   Found ${results2.length} documents where val_field.three = 'four':")
-      results2.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      results2.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
 
       results2.length should be >= 1
       results2.foreach { row =>
@@ -235,9 +217,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val results3 = query3.collect()
       println(s"   Found ${results3.length} documents matching both conditions:")
-      results3.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      results3.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
 
       results3.length should be >= 1
       results3.foreach { row =>
@@ -291,9 +271,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val electronics = electronicsQuery.collect()
       println(s"   Found ${electronics.length} electronics:")
-      electronics.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      electronics.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       electronics.length should be >= 1
 
       // Test: Query by brand
@@ -307,13 +285,9 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val ikea = ikeaQuery.collect()
       println(s"   Found ${ikea.length} IKEA products:")
-      ikea.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      ikea.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       ikea.length should be >= 1
-      ikea.foreach { row =>
-        row.getString(1) should include("ikea")
-      }
+      ikea.foreach(row => row.getString(1) should include("ikea"))
 
       // Test: Complex query - electronics from dell
       println("\n🔍 Test: Query product_info.category:electronics AND product_info.brand:dell")
@@ -326,9 +300,7 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val dellElectronics = dellElectronicsQuery.collect()
       println(s"   Found ${dellElectronics.length} Dell electronics:")
-      dellElectronics.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      dellElectronics.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       dellElectronics.length should be >= 1
       dellElectronics.foreach { row =>
         val json = row.getString(1)
@@ -378,13 +350,9 @@ class JsonFieldIndexQueryTest extends TestBase {
 
       val prodResults = prodQuery.collect()
       println(s"   Found ${prodResults.length} production configs:")
-      prodResults.foreach { row =>
-        println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}")
-      }
+      prodResults.foreach(row => println(s"   - ID ${row.getInt(0)}: ${row.getString(1)}"))
       prodResults.length should be >= 1
-      prodResults.foreach { row =>
-        row.getString(1) should include("production")
-      }
+      prodResults.foreach(row => row.getString(1) should include("production"))
 
       // Note: Deeply nested paths (settings.config.database.host) may require special handling
       // This test demonstrates basic nested JSON querying

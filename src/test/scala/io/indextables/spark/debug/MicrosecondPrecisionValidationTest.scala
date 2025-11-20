@@ -1,7 +1,9 @@
 package io.indextables.spark.debug
 
 import java.sql.Timestamp
+
 import org.apache.spark.sql.SparkSession
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 
@@ -38,10 +40,10 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Create timestamps with MICROSECOND precision
       val baseTime = "2025-11-07 07:00:00"
       val timestamps = Seq(
-        (1, Timestamp.valueOf(baseTime + ".000001")),  // 1 microsecond
-        (2, Timestamp.valueOf(baseTime + ".000500")),  // 500 microseconds
-        (3, Timestamp.valueOf(baseTime + ".001000")),  // 1000 microseconds (1 ms)
-        (4, Timestamp.valueOf(baseTime + ".002000"))   // 2000 microseconds (2 ms)
+        (1, Timestamp.valueOf(baseTime + ".000001")), // 1 microsecond
+        (2, Timestamp.valueOf(baseTime + ".000500")), // 500 microseconds
+        (3, Timestamp.valueOf(baseTime + ".001000")), // 1000 microseconds (1 ms)
+        (4, Timestamp.valueOf(baseTime + ".002000"))  // 2000 microseconds (2 ms)
       ).toDF("id", "ts")
 
       println("📝 Original data with microsecond precision:")
@@ -50,9 +52,9 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Print actual microsecond values
       println("\n🔬 Detailed microsecond values:")
       timestamps.collect().foreach { row =>
-        val id = row.getInt(0)
-        val ts = row.getTimestamp(1)
-        val nanos = ts.getNanos
+        val id     = row.getInt(0)
+        val ts     = row.getTimestamp(1)
+        val nanos  = ts.getNanos
         val micros = nanos / 1000
         println(s"  ID=$id: timestamp=$ts, nanos=$nanos, microseconds=$micros")
       }
@@ -60,9 +62,11 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Write using V2 API (uses DATE fields for timestamps)
       // CRITICAL: Configure timestamp as fast field to enable microsecond precision
       println("\n💾 Writing data using V2 API with DATE fields (timestamp configured as fast field)...")
-      timestamps.coalesce(1).write
+      timestamps
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.fastfields", "ts")  // Enable fast field for microsecond precision
+        .option("spark.indextables.indexing.fastfields", "ts") // Enable fast field for microsecond precision
         .mode("overwrite")
         .save(tempPath)
 
@@ -85,18 +89,18 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
 
       // Expected microsecond values
       val expectedMicros = Map(
-        1 -> 1L,      // 1 microsecond
-        2 -> 500L,    // 500 microseconds
-        3 -> 1000L,   // 1000 microseconds (1 ms)
-        4 -> 2000L    // 2000 microseconds (2 ms)
+        1 -> 1L,    // 1 microsecond
+        2 -> 500L,  // 500 microseconds
+        3 -> 1000L, // 1000 microseconds (1 ms)
+        4 -> 2000L  // 2000 microseconds (2 ms)
       )
 
       var allPassed = true
       results.foreach { row =>
-        val id = row.getInt(0)
-        val ts = row.getTimestamp(1)
-        val nanos = ts.getNanos
-        val actualMicros = nanos / 1000
+        val id                  = row.getInt(0)
+        val ts                  = row.getTimestamp(1)
+        val nanos               = ts.getNanos
+        val actualMicros        = nanos / 1000
         val expectedMicrosForId = expectedMicros(id)
 
         val passed = actualMicros == expectedMicrosForId
@@ -111,8 +115,8 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       }
 
       // Verify sub-millisecond values are preserved (critical test)
-      val row1 = results(0)
-      val row2 = results(1)
+      val row1    = results(0)
+      val row2    = results(1)
       val micros1 = row1.getTimestamp(1).getNanos / 1000
       val micros2 = row2.getTimestamp(1).getNanos / 1000
 
@@ -156,7 +160,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       // Test 2: SQL filter (part of initial query planning)
       println("\n   Test 2: SQL filter (part of initial planning)")
       readData.createOrReplaceTempView("test_table")
-      val sqlFiltered = spark.sql(s"SELECT * FROM test_table WHERE ts = TIMESTAMP '2025-11-07 07:00:00.000001'")
+      val sqlFiltered        = spark.sql(s"SELECT * FROM test_table WHERE ts = TIMESTAMP '2025-11-07 07:00:00.000001'")
       val sqlFilteredResults = sqlFiltered.collect()
       println(s"   SQL Results: ${sqlFilteredResults.length} rows")
 
@@ -193,7 +197,8 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       import scala.util.Try
       Try {
         val path = Paths.get(tempPath)
-        Files.walk(path)
+        Files
+          .walk(path)
           .sorted(java.util.Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p))
       }
@@ -209,7 +214,7 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
     try {
       // Create timestamp with microsecond precision
       val testTimestamp = Timestamp.valueOf("2025-11-07 07:00:00.000001")
-      val data = Seq((1, testTimestamp)).toDF("id", "ts")
+      val data          = Seq((1, testTimestamp)).toDF("id", "ts")
 
       println("📝 Original data:")
       data.show(false)
@@ -218,9 +223,11 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       println(s"   Original micros: ${testTimestamp.getNanos / 1000}")
 
       // Write with timestamp as fast field for microsecond precision
-      data.coalesce(1).write
+      data
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.fastfields", "ts")  // Enable fast field for microsecond precision
+        .option("spark.indextables.indexing.fastfields", "ts") // Enable fast field for microsecond precision
         .mode("overwrite")
         .save(tempPath)
 
@@ -234,12 +241,12 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       readData.show(false)
 
       val result = readData.collect()(0)
-      val ts = result.getTimestamp(1)
+      val ts     = result.getTimestamp(1)
 
       // Extract microseconds from Timestamp: (seconds * 1000000) + (nanos / 1000)
       val epochSecond = ts.getTime / 1000 // getTime returns milliseconds, convert to seconds
-      val nanos = ts.getNanos
-      val tsMicros = epochSecond * 1000000L + nanos / 1000L
+      val nanos       = ts.getNanos
+      val tsMicros    = epochSecond * 1000000L + nanos / 1000L
 
       println(s"   Timestamp object: $ts")
       println(s"   Nanos: $nanos")
@@ -254,8 +261,10 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       println(s"   Actual:   $tsMicros microseconds")
       println(s"   Match: ${tsMicros == expectedMicros}")
 
-      assert(tsMicros == expectedMicros,
-        s"CAST to BIGINT should preserve microseconds. Expected $expectedMicros, got $tsMicros")
+      assert(
+        tsMicros == expectedMicros,
+        s"CAST to BIGINT should preserve microseconds. Expected $expectedMicros, got $tsMicros"
+      )
 
       println("\n✅ CAST to BIGINT preserves microseconds!")
 
@@ -265,7 +274,8 @@ class MicrosecondPrecisionValidationTest extends AnyFunSuite with BeforeAndAfter
       import scala.util.Try
       Try {
         val path = Paths.get(tempPath)
-        Files.walk(path)
+        Files
+          .walk(path)
           .sorted(java.util.Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p))
       }

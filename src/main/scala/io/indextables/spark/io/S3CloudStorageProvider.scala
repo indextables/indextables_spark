@@ -35,8 +35,8 @@ import software.amazon.awssdk.auth.credentials.{
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.core.ResponseInputStream
 import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.model._
 import software.amazon.awssdk.services.s3.{S3AsyncClient, S3Client}
+import software.amazon.awssdk.services.s3.model._
 
 /**
  * High-performance S3 storage provider using AWS SDK directly. Bypasses Hadoop filesystem for better performance and
@@ -60,9 +60,9 @@ class S3CloudStorageProvider(
     s3AsyncClient, // TRUE async I/O for non-blocking uploads
     S3MultipartConfig(
       multipartThreshold = multipartThreshold,
-      partSize = config.partSize.getOrElse(128L * 1024 * 1024),      // 128MB default (configurable)
-      maxConcurrency = config.maxConcurrency.getOrElse(4),           // 4 parallel uploads
-      maxQueueSize = config.maxQueueSize.getOrElse(3),               // 3 parts buffered = 384MB max memory
+      partSize = config.partSize.getOrElse(128L * 1024 * 1024), // 128MB default (configurable)
+      maxConcurrency = config.maxConcurrency.getOrElse(4),      // 4 parallel uploads
+      maxQueueSize = config.maxQueueSize.getOrElse(3),          // 3 parts buffered = 384MB max memory
       maxRetries = config.maxRetries.getOrElse(3)
     )
   )

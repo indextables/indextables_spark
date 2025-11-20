@@ -17,29 +17,31 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.Row
+
 import io.indextables.spark.core.IndexTables4SparkOptions
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import scala.jdk.CollectionConverters._
-
 class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
-  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions = {
+  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions =
     new IndexTables4SparkOptions(new CaseInsensitiveStringMap(configMap.asJava))
-  }
 
   test("structToJsonMap converts simple struct") {
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("age", IntegerType)
+      )
+    )
 
-    val row = Row("Alice", 30)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val row       = Row("Alice", 30)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.structToJsonMap(row, schema)
@@ -49,13 +51,15 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("structToJsonMap handles null fields") {
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("age", IntegerType)
+      )
+    )
 
-    val row = Row("Alice", null)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val row       = Row("Alice", null)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.structToJsonMap(row, schema)
@@ -67,17 +71,21 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("structToJsonMap converts nested struct") {
-    val addressSchema = StructType(Seq(
-      StructField("city", StringType),
-      StructField("zip", StringType)
-    ))
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("address", addressSchema)
-    ))
+    val addressSchema = StructType(
+      Seq(
+        StructField("city", StringType),
+        StructField("zip", StringType)
+      )
+    )
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("address", addressSchema)
+      )
+    )
 
-    val row = Row("Alice", Row("NYC", "10001"))
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val row       = Row("Alice", Row("NYC", "10001"))
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.structToJsonMap(row, schema)
@@ -90,10 +98,10 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("arrayToJsonList converts simple string array") {
     val arrayType = ArrayType(StringType)
-    val tags = Seq("tag1", "tag2", "tag3")
+    val tags      = Seq("tag1", "tag2", "tag3")
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonList = converter.arrayToJsonList(tags, arrayType)
@@ -106,10 +114,10 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("arrayToJsonList converts numeric array") {
     val arrayType = ArrayType(IntegerType)
-    val numbers = Seq(10, 20, 30)
+    val numbers   = Seq(10, 20, 30)
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonList = converter.arrayToJsonList(numbers, arrayType)
@@ -122,10 +130,10 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("arrayToJsonList handles null elements") {
     val arrayType = ArrayType(StringType)
-    val tags = Seq("tag1", null, "tag3")
+    val tags      = Seq("tag1", null, "tag3")
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonList = converter.arrayToJsonList(tags, arrayType)
@@ -137,8 +145,8 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("convertToJsonValue handles all primitive types") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     converter.convertToJsonValue("test", StringType) shouldBe "test"
@@ -150,38 +158,40 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("convertToJsonValue converts DateType to milliseconds") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
-    val days = 100  // 100 days since epoch
+    val days   = 100 // 100 days since epoch
     val result = converter.convertToJsonValue(days, DateType)
 
-    result shouldBe (100L * 86400000L)  // Days to milliseconds
+    result shouldBe (100L * 86400000L) // Days to milliseconds
   }
 
   test("convertToJsonValue converts TimestampType to microseconds") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
-    val schema = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
     val converter = new SparkToTantivyConverter(schema, mapper)
 
-    val micros = 1000000L  // 1 second in microseconds
+    val micros = 1000000L // 1 second in microseconds
     val result = converter.convertToJsonValue(micros, TimestampType)
 
-    result shouldBe 1000000L  // Microseconds stored directly (no conversion)
+    result shouldBe 1000000L // Microseconds stored directly (no conversion)
   }
 
   test("jsonMapToRow converts simple map to Row") {
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("age", IntegerType)
+      )
+    )
 
     val jsonMap = new java.util.HashMap[String, Object]()
     jsonMap.put("name", "Alice")
     jsonMap.put("age", Integer.valueOf(30))
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val row = converter.jsonMapToRow(jsonMap, schema)
@@ -191,16 +201,18 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("jsonMapToRow handles null values") {
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("age", IntegerType)
+      )
+    )
 
     val jsonMap = new java.util.HashMap[String, Object]()
     jsonMap.put("name", "Alice")
     // age is null
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val row = converter.jsonMapToRow(jsonMap, schema)
@@ -217,8 +229,8 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     jsonList.add("tag2")
     jsonList.add("tag3")
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val result = converter.jsonListToArray(jsonList, arrayType)
@@ -230,8 +242,8 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("convertFromJsonValue handles all primitive types") {
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     // String returns UTF8String for Spark internal format
@@ -244,39 +256,41 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("convertFromJsonValue converts milliseconds to DateType") {
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
-    val millis = 100L * 86400000L  // 100 days in milliseconds
+    val millis = 100L * 86400000L // 100 days in milliseconds
     val result = converter.convertFromJsonValue(java.lang.Long.valueOf(millis), DateType)
 
-    result shouldBe 100  // Days since epoch
+    result shouldBe 100 // Days since epoch
   }
 
   test("convertFromJsonValue converts milliseconds to TimestampType") {
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
-    val millis = 1000L  // 1 second in milliseconds
+    val millis = 1000L // 1 second in milliseconds
     val result = converter.convertFromJsonValue(java.lang.Long.valueOf(millis), TimestampType)
 
-    result shouldBe 1000000L  // Microseconds
+    result shouldBe 1000000L // Microseconds
   }
 
   test("round-trip conversion preserves struct data") {
-    val schema = StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType),
-      StructField("score", DoubleType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType),
+        StructField("age", IntegerType),
+        StructField("score", DoubleType)
+      )
+    )
 
     val originalRow = Row("Alice", 30, 95.5)
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper         = new SparkSchemaToTantivyMapper(createOptions())
     val writeConverter = new SparkToTantivyConverter(schema, mapper)
-    val readConverter = new TantivyToSparkConverter(schema, mapper)
+    val readConverter  = new TantivyToSparkConverter(schema, mapper)
 
     // Convert to JSON map
     val jsonMap = writeConverter.structToJsonMap(originalRow, schema)
@@ -290,13 +304,13 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("round-trip conversion preserves array data") {
-    val arrayType = ArrayType(IntegerType)
+    val arrayType     = ArrayType(IntegerType)
     val originalArray = Seq(10, 20, 30, 40, 50)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema         = StructType(Seq.empty)
+    val mapper         = new SparkSchemaToTantivyMapper(createOptions())
     val writeConverter = new SparkToTantivyConverter(schema, mapper)
-    val readConverter = new TantivyToSparkConverter(schema, mapper)
+    val readConverter  = new TantivyToSparkConverter(schema, mapper)
 
     // Convert to JSON list
     val jsonList = writeConverter.arrayToJsonList(originalArray, arrayType)
@@ -306,17 +320,15 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
     // Verify ArrayData contents match original
     resultArray.numElements() shouldBe originalArray.length
-    (0 until resultArray.numElements()).foreach { i =>
-      resultArray.getInt(i) shouldBe originalArray(i)
-    }
+    (0 until resultArray.numElements()).foreach(i => resultArray.getInt(i) shouldBe originalArray(i))
   }
 
   test("parseJsonString succeeds for valid JSON") {
     val jsonString = """{"user_id": "123", "action": "click"}"""
-    val config = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = false)
+    val config     = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = false)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.parseJsonString(jsonString, config)
@@ -327,10 +339,10 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("parseJsonString handles invalid JSON with failOnInvalidJson=false") {
     val jsonString = "invalid json{"
-    val config = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = false)
+    val config     = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = false)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.parseJsonString(jsonString, config)
@@ -341,10 +353,10 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("parseJsonString throws exception for invalid JSON with failOnInvalidJson=true") {
     val jsonString = "invalid json{"
-    val config = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = true)
+    val config     = JsonFieldConfig(parseOnWrite = true, failOnInvalidJson = true)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     an[RuntimeException] should be thrownBy {
@@ -355,11 +367,11 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   // MapType conversion tests
 
   test("mapToJsonMap converts simple string map") {
-    val mapType = MapType(StringType, StringType)
+    val mapType  = MapType(StringType, StringType)
     val sparkMap = Map("color" -> "red", "size" -> "large", "category" -> "clothing")
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
@@ -371,11 +383,11 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("mapToJsonMap converts integer key-value map") {
-    val mapType = MapType(IntegerType, IntegerType)
+    val mapType  = MapType(IntegerType, IntegerType)
     val sparkMap = Map(1 -> 100, 2 -> 200, 3 -> 300)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
@@ -388,11 +400,11 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("mapToJsonMap handles mixed-type map") {
-    val mapType = MapType(StringType, IntegerType)
+    val mapType  = MapType(StringType, IntegerType)
     val sparkMap = Map("count" -> 42, "total" -> 1000, "errors" -> 0)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
@@ -404,18 +416,20 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("mapToJsonMap handles nested struct values") {
-    val valueSchema = StructType(Seq(
-      StructField("city", StringType),
-      StructField("zip", StringType)
-    ))
+    val valueSchema = StructType(
+      Seq(
+        StructField("city", StringType),
+        StructField("zip", StringType)
+      )
+    )
     val mapType = MapType(StringType, valueSchema)
     val sparkMap = Map(
       "home" -> Row("NYC", "10001"),
       "work" -> Row("SF", "94102")
     )
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
@@ -430,11 +444,11 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("mapToJsonMap handles null values") {
-    val mapType = MapType(StringType, IntegerType)
+    val mapType  = MapType(StringType, IntegerType)
     val sparkMap = scala.collection.Map("count" -> 42, "total" -> null)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonMap = converter.mapToJsonMap(sparkMap, mapType)
@@ -451,15 +465,15 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     jsonMap.put("color", "red")
     jsonMap.put("size", "large")
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val mapData = converter.jsonMapToMapData(jsonMap, mapType)
 
     mapData.numElements() shouldBe 2
     // Verify map contains expected keys and values
-    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val keys   = mapData.keyArray().toSeq[Any](mapType.keyType)
     val values = mapData.valueArray().toSeq[Any](mapType.valueType)
 
     keys.map(_.toString) should contain allOf ("color", "size")
@@ -473,14 +487,14 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     jsonMap.put("count", Integer.valueOf(42))
     jsonMap.put("total", Integer.valueOf(1000))
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val mapData = converter.jsonMapToMapData(jsonMap, mapType)
 
     mapData.numElements() shouldBe 2
-    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val keys   = mapData.keyArray().toSeq[Any](mapType.keyType)
     val values = mapData.valueArray().toSeq[Any](mapType.valueType)
 
     keys.map(_.toString) should contain allOf ("count", "total")
@@ -488,11 +502,11 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("convertToJsonValue handles MapType recursively") {
-    val mapType = MapType(StringType, IntegerType)
+    val mapType  = MapType(StringType, IntegerType)
     val sparkMap = Map("count" -> 42, "total" -> 1000)
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new SparkToTantivyConverter(schema, mapper)
 
     val jsonValue = converter.convertToJsonValue(sparkMap, mapType)
@@ -510,8 +524,8 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
     jsonMap.put("count", Integer.valueOf(42))
     jsonMap.put("total", Integer.valueOf(1000))
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema    = StructType(Seq.empty)
+    val mapper    = new SparkSchemaToTantivyMapper(createOptions())
     val converter = new TantivyToSparkConverter(schema, mapper)
 
     val mapData = converter.convertFromJsonValue(jsonMap, mapType)
@@ -521,13 +535,13 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("roundtrip Map conversion maintains data integrity") {
-    val mapType = MapType(StringType, StringType)
+    val mapType     = MapType(StringType, StringType)
     val originalMap = Map("color" -> "red", "size" -> "large", "category" -> "clothing")
 
-    val schema = StructType(Seq.empty)
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val schema         = StructType(Seq.empty)
+    val mapper         = new SparkSchemaToTantivyMapper(createOptions())
     val writeConverter = new SparkToTantivyConverter(schema, mapper)
-    val readConverter = new TantivyToSparkConverter(schema, mapper)
+    val readConverter  = new TantivyToSparkConverter(schema, mapper)
 
     // Convert to JSON map
     val jsonMap = writeConverter.mapToJsonMap(originalMap, mapType)
@@ -537,7 +551,7 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
     // Verify data integrity
     mapData.numElements() shouldBe 3
-    val keys = mapData.keyArray().toSeq[Any](mapType.keyType)
+    val keys   = mapData.keyArray().toSeq[Any](mapType.keyType)
     val values = mapData.valueArray().toSeq[Any](mapType.valueType)
 
     keys.map(_.toString) should contain allOf ("color", "size", "category")

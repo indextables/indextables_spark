@@ -32,7 +32,13 @@ import com.azure.core.credential.{AccessToken, TokenCredential, TokenRequestCont
 import com.azure.core.http.rest.PagedIterable
 import com.azure.core.util.BinaryData
 import com.azure.identity.{ClientSecretCredentialBuilder, DefaultAzureCredentialBuilder}
-import com.azure.storage.blob.{BlobAsyncClient, BlobClient, BlobContainerClient, BlobServiceClient, BlobServiceClientBuilder}
+import com.azure.storage.blob.{
+  BlobAsyncClient,
+  BlobClient,
+  BlobContainerClient,
+  BlobServiceClient,
+  BlobServiceClientBuilder
+}
 import com.azure.storage.blob.models.{BlobItem, BlobItemProperties, BlobRequestConditions, BlobStorageException}
 import com.azure.storage.blob.specialized.{BlockBlobAsyncClient, BlockBlobClient}
 import com.azure.storage.common.StorageSharedKeyCredential
@@ -333,11 +339,11 @@ class AzureCloudStorageProvider(
   /** Get async blob client for true async I/O operations */
   private def getBlobAsyncClient(path: String): BlobAsyncClient = {
     val (container, blobPath) = parseAzureUri(path)
-    val containerName = container
+    val containerName         = container
 
     // Get the container URL from the sync client and create async client
     val containerClient = getContainerClient(containerName)
-    val blobUrl = s"${containerClient.getBlobContainerUrl()}/$blobPath"
+    val blobUrl         = s"${containerClient.getBlobContainerUrl()}/$blobPath"
 
     // Use BlobClientBuilder to create async client
     val builder = new com.azure.storage.blob.BlobClientBuilder()
@@ -358,7 +364,7 @@ class AzureCloudStorageProvider(
     try {
       // Always use prefix filter to only list blobs under the specified path
       import com.azure.storage.blob.models.ListBlobsOptions
-      val options = new ListBlobsOptions().setPrefix(prefix)
+      val options                        = new ListBlobsOptions().setPrefix(prefix)
       val blobs: PagedIterable[BlobItem] = containerClient.listBlobs(options, null)
 
       blobs.forEach { blobItem =>
@@ -506,10 +512,10 @@ class AzureCloudStorageProvider(
     val blockBlobClient = blobClient.getBlockBlobClient
 
     // Configuration (using same defaults as S3 for consistency)
-    val partSize = config.partSize.getOrElse(128L * 1024 * 1024) // 128MB
-    val threshold = config.multipartUploadThreshold.getOrElse(200L * 1024 * 1024) // 200MB
+    val partSize       = config.partSize.getOrElse(128L * 1024 * 1024)                 // 128MB
+    val threshold      = config.multipartUploadThreshold.getOrElse(200L * 1024 * 1024) // 200MB
     val maxConcurrency = config.maxConcurrency.getOrElse(4)
-    val maxQueueSize = config.maxQueueSize.getOrElse(3)
+    val maxQueueSize   = config.maxQueueSize.getOrElse(3)
 
     contentLength match {
       case Some(length) if length < threshold =>
@@ -525,16 +531,13 @@ class AzureCloudStorageProvider(
         logger.info(s"   Max queue size: $maxQueueSize")
 
         // Get async client for true async I/O
-        val blobAsyncClient = getBlobAsyncClient(path)
+        val blobAsyncClient      = getBlobAsyncClient(path)
         val blockBlobAsyncClient = blobAsyncClient.getBlockBlobAsyncClient
         uploadWithParallelBlocksAsync(blockBlobAsyncClient, inputStream, partSize.toInt, maxConcurrency, maxQueueSize)
     }
   }
 
-  /**
-   * Upload blocks in parallel using Azure ASYNC block blob API.
-   * Provides true async I/O instead of just threading.
-   */
+  /** Upload blocks in parallel using Azure ASYNC block blob API. Provides true async I/O instead of just threading. */
   private def uploadWithParallelBlocksAsync(
     blockBlobAsyncClient: BlockBlobAsyncClient,
     inputStream: InputStream,
@@ -550,25 +553,26 @@ class AzureCloudStorageProvider(
     val blockIds = new java.util.concurrent.ConcurrentHashMap[Int, String]()
 
     // Use bounded queue for producer-consumer pattern
-    val blockQueue = new java.util.concurrent.ArrayBlockingQueue[(Int, String, Array[Byte])](maxQueueSize)
-    val producerError = new java.util.concurrent.atomic.AtomicReference[Exception](null)
+    val blockQueue     = new java.util.concurrent.ArrayBlockingQueue[(Int, String, Array[Byte])](maxQueueSize)
+    val producerError  = new java.util.concurrent.atomic.AtomicReference[Exception](null)
     val consumerErrors = new java.util.concurrent.ConcurrentLinkedQueue[Exception]()
 
     // Producer thread: Read from stream and queue blocks
     val producerFuture = CompletableFuture.runAsync(
       new Runnable {
-        override def run(): Unit = {
+        override def run(): Unit =
           try {
-            val buffer = new Array[Byte](blockSize)
+            val buffer      = new Array[Byte](blockSize)
             var blockNumber = 1
-            var bytesRead = 0
+            var bytesRead   = 0
 
             while ({ bytesRead = readFully(inputStream, buffer); bytesRead } > 0) {
-              val blockData = if (bytesRead == buffer.length) buffer.clone() else java.util.Arrays.copyOf(buffer, bytesRead)
+              val blockData =
+                if (bytesRead == buffer.length) buffer.clone() else java.util.Arrays.copyOf(buffer, bytesRead)
 
               // Generate block ID - must be base64 encoded and same length for all blocks
               val blockIdString = f"block-$blockNumber%08d"
-              val blockId = Base64.getEncoder.encodeToString(blockIdString.getBytes("UTF-8"))
+              val blockId       = Base64.getEncoder.encodeToString(blockIdString.getBytes("UTF-8"))
 
               // This blocks if queue is full - natural backpressure
               blockQueue.put((blockNumber, blockId, blockData))
@@ -588,7 +592,6 @@ class AzureCloudStorageProvider(
               try blockQueue.put((-1, "", Array.empty))
               catch { case _: InterruptedException => () }
           }
-        }
       },
       executor
     )
@@ -597,7 +600,7 @@ class AzureCloudStorageProvider(
     val consumerFutures = (1 to maxConcurrency).map { workerId =>
       CompletableFuture.runAsync(
         new Runnable {
-          override def run(): Unit = {
+          override def run(): Unit =
             try {
               var continue = true
               while (continue) {
@@ -609,11 +612,13 @@ class AzureCloudStorageProvider(
                   continue = false
                 } else {
                   // Upload this block using ASYNC client (true non-blocking I/O)
-                  logger.debug(s"Azure: Worker $workerId uploading block $blockNumber (ASYNC): ${formatBytes(blockData.length)}")
+                  logger.debug(
+                    s"Azure: Worker $workerId uploading block $blockNumber (ASYNC): ${formatBytes(blockData.length)}"
+                  )
 
                   // Use BinaryData for async API
                   val binaryData = BinaryData.fromBytes(blockData)
-                  val mono = blockBlobAsyncClient.stageBlock(blockId, binaryData)
+                  val mono       = blockBlobAsyncClient.stageBlock(blockId, binaryData)
 
                   // Block on the Mono to wait for completion (worker thread blocks but Azure I/O is async)
                   mono.block()
@@ -628,7 +633,6 @@ class AzureCloudStorageProvider(
                 consumerErrors.add(ex)
                 logger.error(s"Azure: Worker $workerId failed", ex)
             }
-          }
         },
         executor
       )
@@ -647,7 +651,7 @@ class AzureCloudStorageProvider(
 
     // Commit all blocks using ASYNC client
     val sortedBlockIds = blockIds.asScala.toSeq.sortBy(_._1).map(_._2).asJava
-    val commitMono = blockBlobAsyncClient.commitBlockList(sortedBlockIds, true) // overwrite = true
+    val commitMono     = blockBlobAsyncClient.commitBlockList(sortedBlockIds, true) // overwrite = true
     commitMono.block() // Wait for commit to complete
 
     val uploadTime = System.currentTimeMillis() - startTime
@@ -655,16 +659,17 @@ class AzureCloudStorageProvider(
     logger.info(s"   Blocks count: ${blockIds.size()}")
   }
 
-  /**
-   * Read from input stream fully, filling the buffer as much as possible.
-   */
+  /** Read from input stream fully, filling the buffer as much as possible. */
   private def readFully(inputStream: InputStream, buffer: Array[Byte]): Int = {
     var totalRead = 0
     var bytesRead = 0
 
-    while (totalRead < buffer.length && { bytesRead = inputStream.read(buffer, totalRead, buffer.length - totalRead); bytesRead } != -1) {
+    while (
+      totalRead < buffer.length && {
+        bytesRead = inputStream.read(buffer, totalRead, buffer.length - totalRead); bytesRead
+      } != -1
+    )
       totalRead += bytesRead
-    }
 
     totalRead
   }

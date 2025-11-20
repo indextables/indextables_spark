@@ -33,8 +33,8 @@ import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
-import io.indextables.spark.util.TimestampUtils
 import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
+import io.indextables.spark.util.TimestampUtils
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -358,19 +358,19 @@ class IndexTables4SparkScan(
               case Some(max) if max.nonEmpty =>
                 val (convertedValue, _, convertedMax) = convertValuesForComparison(attribute, value, "", max)
                 convertedMax.compareTo(convertedValue) <= 0
-              case _ => false  // No statistics or empty string - don't skip
+              case _ => false // No statistics or empty string - don't skip
             }
           case LessThan(attribute, value) =>
             minVals.get(attribute) match {
               case Some(min) if min.nonEmpty =>
                 val (convertedValue, convertedMin, _) = convertValuesForComparison(attribute, value, min, "")
-                val compareResult = convertedMin.compareTo(convertedValue)
-                val shouldSkip = compareResult >= 0
+                val compareResult                     = convertedMin.compareTo(convertedValue)
+                val shouldSkip                        = compareResult >= 0
                 logger.debug(s"DATA SKIPPING LessThan: attribute=$attribute, min=$min, filterValue=$value")
                 logger.debug(s"DATA SKIPPING LessThan: convertedMin=$convertedMin (${convertedMin.getClass.getSimpleName}), convertedValue=$convertedValue (${convertedValue.getClass.getSimpleName})")
                 logger.debug(s"DATA SKIPPING LessThan: compareResult=$compareResult, shouldSkip=$shouldSkip")
                 shouldSkip
-              case _ => false  // No statistics or empty string - don't skip
+              case _ => false // No statistics or empty string - don't skip
             }
           case GreaterThanOrEqual(attribute, value) =>
             maxVals.get(attribute) match {
@@ -382,7 +382,7 @@ class IndexTables4SparkScan(
                 // BUT don't skip if filterValue starts with max (truncated max means actual value could be >= filterValue)
                 // Example: max="aaa" (truncated), filterValue="aaab" - actual could be "aaac" which is >= "aaab"
                 convertedMax.compareTo(convertedValue) < 0 && !valueStr.startsWith(maxStr)
-              case _ => false  // No statistics or empty string - don't skip
+              case _ => false // No statistics or empty string - don't skip
             }
           case LessThanOrEqual(attribute, value) =>
             minVals.get(attribute) match {
@@ -394,7 +394,7 @@ class IndexTables4SparkScan(
                 // BUT don't skip if filterValue starts with min (truncated min means actual value could be <= filterValue)
                 // Example: min="bbb" (truncated), filterValue="bbbc" - actual could be "bbba" which is <= "bbbc"
                 convertedMin.compareTo(convertedValue) > 0 && !valueStr.startsWith(minStr)
-              case _ => false  // No statistics or empty string - don't skip
+              case _ => false // No statistics or empty string - don't skip
             }
           case StringStartsWith(attribute, value) =>
             // For startsWith, check if any string in [min, max] could start with the value
@@ -452,7 +452,7 @@ class IndexTables4SparkScan(
     parser: String => T,
     boxer: T => Comparable[Any],
     logger: org.slf4j.Logger
-  ): (Comparable[Any], Comparable[Any], Comparable[Any]) = {
+  ): (Comparable[Any], Comparable[Any], Comparable[Any]) =
     try {
       val filterNum = parser(filterValue.toString)
       val minNum    = if (minValue.nonEmpty) Some(parser(minValue)) else None
@@ -468,7 +468,11 @@ class IndexTables4SparkScan(
         case (None, Some(max)) =>
           (boxer(filterNum), "".asInstanceOf[Comparable[Any]], boxer(max))
         case (None, None) =>
-          (filterValue.toString.asInstanceOf[Comparable[Any]], "".asInstanceOf[Comparable[Any]], "".asInstanceOf[Comparable[Any]])
+          (
+            filterValue.toString.asInstanceOf[Comparable[Any]],
+            "".asInstanceOf[Comparable[Any]],
+            "".asInstanceOf[Comparable[Any]]
+          )
       }
     } catch {
       case ex: Exception =>
@@ -479,7 +483,6 @@ class IndexTables4SparkScan(
           maxValue.asInstanceOf[Comparable[Any]]
         )
     }
-  }
 
   private def convertValuesForComparison(
     attribute: String,
@@ -518,7 +521,9 @@ class IndexTables4SparkScan(
               // Use direct calculation from milliseconds since epoch
               val millisSinceEpoch = sqlDate.getTime
               val daysSinceEpoch   = (millisSinceEpoch / (24 * 60 * 60 * 1000)).toInt
-              logger.debug(s"DATE CONVERSION: SQL Date '$sqlDate' -> millis=$millisSinceEpoch -> days since epoch: $daysSinceEpoch")
+              logger.debug(
+                s"DATE CONVERSION: SQL Date '$sqlDate' -> millis=$millisSinceEpoch -> days since epoch: $daysSinceEpoch"
+              )
               daysSinceEpoch
             case intVal: Int =>
               logger.debug(s"DATE CONVERSION: Using int value directly: $intVal")
@@ -533,16 +538,15 @@ class IndexTables4SparkScan(
           }
 
           // Helper function to parse date string or integer to days since epoch
-          def parseDateOrInt(value: String): Int = {
+          def parseDateOrInt(value: String): Int =
             if (value.contains("-")) {
               // Date string format (e.g., "2023-02-15")
-              val date = LocalDate.parse(value)
+              val date      = LocalDate.parse(value)
               val epochDate = LocalDate.of(1970, 1, 1)
               java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt
             } else {
               value.toInt
             }
-          }
 
           val minDays = parseDateOrInt(minValue)
           val maxDays = parseDateOrInt(maxValue)
@@ -566,16 +570,48 @@ class IndexTables4SparkScan(
         }
 
       case Some(IntegerType) =>
-        convertNumericValues[Int]("INTEGER", filterValue, minValue, maxValue, (s: String) => s.toInt, (n: Int) => Integer.valueOf(n).asInstanceOf[Comparable[Any]], logger)
+        convertNumericValues[Int](
+          "INTEGER",
+          filterValue,
+          minValue,
+          maxValue,
+          (s: String) => s.toInt,
+          (n: Int) => Integer.valueOf(n).asInstanceOf[Comparable[Any]],
+          logger
+        )
 
       case Some(LongType) =>
-        convertNumericValues[Long]("LONG", filterValue, minValue, maxValue, (s: String) => s.toLong, (n: Long) => Long.box(n).asInstanceOf[Comparable[Any]], logger)
+        convertNumericValues[Long](
+          "LONG",
+          filterValue,
+          minValue,
+          maxValue,
+          (s: String) => s.toLong,
+          (n: Long) => Long.box(n).asInstanceOf[Comparable[Any]],
+          logger
+        )
 
       case Some(FloatType) =>
-        convertNumericValues[Float]("FLOAT", filterValue, minValue, maxValue, (s: String) => s.toFloat, (n: Float) => Float.box(n).asInstanceOf[Comparable[Any]], logger)
+        convertNumericValues[Float](
+          "FLOAT",
+          filterValue,
+          minValue,
+          maxValue,
+          (s: String) => s.toFloat,
+          (n: Float) => Float.box(n).asInstanceOf[Comparable[Any]],
+          logger
+        )
 
       case Some(DoubleType) =>
-        convertNumericValues[Double]("DOUBLE", filterValue, minValue, maxValue, (s: String) => s.toDouble, (n: Double) => Double.box(n).asInstanceOf[Comparable[Any]], logger)
+        convertNumericValues[Double](
+          "DOUBLE",
+          filterValue,
+          minValue,
+          maxValue,
+          (s: String) => s.toDouble,
+          (n: Double) => Double.box(n).asInstanceOf[Comparable[Any]],
+          logger
+        )
 
       case Some(TimestampType) =>
         // Convert timestamps to microseconds since epoch for numeric comparison
@@ -587,7 +623,7 @@ class IndexTables4SparkScan(
             // Spark stores timestamps as microseconds since epoch
             TimestampUtils.toMicros(ts)
           case l: Long => l
-          case _ =>
+          case _       =>
             // Try to parse as timestamp string
             val ts = Timestamp.valueOf(filterValue.toString)
             TimestampUtils.toMicros(ts)

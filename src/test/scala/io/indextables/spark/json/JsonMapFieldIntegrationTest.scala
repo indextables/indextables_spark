@@ -17,13 +17,14 @@
 
 package io.indextables.spark.json
 
-import io.indextables.spark.TestBase
 import org.apache.spark.sql.Row
+
+import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Integration tests for MapType field support via JSON fields.
- * Tests end-to-end write/read paths with various Map configurations.
+ * Integration tests for MapType field support via JSON fields. Tests end-to-end write/read paths with various Map
+ * configurations.
  */
 class JsonMapFieldIntegrationTest extends TestBase with Matchers {
 
@@ -35,11 +36,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -68,11 +71,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "counters")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -101,11 +106,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "metrics")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -135,18 +142,20 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 3
       val rows = result.orderBy("id").collect()
 
       rows(0).getMap[String, String](1).size shouldBe 1
-      rows(1).getMap[String, String](1).size shouldBe 0  // Empty map
+      rows(1).getMap[String, String](1).size shouldBe 0 // Empty map
       rows(2).getMap[String, String](1).size shouldBe 2
     }
   }
@@ -159,11 +168,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "attributes", "counters")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -190,11 +201,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "lookup")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -224,11 +237,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "attributes")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2
@@ -247,11 +262,13 @@ class JsonMapFieldIntegrationTest extends TestBase with Matchers {
       )
       val df = spark.createDataFrame(data).toDF("id", "metrics")
 
-      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(path)
 
-      val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(path)
 
       result.count() shouldBe 2

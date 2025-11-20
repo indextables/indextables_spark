@@ -20,8 +20,8 @@ package io.indextables.spark.json
 import io.indextables.spark.TestBase
 
 /**
- * Test for the exact usage pattern requested by user:
- * StringType field with JSON string content, configured as "json" type.
+ * Test for the exact usage pattern requested by user: StringType field with JSON string content, configured as "json"
+ * type.
  */
 class JsonStringFieldTest extends TestBase {
 
@@ -51,9 +51,7 @@ class JsonStringFieldTest extends TestBase {
       // Verify data can be read
       val data = resultDf.collect()
       println(s"✅ Read back ${data.length} rows")
-      data.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}")
-      }
+      data.foreach(row => println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}"))
 
       data.length shouldBe 1
       val jsonStr = data(0).getString(1)
@@ -70,9 +68,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results = query.collect()
       println(s"   Found ${results.length} matching documents")
-      results.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}")
-      }
+      results.foreach(row => println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}"))
 
       results.length shouldBe 1
       results(0).getInt(0) shouldBe 1
@@ -117,9 +113,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results = query.collect()
       println(s"   Found ${results.length} matching documents:")
-      results.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}")
-      }
+      results.foreach(row => println(s"   - ID: ${row.getInt(0)}, val_field: ${row.getString(1)}"))
 
       results.length shouldBe 2
       results(0).getInt(0) shouldBe 1
@@ -162,9 +156,7 @@ class JsonStringFieldTest extends TestBase {
 
       val andResults = andQuery.collect()
       println(s"   Found ${andResults.length} engineers in analytics:")
-      andResults.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, user_data: ${row.getString(1)}")
-      }
+      andResults.foreach(row => println(s"   - ID: ${row.getInt(0)}, user_data: ${row.getString(1)}"))
 
       andResults.length shouldBe 1
       andResults(0).getInt(0) shouldBe 3
@@ -180,9 +172,7 @@ class JsonStringFieldTest extends TestBase {
 
       val orResults = orQuery.collect()
       println(s"   Found ${orResults.length} managers or search team members:")
-      orResults.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, user_data: ${row.getString(1)}")
-      }
+      orResults.foreach(row => println(s"   - ID: ${row.getInt(0)}, user_data: ${row.getString(1)}"))
 
       orResults.length shouldBe 2
       orResults(0).getInt(0) shouldBe 1
@@ -222,7 +212,7 @@ class JsonStringFieldTest extends TestBase {
       resultDf.createOrReplaceTempView("test_table")
 
       // Verify schema preserves mixed case
-      val schema = resultDf.schema
+      val schema     = resultDf.schema
       val fieldNames = schema.fieldNames
       println(s"✅ Schema field names: ${fieldNames.mkString(", ")}")
       fieldNames should contain("valField")
@@ -238,9 +228,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results = query.collect()
       println(s"   Found ${results.length} matching documents:")
-      results.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}")
-      }
+      results.foreach(row => println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}"))
 
       results.length shouldBe 2
       results(0).getInt(0) shouldBe 1
@@ -256,9 +244,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results2 = query2.collect()
       println(s"   Found ${results2.length} matching documents:")
-      results2.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}")
-      }
+      results2.foreach(row => println(s"   - ID: ${row.getInt(0)}, valField: ${row.getString(1)}"))
 
       results2.length shouldBe 1
       results2(0).getInt(0) shouldBe 2
@@ -315,9 +301,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results1 = query1.collect()
       println(s"   Found ${results1.length} active users:")
-      results1.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, userStatus: ${row.getString(1)}")
-      }
+      results1.foreach(row => println(s"   - ID: ${row.getInt(0)}, userStatus: ${row.getString(1)}"))
       results1.length shouldBe 2
 
       // Test: Query second mixed-case field
@@ -330,9 +314,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results2 = query2.collect()
       println(s"   Found ${results2.length} 404 responses:")
-      results2.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, httpResponse: ${row.getString(1)}")
-      }
+      results2.foreach(row => println(s"   - ID: ${row.getInt(0)}, httpResponse: ${row.getString(1)}"))
       results2.length shouldBe 1
       results2(0).getInt(0) shouldBe 2
 
@@ -347,9 +329,7 @@ class JsonStringFieldTest extends TestBase {
 
       val results3 = query3.collect()
       println(s"   Found ${results3.length} error logs:")
-      results3.foreach { row =>
-        println(s"   - ID: ${row.getInt(0)}, LogLevel: ${row.getString(1)}")
-      }
+      results3.foreach(row => println(s"   - ID: ${row.getInt(0)}, LogLevel: ${row.getString(1)}"))
       results3.length shouldBe 2
 
       // Test: Combined query across mixed-case fields

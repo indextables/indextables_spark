@@ -28,11 +28,11 @@ import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 
 /**
- * Reproduction test for tantivy4java 0.25.3 bug:
- * searcher.aggregate(query, aggregations) does NOT filter aggregations by query.
+ * Reproduction test for tantivy4java 0.25.3 bug: searcher.aggregate(query, aggregations) does NOT filter aggregations
+ * by query.
  *
- * Expected: StatsAggregation should only aggregate over documents matching the query
- * Actual: StatsAggregation aggregates over ALL documents, ignoring the query filter
+ * Expected: StatsAggregation should only aggregate over documents matching the query Actual: StatsAggregation
+ * aggregates over ALL documents, ignoring the query filter
  */
 class FilteredAggregationBugTest extends AnyFunSuite {
 
@@ -71,8 +71,8 @@ class FilteredAggregationBugTest extends AnyFunSuite {
 
     // Create schema with string field "batch" and numeric fast field "value"
     val schema = new SchemaBuilder()
-      .addTextField("batch", true, false, "default", "position")  // String field for filtering
-      .addIntegerField("value", true, true, true)                 // Numeric fast field for aggregation
+      .addTextField("batch", true, false, "default", "position") // String field for filtering
+      .addIntegerField("value", true, true, true)                // Numeric fast field for aggregation
       .build()
 
     val index  = new Index(schema, indexDir.getAbsolutePath)
@@ -107,8 +107,8 @@ class FilteredAggregationBugTest extends AnyFunSuite {
     // Create split
     val splitDir = new File(baseDir, "splits")
     splitDir.mkdirs()
-    val splitPath = new File(splitDir, s"$uniqueId.split").getAbsolutePath
-    val splitConfig = new QuickwitSplit.SplitConfig(uniqueId, "test-source", "test-node")
+    val splitPath     = new File(splitDir, s"$uniqueId.split").getAbsolutePath
+    val splitConfig   = new QuickwitSplit.SplitConfig(uniqueId, "test-source", "test-node")
     val splitMetadata = QuickwitSplit.convertIndexFromPath(indexDir.getAbsolutePath, splitPath, splitConfig)
 
     println(s"✓ Created split: $splitPath\n")
@@ -120,7 +120,7 @@ class FilteredAggregationBugTest extends AnyFunSuite {
     val cacheConfig = new SplitCacheManager.CacheConfig(s"test-unfiltered-${System.currentTimeMillis()}")
       .withMaxCacheSize(50000000)
     val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-    val searcher = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
+    val searcher     = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
 
     try {
       // Create match-all query (no filtering)
@@ -132,7 +132,7 @@ class FilteredAggregationBugTest extends AnyFunSuite {
 
       // Execute aggregation
       val result = searcher.aggregate(query, aggregations)
-      val stats = result.getAggregation("value_stats").asInstanceOf[StatsResult]
+      val stats  = result.getAggregation("value_stats").asInstanceOf[StatsResult]
 
       println(s"  Query: match_all (no filter)")
       println(s"  Count: ${stats.getCount()} (expected: 4)")
@@ -141,9 +141,9 @@ class FilteredAggregationBugTest extends AnyFunSuite {
       println(s"  Max:   ${stats.getMax()} (expected: 40.0)")
 
       val correct = stats.getCount() == 4 &&
-                    stats.getSum() == 100.0 &&
-                    stats.getMin() == 10.0 &&
-                    stats.getMax() == 40.0
+        stats.getSum() == 100.0 &&
+        stats.getMin() == 10.0 &&
+        stats.getMax() == 40.0
 
       if (correct) {
         println("  ✅ UNFILTERED aggregation works correctly!")
@@ -152,16 +152,15 @@ class FilteredAggregationBugTest extends AnyFunSuite {
         fail("Unfiltered aggregation should work correctly")
       }
 
-    } finally {
+    } finally
       searcher.close()
-    }
   }
 
   private def testFilteredAggregation(splitPath: String, splitMetadata: QuickwitSplit.SplitMetadata): Unit = {
     val cacheConfig = new SplitCacheManager.CacheConfig(s"test-filtered-${System.currentTimeMillis()}")
       .withMaxCacheSize(50000000)
     val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-    val searcher = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
+    val searcher     = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
 
     try {
       // Create query that filters to batch="batch1"
@@ -173,7 +172,7 @@ class FilteredAggregationBugTest extends AnyFunSuite {
 
       // Execute aggregation with filter
       val result = searcher.aggregate(query, aggregations)
-      val stats = result.getAggregation("value_stats").asInstanceOf[StatsResult]
+      val stats  = result.getAggregation("value_stats").asInstanceOf[StatsResult]
 
       println(s"  Query: batch='batch1' (filter to 2 documents)")
       println(s"  Count: ${stats.getCount()} (expected: 2)")
@@ -182,9 +181,9 @@ class FilteredAggregationBugTest extends AnyFunSuite {
       println(s"  Max:   ${stats.getMax()} (expected: 20.0)")
 
       // Check for bug
-      val hasBug = stats.getCount() == 4 ||   // Count all docs instead of filtered
-                   stats.getSum() == 100.0 || // Sum all values instead of filtered
-                   stats.getMax() == 40.0     // Max from all docs instead of filtered
+      val hasBug = stats.getCount() == 4 || // Count all docs instead of filtered
+        stats.getSum() == 100.0 || // Sum all values instead of filtered
+        stats.getMax() == 40.0     // Max from all docs instead of filtered
 
       if (hasBug) {
         println("\n  ❌ BUG CONFIRMED: Aggregation is NOT filtered by query!")
@@ -195,9 +194,8 @@ class FilteredAggregationBugTest extends AnyFunSuite {
         println("\n  ✅ No bug detected - filtered aggregation works correctly!")
       }
 
-    } finally {
+    } finally
       searcher.close()
-    }
   }
 
   private def deleteRecursively(file: File): Unit = {

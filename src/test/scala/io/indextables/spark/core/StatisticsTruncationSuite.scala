@@ -215,10 +215,10 @@ class StatisticsTruncationSuite extends AnyFunSuite with Matchers {
     truncatedMin should contain key "field2"
     truncatedMax should contain key "field2"
 
-    truncatedMin("field1") shouldBe "short_min" // Was already short
+    truncatedMin("field1") shouldBe "short_min"  // Was already short
     truncatedMax("field1") should have length 32 // Truncated from 500
     truncatedMin("field2") should have length 32 // Truncated from 500
-    truncatedMax("field2") shouldBe "short_max" // Was already short
+    truncatedMax("field2") shouldBe "short_max"  // Was already short
   }
 
   test("statistics truncation with very large threshold should preserve all values") {

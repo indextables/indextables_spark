@@ -15,8 +15,8 @@ import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 
 /**
- * Test filtered aggregations using SplitBooleanQuery (the query type actually used in production).
- * This tests the REAL code path that's failing.
+ * Test filtered aggregations using SplitBooleanQuery (the query type actually used in production). This tests the REAL
+ * code path that's failing.
  */
 class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
 
@@ -83,8 +83,8 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
     // Create split
     val splitDir = new File(baseDir, "splits")
     splitDir.mkdirs()
-    val splitPath = new File(splitDir, s"$uniqueId.split").getAbsolutePath
-    val splitConfig = new QuickwitSplit.SplitConfig(uniqueId, "test-source", "test-node")
+    val splitPath     = new File(splitDir, s"$uniqueId.split").getAbsolutePath
+    val splitConfig   = new QuickwitSplit.SplitConfig(uniqueId, "test-source", "test-node")
     val splitMetadata = QuickwitSplit.convertIndexFromPath(indexDir.getAbsolutePath, splitPath, splitConfig)
 
     println(s"✓ Created split\n")
@@ -92,11 +92,12 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
     (splitPath, splitMetadata)
   }
 
-  private def testFilteredAggregationWithBooleanQuery(splitPath: String, splitMetadata: QuickwitSplit.SplitMetadata): Unit = {
+  private def testFilteredAggregationWithBooleanQuery(splitPath: String, splitMetadata: QuickwitSplit.SplitMetadata)
+    : Unit = {
     val cacheConfig = new SplitCacheManager.CacheConfig(s"test-boolean-${System.currentTimeMillis()}")
       .withMaxCacheSize(50000000)
     val cacheManager = SplitCacheManager.getInstance(cacheConfig)
-    val searcher = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
+    val searcher     = cacheManager.createSplitSearcher(s"file://$splitPath", splitMetadata)
 
     try {
       // Create a SplitBooleanQuery with two MUST clauses (matching production usage)
@@ -115,7 +116,7 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
 
       // Execute aggregation with BooleanQuery filter
       val result = searcher.aggregate(booleanQuery, aggregations)
-      val stats = result.getAggregation("value_stats").asInstanceOf[StatsResult]
+      val stats  = result.getAggregation("value_stats").asInstanceOf[StatsResult]
 
       println(s"  Count: ${stats.getCount()} (expected: 2)")
       println(s"  Sum:   ${stats.getSum()} (expected: 30.0)")
@@ -124,9 +125,9 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
 
       // Check results
       val correct = stats.getCount() == 2 &&
-                    stats.getSum() == 30.0 &&
-                    stats.getMin() == 10.0 &&
-                    stats.getMax() == 20.0
+        stats.getSum() == 30.0 &&
+        stats.getMin() == 10.0 &&
+        stats.getMax() == 20.0
 
       if (correct) {
         println("\n  ✅ Filtered aggregation with SplitBooleanQuery works correctly!")
@@ -137,9 +138,8 @@ class FilteredAggregationBooleanQueryTest extends AnyFunSuite {
         fail("Filtered aggregation with SplitBooleanQuery should work")
       }
 
-    } finally {
+    } finally
       searcher.close()
-    }
   }
 
   private def deleteRecursively(file: File): Unit = {

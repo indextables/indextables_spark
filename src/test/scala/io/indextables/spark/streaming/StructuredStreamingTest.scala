@@ -17,8 +17,8 @@
 
 package io.indextables.spark.streaming
 
-import java.nio.file.{Files, Paths}
 import java.io.{File, PrintWriter}
+import java.nio.file.{Files, Paths}
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.Trigger
@@ -30,17 +30,17 @@ import org.scalatest.funsuite.AnyFunSuite
  * Tests for Spark Structured Streaming integration with IndexTables4Spark V2 DataSource.
  *
  * This test demonstrates:
- * - Reading CSV files via structured streaming
- * - Using availableNow trigger for micro-batch processing
- * - Writing via foreachBatch to IndexTables4Spark
- * - Verifying data integrity across streaming batches
+ *   - Reading CSV files via structured streaming
+ *   - Using availableNow trigger for micro-batch processing
+ *   - Writing via foreachBatch to IndexTables4Spark
+ *   - Verifying data integrity across streaming batches
  */
 class StructuredStreamingTest extends AnyFunSuite with TestBase {
 
   test("Structured streaming with availableNow trigger and foreachBatch to V2 DataSource") {
     // Create directories for CSV input and IndexTables output
-    val csvInputDir = Files.createTempDirectory("csv_input_").toFile.getAbsolutePath
-    val outputDir = Files.createTempDirectory("streaming_output_").toFile.getAbsolutePath
+    val csvInputDir   = Files.createTempDirectory("csv_input_").toFile.getAbsolutePath
+    val outputDir     = Files.createTempDirectory("streaming_output_").toFile.getAbsolutePath
     val checkpointDir = Files.createTempDirectory("checkpoint_").toFile.getAbsolutePath
 
     try {
@@ -50,25 +50,19 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
       // Batch 1: Initial data (100 records)
       writeCsvFile(
         path = s"$csvInputDir/batch1.csv",
-        data = (1 to 100).map { id =>
-          s"$id,user_$id,content for record $id,${id * 10}"
-        }
+        data = (1 to 100).map(id => s"$id,user_$id,content for record $id,${id * 10}")
       )
 
       // Batch 2: Additional data (50 records)
       writeCsvFile(
         path = s"$csvInputDir/batch2.csv",
-        data = (101 to 150).map { id =>
-          s"$id,user_$id,content for record $id,${id * 10}"
-        }
+        data = (101 to 150).map(id => s"$id,user_$id,content for record $id,${id * 10}")
       )
 
       // Batch 3: More data (75 records)
       writeCsvFile(
         path = s"$csvInputDir/batch3.csv",
-        data = (151 to 225).map { id =>
-          s"$id,user_$id,content for record $id,${id * 10}"
-        }
+        data = (151 to 225).map(id => s"$id,user_$id,content for record $id,${id * 10}")
       )
 
       println(s"✅ Created 3 CSV files with 225 total records")
@@ -82,14 +76,14 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
         .schema("id INT, username STRING, content STRING, score INT")
         .load(csvInputDir)
         .writeStream
-        .trigger(Trigger.AvailableNow())  // Process all available data then stop
+        .trigger(Trigger.AvailableNow()) // Process all available data then stop
         .foreachBatch { (batchDF: DataFrame, batchId: Long) =>
           println(s"📦 Processing batch $batchId with ${batchDF.count()} records")
 
           // Write each batch to IndexTables4Spark using V2 DataSource
           batchDF.write
             .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-            .mode("append")  // Append each batch
+            .mode("append") // Append each batch
             .option("spark.indextables.indexing.typemap.content", "text")
             .option("spark.indextables.indexing.fastfields", "score")
             .save(outputDir)
@@ -116,7 +110,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
       println(s"✅ Record count verified: $actualCount records")
 
       // Verify all IDs are present (1 to 225)
-      val readIds = resultDf.select("id").collect().map(_.getInt(0)).sorted
+      val readIds     = resultDf.select("id").collect().map(_.getInt(0)).sorted
       val expectedIds = (1 to 225).toArray
       assert(readIds.sameElements(expectedIds), "Not all IDs are present or duplicates exist")
       println(s"✅ All IDs present (1-225) with no duplicates")
@@ -153,8 +147,8 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
   }
 
   test("Structured streaming with multiple batches and deduplication") {
-    val csvInputDir = Files.createTempDirectory("csv_input_dedup_").toFile.getAbsolutePath
-    val outputDir = Files.createTempDirectory("streaming_output_dedup_").toFile.getAbsolutePath
+    val csvInputDir   = Files.createTempDirectory("csv_input_dedup_").toFile.getAbsolutePath
+    val outputDir     = Files.createTempDirectory("streaming_output_dedup_").toFile.getAbsolutePath
     val checkpointDir = Files.createTempDirectory("checkpoint_dedup_").toFile.getAbsolutePath
 
     try {
@@ -163,12 +157,12 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
       // Write multiple batches with overlapping IDs
       writeCsvFile(
         path = s"$csvInputDir/batch1.csv",
-        data = (1 to 50).map { id => s"$id,user_$id,batch1 content $id,${id * 5}" }
+        data = (1 to 50).map(id => s"$id,user_$id,batch1 content $id,${id * 5}")
       )
 
       writeCsvFile(
         path = s"$csvInputDir/batch2.csv",
-        data = (40 to 80).map { id => s"$id,user_${id}_updated,batch2 content $id,${id * 6}" }
+        data = (40 to 80).map(id => s"$id,user_${id}_updated,batch2 content $id,${id * 6}")
       )
 
       println(s"✅ Created CSV files with overlapping IDs (40-50)")
@@ -224,8 +218,8 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
   }
 
   test("Structured streaming with partitioned output") {
-    val csvInputDir = Files.createTempDirectory("csv_input_partitioned_").toFile.getAbsolutePath
-    val outputDir = Files.createTempDirectory("streaming_output_partitioned_").toFile.getAbsolutePath
+    val csvInputDir   = Files.createTempDirectory("csv_input_partitioned_").toFile.getAbsolutePath
+    val outputDir     = Files.createTempDirectory("streaming_output_partitioned_").toFile.getAbsolutePath
     val checkpointDir = Files.createTempDirectory("checkpoint_partitioned_").toFile.getAbsolutePath
 
     try {
@@ -257,7 +251,7 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
           batchDF.write
             .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
             .mode("append")
-            .partitionBy("date")  // Partition by date
+            .partitionBy("date") // Partition by date
             .option("spark.indextables.indexing.typemap.content", "text")
             .option("spark.indextables.indexing.fastfields", "score")
             .save(outputDir)
@@ -297,16 +291,15 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
   // Helper method to write CSV files
   private def writeCsvFile(path: String, data: Seq[String]): Unit = {
     val writer = new PrintWriter(new File(path))
-    try {
+    try
       // Write data only (no header - schema is inferred in streaming reader)
       data.foreach(writer.println)
-    } finally {
+    finally
       writer.close()
-    }
   }
 
   // Helper method to recursively delete directory
-  private def deleteDirectory(directory: File): Unit = {
+  private def deleteDirectory(directory: File): Unit =
     if (directory.exists()) {
       Option(directory.listFiles()).foreach(_.foreach { file =>
         if (file.isDirectory) deleteDirectory(file)
@@ -314,5 +307,4 @@ class StructuredStreamingTest extends AnyFunSuite with TestBase {
       })
       directory.delete()
     }
-  }
 }

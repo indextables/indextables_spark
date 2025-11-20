@@ -17,19 +17,20 @@
 
 package io.indextables.spark.json
 
-import io.indextables.spark.TestBase
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+import io.indextables.spark.TestBase
 
 /**
- * Test suite for JSON field configuration options, specifically testing the
- * spark.indextables.indexing.json.mode configuration.
+ * Test suite for JSON field configuration options, specifically testing the spark.indextables.indexing.json.mode
+ * configuration.
  *
  * Validates:
- * - Default "full" mode enables fast fields for range queries and aggregations
- * - "minimal" mode disables fast fields (stored + indexed only)
- * - Configuration override behavior
+ *   - Default "full" mode enables fast fields for range queries and aggregations
+ *   - "minimal" mode disables fast fields (stored + indexed only)
+ *   - Configuration override behavior
  */
 class JsonFieldConfigurationTest extends TestBase {
 
@@ -350,8 +351,10 @@ class JsonFieldConfigurationTest extends TestBase {
       stats.getInt(3) shouldBe 25
       stats.getInt(4) shouldBe 90000
 
-      println(s"✅ Multiple aggregations: count=${stats.getLong(0)}, sum=${stats.getLong(1)}, " +
-             s"avg=${stats.getDouble(2)}, min=${stats.getInt(3)}, max=${stats.getInt(4)}")
+      println(
+        s"✅ Multiple aggregations: count=${stats.getLong(0)}, sum=${stats.getLong(1)}, " +
+          s"avg=${stats.getDouble(2)}, min=${stats.getInt(3)}, max=${stats.getInt(4)}"
+      )
     }
   }
 }
