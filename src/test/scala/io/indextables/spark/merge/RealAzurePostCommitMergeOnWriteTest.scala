@@ -47,8 +47,8 @@ class RealAzurePostCommitMergeOnWriteTest extends RealAzureTestBase {
   }
 
   /**
-   * Count the number of split files in the transaction log.
-   * This gives us the current active split count after all merges.
+   * Count the number of split files in the transaction log. This gives us the current active split count after all
+   * merges.
    */
   private def countActiveSplits(azurePath: String): Int = {
     import org.apache.hadoop.fs.Path
@@ -63,7 +63,7 @@ class RealAzurePostCommitMergeOnWriteTest extends RealAzureTestBase {
     )
 
     val activeSplits = transactionLog.listFiles()
-    val count = activeSplits.size
+    val count        = activeSplits.size
 
     logger.info(s"📊 Active splits in transaction log: $count")
     count
@@ -92,9 +92,9 @@ class RealAzurePostCommitMergeOnWriteTest extends RealAzureTestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold
-      .option("spark.indextables.mergeOnWrite.targetSize", "1M") // Small target to create multiple groups
-      .option("spark.indextables.indexwriter.batchSize", "100") // Force multiple splits
-      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1") // Allow test to run with limited disk
+      .option("spark.indextables.mergeOnWrite.targetSize", "1M")            // Small target to create multiple groups
+      .option("spark.indextables.indexwriter.batchSize", "100")             // Force multiple splits
+      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")         // Allow test to run with limited disk
       .mode("overwrite")
       .save(azurePath)
 
@@ -184,7 +184,7 @@ class RealAzurePostCommitMergeOnWriteTest extends RealAzureTestBase {
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")
       .option("spark.indextables.mergeOnWrite.targetSize", "1M")
       .option("spark.indextables.merge.heapSize", "512M") // Custom heap size
-      .option("spark.indextables.merge.debug", "true") // Enable debug
+      .option("spark.indextables.merge.debug", "true")    // Enable debug
       .option("spark.indextables.indexwriter.batchSize", "50")
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .mode("overwrite")

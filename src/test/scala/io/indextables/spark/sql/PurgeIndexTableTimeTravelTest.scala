@@ -17,24 +17,28 @@
 
 package io.indextables.spark.sql
 
+import java.io.File
+
+import scala.util.Random
+
+import org.apache.spark.sql.SparkSession
+
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import org.apache.spark.sql.SparkSession
-import org.apache.hadoop.fs.{FileSystem, Path}
-import java.io.File
-import scala.util.Random
 
 /**
  * Tests for time travel support in PURGE INDEXTABLE command.
  *
- * These tests verify that PURGE correctly handles files that were added and removed
- * in historical versions, ensuring time travel queries continue to work.
+ * These tests verify that PURGE correctly handles files that were added and removed in historical versions, ensuring
+ * time travel queries continue to work.
  */
 class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var fs: FileSystem = _
-  var tempDir: String = _
+  var fs: FileSystem      = _
+  var tempDir: String     = _
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -66,7 +70,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
   }
 
   test("PURGE should NOT delete files referenced in transaction logs within retention period") {
-    val tablePath = s"$tempDir/time_travel_test1"
+    val tablePath    = s"$tempDir/time_travel_test1"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -76,14 +80,16 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Create initial data (versions 0-4)
     (1 to 5).foreach { i =>
       val data = Seq((i, s"initial_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
     // Get the split file from version 5
     val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val filesAfterV5 = fs.listStatus(new Path(tablePath))
+    val filesAfterV5 = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
 
@@ -93,7 +99,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Overwrite the table (version 5) - this creates REMOVE actions for old files
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
-    overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    overwriteData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
@@ -104,19 +111,21 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Continue writing to create more versions and trigger checkpoint
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // Verify checkpoint was created
-    val checkpointFiles = fs.listStatus(txLogPath)
+    val checkpointFiles = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.contains("checkpoint"))
     assert(checkpointFiles.nonEmpty, "Checkpoint should have been created")
 
     // Run PURGE with 24 hour retention (transaction logs are recent, within retention)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result               = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
+    val metrics              = result(0).getStruct(1)
     val orphanedFilesDeleted = metrics.getLong(2)
 
     // The file from v5 should NOT be deleted because:
@@ -129,7 +138,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
   }
 
   test("PURGE should delete orphaned files when their transaction logs are outside retention period") {
-    val tablePath = s"$tempDir/time_travel_test2"
+    val tablePath    = s"$tempDir/time_travel_test2"
     val sparkSession = spark
     import sparkSession.implicits._
     import java.util.UUID
@@ -140,7 +149,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Create initial data (versions 0-4)
     (1 to 5).foreach { i =>
       val data = Seq((i, s"initial_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -159,21 +169,24 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Overwrite the table - creates REMOVE actions for old files
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
-    overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    overwriteData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Continue writing to create checkpoint at v10
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // Verify checkpoint was created
     val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val checkpointFiles = fs.listStatus(txLogPath)
+    val checkpointFiles = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.contains("checkpoint"))
     assert(checkpointFiles.nonEmpty, "Checkpoint should have been created")
 
@@ -187,10 +200,11 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     }
 
     // Run PURGE with 24 hour retention for splits
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
+    val metrics              = result(0).getStruct(1)
     val orphanedFilesDeleted = metrics.getLong(2)
-    val txLogsDeleted = metrics.getLong(5)
+    val txLogsDeleted        = metrics.getLong(5)
 
     println(s"Transaction logs deleted: $txLogsDeleted")
     println(s"Orphaned files deleted: $orphanedFilesDeleted")
@@ -202,21 +216,20 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // 1. Their transaction logs (v0-v9) were deleted
     // 2. They're not referenced in any remaining transaction log
     // 3. No way to time travel to them anymore
-    assert(orphanedFilesDeleted >= orphanedFiles.size,
-      s"Should have deleted at least ${orphanedFiles.size} orphaned files, deleted: $orphanedFilesDeleted")
+    assert(
+      orphanedFilesDeleted >= orphanedFiles.size,
+      s"Should have deleted at least ${orphanedFiles.size} orphaned files, deleted: $orphanedFilesDeleted"
+    )
 
     // Verify orphaned files no longer exist
-    val remainingOrphanedFiles = orphanedFiles.filter { fileName =>
-      fs.exists(new Path(tablePath, fileName))
-    }
-    assert(remainingOrphanedFiles.isEmpty,
-      s"Orphaned files should be deleted: ${remainingOrphanedFiles.mkString(", ")}")
+    val remainingOrphanedFiles = orphanedFiles.filter(fileName => fs.exists(new Path(tablePath, fileName)))
+    assert(remainingOrphanedFiles.isEmpty, s"Orphaned files should be deleted: ${remainingOrphanedFiles.mkString(", ")}")
 
     println(s"✓ Time travel test 2 passed: Files deleted when transaction logs are outside retention")
   }
 
   test("PURGE DRY RUN should correctly preview orphaned files based on transaction log retention") {
-    val tablePath = s"$tempDir/time_travel_dryrun_test"
+    val tablePath    = s"$tempDir/time_travel_dryrun_test"
     val sparkSession = spark
     import sparkSession.implicits._
     import java.util.UUID
@@ -225,7 +238,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Create initial data - just one write to keep it simple
     val initialData = Seq((1, "initial")).toDF("id", "value")
-    initialData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    initialData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
@@ -242,20 +256,22 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Overwrite to create new transaction log versions
     val overwriteData = Seq((100, "new_data")).toDF("id", "value")
-    overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    overwriteData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Create more versions and checkpoint
     (7 to 12).foreach { i =>
       val data = Seq((i + 100, s"newer_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // Age transaction logs
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath    = new Path(s"$tablePath/_transaction_log")
     val oldTimestamp = System.currentTimeMillis() - (2L * 60 * 60 * 1000)
     (0 to 9).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
@@ -264,22 +280,25 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
       }
     }
 
-    val filesBeforePurge = fs.listStatus(new Path(tablePath))
+    val filesBeforePurge = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
 
     // Run DRY RUN
-    val dryRunResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS DRY RUN").collect()
-    val dryRunMetrics = dryRunResult(0).getStruct(1)
+    val dryRunResult =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS DRY RUN").collect()
+    val dryRunMetrics       = dryRunResult(0).getStruct(1)
     val dryRunOrphanedFound = dryRunMetrics.getLong(1)
-    val dryRunStatus = dryRunMetrics.getString(0)
+    val dryRunStatus        = dryRunMetrics.getString(0)
 
     assert(dryRunStatus == "DRY_RUN", "Status should be DRY_RUN")
     println(s"DRY RUN found $dryRunOrphanedFound orphaned files")
 
     // Verify NO files were actually deleted
-    val filesAfterDryRun = fs.listStatus(new Path(tablePath))
+    val filesAfterDryRun = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
@@ -287,25 +306,30 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(filesBeforePurge == filesAfterDryRun, "DRY RUN should not delete any files")
 
     // Now run actual PURGE
-    val actualResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
-    val actualMetrics = actualResult(0).getStruct(1)
+    val actualResult =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
+    val actualMetrics         = actualResult(0).getStruct(1)
     val actualOrphanedDeleted = actualMetrics.getLong(2)
 
     println(s"Actual PURGE deleted $actualOrphanedDeleted orphaned files")
 
     // DRY RUN count should match actual deletion count
-    assert(dryRunOrphanedFound == actualOrphanedDeleted,
-      s"DRY RUN preview ($dryRunOrphanedFound) should match actual deletions ($actualOrphanedDeleted)")
+    assert(
+      dryRunOrphanedFound == actualOrphanedDeleted,
+      s"DRY RUN preview ($dryRunOrphanedFound) should match actual deletions ($actualOrphanedDeleted)"
+    )
 
     // Verify we deleted at least the orphaned files we created
-    assert(actualOrphanedDeleted >= orphanedFiles.size,
-      s"Should have deleted at least ${orphanedFiles.size} orphaned files")
+    assert(
+      actualOrphanedDeleted >= orphanedFiles.size,
+      s"Should have deleted at least ${orphanedFiles.size} orphaned files"
+    )
 
     println(s"✓ DRY RUN test passed: Preview matched actual deletions ($actualOrphanedDeleted files)")
   }
 
   test("PURGE should handle mixed file lifecycles correctly") {
-    val tablePath = s"$tempDir/mixed_lifecycle_test"
+    val tablePath    = s"$tempDir/mixed_lifecycle_test"
     val sparkSession = spark
     import sparkSession.implicits._
     import java.util.UUID
@@ -321,7 +345,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // v0-v2: Create initial data
     (1 to 3).foreach { i =>
       val data = Seq((i, s"group_a_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -339,27 +364,30 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // v3: Overwrite
     val overwriteData = Seq((100, "overwrite")).toDF("id", "value")
-    overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    overwriteData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // v4-v12: Add new data (Group D) and create checkpoint
     (5 to 13).foreach { i =>
       val data = Seq((i + 100, s"group_d_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // Get current active files (should be preserved)
-    val currentActiveFiles = fs.listStatus(new Path(tablePath))
+    val currentActiveFiles = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .filterNot(f => orphanedGroupA.contains(f.getPath.getName))
       .map(_.getPath.getName)
       .toSet
 
     // Age transaction logs v0-v9 (outside retention)
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath    = new Path(s"$tablePath/_transaction_log")
     val oldTimestamp = System.currentTimeMillis() - (2L * 60 * 60 * 1000)
     (0 to 9).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
@@ -368,34 +396,40 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
       }
     }
 
-    val filesBeforePurge = fs.listStatus(new Path(tablePath))
+    val filesBeforePurge = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
 
     // Run PURGE
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
+    val metrics              = result(0).getStruct(1)
     val orphanedFilesDeleted = metrics.getLong(2)
 
-    val filesAfterPurge = fs.listStatus(new Path(tablePath))
+    val filesAfterPurge = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
 
     // Orphaned files from group A should be deleted
-    val deletedFiles = filesBeforePurge -- filesAfterPurge
+    val deletedFiles          = filesBeforePurge -- filesAfterPurge
     val orphanedGroupADeleted = deletedFiles.intersect(orphanedGroupA)
 
-    assert(orphanedGroupADeleted.size >= 1,
-      s"Should have deleted files from group A (found ${orphanedGroupADeleted.size} of ${orphanedGroupA.size})")
+    assert(
+      orphanedGroupADeleted.size >= 1,
+      s"Should have deleted files from group A (found ${orphanedGroupADeleted.size} of ${orphanedGroupA.size})"
+    )
 
     // Current active files should NOT be deleted
     val currentFilesStillExist = currentActiveFiles.subsetOf(filesAfterPurge)
     assert(currentFilesStillExist, "Current active files should NOT be deleted")
 
     // Verify we can still read data
-    val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    val readData = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
     val count = readData.count()
     assert(count > 0, "Should be able to read data after PURGE")
@@ -404,7 +438,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
   }
 
   test("PURGE should handle file re-add after removal (same path reused)") {
-    val tablePath = s"$tempDir/file_readd_test"
+    val tablePath    = s"$tempDir/file_readd_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -412,40 +446,45 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // v0: Initial write with specific data that will create a split file
     val initialData = Seq((1, "version1")).toDF("id", "value")
-    initialData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    initialData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // v1-v2: Add more data
     (2 to 3).foreach { i =>
       val data = Seq((i, s"data_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // v3: Overwrite (removes all old files, creates REMOVE actions)
     val overwriteData = Seq((100, "overwrite")).toDF("id", "value")
-    overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    overwriteData.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // v4-v13: Add new data and create checkpoint
     (5 to 14).foreach { i =>
       val data = Seq((i + 100, s"new_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(tablePath)
     }
 
     // Current files are active and should not be deleted
-    val currentFiles = fs.listStatus(new Path(tablePath))
+    val currentFiles = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
 
     // Age old transaction logs
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath    = new Path(s"$tablePath/_transaction_log")
     val oldTimestamp = System.currentTimeMillis() - (2L * 60 * 60 * 1000)
     (0 to 9).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
@@ -457,7 +496,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     // Run PURGE
     spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
 
-    val filesAfterPurge = fs.listStatus(new Path(tablePath))
+    val filesAfterPurge = fs
+      .listStatus(new Path(tablePath))
       .filter(_.getPath.getName.endsWith(".split"))
       .map(_.getPath.getName)
       .toSet
@@ -467,7 +507,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     assert(currentFilesPreserved, "All current files should be preserved")
 
     // Verify we can read the current data
-    val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    val readData = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
     val count = readData.count()
     assert(count > 0, "Should be able to read data after PURGE")

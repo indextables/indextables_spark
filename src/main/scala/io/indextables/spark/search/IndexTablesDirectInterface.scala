@@ -26,9 +26,9 @@ import scala.util.Using
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 
+import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
 import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Tantivy}
-import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import org.slf4j.LoggerFactory
 
 /**
@@ -155,7 +155,9 @@ object TantivyDirectInterface {
       import scala.jdk.CollectionConverters._
       val autoConfiguredMap = autoConfiguredOptions.asCaseSensitiveMap().asScala.toMap
       logger.debug(s"AUTO-CONFIG MAP DEBUG: Keys in autoConfiguredOptions: ${autoConfiguredMap.keys.mkString(", ")}")
-      logger.debug(s"AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}")
+      logger.debug(
+        s"AUTO-CONFIG MAP DEBUG: fastfields value = ${autoConfiguredMap.get("spark.indextables.indexing.fastfields")}"
+      )
 
       val finalTantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(autoConfiguredOptions)
 
@@ -219,8 +221,10 @@ object TantivyDirectInterface {
               io.indextables.tantivy4java.core.JsonObjectOptions.full()
           }
 
-          logger.debug(s"JSON field options: stored=${jsonOptions.isStored()}, " +
-                      s"indexed=${jsonOptions.getIndexing() != null}, fast=${jsonOptions.isFast()}")
+          logger.debug(
+            s"JSON field options: stored=${jsonOptions.isStored()}, " +
+              s"indexed=${jsonOptions.getIndexing() != null}, fast=${jsonOptions.isFast()}"
+          )
 
           builder.addJsonField(fieldName, jsonOptions)
         } else {
@@ -244,15 +248,15 @@ object TantivyDirectInterface {
                     s"Unsupported field type override for field $fieldName: $other. Supported types: string, text"
                   )
               }
-          case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
-            logger.debug(s"CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
-            builder.addIntegerField(fieldName, stored, indexed, fast)
-          case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
-            builder.addFloatField(fieldName, stored, indexed, fast)
-          case org.apache.spark.sql.types.BooleanType =>
-            builder.addBooleanField(fieldName, stored, indexed, fast)
-          case org.apache.spark.sql.types.BinaryType =>
-            builder.addBytesField(fieldName, stored, indexed, fast, "position")
+            case org.apache.spark.sql.types.LongType | org.apache.spark.sql.types.IntegerType =>
+              logger.debug(s"CALLING addIntegerField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
+              builder.addIntegerField(fieldName, stored, indexed, fast)
+            case org.apache.spark.sql.types.DoubleType | org.apache.spark.sql.types.FloatType =>
+              builder.addFloatField(fieldName, stored, indexed, fast)
+            case org.apache.spark.sql.types.BooleanType =>
+              builder.addBooleanField(fieldName, stored, indexed, fast)
+            case org.apache.spark.sql.types.BinaryType =>
+              builder.addBytesField(fieldName, stored, indexed, fast, "position")
             case org.apache.spark.sql.types.TimestampType =>
               builder.addIntegerField(fieldName, stored, indexed, fast) // Store as microseconds since epoch
             case org.apache.spark.sql.types.DateType =>
@@ -295,9 +299,9 @@ class TantivyDirectInterface(
   TantivyDirectInterface.ensureInitialized()
 
   // Create JSON field mapper and converter for handling complex types
-  private val tantivyOptions = io.indextables.spark.core.IndexTables4SparkOptions(options)
+  private val tantivyOptions  = io.indextables.spark.core.IndexTables4SparkOptions(options)
   private val jsonFieldMapper = new SparkSchemaToTantivyMapper(tantivyOptions)
-  private val jsonConverter = new SparkToTantivyConverter(schema, jsonFieldMapper)
+  private val jsonConverter   = new SparkToTantivyConverter(schema, jsonFieldMapper)
 
   // Validate indexing configuration against existing table if provided
   if (existingDocMappingJson.isDefined) {
@@ -707,8 +711,9 @@ class TantivyDirectInterface(
 
           // Convert InternalRow to generic Row for easier processing
           val genericRow = org.apache.spark.sql.Row.fromSeq(
-            st.fields.zipWithIndex.map { case (field, idx) =>
-              internalRow.get(idx, field.dataType)
+            st.fields.zipWithIndex.map {
+              case (field, idx) =>
+                internalRow.get(idx, field.dataType)
             }
           )
 
@@ -720,9 +725,7 @@ class TantivyDirectInterface(
         case at: org.apache.spark.sql.types.ArrayType =>
           // Convert to Scala Seq
           val arrayData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
-          val seq = (0 until arrayData.numElements()).map { i =>
-            arrayData.get(i, at.elementType)
-          }
+          val seq       = (0 until arrayData.numElements()).map(i => arrayData.get(i, at.elementType))
 
           val jsonList = jsonConverter.arrayToJsonList(seq, at)
           // Wrap array in object with "_values" key
@@ -735,9 +738,12 @@ class TantivyDirectInterface(
           // Convert to Scala Map
           val mapData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.MapData]
           val sparkMap = scala.collection.Map(
-            mapData.keyArray().toSeq[Any](mt.keyType).zip(
-              mapData.valueArray().toSeq[Any](mt.valueType)
-            ): _*
+            mapData
+              .keyArray()
+              .toSeq[Any](mt.keyType)
+              .zip(
+                mapData.valueArray().toSeq[Any](mt.valueType)
+              ): _*
           )
 
           val jsonMap = jsonConverter.mapToJsonMap(sparkMap, mt)
@@ -812,8 +818,9 @@ class TantivyDirectInterface(
 
           // Convert InternalRow to generic Row for easier processing
           val genericRow = org.apache.spark.sql.Row.fromSeq(
-            st.fields.zipWithIndex.map { case (field, idx) =>
-              internalRow.get(idx, field.dataType)
+            st.fields.zipWithIndex.map {
+              case (field, idx) =>
+                internalRow.get(idx, field.dataType)
             }
           )
 
@@ -825,9 +832,7 @@ class TantivyDirectInterface(
         case at: org.apache.spark.sql.types.ArrayType =>
           // Convert to Scala Seq
           val arrayData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
-          val seq = (0 until arrayData.numElements()).map { i =>
-            arrayData.get(i, at.elementType)
-          }
+          val seq       = (0 until arrayData.numElements()).map(i => arrayData.get(i, at.elementType))
 
           val jsonList = jsonConverter.arrayToJsonList(seq, at)
           // Wrap array in object with "_values" key
@@ -840,9 +845,12 @@ class TantivyDirectInterface(
           // Convert to Scala Map
           val mapData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.MapData]
           val sparkMap = scala.collection.Map(
-            mapData.keyArray().toSeq[Any](mt.keyType).zip(
-              mapData.valueArray().toSeq[Any](mt.valueType)
-            ): _*
+            mapData
+              .keyArray()
+              .toSeq[Any](mt.keyType)
+              .zip(
+                mapData.valueArray().toSeq[Any](mt.valueType)
+              ): _*
           )
 
           val jsonMap = jsonConverter.mapToJsonMap(sparkMap, mt)

@@ -22,22 +22,19 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types._
+
 import org.slf4j.LoggerFactory
 
 /**
  * SQL command to describe the contents of an IndexTables4Spark transaction log.
  *
- * Syntax:
- *   DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table'
- *   DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table' INCLUDE ALL
- *   DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table
- *   DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table INCLUDE ALL
+ * Syntax: DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table' DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table'
+ * INCLUDE ALL DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table DESCRIBE INDEXTABLES TRANSACTION LOG
+ * my_catalog.my_database.my_table INCLUDE ALL
  *
- * Without INCLUDE ALL:
- *   Returns current state from latest checkpoint forward (more efficient)
+ * Without INCLUDE ALL: Returns current state from latest checkpoint forward (more efficient)
  *
- * With INCLUDE ALL:
- *   Returns complete transaction log history from version 0
+ * With INCLUDE ALL: Returns complete transaction log history from version 0
  *
  * Returns a DataFrame with all transaction log actions including:
  *   - AddAction: Files added to the table
@@ -47,9 +44,9 @@ import org.slf4j.LoggerFactory
  *   - MetadataAction: Schema and configuration changes
  */
 case class DescribeTransactionLogCommand(
-    override val child: LogicalPlan,
-    tablePath: String,
-    includeAll: Boolean)
+  override val child: LogicalPlan,
+  tablePath: String,
+  includeAll: Boolean)
     extends RunnableCommand
     with UnaryNode {
 

@@ -17,35 +17,40 @@
 
 package io.indextables.spark.json
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import io.indextables.spark.core.IndexTables4SparkOptions
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import scala.jdk.CollectionConverters._
-
 class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
-  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions = {
+  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions =
     new IndexTables4SparkOptions(new CaseInsensitiveStringMap(configMap.asJava))
-  }
 
   test("shouldUseJsonField detects StructType") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val structField = StructField("user", StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType)
-    )))
+    val structField = StructField(
+      "user",
+      StructType(
+        Seq(
+          StructField("name", StringType),
+          StructField("age", IntegerType)
+        )
+      )
+    )
 
     mapper.shouldUseJsonField(structField) shouldBe true
   }
 
   test("shouldUseJsonField detects ArrayType") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     val arrayField = StructField("tags", ArrayType(StringType))
 
@@ -53,9 +58,11 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("shouldUseJsonField detects StringType with json configuration") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.payload" -> "json"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.payload" -> "json"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
     val stringField = StructField("payload", StringType)
@@ -65,7 +72,7 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("shouldUseJsonField returns false for regular StringType") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     val stringField = StructField("name", StringType)
 
@@ -74,7 +81,7 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("shouldUseJsonField returns false for primitive types") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     mapper.shouldUseJsonField(StructField("age", IntegerType)) shouldBe false
     mapper.shouldUseJsonField(StructField("score", DoubleType)) shouldBe false
@@ -82,11 +89,13 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("getFieldType returns configured type") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.title" -> "string",
-      "spark.indextables.indexing.typemap.content" -> "text",
-      "spark.indextables.indexing.typemap.payload" -> "json"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.title"   -> "string",
+        "spark.indextables.indexing.typemap.content" -> "text",
+        "spark.indextables.indexing.typemap.payload" -> "json"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
     mapper.getFieldType("title") shouldBe "string"
@@ -96,15 +105,17 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("getFieldType returns default 'string' for unconfigured fields") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     mapper.getFieldType("unknown_field") shouldBe "string"
   }
 
   test("requiresRangeQueries detects fast field configuration") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.fastfields" -> "score,timestamp,value"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.fastfields" -> "score,timestamp,value"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
     mapper.requiresRangeQueries("score") shouldBe true
@@ -115,42 +126,60 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("validateJsonFieldConfiguration accepts valid Struct configuration") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("id", StringType),
-      StructField("user", StructType(Seq(
-        StructField("name", StringType),
-        StructField("age", IntegerType)
-      )))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType),
+        StructField(
+          "user",
+          StructType(
+            Seq(
+              StructField("name", StringType),
+              StructField("age", IntegerType)
+            )
+          )
+        )
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
 
   test("validateJsonFieldConfiguration accepts valid Array configuration") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("id", StringType),
-      StructField("tags", ArrayType(StringType))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType),
+        StructField("tags", ArrayType(StringType))
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
 
   test("validateJsonFieldConfiguration rejects conflicting Struct type mapping") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.user" -> "string"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.user" -> "string"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("user", StructType(Seq(
-        StructField("name", StringType)
-      )))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField(
+          "user",
+          StructType(
+            Seq(
+              StructField("name", StringType)
+            )
+          )
+        )
+      )
+    )
 
     an[IllegalArgumentException] should be thrownBy {
       mapper.validateJsonFieldConfiguration(schema)
@@ -158,28 +187,36 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("validateJsonFieldConfiguration accepts valid JSON string configuration") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.payload" -> "json"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.payload" -> "json"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("id", StringType),
-      StructField("payload", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", StringType),
+        StructField("payload", StringType)
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
 
   test("validateJsonFieldConfiguration rejects invalid field type") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.name" -> "invalid_type"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.name" -> "invalid_type"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("name", StringType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("name", StringType)
+      )
+    )
 
     an[IllegalArgumentException] should be thrownBy {
       mapper.validateJsonFieldConfiguration(schema)
@@ -187,14 +224,18 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("validateJsonFieldConfiguration rejects json type for non-JSON fields") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.age" -> "json"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.age" -> "json"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("age", IntegerType)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("age", IntegerType)
+      )
+    )
 
     an[IllegalArgumentException] should be thrownBy {
       mapper.validateJsonFieldConfiguration(schema)
@@ -202,9 +243,11 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
   }
 
   test("getJsonFieldConfig returns correct configuration") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.fastfields" -> "payload"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.fastfields" -> "payload"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
     val config = mapper.getJsonFieldConfig("payload")
@@ -215,7 +258,7 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("getJsonFieldConfig returns default configuration for unconfigured field") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     val config = mapper.getJsonFieldConfig("other")
     config.parseOnWrite shouldBe true
@@ -225,33 +268,59 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("validateJsonFieldConfiguration handles nested structs") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("user", StructType(Seq(
-        StructField("address", StructType(Seq(
-          StructField("city", StringType),
-          StructField("coordinates", StructType(Seq(
-            StructField("lat", DoubleType),
-            StructField("lon", DoubleType)
-          )))
-        )))
-      )))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField(
+          "user",
+          StructType(
+            Seq(
+              StructField(
+                "address",
+                StructType(
+                  Seq(
+                    StructField("city", StringType),
+                    StructField(
+                      "coordinates",
+                      StructType(
+                        Seq(
+                          StructField("lat", DoubleType),
+                          StructField("lon", DoubleType)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
 
   test("validateJsonFieldConfiguration handles array of structs") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("reviews", ArrayType(StructType(Seq(
-        StructField("rating", IntegerType),
-        StructField("comment", StringType)
-      ))))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField(
+          "reviews",
+          ArrayType(
+            StructType(
+              Seq(
+                StructField("rating", IntegerType),
+                StructField("comment", StringType)
+              )
+            )
+          )
+        )
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
@@ -260,7 +329,7 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("shouldUseJsonField returns true for MapType") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     val mapField = StructField("attributes", MapType(StringType, StringType))
     mapper.shouldUseJsonField(mapField) shouldBe true
@@ -268,7 +337,7 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("shouldUseJsonField returns true for MapType with integer values") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
     val mapField = StructField("counters", MapType(StringType, IntegerType))
     mapper.shouldUseJsonField(mapField) shouldBe true
@@ -276,37 +345,45 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("shouldUseJsonField returns true for MapType with nested values") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val valueSchema = StructType(Seq(
-      StructField("city", StringType),
-      StructField("zip", StringType)
-    ))
+    val valueSchema = StructType(
+      Seq(
+        StructField("city", StringType),
+        StructField("zip", StringType)
+      )
+    )
     val mapField = StructField("addresses", MapType(StringType, valueSchema))
     mapper.shouldUseJsonField(mapField) shouldBe true
   }
 
   test("validateJsonFieldConfiguration accepts MapType") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("id", IntegerType),
-      StructField("attributes", MapType(StringType, StringType))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType),
+        StructField("attributes", MapType(StringType, StringType))
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }
 
   test("validateJsonFieldConfiguration rejects MapType with conflicting type config") {
-    val options = createOptions(Map(
-      "spark.indextables.indexing.typemap.attributes" -> "text"
-    ))
+    val options = createOptions(
+      Map(
+        "spark.indextables.indexing.typemap.attributes" -> "text"
+      )
+    )
     val mapper = new SparkSchemaToTantivyMapper(options)
 
-    val schema = StructType(Seq(
-      StructField("attributes", MapType(StringType, StringType))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("attributes", MapType(StringType, StringType))
+      )
+    )
 
     an[IllegalArgumentException] should be thrownBy {
       mapper.validateJsonFieldConfiguration(schema)
@@ -315,16 +392,20 @@ class JsonSchemaConversionTest extends AnyFunSuite with Matchers {
 
   test("validateJsonFieldConfiguration handles map with struct values") {
     val options = createOptions()
-    val mapper = new SparkSchemaToTantivyMapper(options)
+    val mapper  = new SparkSchemaToTantivyMapper(options)
 
-    val addressSchema = StructType(Seq(
-      StructField("city", StringType),
-      StructField("zip", StringType)
-    ))
+    val addressSchema = StructType(
+      Seq(
+        StructField("city", StringType),
+        StructField("zip", StringType)
+      )
+    )
 
-    val schema = StructType(Seq(
-      StructField("addresses", MapType(StringType, addressSchema))
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("addresses", MapType(StringType, addressSchema))
+      )
+    )
 
     noException should be thrownBy mapper.validateJsonFieldConfiguration(schema)
   }

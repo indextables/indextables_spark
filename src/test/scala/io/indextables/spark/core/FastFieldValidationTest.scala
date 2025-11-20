@@ -92,7 +92,9 @@ class FastFieldValidationTest extends TestBase with BeforeAndAfterAll with Befor
         assert(batch1Count == 2, "Should find 2 records with batch=batch1")
       } catch {
         case e: IllegalArgumentException if e.getMessage.contains("numeric fast field") =>
-          println(s"✅ Got expected error for missing numeric fast field (connector rejected aggregation): ${e.getMessage}")
+          println(
+            s"✅ Got expected error for missing numeric fast field (connector rejected aggregation): ${e.getMessage}"
+          )
         case e: Exception =>
           fail(s"Unexpected exception type: ${e.getClass.getName}: ${e.getMessage}")
       }

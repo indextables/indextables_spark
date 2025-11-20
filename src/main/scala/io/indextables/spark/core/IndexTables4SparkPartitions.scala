@@ -493,10 +493,12 @@ class IndexTables4SparkDataWriter(
     // Get configured max parallelism. If not set, we'll use a conservative default of 1
     // The driver should set this configuration based on defaultParallelism
     val defaultMaxParallelism = 1
-    val maxParallelism = options.getLong(
-      io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM,
-      defaultMaxParallelism
-    ).toInt
+    val maxParallelism = options
+      .getLong(
+        io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM,
+        defaultMaxParallelism
+      )
+      .toInt
 
     // Initialize throttle (idempotent - only initializes once per parallelism value)
     io.indextables.spark.storage.SplitConversionThrottle.initialize(maxParallelism)
@@ -600,7 +602,7 @@ class IndexTables4SparkDataWriter(
         case (partitionKey, (searchEngine, statistics, recordCount)) =>
           if (recordCount > 0) {
             val partitionValues = parsePartitionKey(partitionKey)
-            val addAction = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
+            val addAction       = commitWriter(searchEngine, statistics, recordCount, partitionValues, partitionKey)
             allActions += addAction
           } else {
             logger.warn(s"Skipping empty partition: $partitionKey")

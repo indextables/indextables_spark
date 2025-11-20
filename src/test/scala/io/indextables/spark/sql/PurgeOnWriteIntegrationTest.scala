@@ -17,32 +17,34 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.purge.PurgeOnWriteTransactionCounter
-import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.spark.sql.{SaveMode, SparkSession}
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
-
 import java.io.File
 import java.nio.file.Files
 import java.util.UUID
+
+import org.apache.spark.sql.{SaveMode, SparkSession}
+
+import org.apache.hadoop.fs.{FileSystem, Path}
+
+import io.indextables.spark.purge.PurgeOnWriteTransactionCounter
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Integration tests for purge-on-write feature.
  *
  * Tests cover:
- * - Trigger after N writes
- * - Trigger after merge-on-write
- * - Configuration propagation
- * - Split file cleanup
- * - Transaction log cleanup
- * - Counter reset after purge
+ *   - Trigger after N writes
+ *   - Trigger after merge-on-write
+ *   - Configuration propagation
+ *   - Split file cleanup
+ *   - Transaction log cleanup
+ *   - Counter reset after purge
  */
 class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
 
-  var spark: SparkSession = _
+  var spark: SparkSession  = _
   var testBasePath: String = _
-  var fs: FileSystem = _
+  var fs: FileSystem       = _
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -69,19 +71,18 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "true")
   }
 
-  override def afterEach(): Unit = {
-    try {
+  override def afterEach(): Unit =
+    try
       if (fs != null && testBasePath != null) {
         fs.delete(new Path(testBasePath), true)
       }
-    } finally {
+    finally {
       PurgeOnWriteTransactionCounter.clearAll()
       if (spark != null) {
         spark.stop()
         spark = null
       }
     }
-  }
 
   test("purge-on-write should be disabled by default") {
     val tablePath = s"$testBasePath/default_disabled"
@@ -128,8 +129,10 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Append)
       .save(tablePath)
-    assert(PurgeOnWriteTransactionCounter.get(tablePath) === 0,
-      "Counter should reset to 0 after purge triggers on 3rd write")
+    assert(
+      PurgeOnWriteTransactionCounter.get(tablePath) === 0,
+      "Counter should reset to 0 after purge triggers on 3rd write"
+    )
   }
 
   test("purge-on-write should clean up old orphaned split files") {
@@ -218,14 +221,11 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     }
 
     // Verify old transaction log files are deleted
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")),
-      "Old version 0 should be deleted")
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000005.json")),
-      "Old version 5 should be deleted")
+    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")), "Old version 0 should be deleted")
+    assert(!fs.exists(new Path(txLogPath, "00000000000000000005.json")), "Old version 5 should be deleted")
 
     // Verify recent files are kept
-    assert(fs.exists(new Path(txLogPath, "00000000000000000009.json")),
-      "Recent version 9 should be kept")
+    assert(fs.exists(new Path(txLogPath, "00000000000000000009.json")), "Recent version 9 should be kept")
   }
 
   test("purge-on-write should propagate credentials from write options") {
@@ -343,14 +343,14 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
     val orphanSplit = new Path(tablePath, s"orphan_${UUID.randomUUID()}.split")
     fs.create(orphanSplit).close()
 
-    val splitAgeHours = 25L // Old enough for 24h retention
+    val splitAgeHours  = 25L // Old enough for 24h retention
     val splitTimestamp = System.currentTimeMillis() - (splitAgeHours * 60 * 60 * 1000)
     fs.setTimes(orphanSplit, splitTimestamp, -1)
 
     // Age version 0 to 30 hours (old for split retention, but not for txlog retention)
     val txLog0 = new Path(txLogPath, "00000000000000000000.json")
     if (fs.exists(txLog0)) {
-      val txlogAgeHours = 30L // Too old for 24h split, but not for 48h txlog
+      val txlogAgeHours  = 30L // Too old for 24h split, but not for 48h txlog
       val txlogTimestamp = System.currentTimeMillis() - (txlogAgeHours * 60 * 60 * 1000)
       fs.setTimes(txLog0, txlogTimestamp, -1)
     }

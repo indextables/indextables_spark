@@ -20,12 +20,13 @@ package io.indextables.spark.sql
 import java.sql.Timestamp
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.hadoop.fs.Path
-import org.slf4j.LoggerFactory
 
-import io.indextables.spark.transaction._
+import org.apache.hadoop.fs.Path
+
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.transaction._
+import org.slf4j.LoggerFactory
 
 /**
  * Executor for DESCRIBE INDEXTABLES TRANSACTION LOG command.
@@ -33,9 +34,9 @@ import com.fasterxml.jackson.module.scala.DefaultScalaModule
  * Reads the transaction log and returns all actions as rows with detailed information.
  */
 class DescribeTransactionLogExecutor(
-    spark: SparkSession,
-    tablePath: String,
-    includeAll: Boolean) {
+  spark: SparkSession,
+  tablePath: String,
+  includeAll: Boolean) {
 
   private val logger = LoggerFactory.getLogger(classOf[DescribeTransactionLogExecutor])
   private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
@@ -56,14 +57,11 @@ class DescribeTransactionLogExecutor(
 
       logger.info(s"Successfully read ${rows.length} actions from transaction log")
       rows
-    } finally {
+    } finally
       txLog.close()
-    }
   }
 
-  /**
-   * Read all transaction log versions from 0 to current.
-   */
+  /** Read all transaction log versions from 0 to current. */
   private def readAllVersions(txLog: TransactionLog): Seq[Row] = {
     val versions = txLog.getVersions()
     logger.info(s"Reading all versions: ${versions.length} total versions")
@@ -71,20 +69,16 @@ class DescribeTransactionLogExecutor(
     val rows = scala.collection.mutable.ArrayBuffer[Row]()
 
     for (version <- versions.sorted) {
-      val actions = txLog.readVersion(version)
+      val actions     = txLog.readVersion(version)
       val logFilePath = getLogFilePath(txLog, version)
 
-      actions.foreach { action =>
-        rows += actionToRow(version, logFilePath, action, isCheckpoint = false)
-      }
+      actions.foreach(action => rows += actionToRow(version, logFilePath, action, isCheckpoint = false))
     }
 
     rows.toSeq
   }
 
-  /**
-   * Read from latest checkpoint forward (more efficient for large transaction logs).
-   */
+  /** Read from latest checkpoint forward (more efficient for large transaction logs). */
   private def readFromCheckpoint(txLog: TransactionLog): Seq[Row] = {
     val checkpointVersion = txLog.getLastCheckpointVersion()
 
@@ -101,7 +95,7 @@ class DescribeTransactionLogExecutor(
     val allVersions = txLog.getVersions()
 
     // Read checkpoint version to get current state
-    val checkpointActions = txLog.readVersion(checkpointVersion.get)
+    val checkpointActions  = txLog.readVersion(checkpointVersion.get)
     val checkpointFilePath = getCheckpointFilePath(txLog, checkpointVersion.get)
     checkpointActions.foreach { action =>
       rows += actionToRow(checkpointVersion.get, checkpointFilePath, action, isCheckpoint = true)
@@ -111,21 +105,22 @@ class DescribeTransactionLogExecutor(
     val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion.get).sorted
 
     for (version <- versionsAfterCheckpoint) {
-      val actions = txLog.readVersion(version)
+      val actions     = txLog.readVersion(version)
       val logFilePath = getLogFilePath(txLog, version)
 
-      actions.foreach { action =>
-        rows += actionToRow(version, logFilePath, action, isCheckpoint = false)
-      }
+      actions.foreach(action => rows += actionToRow(version, logFilePath, action, isCheckpoint = false))
     }
 
     rows.toSeq
   }
 
-  /**
-   * Convert an Action to a Row with all fields populated.
-   */
-  private def actionToRow(version: Long, logFilePath: String, action: Action, isCheckpoint: Boolean): Row = {
+  /** Convert an Action to a Row with all fields populated. */
+  private def actionToRow(
+    version: Long,
+    logFilePath: String,
+    action: Action,
+    isCheckpoint: Boolean
+  ): Row = {
     action match {
       case add: AddAction =>
         Row(
@@ -157,13 +152,29 @@ class DescribeTransactionLogExecutor(
           add.docMappingJson.orNull,
           toLongOrNull(add.uncompressedSizeBytes),
           // RemoveAction specific fields
-          null, null,
+          null,
+          null,
           // SkipAction specific fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // ProtocolAction specific fields
-          null, null, null, null,
+          null,
+          null,
+          null,
+          null,
           // MetadataAction specific fields
-          null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // Checkpoint marker
           isCheckpoint
         )
@@ -180,16 +191,47 @@ class DescribeTransactionLogExecutor(
           remove.dataChange,
           remove.tags.map(toJsonString).orNull,
           // AddAction specific fields
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // RemoveAction specific fields
           remove.deletionTimestamp.map(ts => new Timestamp(ts)).orNull,
           remove.extendedFileMetadata.orNull,
           // SkipAction specific fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // ProtocolAction specific fields
-          null, null, null, null,
+          null,
+          null,
+          null,
+          null,
           // MetadataAction specific fields
-          null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // Checkpoint marker
           isCheckpoint
         )
@@ -206,9 +248,26 @@ class DescribeTransactionLogExecutor(
           null, // dataChange not applicable for skip
           null, // tags not applicable for skip
           // AddAction specific fields
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // RemoveAction specific fields
-          null, null,
+          null,
+          null,
           // SkipAction specific fields
           new Timestamp(skip.skipTimestamp),
           skip.reason,
@@ -216,9 +275,20 @@ class DescribeTransactionLogExecutor(
           skip.retryAfter.map(ts => new Timestamp(ts)).orNull,
           skip.skipCount,
           // ProtocolAction specific fields
-          null, null, null, null,
+          null,
+          null,
+          null,
+          null,
           // MetadataAction specific fields
-          null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // Checkpoint marker
           isCheckpoint
         )
@@ -229,20 +299,53 @@ class DescribeTransactionLogExecutor(
           logFilePath,
           "protocol",
           // Common fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // AddAction specific fields
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // RemoveAction specific fields
-          null, null,
+          null,
+          null,
           // SkipAction specific fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // ProtocolAction specific fields
           protocol.minReaderVersion,
           protocol.minWriterVersion,
           protocol.readerFeatures.map(features => toJsonString(features.toSeq)).orNull,
           protocol.writerFeatures.map(features => toJsonString(features.toSeq)).orNull,
           // MetadataAction specific fields
-          null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // Checkpoint marker
           isCheckpoint
         )
@@ -253,15 +356,43 @@ class DescribeTransactionLogExecutor(
           logFilePath,
           "metadata",
           // Common fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // AddAction specific fields
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // RemoveAction specific fields
-          null, null,
+          null,
+          null,
           // SkipAction specific fields
-          null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
           // ProtocolAction specific fields
-          null, null, null, null,
+          null,
+          null,
+          null,
+          null,
           // MetadataAction specific fields
           metadata.id,
           metadata.name.orNull,
@@ -284,57 +415,85 @@ class DescribeTransactionLogExecutor(
           logFilePath,
           "unknown",
           // All other fields null
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           isCheckpoint
         )
     }
   }
 
-  /**
-   * Convert a Scala object to JSON string.
-   */
-  private def toJsonString(obj: Any): String = {
-    try {
+  /** Convert a Scala object to JSON string. */
+  private def toJsonString(obj: Any): String =
+    try
       mapper.writeValueAsString(obj)
-    } catch {
+    catch {
       case e: Exception =>
         logger.warn(s"Failed to serialize object to JSON: ${e.getMessage}")
         obj.toString
     }
-  }
 
-  /**
-   * Convert Option[Long] to proper Java Long (handles case where JSON deserializes as Integer).
-   */
-  private def toLongOrNull(opt: Option[Long]): java.lang.Long = {
+  /** Convert Option[Long] to proper Java Long (handles case where JSON deserializes as Integer). */
+  private def toLongOrNull(opt: Option[Long]): java.lang.Long =
     if (opt.isEmpty) {
       null
     } else {
       // Handle both Int and Long from JSON deserialization by treating as Any
       val anyValue: Any = opt.get.asInstanceOf[Any]
       anyValue match {
-        case i: Int => java.lang.Long.valueOf(i.toLong)
+        case i: Int  => java.lang.Long.valueOf(i.toLong)
         case l: Long => java.lang.Long.valueOf(l)
-        case other => java.lang.Long.valueOf(other.toString.toLong)
+        case other   => java.lang.Long.valueOf(other.toString.toLong)
       }
     }
-  }
 
-  /**
-   * Get the full path to a transaction log file.
-   */
+  /** Get the full path to a transaction log file. */
   private def getLogFilePath(txLog: TransactionLog, version: Long): String = {
-    val txLogPath = new Path(txLog.getTablePath(), "_transaction_log")
+    val txLogPath   = new Path(txLog.getTablePath(), "_transaction_log")
     val versionFile = new Path(txLogPath, f"$version%020d.json")
     versionFile.toString
   }
 
-  /**
-   * Get the full path to a checkpoint file.
-   */
+  /** Get the full path to a checkpoint file. */
   private def getCheckpointFilePath(txLog: TransactionLog, version: Long): String = {
-    val txLogPath = new Path(txLog.getTablePath(), "_transaction_log")
+    val txLogPath      = new Path(txLog.getTablePath(), "_transaction_log")
     val checkpointFile = new Path(txLogPath, f"$version%020d.checkpoint.json")
     checkpointFile.toString
   }

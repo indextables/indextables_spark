@@ -255,13 +255,15 @@ class TransactionLogCountBatch(
         !matchesFilter(file, child)
       case _ =>
         // Log warning for unhandled filters instead of silently including
-        logger.warn(s"TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file")
+        logger.warn(
+          s"TRANSACTION LOG: Unhandled filter type: ${filter.getClass.getSimpleName}, defaulting to include file"
+        )
         true
     }
   }
 
   /** Compare two partition values for range filters. Handles strings, dates, and numeric values. */
-  private def compareValues(partitionValue: String, filterValue: String): Int = {
+  private def compareValues(partitionValue: String, filterValue: String): Int =
     // Try numeric comparison first
     try {
       val pNum = partitionValue.toDouble
@@ -272,7 +274,6 @@ class TransactionLogCountBatch(
         // Fall back to string comparison (works for ISO dates like "2024-01-01")
         partitionValue.compareTo(filterValue)
     }
-  }
 
   override def createReaderFactory(): PartitionReaderFactory =
     new TransactionLogCountReaderFactory(config)

@@ -345,7 +345,10 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     )
 
     // Should use multipart-stream-parallel strategy (new parallel async implementation)
-    assert(result.strategy == "multipart-stream-parallel", s"Expected multipart-stream-parallel, got: ${result.strategy}")
+    assert(
+      result.strategy == "multipart-stream-parallel",
+      s"Expected multipart-stream-parallel, got: ${result.strategy}"
+    )
 
     // Verify actual object in S3 BEFORE checking reported size
     val headRequest = HeadObjectRequest
@@ -357,18 +360,24 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
     val headResponse = s3Client.get.headObject(headRequest)
     val actualS3Size = headResponse.contentLength()
 
-    println(s"✅ S3 object actual size: ${actualS3Size} bytes")
+    println(s"✅ S3 object actual size: $actualS3Size bytes")
     println(s"📊 Expected size: ${content.length} bytes")
     println(s"📊 Reported size: ${result.totalSize} bytes")
 
     // First verify the ACTUAL upload was correct
-    assert(actualS3Size == content.length, s"S3 object size mismatch - actual: $actualS3Size, expected: ${content.length}")
+    assert(
+      actualS3Size == content.length,
+      s"S3 object size mismatch - actual: $actualS3Size, expected: ${content.length}"
+    )
 
     // Then check the reported size (this may be a reporting bug)
-    assert(result.totalSize == content.length, s"Reported size mismatch - reported: ${result.totalSize}, expected: ${content.length}")
+    assert(
+      result.totalSize == content.length,
+      s"Reported size mismatch - reported: ${result.totalSize}, expected: ${content.length}"
+    )
     assert(result.partCount > 0, "Should have at least one part")
 
-    println(s"✅ Streaming upload verified in S3 with correct size: ${actualS3Size} bytes")
+    println(s"✅ Streaming upload verified in S3 with correct size: $actualS3Size bytes")
   }
 
   test("Real S3: Upload performance with large merged splits config") {
@@ -456,13 +465,13 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       val tempFile = java.nio.file.Files.createTempFile("mmap-test-", ".dat")
       val fileSize = 300L * 1024 * 1024 // 300MB
 
-      println(s"📝 Creating temporary file: ${tempFile}")
+      println(s"📝 Creating temporary file: $tempFile")
       println(s"   Size: ${fileSize / (1024 * 1024)}MB")
 
       // Write random data to file
       Using.resource(new java.io.FileOutputStream(tempFile.toFile)) { fos =>
-        val random = new Random(88888)
-        val buffer = new Array[Byte](64 * 1024) // 64KB write buffer
+        val random    = new Random(88888)
+        val buffer    = new Array[Byte](64 * 1024) // 64KB write buffer
         var remaining = fileSize
 
         while (remaining > 0) {
@@ -476,12 +485,12 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
       val key = s"$testKeyPrefix/memory-mapped-test.dat"
 
       println(s"🗺️  Testing memory-mapped upload (zero-copy) to s3://$S3_BUCKET/$key")
-      println(s"   File: ${tempFile}")
+      println(s"   File: $tempFile")
       println(s"   Size: ${fileSize / (1024 * 1024)}MB")
       println(s"   Config: part size=${config.partSize / (1024 * 1024)}MB, concurrency=${config.maxConcurrency}")
 
-      val startTime = System.currentTimeMillis()
-      val result = mmapUploader.uploadFileWithMemoryMapping(S3_BUCKET, key, tempFile)
+      val startTime  = System.currentTimeMillis()
+      val result     = mmapUploader.uploadFileWithMemoryMapping(S3_BUCKET, key, tempFile)
       val uploadTime = System.currentTimeMillis() - startTime
 
       val throughputMBps = (fileSize.toDouble / (1024 * 1024)) / (uploadTime / 1000.0)
@@ -507,7 +516,10 @@ class RealS3MultipartUploaderTest extends RealS3TestBase {
         .build()
 
       val headResponse = s3Client.get.headObject(headRequest)
-      assert(headResponse.contentLength() == fileSize, s"S3 object size mismatch: expected $fileSize, got ${headResponse.contentLength()}")
+      assert(
+        headResponse.contentLength() == fileSize,
+        s"S3 object size mismatch: expected $fileSize, got ${headResponse.contentLength()}"
+      )
 
       println(f"✅ Memory-mapped upload verified in S3: ${headResponse.contentLength()} bytes")
       println(f"✅ Throughput: $throughputMBps%.2f MB/s")

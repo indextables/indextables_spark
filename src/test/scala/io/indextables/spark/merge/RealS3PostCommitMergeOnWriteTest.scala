@@ -140,16 +140,16 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
 
   /** Clean up test data from S3. */
   private def cleanupTestData(): Unit =
-    try {
+    try
       logger.info(s"ℹ️  Test data cleanup skipped (unique paths used): $testBasePath")
-    } catch {
+    catch {
       case e: Exception =>
         logger.warn(s"⚠️  Warning: Could not clean up test data: ${e.getMessage}")
     }
 
   /**
-   * Count the number of split files in the transaction log.
-   * This gives us the current active split count after all merges.
+   * Count the number of split files in the transaction log. This gives us the current active split count after all
+   * merges.
    */
   private def countActiveSplits(tablePath: String): Int = {
     import org.apache.hadoop.fs.Path
@@ -164,7 +164,7 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
     )
 
     val activeSplits = transactionLog.listFiles()
-    val count = activeSplits.size
+    val count        = activeSplits.size
 
     logger.info(s"📊 Active splits in transaction log: $count")
     count
@@ -190,13 +190,15 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       )
 
     // Write with merge-on-write enabled and very low threshold to ensure merge triggers
-    val writeOptions = getWriteOptions(Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.1", // Very low threshold
-      "spark.indextables.mergeOnWrite.targetSize" -> "1M", // Small target to create multiple groups
-      "spark.indextables.indexwriter.batchSize" -> "100", // Force multiple splits
-      "spark.indextables.mergeOnWrite.minDiskSpaceGB" -> "1" // Allow test to run with limited disk
-    ))
+    val writeOptions = getWriteOptions(
+      Map(
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.1", // Very low threshold
+        "spark.indextables.mergeOnWrite.targetSize"           -> "1M",  // Small target to create multiple groups
+        "spark.indextables.indexwriter.batchSize"             -> "100", // Force multiple splits
+        "spark.indextables.mergeOnWrite.minDiskSpaceGB"       -> "1"    // Allow test to run with limited disk
+      )
+    )
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -241,11 +243,13 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Write with merge-on-write enabled but very high threshold to prevent merge
-    val writeOptions = getWriteOptions(Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "100.0", // Very high threshold
-      "spark.indextables.mergeOnWrite.targetSize" -> "1M"
-    ))
+    val writeOptions = getWriteOptions(
+      Map(
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "100.0", // Very high threshold
+        "spark.indextables.mergeOnWrite.targetSize"           -> "1M"
+      )
+    )
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -296,15 +300,17 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       )
 
     // Write with custom merge options to verify they propagate
-    val writeOptions = getWriteOptions(Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.1",
-      "spark.indextables.mergeOnWrite.targetSize" -> "1M",
-      "spark.indextables.merge.heapSize" -> "512M", // Custom heap size
-      "spark.indextables.merge.debug" -> "true", // Enable debug
-      "spark.indextables.indexwriter.batchSize" -> "50",
-      "spark.indextables.mergeOnWrite.minDiskSpaceGB" -> "1"
-    ))
+    val writeOptions = getWriteOptions(
+      Map(
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.1",
+        "spark.indextables.mergeOnWrite.targetSize"           -> "1M",
+        "spark.indextables.merge.heapSize"                    -> "512M", // Custom heap size
+        "spark.indextables.merge.debug"                       -> "true", // Enable debug
+        "spark.indextables.indexwriter.batchSize"             -> "50",
+        "spark.indextables.mergeOnWrite.minDiskSpaceGB"       -> "1"
+      )
+    )
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -343,13 +349,15 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
       )
 
     // Write with partitioning and merge-on-write
-    val writeOptions = getWriteOptions(Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.5",
-      "spark.indextables.mergeOnWrite.targetSize" -> "500K",
-      "spark.indextables.indexwriter.batchSize" -> "50",
-      "spark.indextables.mergeOnWrite.minDiskSpaceGB" -> "1"
-    ))
+    val writeOptions = getWriteOptions(
+      Map(
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "0.5",
+        "spark.indextables.mergeOnWrite.targetSize"           -> "500K",
+        "spark.indextables.indexwriter.batchSize"             -> "50",
+        "spark.indextables.mergeOnWrite.minDiskSpaceGB"       -> "1"
+      )
+    )
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -383,13 +391,15 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
 
     logger.info(s"Testing post-commit merge-on-write with multiple appends at: $tablePath")
 
-    val writeOptions = getWriteOptions(Map(
-      "spark.indextables.mergeOnWrite.enabled" -> "true",
-      "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "5.0", // Higher threshold
-      "spark.indextables.mergeOnWrite.targetSize" -> "500K",
-      "spark.indextables.indexwriter.batchSize" -> "50",
-      "spark.indextables.mergeOnWrite.minDiskSpaceGB" -> "1"
-    ))
+    val writeOptions = getWriteOptions(
+      Map(
+        "spark.indextables.mergeOnWrite.enabled"              -> "true",
+        "spark.indextables.mergeOnWrite.mergeGroupMultiplier" -> "5.0", // Higher threshold
+        "spark.indextables.mergeOnWrite.targetSize"           -> "500K",
+        "spark.indextables.indexwriter.batchSize"             -> "50",
+        "spark.indextables.mergeOnWrite.minDiskSpaceGB"       -> "1"
+      )
+    )
 
     // First write
     val df1 = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")

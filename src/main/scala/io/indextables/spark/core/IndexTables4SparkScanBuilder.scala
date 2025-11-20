@@ -166,7 +166,11 @@ class IndexTables4SparkScanBuilder(
     }
 
   /** Create a GROUP BY aggregation scan. */
-  private def createGroupByAggregateScan(aggregation: Aggregation, groupByColumns: Array[String], effectiveFilters: Array[Filter]): Scan = {
+  private def createGroupByAggregateScan(
+    aggregation: Aggregation,
+    groupByColumns: Array[String],
+    effectiveFilters: Array[Filter]
+  ): Scan = {
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
     // Check if we can use transaction log optimization for partition-only GROUP BY COUNT
@@ -271,7 +275,11 @@ class IndexTables4SparkScanBuilder(
   }
 
   /** Check if we can optimize GROUP BY partition columns COUNT using transaction log. */
-  private def canUseTransactionLogGroupByCount(aggregation: Aggregation, groupByColumns: Array[String], effectiveFilters: Array[Filter]): Boolean = {
+  private def canUseTransactionLogGroupByCount(
+    aggregation: Aggregation,
+    groupByColumns: Array[String],
+    effectiveFilters: Array[Filter]
+  ): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate.{Count, CountStar}
 
     // Check 1: All GROUP BY columns must be partition columns
@@ -314,7 +322,9 @@ class IndexTables4SparkScanBuilder(
     new TransactionLogCountScan(sparkSession, transactionLog, effectiveFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    logger.debug(s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters")
+    logger.debug(
+      s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters"
+    )
     filters.foreach { filter =>
       logger.debug(s"PUSHFILTERS:   - Input filter: $filter (${filter.getClass.getSimpleName})")
     }
@@ -336,7 +346,9 @@ class IndexTables4SparkScanBuilder(
     IndexTables4SparkScanBuilder.getCurrentRelation() match {
       case Some(relation) =>
         IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
-        logger.debug(s"PUSHFILTERS: Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}")
+        logger.debug(
+          s"PUSHFILTERS: Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}"
+        )
       case None =>
         logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
     }
@@ -502,29 +514,28 @@ class IndexTables4SparkScanBuilder(
     import org.apache.spark.sql.sources._
 
     filter match {
-      case EqualTo(attribute, _)       => isFieldSuitableForExactMatching(attribute)
-      case EqualNullSafe(attribute, _) => isFieldSuitableForExactMatching(attribute)
-      case GreaterThan(attribute, _)        => true  // Support range on all fields (both regular and JSON)
-      case GreaterThanOrEqual(attribute, _) => true  // Support range on all fields (both regular and JSON)
-      case LessThan(attribute, _)           => true  // Support range on all fields (both regular and JSON)
-      case LessThanOrEqual(attribute, _)    => true  // Support range on all fields (both regular and JSON)
-      case _: In                       => true
-      case IsNull(attribute)           => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
-      case IsNotNull(attribute)        => !attribute.contains(".")  // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
-      case And(left, right)            => isSupportedFilter(left) && isSupportedFilter(right)
-      case Or(left, right)             => isSupportedFilter(left) && isSupportedFilter(right)
-      case Not(child)                  => isSupportedFilter(child) // NOT is supported only if child is supported
-      case _: StringStartsWith => false // Tantivy does best-effort, Spark applies final filtering
-      case _: StringEndsWith   => false // Tantivy does best-effort, Spark applies final filtering
+      case EqualTo(attribute, _)            => isFieldSuitableForExactMatching(attribute)
+      case EqualNullSafe(attribute, _)      => isFieldSuitableForExactMatching(attribute)
+      case GreaterThan(attribute, _)        => true // Support range on all fields (both regular and JSON)
+      case GreaterThanOrEqual(attribute, _) => true // Support range on all fields (both regular and JSON)
+      case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
+      case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
+      case _: In                            => true
+      case IsNull(attribute) => !attribute.contains(".") // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
+      case IsNotNull(attribute) => !attribute.contains(".") // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
+      case And(left, right)    => isSupportedFilter(left) && isSupportedFilter(right)
+      case Or(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
+      case Not(child)          => isSupportedFilter(child) // NOT is supported only if child is supported
+      case _: StringStartsWith => false                    // Tantivy does best-effort, Spark applies final filtering
+      case _: StringEndsWith   => false                    // Tantivy does best-effort, Spark applies final filtering
       case _: StringContains   => true
       case _                   => false
     }
   }
 
   /** Check if an attribute references a nested JSON field (contains dot notation). */
-  private def isNestedJsonField(attribute: String): Boolean = {
+  private def isNestedJsonField(attribute: String): Boolean =
     attribute.contains(".")
-  }
 
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
     // For V2 predicates, we need to inspect the actual predicate type
@@ -537,8 +548,8 @@ class IndexTables4SparkScanBuilder(
 
   /**
    * Check if a field is suitable for exact matching at the data source level. String fields (raw tokenizer) support
-   * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches.
-   * Nested JSON fields (containing dots) are always supported for pushdown via JsonPredicateTranslator.
+   * exact matching. Text fields (default tokenizer) should be filtered by Spark for exact matches. Nested JSON fields
+   * (containing dots) are always supported for pushdown via JsonPredicateTranslator.
    */
   private def isFieldSuitableForExactMatching(attribute: String): Boolean = {
     // Check if this is a nested field (JSON field)
@@ -678,8 +689,8 @@ class IndexTables4SparkScanBuilder(
 
     // For nested JSON fields (containing dots), check if the field itself OR its parent struct is marked as fast
     if (fieldName.contains(".")) {
-      val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
-      val isFieldFast = fastFields.contains(fieldName)
+      val parentField  = fieldName.substring(0, fieldName.lastIndexOf('.'))
+      val isFieldFast  = fastFields.contains(fieldName)
       val isParentFast = fastFields.contains(parentField)
 
       if (isFieldFast || isParentFast) {
@@ -694,7 +705,8 @@ class IndexTables4SparkScanBuilder(
     // For top-level fields, check directly
     if (!fastFields.contains(fieldName)) {
       logger.debug(
-        s"FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields.mkString(", ")})"
+        s"FAST FIELD VALIDATION: Field '$fieldName' is not marked as fast in schema (available fast fields: ${fastFields
+            .mkString(", ")})"
       )
       return false
     }
@@ -806,8 +818,9 @@ class IndexTables4SparkScanBuilder(
         import scala.jdk.CollectionConverters._
 
         val mappingJson = existingDocMapping.get
-        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Full docMappingJson: ${mappingJson.take(500)}${if (mappingJson.length > 500) "..." else ""}")
-        val docMapping  = JsonUtil.mapper.readTree(mappingJson)
+        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Full docMappingJson: ${mappingJson
+            .take(500)}${if (mappingJson.length > 500) "..." else ""}")
+        val docMapping = JsonUtil.mapper.readTree(mappingJson)
 
         if (docMapping.isArray) {
           val fastFields = docMapping.asScala.flatMap { fieldNode =>
@@ -889,8 +902,8 @@ class IndexTables4SparkScanBuilder(
     val missingFastFields = nonPartitionFilterFields.filterNot { fieldName =>
       if (fieldName.contains(".")) {
         // Nested field - check both field and parent
-        val parentField = fieldName.substring(0, fieldName.lastIndexOf('.'))
-        val isFieldFast = fastFields.contains(fieldName)
+        val parentField  = fieldName.substring(0, fieldName.lastIndexOf('.'))
+        val isFieldFast  = fastFields.contains(fieldName)
         val isParentFast = fastFields.contains(parentField)
         isFieldFast || isParentFast
       } else {
@@ -1264,7 +1277,6 @@ object IndexTables4SparkScanBuilder {
   // We track the relation's identity hash (stable within query, different for self-joins) to avoid clearing mid-query
   private val currentRelation: ThreadLocal[Option[AnyRef]] = ThreadLocal.withInitial(() => None)
   private val currentRelationId: ThreadLocal[Option[Int]]  = ThreadLocal.withInitial(() => None)
-
 
   /** Set the current relation object for this thread (called by V2IndexQueryExpressionRule). */
   def setCurrentRelation(relation: AnyRef): Unit = {

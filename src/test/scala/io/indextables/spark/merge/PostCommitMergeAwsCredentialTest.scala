@@ -17,15 +17,14 @@
 
 package io.indextables.spark.merge
 
-import org.scalatest.BeforeAndAfterEach
-
 import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Test to replicate and fix AWS credential passing in post-commit merge-on-write.
  *
- * Issue: AWS credentials passed as write options were not properly forwarded
- * to the MERGE SPLITS executor, resulting in "authorization header is malformed" errors.
+ * Issue: AWS credentials passed as write options were not properly forwarded to the MERGE SPLITS executor, resulting in
+ * "authorization header is malformed" errors.
  *
  * These tests use REAL S3 to replicate the production issue.
  */
@@ -34,23 +33,26 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[PostCommitMergeAwsCredentialTest])
 
   // S3 test configuration - uses environment variables for credentials
-  private val s3Bucket = sys.env.getOrElse("TEST_S3_BUCKET", "indextables-test")
+  private val s3Bucket     = sys.env.getOrElse("TEST_S3_BUCKET", "indextables-test")
   private val awsAccessKey = sys.env.getOrElse("AWS_ACCESS_KEY_ID", "")
   private val awsSecretKey = sys.env.getOrElse("AWS_SECRET_ACCESS_KEY", "")
-  private val awsRegion = sys.env.getOrElse("AWS_REGION", "us-west-2")
+  private val awsRegion    = sys.env.getOrElse("AWS_REGION", "us-west-2")
 
   // Skip tests if S3 credentials not available
-  private def skipIfNoS3Credentials(): Unit = {
-    assume(awsAccessKey.nonEmpty && awsSecretKey.nonEmpty, "S3 credentials not available - set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
-  }
+  private def skipIfNoS3Credentials(): Unit =
+    assume(
+      awsAccessKey.nonEmpty && awsSecretKey.nonEmpty,
+      "S3 credentials not available - set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+    )
 
   test("should pass AWS credentials from write options to merge executor") {
     val tablePath = s"file://$tempDir/test_aws_creds"
     logger.info(s"Testing AWS credential passing at: $tablePath")
 
     // Create test data that will trigger merge (small splits with low threshold)
-    val df = spark.range(0, 1000)
-      .repartition(10)  // Create 10 small partitions
+    val df = spark
+      .range(0, 1000)
+      .repartition(10) // Create 10 small partitions
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Write with merge-on-write enabled AND AWS credentials as options
@@ -59,9 +61,9 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")  // Very low threshold
-      .option("spark.indextables.mergeOnWrite.targetSize", "1M")  // Small target
-      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")  // Allow test to run
+      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low threshold
+      .option("spark.indextables.mergeOnWrite.targetSize", "1M")            // Small target
+      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")         // Allow test to run
       // Mock AWS credentials (these would be real in production)
       .option("spark.indextables.aws.accessKey", "AKIAIOSFODNN7EXAMPLE")
       .option("spark.indextables.aws.secretKey", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
@@ -86,7 +88,8 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     val tablePath = s"file://$tempDir/test_missing_creds"
     logger.info(s"Testing missing credential handling at: $tablePath")
 
-    val df = spark.range(0, 100)
+    val df = spark
+      .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Write with merge-on-write enabled but NO AWS credentials
@@ -116,7 +119,8 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     // Enable debug logging to verify credential passing
     val previousLevel = logger.getClass.getName
 
-    val df = spark.range(0, 500)
+    val df = spark
+      .range(0, 500)
       .repartition(5)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
@@ -152,7 +156,8 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     spark.conf.set("spark.indextables.aws.accessKey", "CONF_ACCESS_KEY")
     spark.conf.set("spark.indextables.aws.secretKey", "CONF_SECRET_KEY")
 
-    val df = spark.range(0, 200)
+    val df = spark
+      .range(0, 200)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Write with DIFFERENT credentials in options - these should take priority

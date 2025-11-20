@@ -21,19 +21,19 @@ import java.io.File
 import java.nio.file.Files
 import java.util.UUID
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
 import org.apache.spark.sql.SparkSession
+
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-/**
- * Error handling and edge case tests for PURGE INDEXTABLE command.
- */
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
+
+/** Error handling and edge case tests for PURGE INDEXTABLE command. */
 class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: String = _
-  var fs: FileSystem = _
+  var tempDir: String     = _
+  var fs: FileSystem      = _
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -72,14 +72,15 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     val nonExistentPath = s"$tempDir/non_existent_table"
 
     // Should handle gracefully, not throw exception
-    val result: Option[Array[org.apache.spark.sql.Row]] = try {
-      val rows = spark.sql(s"PURGE INDEXTABLE '$nonExistentPath' DRY RUN").collect()
-      Some(rows)
-    } catch {
-      case e: Exception =>
-        // Acceptable to throw exception for non-existent table
-        None
-    }
+    val result: Option[Array[org.apache.spark.sql.Row]] =
+      try {
+        val rows = spark.sql(s"PURGE INDEXTABLE '$nonExistentPath' DRY RUN").collect()
+        Some(rows)
+      } catch {
+        case e: Exception =>
+          // Acceptable to throw exception for non-existent table
+          None
+      }
 
     // Either succeeds with 0 files or throws appropriate exception
     if (result.isDefined) {
@@ -121,7 +122,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
 
     // Zero retention should be handled (deletes nothing newer than current time)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
     assert(metrics.getString(0) == "DRY_RUN")
   }
@@ -134,7 +135,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     fs.mkdirs(new Path(s"$tablePath/_transaction_log"))
 
     // Should handle gracefully
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Should report no orphaned files
@@ -152,7 +153,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Get transaction log files
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath        = new Path(s"$tablePath/_transaction_log")
     val txLogFilesBefore = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     assert(txLogFilesBefore.nonEmpty, "Transaction log should have files")
@@ -182,7 +183,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     fs.setTimes(orphan, oldTime, -1)
 
     // Very large retention period (1000 days)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1000 DAYS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1000 DAYS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Should find 0 files eligible (all files are newer than 1000 days)
@@ -211,7 +212,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
 
     // Purge should still work correctly
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete only the orphan, not the newly written file
@@ -246,16 +247,14 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     }
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete all special character files
     assert(metrics.getLong(2) >= 3)
 
     // Verify files are deleted
-    specialOrphans.foreach { file =>
-      assert(!fs.exists(file), s"Special character file $file should be deleted")
-    }
+    specialOrphans.foreach(file => assert(!fs.exists(file), s"Special character file $file should be deleted"))
   }
 
   test("PURGE INDEXTABLE should handle deeply nested partition directories") {
@@ -272,7 +271,8 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
 
     data.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .partitionBy("year", "month", "day").mode("overwrite")
+      .partitionBy("year", "month", "day")
+      .mode("overwrite")
       .save(tablePath)
 
     // Create orphaned file in deep partition
@@ -282,7 +282,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     fs.setTimes(deepOrphan, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should find and delete the orphan in deep partition
@@ -311,14 +311,15 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     file.setReadOnly()
 
     // Try to purge - should handle permission errors gracefully
-    val result: Option[Array[org.apache.spark.sql.Row]] = try {
-      val rows = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
-      Some(rows)
-    } catch {
-      case e: Exception =>
-        // Permission errors are acceptable
-        None
-    }
+    val result: Option[Array[org.apache.spark.sql.Row]] =
+      try {
+        val rows = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+        Some(rows)
+      } catch {
+        case e: Exception =>
+          // Permission errors are acceptable
+          None
+      }
 
     // Either succeeds with partial success or throws appropriate exception
     if (result.isDefined) {
@@ -363,14 +364,17 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     fs.setTimes(file2, oldTime, -1)
 
     // Purge
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Check size metrics
-    val sizeMB = metrics.getDouble(3)
+    val sizeMB     = metrics.getDouble(3)
     val expectedMB = (size1 + size2) / (1024.0 * 1024.0)
 
-    assert(math.abs(sizeMB - expectedMB) < 0.01, s"Size metrics should be accurate: expected $expectedMB MB, got $sizeMB MB")
+    assert(
+      math.abs(sizeMB - expectedMB) < 0.01,
+      s"Size metrics should be accurate: expected $expectedMB MB, got $sizeMB MB"
+    )
   }
 
   test("PURGE INDEXTABLE should handle case-insensitive file extensions") {
@@ -392,7 +396,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     fs.setTimes(normalOrphan, oldTime, -1)
 
     // Purge should find .split files regardless of implementation
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Should delete the orphan
@@ -410,7 +414,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // Purge should not crash on edge cases
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     // Should complete successfully
@@ -431,7 +435,7 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
     // Command should handle gracefully without following symlinks
 
     // Purge should complete without error
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' DRY RUN").collect()
     val metrics = result(0).getStruct(1)
 
     assert(metrics.getString(0) == "DRY_RUN")

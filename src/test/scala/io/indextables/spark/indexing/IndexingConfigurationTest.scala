@@ -221,11 +221,11 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       // Verify the JSON field can be read back with correct data
       // Note: JSON field order may change during serialization/deserialization
-      val doc1 = results.find(_.getString(0) == "doc1").get
+      val doc1     = results.find(_.getString(0) == "doc1").get
       val doc1Json = doc1.getString(1)
       doc1Json should (include("john") and include("30"))
 
-      val doc2 = results.find(_.getString(0) == "doc2").get
+      val doc2     = results.find(_.getString(0) == "doc2").get
       val doc2Json = doc2.getString(1)
       doc2Json should (include("jane") and include("25"))
 

@@ -29,14 +29,13 @@ import io.indextables.spark.TestBase
  * Comprehensive test to validate timestamp data skipping and query correctness for V2 DataSource.
  *
  * Tests specifically for the bug where TimestampType is not handled in:
- * 1. StatisticsCalculator.convertToString (line 51-61)
- * 2. StatisticsCalculator.compareValues (line 63-77)
- * 3. IndexTables4SparkScan.convertValuesForComparison (line 481-586)
+ *   1. StatisticsCalculator.convertToString (line 51-61) 2. StatisticsCalculator.compareValues (line 63-77) 3.
+ *      IndexTables4SparkScan.convertValuesForComparison (line 481-586)
  *
  * This causes:
- * - Incorrect min/max statistics storage (toString instead of proper microseconds)
- * - Failed data skipping (always returns 0 for comparison)
- * - Incorrect BETWEEN query results (string comparison instead of numeric)
+ *   - Incorrect min/max statistics storage (toString instead of proper microseconds)
+ *   - Failed data skipping (always returns 0 for comparison)
+ *   - Incorrect BETWEEN query results (string comparison instead of numeric)
  */
 class TimestampDataSkippingAndQueryTest extends TestBase {
 
@@ -92,19 +91,25 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       // Write each dataset separately to ensure separate split files
       // Force single partition per write to ensure we get distinct splits
       println("💾 Writing split 1...")
-      split1Data.coalesce(1).write
+      split1Data
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       println("💾 Writing split 2...")
-      split2Data.coalesce(1).write
+      split2Data
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Append)
         .save(tempPath)
 
       println("💾 Writing split 3...")
-      split3Data.coalesce(1).write
+      split3Data
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Append)
         .save(tempPath)
@@ -118,7 +123,8 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       // Read transaction log to verify split files
       import org.apache.hadoop.fs.Path
       val fs = new Path(tempPath).getFileSystem(spark.sparkContext.hadoopConfiguration)
-      val splitFiles = fs.listStatus(new Path(tempPath))
+      val splitFiles = fs
+        .listStatus(new Path(tempPath))
         .filter(_.getPath.getName.endsWith(".split"))
         .map(_.getPath.getName)
         .sorted
@@ -144,7 +150,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       println("\n🧪 Test 1: BETWEEN query with SQL timestamp strings")
       // Use actual Timestamp objects to avoid timezone issues
       val betweenStart = Timestamp.from(Instant.parse("2025-11-07T04:32:46.402Z"))
-      val betweenEnd = Timestamp.from(Instant.parse("2025-11-07T05:00:01.101Z"))
+      val betweenEnd   = Timestamp.from(Instant.parse("2025-11-07T05:00:01.101Z"))
       val betweenQuery = readData.filter(
         col("timestamp_field").between(betweenStart, betweenEnd)
       )
@@ -249,7 +255,9 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       println("📝 Test data:")
       testData.show(false)
 
-      testData.coalesce(1).write
+      testData
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
@@ -262,7 +270,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       println("\n🧪 Testing comparison operators...")
 
       // Test: = (equal) - Use actual Timestamp to avoid timezone issues
-      val ts3 = Timestamp.from(Instant.parse("2025-11-07T05:00:00.000Z"))
+      val ts3          = Timestamp.from(Instant.parse("2025-11-07T05:00:00.000Z"))
       val equalResults = readData.filter($"ts" === ts3).collect()
       println(s"Equal (=) test: ${equalResults.length} rows")
       assert(equalResults.length == 1, s"Expected 1 row, got ${equalResults.length}")
@@ -304,17 +312,19 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
       // Test microsecond precision (Spark timestamps are microsecond precision)
       val baseTime = Instant.parse("2025-11-07T12:00:00.000000Z")
       val testData = Seq(
-        (1, Timestamp.from(baseTime.plusNanos(1000))),      // +1 microsecond
-        (2, Timestamp.from(baseTime.plusNanos(500000))),    // +500 microseconds
-        (3, Timestamp.from(baseTime.plusNanos(1000000))),   // +1000 microseconds (1 ms)
-        (4, Timestamp.from(baseTime.plusNanos(2000000)))    // +2000 microseconds (2 ms)
+        (1, Timestamp.from(baseTime.plusNanos(1000))),    // +1 microsecond
+        (2, Timestamp.from(baseTime.plusNanos(500000))),  // +500 microseconds
+        (3, Timestamp.from(baseTime.plusNanos(1000000))), // +1000 microseconds (1 ms)
+        (4, Timestamp.from(baseTime.plusNanos(2000000)))  // +2000 microseconds (2 ms)
       ).toDF("id", "ts")
 
       println("📝 Microsecond precision test data:")
       testData.show(false)
       testData.select($"id", $"ts", $"ts".cast("long").as("micros_since_epoch")).show(false)
 
-      testData.coalesce(1).write
+      testData
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
@@ -333,7 +343,7 @@ class TimestampDataSkippingAndQueryTest extends TestBase {
 
       // Test range query with microsecond precision
       val rangeStart = baseTime.plusNanos(250000)  // +250 microseconds
-      val rangeEnd = baseTime.plusNanos(1500000)   // +1500 microseconds
+      val rangeEnd   = baseTime.plusNanos(1500000) // +1500 microseconds
 
       val rangeQuery = readData.filter(
         $"ts".between(

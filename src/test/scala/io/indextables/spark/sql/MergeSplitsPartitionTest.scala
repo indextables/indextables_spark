@@ -363,7 +363,18 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     )
 
     // Create empty configs for test
-    val awsConfig = SerializableAwsConfig("", "", None, "us-east-1", None, false, None, None, java.lang.Long.valueOf(1073741824L), false)
+    val awsConfig = SerializableAwsConfig(
+      "",
+      "",
+      None,
+      "us-east-1",
+      None,
+      false,
+      None,
+      None,
+      java.lang.Long.valueOf(1073741824L),
+      false
+    )
     val azureConfig = SerializableAzureConfig(None, None, None, None, None, None, None, None)
 
     // Use reflection to access private createMergedSplitDistributed method from companion object

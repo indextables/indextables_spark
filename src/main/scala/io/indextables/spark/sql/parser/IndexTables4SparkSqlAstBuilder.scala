@@ -178,12 +178,12 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       // Extract retention period (convert to hours)
       val retentionHours: Option[Long] = if (ctx.retentionNumber != null && ctx.retentionUnit != null) {
         val number = ctx.retentionNumber.getText.toLong
-        val unit = ctx.retentionUnit.getText.toUpperCase
+        val unit   = ctx.retentionUnit.getText.toUpperCase
 
         val hours = unit match {
-          case "DAYS" => number * 24
+          case "DAYS"  => number * 24
           case "HOURS" => number
-          case other => throw new IllegalArgumentException(s"Invalid retention unit: $other")
+          case other   => throw new IllegalArgumentException(s"Invalid retention unit: $other")
         }
 
         logger.debug(s"Found retention: $number $unit = $hours hours")
@@ -194,22 +194,23 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       }
 
       // Extract transaction log retention period (convert to milliseconds)
-      val txLogRetentionDuration: Option[Long] = if (ctx.txLogRetentionNumber != null && ctx.txLogRetentionUnit != null) {
-        val number = ctx.txLogRetentionNumber.getText.toLong
-        val unit = ctx.txLogRetentionUnit.getText.toUpperCase
+      val txLogRetentionDuration: Option[Long] =
+        if (ctx.txLogRetentionNumber != null && ctx.txLogRetentionUnit != null) {
+          val number = ctx.txLogRetentionNumber.getText.toLong
+          val unit   = ctx.txLogRetentionUnit.getText.toUpperCase
 
-        val milliseconds = unit match {
-          case "DAYS" => number * 24 * 60 * 60 * 1000
-          case "HOURS" => number * 60 * 60 * 1000
-          case other => throw new IllegalArgumentException(s"Invalid transaction log retention unit: $other")
+          val milliseconds = unit match {
+            case "DAYS"  => number * 24 * 60 * 60 * 1000
+            case "HOURS" => number * 60 * 60 * 1000
+            case other   => throw new IllegalArgumentException(s"Invalid transaction log retention unit: $other")
+          }
+
+          logger.debug(s"Found transaction log retention: $number $unit = $milliseconds ms")
+          Some(milliseconds)
+        } else {
+          logger.debug("No transaction log retention period specified, will use default")
+          None
         }
-
-        logger.debug(s"Found transaction log retention: $number $unit = $milliseconds ms")
-        Some(milliseconds)
-      } else {
-        logger.debug("No transaction log retention period specified, will use default")
-        None
-      }
 
       // Extract DRY RUN flag
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
@@ -304,7 +305,9 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         logger.debug(s"Parsed table ID: $tableId")
         tableId.mkString(".")
       } else {
-        throw new IllegalArgumentException("DESCRIBE INDEXTABLES TRANSACTION LOG requires either a path or table identifier")
+        throw new IllegalArgumentException(
+          "DESCRIBE INDEXTABLES TRANSACTION LOG requires either a path or table identifier"
+        )
       }
 
       // Extract INCLUDE ALL flag

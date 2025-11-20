@@ -70,7 +70,7 @@ class IndexTables4SparkWriteBuilder(
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     if (!serializedOptions.contains(configKey)) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
-      val maxParallelism = Math.max(1, availableProcessors / 4)
+      val maxParallelism      = Math.max(1, availableProcessors / 4)
       logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
       serializedOptions = serializedOptions + (configKey -> maxParallelism.toString)
     }
@@ -96,7 +96,9 @@ class IndexTables4SparkWriteBuilder(
         }
     }
 
-    logger.debug(s"WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled, options = ${tantivyOptions.optimizeWrite}")
+    logger.debug(
+      s"WriteBuilder decision: optimizeWriteEnabled = $optimizeWriteEnabled, options = ${tantivyOptions.optimizeWrite}"
+    )
 
     if (optimizeWriteEnabled) {
       logger.info("Using IndexTables4SparkOptimizedWrite with RequiresDistributionAndOrdering")

@@ -24,8 +24,8 @@ import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Tests to verify that complex data types (Struct, Array, Map) are now supported via JSON fields,
- * and that other unsupported types are explicitly rejected.
+ * Tests to verify that complex data types (Struct, Array, Map) are now supported via JSON fields, and that other
+ * unsupported types are explicitly rejected.
  */
 class UnsupportedTypesTest extends TestBase with Matchers {
 

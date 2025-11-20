@@ -22,11 +22,11 @@ import io.indextables.spark.TestBase
 /**
  * Test for appending to tables with JSON fields configured via typemap.
  *
- * Bug: First write with typemap.field=json succeeds, but subsequent appends fail with:
- * "Field 'user_identity' type mismatch: existing table has object field, cannot append with json configuration"
+ * Bug: First write with typemap.field=json succeeds, but subsequent appends fail with: "Field 'user_identity' type
+ * mismatch: existing table has object field, cannot append with json configuration"
  *
- * This is because JSON fields are stored as "object" type in tantivy, but the config specifies "json".
- * The validation needs to recognize these as equivalent.
+ * This is because JSON fields are stored as "object" type in tantivy, but the config specifies "json". The validation
+ * needs to recognize these as equivalent.
  */
 class JsonFieldAppendTest extends TestBase {
 

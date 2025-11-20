@@ -20,29 +20,32 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
+
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Tests for transaction log cleanup functionality in PURGE INDEXTABLE command.
  *
  * These tests validate:
- *  - Old transaction log files are deleted when past retention period
- *  - DRY RUN mode previews transaction log cleanup without deleting
- *  - Explicit TRANSACTION LOG RETENTION parameter works correctly
- *  - Files older than checkpoint are candidates for deletion
- *  - Recent transaction log files are preserved
+ *   - Old transaction log files are deleted when past retention period
+ *   - DRY RUN mode previews transaction log cleanup without deleting
+ *   - Explicit TRANSACTION LOG RETENTION parameter works correctly
+ *   - Files older than checkpoint are candidates for deletion
+ *   - Recent transaction log files are preserved
  */
 class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: String = _
-  var fs: FileSystem = _
+  var tempDir: String     = _
+  var fs: FileSystem      = _
 
   override def beforeEach(): Unit = {
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("PurgeOrphanedSplitsTransactionLogCleanupTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
@@ -65,7 +68,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
   }
 
   test("PURGE INDEXTABLE should delete old transaction log files with default retention") {
-    val tablePath = s"$tempDir/txlog_cleanup_test"
+    val tablePath    = s"$tempDir/txlog_cleanup_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -77,7 +80,8 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // We want to create up to version 10+ so we have old files to clean up
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
@@ -90,17 +94,17 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     assert(filesBeforeCleanup.exists(_.matches("\\d{20}\\.json")), "Should have version files")
 
     // Explicitly age transaction log files 0-8 to 25 hours ago to exceed 24-hour retention
-    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000)  // 25 hours ago
+    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000) // 25 hours ago
     (0 to 8).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
       if (fs.exists(versionFile)) {
-        fs.setTimes(versionFile, oldTimestamp, -1)  // Set modification time, keep access time
+        fs.setTimes(versionFile, oldTimestamp, -1) // Set modification time, keep access time
       }
     }
 
     // Run purge (non-dry-run)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result                 = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
+    val metrics                = result(0).getStruct(1)
     val transactionLogsDeleted = metrics.getLong(5) // Field index for transactionLogsDeleted
 
     // Note: Transaction logs may or may not be deleted depending on whether:
@@ -118,7 +122,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
   }
 
   test("PURGE INDEXTABLE DRY RUN should preview transaction log cleanup without deleting") {
-    val tablePath = s"$tempDir/txlog_dryrun_test"
+    val tablePath    = s"$tempDir/txlog_dryrun_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -128,27 +132,28 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write data to create multiple versions and checkpoints
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath         = new Path(s"$tablePath/_transaction_log")
     val filesBeforeDryRun = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     // Explicitly age transaction log files 0-8 to 25 hours ago to exceed 24-hour retention
-    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000)  // 25 hours ago
+    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000) // 25 hours ago
     (0 to 8).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
       if (fs.exists(versionFile)) {
-        fs.setTimes(versionFile, oldTimestamp, -1)  // Set modification time, keep access time
+        fs.setTimes(versionFile, oldTimestamp, -1) // Set modification time, keep access time
       }
     }
 
     // Run DRY RUN
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
-    val metrics = result(0).getStruct(1)
-    val status = metrics.getString(0)
+    val result                 = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN").collect()
+    val metrics                = result(0).getStruct(1)
+    val status                 = metrics.getString(0)
     val transactionLogsDeleted = metrics.getLong(5)
 
     // Verify it's a dry run
@@ -163,7 +168,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
   }
 
   test("PURGE INDEXTABLE with explicit TRANSACTION LOG RETENTION should respect custom retention") {
-    val tablePath = s"$tempDir/txlog_custom_retention_test"
+    val tablePath    = s"$tempDir/txlog_custom_retention_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -173,35 +178,40 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write data to create multiple versions and checkpoints
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath          = new Path(s"$tablePath/_transaction_log")
     val filesBeforeCleanup = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     // First verify default retention (30 days) means no deletion
     // Files are fresh and won't be deleted with 30-day retention
-    val resultDefault = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
-    val metricsDefault = resultDefault(0).getStruct(1)
+    val resultDefault        = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
+    val metricsDefault       = resultDefault(0).getStruct(1)
     val txLogsDeletedDefault = metricsDefault.getLong(5)
 
     // Should be 0 because files are fresh but retention is 30 days
-    assert(txLogsDeletedDefault == 0, s"Should not delete with 30-day default retention, but deleted $txLogsDeletedDefault")
+    assert(
+      txLogsDeletedDefault == 0,
+      s"Should not delete with 30-day default retention, but deleted $txLogsDeletedDefault"
+    )
 
     // Now explicitly age files 0-8 to exceed custom 1-hour retention
-    val oldTimestamp = System.currentTimeMillis() - (2L * 60 * 60 * 1000)  // 2 hours ago (exceeds 1-hour retention)
+    val oldTimestamp = System.currentTimeMillis() - (2L * 60 * 60 * 1000) // 2 hours ago (exceeds 1-hour retention)
     (0 to 8).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
       if (fs.exists(versionFile)) {
-        fs.setTimes(versionFile, oldTimestamp, -1)  // Set modification time, keep access time
+        fs.setTimes(versionFile, oldTimestamp, -1) // Set modification time, keep access time
       }
     }
 
     // Now use explicit 1 hour retention - should delete aged files 0-8
-    val resultCustom = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
-    val metricsCustom = resultCustom(0).getStruct(1)
+    val resultCustom =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
+    val metricsCustom       = resultCustom(0).getStruct(1)
     val txLogsDeletedCustom = metricsCustom.getLong(5)
 
     // Should delete files older than 1 hour (versions 0-8, which are 2 hours old)
@@ -209,7 +219,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
   }
 
   test("PURGE INDEXTABLE should not delete transaction logs newer than retention period") {
-    val tablePath = s"$tempDir/txlog_recent_preservation_test"
+    val tablePath    = s"$tempDir/txlog_recent_preservation_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -219,82 +229,91 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Write data to create versions and checkpoints
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath          = new Path(s"$tablePath/_transaction_log")
     val filesBeforeCleanup = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     // Files are fresh (just created), should not be deleted even with checkpoint
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result                 = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
+    val metrics                = result(0).getStruct(1)
     val transactionLogsDeleted = metrics.getLong(5)
 
     // Should be 0 because all files are recent
-    assert(transactionLogsDeleted == 0, s"Should not delete recent transaction logs, but deleted $transactionLogsDeleted")
+    assert(
+      transactionLogsDeleted == 0,
+      s"Should not delete recent transaction logs, but deleted $transactionLogsDeleted"
+    )
 
     val filesAfterCleanup = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
     assert(filesBeforeCleanup == filesAfterCleanup, "No files should be deleted when all are within retention period")
   }
 
   test("PURGE INDEXTABLE should parse TRANSACTION LOG RETENTION in DAYS correctly") {
-    val tablePath = s"$tempDir/txlog_days_parsing_test"
+    val tablePath    = s"$tempDir/txlog_days_parsing_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Test that syntax is accepted (should not throw)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' TRANSACTION LOG RETENTION 7 DAYS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' TRANSACTION LOG RETENTION 7 DAYS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
-    val status = metrics.getString(0)
+    val status  = metrics.getString(0)
 
     assert(status == "DRY_RUN", "Should execute successfully with DAYS syntax")
   }
 
   test("PURGE INDEXTABLE should parse TRANSACTION LOG RETENTION in HOURS correctly") {
-    val tablePath = s"$tempDir/txlog_hours_parsing_test"
+    val tablePath    = s"$tempDir/txlog_hours_parsing_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Test that syntax is accepted (should not throw)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' TRANSACTION LOG RETENTION 168 HOURS DRY RUN").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' TRANSACTION LOG RETENTION 168 HOURS DRY RUN").collect()
     val metrics = result(0).getStruct(1)
-    val status = metrics.getString(0)
+    val status  = metrics.getString(0)
 
     assert(status == "DRY_RUN", "Should execute successfully with HOURS syntax")
   }
 
   test("PURGE INDEXTABLE should work with both split and transaction log retention specified") {
-    val tablePath = s"$tempDir/txlog_combined_retention_test"
+    val tablePath    = s"$tempDir/txlog_combined_retention_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Write minimal data
     val data = Seq((1, "test")).toDF("id", "value")
-    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Test combined syntax
-    val result = spark.sql(
-      s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS TRANSACTION LOG RETENTION 30 DAYS DRY RUN"
-    ).collect()
+    val result = spark
+      .sql(
+        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS TRANSACTION LOG RETENTION 30 DAYS DRY RUN"
+      )
+      .collect()
 
-    val metrics = result(0).getStruct(1)
-    val status = metrics.getString(0)
+    val metrics        = result(0).getStruct(1)
+    val status         = metrics.getString(0)
     val retentionHours = metrics.getLong(4) // Field 4 is retention_hours
 
     assert(status == "DRY_RUN", "Should execute successfully")
@@ -302,7 +321,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
   }
 
   test("PURGE INDEXTABLE should allow reads and writes even when old transaction logs are missing") {
-    val tablePath = s"$tempDir/txlog_version0_deletion_test"
+    val tablePath    = s"$tempDir/txlog_version0_deletion_test"
     val sparkSession = spark
     import sparkSession.implicits._
 
@@ -310,27 +329,28 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // Checkpoint interval is 3, so checkpoints at versions 3, 6, 9, etc.
     (1 to 12).foreach { i =>
       val data = Seq((i, s"record_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
     // Explicitly age transaction log files 0-8 by setting their modification times to 25 hours ago
     // This ensures they exceed the 24-hour retention period we'll set
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000)  // 25 hours ago
+    val txLogPath    = new Path(s"$tablePath/_transaction_log")
+    val oldTimestamp = System.currentTimeMillis() - (25L * 60 * 60 * 1000) // 25 hours ago
 
     (0 to 8).foreach { version =>
       val versionFile = new Path(txLogPath, f"$version%020d.json")
       if (fs.exists(versionFile)) {
-        fs.setTimes(versionFile, oldTimestamp, -1)  // Set modification time, keep access time
+        fs.setTimes(versionFile, oldTimestamp, -1) // Set modification time, keep access time
         println(s"Aged version $version to ${oldTimestamp}ms (25 hours ago)")
       }
     }
 
     // Set retention to 24 hours so aged files (0-8) are now old enough to delete
     // but recent files (9-12) are NOT old enough
-    spark.conf.set("spark.indextables.logRetention.duration", (24L * 60 * 60 * 1000).toString)  // 24 hours in ms
+    spark.conf.set("spark.indextables.logRetention.duration", (24L * 60 * 60 * 1000).toString) // 24 hours in ms
 
     // Check what transaction log files exist before purge
     val filesBeforePurgeList = fs.listStatus(txLogPath).map(_.getPath.getName).sorted
@@ -338,7 +358,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
 
     // Verify that all version files exist before purge
     val versionFilesBeforePurge = filesBeforePurgeList.filter(_.matches("\\d{20}\\.json"))
-    val versionsBeforePurge = versionFilesBeforePurge.map(_.take(20).toLong).sorted
+    val versionsBeforePurge     = versionFilesBeforePurge.map(_.take(20).toLong).sorted
     println(s"Versions before purge: ${versionsBeforePurge.mkString(", ")}")
     assert(versionsBeforePurge.contains(0L), "Version 0.json should exist before purge")
     assert(versionsBeforePurge.contains(8L), "Version 8.json should exist before purge")
@@ -353,13 +373,16 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     // 2. Older than 24-hour retention period (25 hours > 24 hours)
     // 3. Older than checkpoint version 12
     // Versions 9-12 were NOT aged and should NOT be deleted (fresh)
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
-    val metrics = result(0).getStruct(1)
+    val result                 = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS").collect()
+    val metrics                = result(0).getStruct(1)
     val transactionLogsDeleted = metrics.getLong(5)
 
     println(s"Transaction logs deleted: $transactionLogsDeleted (expected exactly 9: aged versions 0-8)")
     // We expect exactly 9 deletions because only versions 0-8 were aged to exceed the 24-hour retention
-    assert(transactionLogsDeleted == 9, s"Should have deleted exactly 9 aged transaction log files (versions 0-8), but deleted $transactionLogsDeleted")
+    assert(
+      transactionLogsDeleted == 9,
+      s"Should have deleted exactly 9 aged transaction log files (versions 0-8), but deleted $transactionLogsDeleted"
+    )
 
     // STEP 3: Verify transaction log structure is still intact and old versions are gone
     val filesAfterPurgeList = fs.listStatus(txLogPath).map(_.getPath.getName).sorted
@@ -371,7 +394,7 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
 
     // Verify that ONLY aged versions 0-8 are gone, and fresh versions 9-12 remain
     val versionFilesAfterPurge = filesAfterPurgeList.filter(_.matches("\\d{20}\\.json"))
-    val versionsAfterPurge = versionFilesAfterPurge.map(_.take(20).toLong).sorted
+    val versionsAfterPurge     = versionFilesAfterPurge.map(_.take(20).toLong).sorted
     println(s"Versions after purge: ${versionsAfterPurge.mkString(", ")}")
     assert(!versionsAfterPurge.contains(0L), "Version 0.json should be deleted (aged)")
     assert(!versionsAfterPurge.contains(8L), "Version 8.json should be deleted (aged)")
@@ -405,7 +428,10 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
     (1 to 12).foreach { i =>
       val record = readRecords(i - 1)
       assert(record.getInt(0) == i, s"Record $i should have id=$i, but got ${record.getInt(0)}")
-      assert(record.getString(1) == s"record_$i", s"Record $i should have value=record_$i, but got ${record.getString(1)}")
+      assert(
+        record.getString(1) == s"record_$i",
+        s"Record $i should have value=record_$i, but got ${record.getString(1)}"
+      )
     }
     println("✓ All data is correct after reading from checkpoint")
 

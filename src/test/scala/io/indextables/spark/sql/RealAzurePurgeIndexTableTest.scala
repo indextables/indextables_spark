@@ -38,7 +38,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
   // Generate unique test run ID to avoid conflicts
   private val testRunId = UUID.randomUUID().toString.substring(0, 8)
 
-  private var azureBasePath: String = _
+  private var azureBasePath: String                                  = _
   private var provider: io.indextables.spark.io.CloudStorageProvider = _
 
   override def beforeAll(): Unit = {
@@ -82,7 +82,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/mod_time_test"
 
     // Write data
@@ -138,7 +138,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/partitioned_test"
 
     // Write partitioned data
@@ -205,7 +205,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/recursive_test"
 
     // Write data
@@ -263,7 +263,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/dry_run_test"
 
     // Write data
@@ -278,7 +278,9 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
 
     // Verify we can read modification time from Azure
     val orphanInfo = provider.getFileInfo(orphanPath).get
-    println(s"📄 Created orphaned file in Azure: $orphanPath (modified: ${new java.util.Date(orphanInfo.modificationTime)})")
+    println(
+      s"📄 Created orphaned file in Azure: $orphanPath (modified: ${new java.util.Date(orphanInfo.modificationTime)})"
+    )
 
     // Verify modification time is recent
     val now = System.currentTimeMillis()
@@ -307,7 +309,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasOAuthCredentials(), "Azure OAuth credentials required for this test")
 
     // Use unique subdirectory for this specific test to avoid cross-test pollution
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/oauth_test"
 
     // Write data (will use OAuth if configured)
@@ -322,7 +324,9 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
 
     // Verify we can read modification time from Azure using OAuth
     val orphanInfo = provider.getFileInfo(orphanPath).get
-    println(s"📄 Created orphaned file using OAuth: $orphanPath (modified: ${new java.util.Date(orphanInfo.modificationTime)})")
+    println(
+      s"📄 Created orphaned file using OAuth: $orphanPath (modified: ${new java.util.Date(orphanInfo.modificationTime)})"
+    )
 
     // Verify modification time is recent
     val now = System.currentTimeMillis()
@@ -349,7 +353,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
     assume(hasAzureCredentials(), "Azure credentials required for this test")
 
     // Use unique subdirectory for this specific test
-    val testPath = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
+    val testPath  = s"$azureBasePath/test-${UUID.randomUUID().toString.substring(0, 8)}"
     val tablePath = s"$testPath/short_retention_test"
 
     // Set very short retention period (1 second = 1000ms) for transaction logs
@@ -382,7 +386,7 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
 
     // Purge with OLDER THAN 0 HOURS (delete immediately) - disable retention check
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
     val metrics = result(0).getStruct(1)
 
     println(s"📊 Purge results:")

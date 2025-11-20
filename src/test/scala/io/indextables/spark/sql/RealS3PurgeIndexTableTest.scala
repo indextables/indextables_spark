@@ -331,7 +331,9 @@ class RealS3PurgeIndexTableTest extends RealS3TestBase {
 
     // Verify we can read modification time from S3
     val orphanStatus = fs.getFileStatus(orphan)
-    println(s"📄 Created orphaned file in S3: $orphan (modified: ${new java.util.Date(orphanStatus.getModificationTime)})")
+    println(
+      s"📄 Created orphaned file in S3: $orphan (modified: ${new java.util.Date(orphanStatus.getModificationTime)})"
+    )
 
     // Verify modification time is recent
     val now = System.currentTimeMillis()
@@ -394,7 +396,7 @@ class RealS3PurgeIndexTableTest extends RealS3TestBase {
     // Let's use a very small value: OLDER THAN 0 HOURS means delete immediately if age > 0
     // Actually, minimum is enforced, so we need to disable the check
     spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS").collect()
     val metrics = result(0).getStruct(1)
 
     println(s"📊 Purge results:")

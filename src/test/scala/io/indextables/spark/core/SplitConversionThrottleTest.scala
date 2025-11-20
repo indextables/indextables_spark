@@ -21,9 +21,9 @@ import java.nio.file.Files
 import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.config.IndexTables4SparkSQLConf
 import io.indextables.spark.storage.SplitConversionThrottle
+import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
 
 /**
@@ -90,11 +90,11 @@ class SplitConversionThrottleTest extends TestBase {
     SplitConversionThrottle.initialize(maxParallelism)
 
     val concurrentOperations = new AtomicInteger(0)
-    val maxConcurrent = new AtomicInteger(0)
-    val completedOperations = new AtomicInteger(0)
-    val totalOperations = 10
+    val maxConcurrent        = new AtomicInteger(0)
+    val completedOperations  = new AtomicInteger(0)
+    val totalOperations      = 10
 
-    val executor = Executors.newFixedThreadPool(totalOperations)
+    val executor   = Executors.newFixedThreadPool(totalOperations)
     val startLatch = new CountDownLatch(1)
 
     try {
@@ -110,9 +110,8 @@ class SplitConversionThrottleTest extends TestBase {
 
               // Update max concurrent if this is higher
               var prevMax = maxConcurrent.get()
-              while (current > prevMax && !maxConcurrent.compareAndSet(prevMax, current)) {
+              while (current > prevMax && !maxConcurrent.compareAndSet(prevMax, current))
                 prevMax = maxConcurrent.get()
-              }
 
               // Simulate work
               Thread.sleep(50)
@@ -143,11 +142,10 @@ class SplitConversionThrottleTest extends TestBase {
       observedMaxConcurrent should be <= (maxParallelism + 1) // Allow 1 for race conditions
 
       println(s"✅ Throttle correctly limited concurrency to ~$maxParallelism (observed: $observedMaxConcurrent)")
-    } finally {
+    } finally
       if (!executor.isTerminated) {
         executor.shutdownNow()
       }
-    }
   }
 
   test("SplitConversionThrottle should handle initialization idempotently") {
@@ -210,7 +208,7 @@ class SplitConversionThrottleTest extends TestBase {
 
   test("Default calculation should use availableProcessors/4") {
     val availableProcessors = Runtime.getRuntime.availableProcessors()
-    val expectedDefault = Math.max(1, availableProcessors / 4)
+    val expectedDefault     = Math.max(1, availableProcessors / 4)
 
     println(s"Available processors: $availableProcessors")
     println(s"Expected default throttle: $expectedDefault")
@@ -269,10 +267,10 @@ class SplitConversionThrottleTest extends TestBase {
     val maxParallelism = 1 // Force serial execution
     SplitConversionThrottle.initialize(maxParallelism)
 
-    val executionOrder = new java.util.concurrent.ConcurrentLinkedQueue[Int]()
+    val executionOrder  = new java.util.concurrent.ConcurrentLinkedQueue[Int]()
     val totalOperations = 5
 
-    val executor = Executors.newFixedThreadPool(totalOperations)
+    val executor   = Executors.newFixedThreadPool(totalOperations)
     val startLatch = new CountDownLatch(1)
 
     try {
@@ -303,10 +301,9 @@ class SplitConversionThrottleTest extends TestBase {
       order.length shouldBe totalOperations
 
       println(s"✅ Fair semaphore completed all $totalOperations operations")
-    } finally {
+    } finally
       if (!executor.isTerminated) {
         executor.shutdownNow()
       }
-    }
   }
 }

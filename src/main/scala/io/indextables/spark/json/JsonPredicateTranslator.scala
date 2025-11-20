@@ -19,6 +19,7 @@ package io.indextables.spark.json
 
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
+
 import io.indextables.tantivy4java.core.Schema
 import io.indextables.tantivy4java.query.{Occur, Query}
 import org.slf4j.LoggerFactory
@@ -35,21 +36,21 @@ import org.slf4j.LoggerFactory
  */
 class JsonPredicateTranslator(
   sparkSchema: StructType,
-  schemaMapper: SparkSchemaToTantivyMapper
-) {
+  schemaMapper: SparkSchemaToTantivyMapper) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Translates a Spark filter to a parseQuery string for use with SplitSearcher.parseQuery().
    *
-   * This method generates Tantivy query syntax strings for JSON field queries in splits.
-   * Examples:
+   * This method generates Tantivy query syntax strings for JSON field queries in splits. Examples:
    *   - Term query: "data.name:\"Alice\""
    *   - Range query: "data.age:[25 TO 30]"
    *   - Boolean query: "data.name:\"Alice\" AND data.age:>25"
    *
-   * @param filter Spark Filter to translate
-   * @return Some(queryString) if filter can be translated to parseQuery syntax, None otherwise
+   * @param filter
+   *   Spark Filter to translate
+   * @return
+   *   Some(queryString) if filter can be translated to parseQuery syntax, None otherwise
    */
   def translateFilterToParseQuery(filter: Filter): Option[String] = {
     logger.debug(s"JsonPredicateTranslator.translateFilterToParseQuery called with: $filter")
@@ -57,63 +58,63 @@ class JsonPredicateTranslator(
       // Nested field equality: $"user.name" === "Alice" => data.name:"Alice"
       case EqualTo(attr, value) if isNestedAttribute(attr) =>
         logger.debug(s"JsonPredicateTranslator: Detected nested attribute: $attr")
-        val fullPath = attr.replace(".", ".")  // Already in correct format
+        val fullPath     = attr.replace(".", ".") // Already in correct format
         val escapedValue = escapeQueryValue(valueToString(value))
-        val queryString = s"""$fullPath:"$escapedValue""""
+        val queryString  = s"""$fullPath:"$escapedValue""""
         logger.debug(s"JsonPredicateTranslator: Translating nested equality to parseQuery: $queryString")
         Some(queryString)
 
       // Nested field range queries
       case GreaterThan(attr, value) if isNestedAttribute(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"$fullPath:>$value"
         logger.debug(s"Translating nested GT to parseQuery: $queryString")
         Some(queryString)
 
       case GreaterThanOrEqual(attr, value) if isNestedAttribute(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"$fullPath:>=$value"
         logger.debug(s"Translating nested GTE to parseQuery: $queryString")
         Some(queryString)
 
       case LessThan(attr, value) if isNestedAttribute(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"$fullPath:<$value"
         logger.debug(s"Translating nested LT to parseQuery: $queryString")
         Some(queryString)
 
       case LessThanOrEqual(attr, value) if isNestedAttribute(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"$fullPath:<=$value"
         logger.debug(s"Translating nested LTE to parseQuery: $queryString")
         Some(queryString)
 
       // Field existence checks - use wildcard syntax
       case IsNotNull(attr) if isNestedAttribute(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"$fullPath:*"
         logger.debug(s"Translating nested IsNotNull to parseQuery: $queryString")
         Some(queryString)
 
       case IsNull(attr) if isNestedAttribute(attr) =>
         // IsNull is NOT of exists query
-        val fullPath = attr.replace(".", ".")
+        val fullPath    = attr.replace(".", ".")
         val queryString = s"NOT $fullPath:*"
         logger.debug(s"Translating nested IsNull to parseQuery: $queryString")
         Some(queryString)
 
       // Array contains operations - search array elements
       case StringContains(attr, substring) if isArrayField(attr) =>
-        val fullPath = attr.replace(".", ".")
+        val fullPath     = attr.replace(".", ".")
         val escapedValue = escapeQueryValue(substring)
-        val queryString = s"""$fullPath:"$escapedValue""""
+        val queryString  = s"""$fullPath:"$escapedValue""""
         logger.debug(s"Translating array contains to parseQuery: $queryString")
         Some(queryString)
 
       // Boolean combinations
       case And(left, right) =>
         for {
-          leftQuery <- translateFilterToParseQuery(left)
+          leftQuery  <- translateFilterToParseQuery(left)
           rightQuery <- translateFilterToParseQuery(right)
         } yield {
           val queryString = s"($leftQuery) AND ($rightQuery)"
@@ -123,7 +124,7 @@ class JsonPredicateTranslator(
 
       case Or(left, right) =>
         for {
-          leftQuery <- translateFilterToParseQuery(left)
+          leftQuery  <- translateFilterToParseQuery(left)
           rightQuery <- translateFilterToParseQuery(right)
         } yield {
           val queryString = s"($leftQuery) OR ($rightQuery)"
@@ -147,22 +148,26 @@ class JsonPredicateTranslator(
   /**
    * Escape special characters in query values for parseQuery syntax.
    *
-   * @param value Value to escape
-   * @return Escaped value safe for use in parseQuery strings
+   * @param value
+   *   Value to escape
+   * @return
+   *   Escaped value safe for use in parseQuery strings
    */
-  private def escapeQueryValue(value: String): String = {
+  private def escapeQueryValue(value: String): String =
     // Escape double quotes and backslashes
     value.replace("\\", "\\\\").replace("\"", "\\\"")
-  }
 
   /**
    * Translates a Spark filter to a tantivy4java Query.
    *
-   * @param filter Spark Filter to translate
-   * @param tantivySchema tantivy4java Schema
-   * @return Some(Query) if filter can be pushed down, None otherwise
+   * @param filter
+   *   Spark Filter to translate
+   * @param tantivySchema
+   *   tantivy4java Schema
+   * @return
+   *   Some(Query) if filter can be pushed down, None otherwise
    */
-  def translateFilter(filter: Filter, tantivySchema: Schema): Option[Query] = {
+  def translateFilter(filter: Filter, tantivySchema: Schema): Option[Query] =
     filter match {
       // Nested field equality: $"user.name" === "Alice"
       case EqualTo(attr, value) if isNestedAttribute(attr) =>
@@ -221,7 +226,7 @@ class JsonPredicateTranslator(
       case And(left, right) =>
         logger.debug("Translating AND filter")
         for {
-          leftQuery <- translateFilter(left, tantivySchema)
+          leftQuery  <- translateFilter(left, tantivySchema)
           rightQuery <- translateFilter(right, tantivySchema)
         } yield {
           val occurQueries = java.util.Arrays.asList(
@@ -234,7 +239,7 @@ class JsonPredicateTranslator(
       case Or(left, right) =>
         logger.debug("Translating OR filter")
         for {
-          leftQuery <- translateFilter(left, tantivySchema)
+          leftQuery  <- translateFilter(left, tantivySchema)
           rightQuery <- translateFilter(right, tantivySchema)
         } yield {
           val occurQueries = java.util.Arrays.asList(
@@ -257,33 +262,35 @@ class JsonPredicateTranslator(
         logger.debug(s"Filter not supported for pushdown: $filter")
         None
     }
-  }
 
   /**
    * Checks if an attribute references a nested field (contains dot notation).
    *
-   * @param attr Attribute name (e.g., "user.name")
-   * @return true if attribute is nested
+   * @param attr
+   *   Attribute name (e.g., "user.name")
+   * @return
+   *   true if attribute is nested
    */
-  private def isNestedAttribute(attr: String): Boolean = {
+  private def isNestedAttribute(attr: String): Boolean =
     if (!attr.contains(".")) {
       false
     } else {
       val rootField = attr.split("\\.")(0)
-      val field = sparkSchema.find(_.name == rootField)
+      val field     = sparkSchema.find(_.name == rootField)
       field.exists { f =>
         f.dataType.isInstanceOf[StructType] ||
         f.dataType.isInstanceOf[ArrayType] ||
         f.dataType.isInstanceOf[MapType]
       }
     }
-  }
 
   /**
    * Checks if an attribute references an array field.
    *
-   * @param attr Attribute name
-   * @return true if field is ArrayType
+   * @param attr
+   *   Attribute name
+   * @return
+   *   true if field is ArrayType
    */
   private def isArrayField(attr: String): Boolean = {
     val rootField = if (attr.contains(".")) attr.split("\\.")(0) else attr
@@ -295,8 +302,10 @@ class JsonPredicateTranslator(
    *
    * Example: "user.address.city" -> ("user", "address.city")
    *
-   * @param attr Nested attribute
-   * @return (fieldName, jsonPath)
+   * @param attr
+   *   Nested attribute
+   * @return
+   *   (fieldName, jsonPath)
    */
   private def splitNestedAttribute(attr: String): (String, String) = {
     val parts = attr.split("\\.", 2)
@@ -310,8 +319,10 @@ class JsonPredicateTranslator(
   /**
    * Gets the Spark field type for an attribute.
    *
-   * @param attr Attribute name
-   * @return DataType or null if not found
+   * @param attr
+   *   Attribute name
+   * @return
+   *   DataType or null if not found
    */
   private def getFieldType(attr: String): DataType = {
     val rootField = if (attr.contains(".")) attr.split("\\.")(0) else attr
@@ -321,49 +332,54 @@ class JsonPredicateTranslator(
   /**
    * Converts a value to String for term queries.
    *
-   * @param value Any value
-   * @return String representation
+   * @param value
+   *   Any value
+   * @return
+   *   String representation
    */
-  private def valueToString(value: Any): String = {
+  private def valueToString(value: Any): String =
     value match {
-      case null => ""
+      case null      => ""
       case s: String => s
-      case _ => value.toString
+      case _         => value.toString
     }
-  }
 
   /**
    * Converts a value to Long for range queries.
    *
-   * @param value Any numeric value
-   * @return Long representation
+   * @param value
+   *   Any numeric value
+   * @return
+   *   Long representation
    */
-  private def valueToLong(value: Any): java.lang.Long = {
+  private def valueToLong(value: Any): java.lang.Long =
     value match {
-      case null => null
-      case i: Int => java.lang.Long.valueOf(i.toLong)
-      case l: Long => java.lang.Long.valueOf(l)
-      case f: Float => java.lang.Long.valueOf(f.toLong)
+      case null      => null
+      case i: Int    => java.lang.Long.valueOf(i.toLong)
+      case l: Long   => java.lang.Long.valueOf(l)
+      case f: Float  => java.lang.Long.valueOf(f.toLong)
       case d: Double => java.lang.Long.valueOf(d.toLong)
       case s: String => java.lang.Long.valueOf(s.toLong)
-      case _ => java.lang.Long.valueOf(value.toString.toLong)
+      case _         => java.lang.Long.valueOf(value.toString.toLong)
     }
-  }
 
   /**
    * Determines if a filter can be pushed down to tantivy4java.
    *
-   * @param filter Spark Filter
-   * @return true if pushdown is supported
+   * @param filter
+   *   Spark Filter
+   * @return
+   *   true if pushdown is supported
    */
   /**
    * Checks if a filter can be pushed down to tantivy4java JSON queries via parseQuery syntax.
    *
-   * @param filter Spark Filter to check
-   * @return true if filter can be translated to parseQuery syntax
+   * @param filter
+   *   Spark Filter to check
+   * @return
+   *   true if filter can be translated to parseQuery syntax
    */
-  def canPushDown(filter: Filter): Boolean = {
+  def canPushDown(filter: Filter): Boolean =
     // Check if we can generate parseQuery string for this filter
     translateFilterToParseQuery(filter).isDefined
-  }
 }

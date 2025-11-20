@@ -17,19 +17,20 @@
 
 package io.indextables.spark.sql
 
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.BeforeAndAfterEach
-import org.apache.spark.sql.SparkSession
 import java.io.File
+
 import scala.util.Random
 
-/**
- * Tests for DESCRIBE INDEXTABLES TRANSACTION LOG command.
- */
+import org.apache.spark.sql.SparkSession
+
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
+
+/** Tests for DESCRIBE INDEXTABLES TRANSACTION LOG command. */
 class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
-  var tempDir: String = _
+  var tempDir: String     = _
 
   override def beforeEach(): Unit = {
     spark = SparkSession
@@ -66,19 +67,21 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("DESCRIBE INDEXTABLES TRANSACTION LOG should return all actions") {
-    val tablePath = s"$tempDir/test_table"
+    val tablePath    = s"$tempDir/test_table"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Write initial data
     val data1 = Seq((1, "one"), (2, "two")).toDF("id", "value")
-    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data1.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Write more data
     val data2 = Seq((3, "three"), (4, "four")).toDF("id", "value")
-    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data2.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("append")
       .save(tablePath)
 
@@ -90,8 +93,14 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Check schema
     val expectedColumns = Seq(
-      "version", "log_file_path", "action_type", "path", "partition_values",
-      "size", "data_change", "tags"
+      "version",
+      "log_file_path",
+      "action_type",
+      "path",
+      "partition_values",
+      "size",
+      "data_change",
+      "tags"
     )
     expectedColumns.foreach { colName =>
       assert(result.columns.contains(colName), s"Result should contain column: $colName")
@@ -109,32 +118,32 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("DESCRIBE INDEXTABLES TRANSACTION LOG INCLUDE ALL should return all versions") {
-    val tablePath = s"$tempDir/test_table2"
+    val tablePath    = s"$tempDir/test_table2"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Create multiple versions
     (1 to 15).foreach { i =>
       val data = Seq((i, s"value_$i")).toDF("id", "value")
-      data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
         .save(tablePath)
     }
 
     // Describe without INCLUDE ALL
     val resultWithoutAll = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath'")
-    val countWithoutAll = resultWithoutAll.count()
+    val countWithoutAll  = resultWithoutAll.count()
 
     // Describe with INCLUDE ALL
     val resultWithAll = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' INCLUDE ALL")
-    val countWithAll = resultWithAll.count()
+    val countWithAll  = resultWithAll.count()
 
     println(s"Without INCLUDE ALL: $countWithoutAll rows")
     println(s"With INCLUDE ALL: $countWithAll rows")
 
     // INCLUDE ALL should return more rows (or equal if no checkpoint)
-    assert(countWithAll >= countWithoutAll,
-      "INCLUDE ALL should return at least as many rows as without INCLUDE ALL")
+    assert(countWithAll >= countWithoutAll, "INCLUDE ALL should return at least as many rows as without INCLUDE ALL")
 
     // Verify versions are present
     val versions = resultWithAll.select("version").distinct().collect().map(_.getLong(0)).sorted
@@ -147,7 +156,7 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Try to describe a non-existent table - should return empty results
     val result = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath'")
-    val count = result.count()
+    val count  = result.count()
 
     // Should return zero rows for non-existent table
     assert(count == 0, s"Expected 0 rows for non-existent table, got $count")
@@ -155,19 +164,21 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("DESCRIBE should show RemoveAction after overwrite") {
-    val tablePath = s"$tempDir/test_table3"
+    val tablePath    = s"$tempDir/test_table3"
     val sparkSession = spark
     import sparkSession.implicits._
 
     // Write initial data
     val data1 = Seq((1, "one"), (2, "two")).toDF("id", "value")
-    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data1.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
     // Overwrite with new data
     val data2 = Seq((10, "ten"), (20, "twenty")).toDF("id", "value")
-    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+    data2.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .save(tablePath)
 
@@ -176,7 +187,7 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Check for remove actions
     val actionTypes = result.select("action_type").collect().map(_.getString(0))
-    val hasRemove = actionTypes.contains("remove")
+    val hasRemove   = actionTypes.contains("remove")
 
     println(s"\n=== Actions after overwrite ===")
     result.select("version", "action_type", "path").show(false)

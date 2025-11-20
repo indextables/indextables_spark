@@ -117,7 +117,9 @@ object BroadcastSplitLocalityManager {
               .toIterator
               .toList
 
-            logger.debug(s"Partition ${partitionId.mkString(",")} on host $hostname contributing ${localData.size} split records")
+            logger.debug(
+              s"Partition ${partitionId.mkString(",")} on host $hostname contributing ${localData.size} split records"
+            )
             localData.foreach {
               case (splitPath, hosts) =>
                 logger.debug(s"  Split: $splitPath -> hosts: ${hosts.mkString(", ")}")

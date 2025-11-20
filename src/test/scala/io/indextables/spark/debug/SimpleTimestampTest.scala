@@ -1,7 +1,9 @@
 package io.indextables.spark.debug
 
 import java.sql.Timestamp
+
 import org.apache.spark.sql.SparkSession
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterAll
 
@@ -42,7 +44,9 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       data.show(false)
 
       // Write using V2 API
-      data.coalesce(1).write
+      data
+        .coalesce(1)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
@@ -68,7 +72,7 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       val txLogRows = txLogInfo.collect()
       val hasFooterOffsets = txLogRows.exists { row =>
         val actionType = row.getAs[String]("action_type")
-        val hasFooter = row.getAs[Boolean]("has_footer_offsets")
+        val hasFooter  = row.getAs[Boolean]("has_footer_offsets")
         actionType == "add" && hasFooter
       }
 
@@ -80,7 +84,7 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
 
       println("\nTesting equality filter...")
       val filtered = readData.filter($"ts" === "2025-11-07 05:00:00")
-      val count = filtered.count()
+      val count    = filtered.count()
       println(s"Filtered count: $count")
       filtered.show(false)
 
@@ -93,7 +97,8 @@ class SimpleTimestampTest extends AnyFunSuite with BeforeAndAfterAll {
       import scala.util.Try
       Try {
         val path = Paths.get(tempPath)
-        Files.walk(path)
+        Files
+          .walk(path)
           .sorted(java.util.Comparator.reverseOrder())
           .forEach(p => Files.deleteIfExists(p))
       }

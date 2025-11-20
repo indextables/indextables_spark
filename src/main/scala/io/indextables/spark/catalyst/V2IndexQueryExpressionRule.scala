@@ -55,7 +55,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
     val result = plan.transformUp {
       case filter @ Filter(condition, child: DataSourceV2Relation) =>
-        logger.debug(s"V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation - table: ${child.table.name()}")
+        logger.debug(
+          s"V2IndexQueryExpressionRule: Found Filter with DataSourceV2Relation - table: ${child.table.name()}"
+        )
         logger.debug(s"V2IndexQueryExpressionRule: Condition: $condition")
         logger.debug(s"V2IndexQueryExpressionRule: Child table: ${child.table.name()}")
 
@@ -96,7 +98,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               val convertedCondition = convertIndexQueryExpressions(condition, v2Relation)
 
               if (convertedCondition != condition) {
-                logger.debug(s"V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition")
+                logger.debug(
+                  s"V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition"
+                )
                 Filter(convertedCondition, child)
               } else {
                 logger.debug(s"V2IndexQueryExpressionRule: No conversion needed")
@@ -107,7 +111,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               // Check if condition contains IndexQuery to warn user
               if (containsIndexQueryExpression(condition)) {
                 logger.warn(s"⚠️  WARNING: IndexQuery expression detected but rejected because table is not compatible V2 DataSource")
-                logger.warn(s"⚠️  Table class: ${v2Relation.table.getClass.getName}, Table name: ${v2Relation.table.name()}")
+                logger.warn(
+                  s"⚠️  Table class: ${v2Relation.table.getClass.getName}, Table name: ${v2Relation.table.name()}"
+                )
               }
               filter
             }
@@ -121,7 +127,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
 
                 // Only apply to V2 DataSource relations
                 if (isCompatibleV2DataSource(v2Relation)) {
-                  logger.debug(s"V2IndexQueryExpressionRule: Compatible V2 DataSource detected (via SubqueryAlias->View)")
+                  logger.debug(
+                    s"V2IndexQueryExpressionRule: Compatible V2 DataSource detected (via SubqueryAlias->View)"
+                  )
                   val convertedCondition = convertIndexQueryExpressions(condition, v2Relation)
 
                   if (convertedCondition != condition) {
@@ -162,7 +170,9 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         // Look for IndexQuery expressions anywhere in the plan's expressions
         val hasIndexQuery = plan.expressions.exists(containsIndexQueryExpression)
         if (hasIndexQuery) {
-          logger.debug(s"V2IndexQueryExpressionRule: Found IndexQuery expressions in ${plan.getClass.getSimpleName} plan")
+          logger.debug(
+            s"V2IndexQueryExpressionRule: Found IndexQuery expressions in ${plan.getClass.getSimpleName} plan"
+          )
 
           // Find the DataSourceV2Relation in the plan tree
           val v2Relations = plan.collect { case relation: DataSourceV2Relation => relation }

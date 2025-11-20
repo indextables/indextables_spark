@@ -76,15 +76,16 @@ class IndexTables4SparkOptimizedWrite(
     }
 
     // Also check for case-insensitive duplicates (warn only, don't fail)
-    val lowerCaseNames = fieldNames.map(_.toLowerCase)
+    val lowerCaseNames            = fieldNames.map(_.toLowerCase)
     val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
 
     if (caseInsensitiveDuplicates.nonEmpty) {
-      val originalNames = caseInsensitiveDuplicates.flatMap { lower =>
-        fieldNames.filter(_.toLowerCase == lower)
-      }.distinct.mkString(", ")
-      logger.warn(s"Schema contains columns that differ only in case: [$originalNames]. " +
-        s"This may cause issues with case-insensitive storage systems.")
+      val originalNames =
+        caseInsensitiveDuplicates.flatMap(lower => fieldNames.filter(_.toLowerCase == lower)).distinct.mkString(", ")
+      logger.warn(
+        s"Schema contains columns that differ only in case: [$originalNames]. " +
+          s"This may cause issues with case-insensitive storage systems."
+      )
     }
   }
 
@@ -440,7 +441,7 @@ class IndexTables4SparkOptimizedWrite(
     // OptimizedWrite handles commit messages - extract AddActions only
     val addActions: Seq[AddAction] = messages.flatMap {
       case msg: IndexTables4SparkCommitMessage => msg.addActions
-      case _ => Seq.empty[AddAction]
+      case _                                   => Seq.empty[AddAction]
     }
 
     // Log how many empty partitions were filtered out

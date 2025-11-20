@@ -17,15 +17,16 @@
 
 package io.indextables.spark.sql
 
+import org.apache.spark.sql.SparkSession
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-import org.apache.spark.sql.SparkSession
 
 class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     spark = SparkSession
       .builder()
       .master("local[2]")
@@ -33,14 +34,12 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
       .config("spark.ui.enabled", "false")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     if (spark != null) {
       spark.stop()
       spark = null
     }
-  }
 
   test("PURGE INDEXTABLE should parse with path") {
     val sql = "PURGE INDEXTABLE '/tmp/test_table'"
@@ -55,7 +54,7 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PURGE INDEXTABLE should parse with OLDER THAN days") {
-    val sql = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 7 DAYS"
+    val sql  = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 7 DAYS"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PurgeOrphanedSplitsCommand])
 
@@ -66,7 +65,7 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PURGE INDEXTABLE should parse with OLDER THAN hours") {
-    val sql = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 24 HOURS"
+    val sql  = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 24 HOURS"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PurgeOrphanedSplitsCommand])
 
@@ -77,7 +76,7 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PURGE INDEXTABLE should parse with DRY RUN") {
-    val sql = "PURGE INDEXTABLE '/tmp/test_table' DRY RUN"
+    val sql  = "PURGE INDEXTABLE '/tmp/test_table' DRY RUN"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PurgeOrphanedSplitsCommand])
 
@@ -88,7 +87,7 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PURGE INDEXTABLE should parse with all options") {
-    val sql = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 14 DAYS DRY RUN"
+    val sql  = "PURGE INDEXTABLE '/tmp/test_table' OLDER THAN 14 DAYS DRY RUN"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PurgeOrphanedSplitsCommand])
 
@@ -99,7 +98,7 @@ class PurgeIndexTableParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PURGE INDEXTABLE should parse case-insensitive keywords") {
-    val sql = "purge indextable '/tmp/test_table' older than 3 days dry run"
+    val sql  = "purge indextable '/tmp/test_table' older than 3 days dry run"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PurgeOrphanedSplitsCommand])
 

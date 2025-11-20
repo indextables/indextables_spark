@@ -17,31 +17,28 @@
 
 package io.indextables.spark.merge
 
-import org.scalatest.BeforeAndAfterEach
-
 import io.indextables.spark.TestBase
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Regression test for merge-on-write group counting bug.
  *
- * Bug Description:
- * The countMergeGroupsFromTransactionLog method was incorrectly counting individual files
- * as "mergeable groups" instead of counting the actual merge groups that would be created
- * by bin-packing those files. This caused merge-on-write to trigger inappropriately.
+ * Bug Description: The countMergeGroupsFromTransactionLog method was incorrectly counting individual files as
+ * "mergeable groups" instead of counting the actual merge groups that would be created by bin-packing those files. This
+ * caused merge-on-write to trigger inappropriately.
  *
  * Reproduction Scenario (from bad_merge_trigger.txt):
- * - 620 total files in transaction log
- * - Target size: 4GB
- * - Default parallelism: 64 cores
- * - Merge threshold: 128 groups (64 × 2.0)
- * - Buggy behavior: Reported 300 "mergeable groups" → triggered merge
- * - Actual merge groups: Only 46 groups were created
- * - Expected behavior: Should NOT trigger merge (46 < 128)
+ *   - 620 total files in transaction log
+ *   - Target size: 4GB
+ *   - Default parallelism: 64 cores
+ *   - Merge threshold: 128 groups (64 × 2.0)
+ *   - Buggy behavior: Reported 300 "mergeable groups" → triggered merge
+ *   - Actual merge groups: Only 46 groups were created
+ *   - Expected behavior: Should NOT trigger merge (46 < 128)
  *
  * This test validates that:
- * 1. Many small files are correctly counted as forming fewer merge groups
- * 2. Merge only triggers when actual merge group count exceeds threshold
- * 3. The bin-packing simulation matches MergeSplitsExecutor logic
+ *   1. Many small files are correctly counted as forming fewer merge groups 2. Merge only triggers when actual merge
+ *      group count exceeds threshold 3. The bin-packing simulation matches MergeSplitsExecutor logic
  */
 class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
 
@@ -50,8 +47,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
   /**
    * Test that reproduces the bug scenario from bad_merge_trigger.txt
    *
-   * Creates many small files that should form relatively few merge groups,
-   * and verifies that merge does NOT trigger inappropriately.
+   * Creates many small files that should form relatively few merge groups, and verifies that merge does NOT trigger
+   * inappropriately.
    */
   test("should NOT trigger merge when many small files form few groups") {
     val tablePath = s"file://$tempDir/test_group_count_bug"
@@ -64,17 +61,18 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
 
     // Create initial data with many small partitions
     // Each partition will create a small split file
-    val numRecordsPerPartition = 100  // Small number to create small splits
-    val numPartitions = 300           // Many partitions = many small files
+    val numRecordsPerPartition = 100 // Small number to create small splits
+    val numPartitions          = 300 // Many partitions = many small files
 
-    val df = spark.range(0, numRecordsPerPartition * numPartitions)
+    val df = spark
+      .range(0, numRecordsPerPartition * numPartitions)
       .selectExpr(
         "id",
         "CAST(id AS STRING) as text",
-        "(id % 2) + 2025 as year",    // Two year partitions: 2025-11-07 and 2025-11-08
-        s"(id % $numPartitions) as partition_id"  // Spread across many partitions
+        "(id % 2) + 2025 as year",               // Two year partitions: 2025-11-07 and 2025-11-08
+        s"(id % $numPartitions) as partition_id" // Spread across many partitions
       )
-      .repartition(numPartitions)  // Force many small splits
+      .repartition(numPartitions) // Force many small splits
 
     logger.info(s"Created DataFrame with ${numRecordsPerPartition * numPartitions} records in $numPartitions partitions")
 
@@ -82,8 +80,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     df.write
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .option("spark.indextables.mergeOnWrite.enabled", "false")  // Disable for initial write
-      .partitionBy("year")  // Partition by year (similar to kdate in the log)
+      .option("spark.indextables.mergeOnWrite.enabled", "false") // Disable for initial write
+      .partitionBy("year")                                       // Partition by year (similar to kdate in the log)
       .save(tablePath)
 
     // Verify initial write created many files
@@ -103,7 +101,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // 1. Count merge groups correctly (should be relatively few groups due to large target size)
     // 2. NOT trigger merge because group count < threshold
 
-    val appendDf = spark.range(0, 1000)
+    val appendDf = spark
+      .range(0, 1000)
       .selectExpr(
         "id",
         "CAST(id AS STRING) as text",
@@ -120,7 +119,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "4G")
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0")
-      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")  // Lower threshold for tests
+      .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1") // Lower threshold for tests
       .partitionBy("year")
       .save(tablePath)
 
@@ -142,9 +141,7 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     logger.info("✅ Group count bug test passed - merge did NOT trigger inappropriately")
   }
 
-  /**
-   * Test that merge DOES trigger when actual merge group count exceeds threshold
-   */
+  /** Test that merge DOES trigger when actual merge group count exceeds threshold */
   test("should trigger merge when actual merge groups exceed threshold") {
     val tablePath = s"file://$tempDir/test_merge_triggers"
     logger.info(s"Testing merge trigger with sufficient groups at: $tablePath")
@@ -154,7 +151,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     // - Low threshold so merge triggers
 
     val numPartitions = 200
-    val df = spark.range(0, 10000)
+    val df = spark
+      .range(0, 10000)
       .selectExpr(
         "id",
         "CAST(id AS STRING) as text",
@@ -167,8 +165,8 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.targetSize", "10M")  // Small target = many groups
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")  // Very low multiplier
+      .option("spark.indextables.mergeOnWrite.targetSize", "10M")           // Small target = many groups
+      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low multiplier
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .partitionBy("year")
       .save(tablePath)
@@ -183,25 +181,23 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
     logger.info("✅ Merge trigger test passed - merge triggered when threshold was met")
   }
 
-  /**
-   * Test edge case: files that don't form any valid merge groups
-   * (all files are single-file groups)
-   */
+  /** Test edge case: files that don't form any valid merge groups (all files are single-file groups) */
   test("should NOT trigger merge when files cannot form valid groups") {
     val tablePath = s"file://$tempDir/test_no_valid_groups"
     logger.info(s"Testing no-valid-groups scenario at: $tablePath")
 
     // Create just 1 small file - cannot form a merge group (need ≥2 files per group)
-    val df = spark.range(0, 100)
+    val df = spark
+      .range(0, 100)
       .selectExpr("id", "CAST(id AS STRING) as text", "2025 as year")
-      .coalesce(1)  // Single partition = single file
+      .coalesce(1) // Single partition = single file
 
     df.write
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "100M")
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1")  // Low threshold
+      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Low threshold
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .partitionBy("year")
       .save(tablePath)

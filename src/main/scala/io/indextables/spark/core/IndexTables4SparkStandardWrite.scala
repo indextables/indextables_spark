@@ -66,24 +66,24 @@ class IndexTables4SparkStandardWrite(
     }
 
     // Also check for case-insensitive duplicates (warn only, don't fail)
-    val lowerCaseNames = fieldNames.map(_.toLowerCase)
+    val lowerCaseNames            = fieldNames.map(_.toLowerCase)
     val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
 
     if (caseInsensitiveDuplicates.nonEmpty) {
-      val originalNames = caseInsensitiveDuplicates.flatMap { lower =>
-        fieldNames.filter(_.toLowerCase == lower)
-      }.distinct.mkString(", ")
-      logger.warn(s"Schema contains columns that differ only in case: [$originalNames]. " +
-        s"This may cause issues with case-insensitive storage systems.")
+      val originalNames =
+        caseInsensitiveDuplicates.flatMap(lower => fieldNames.filter(_.toLowerCase == lower)).distinct.mkString(", ")
+      logger.warn(
+        s"Schema contains columns that differ only in case: [$originalNames]. " +
+          s"This may cause issues with case-insensitive storage systems."
+      )
     }
   }
 
   // Validate the write schema
   validateSchema(writeSchema)
-  private val serializedHadoopConf = {
+  private val serializedHadoopConf =
     // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
     io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-  }
   private val partitionColumns =
     // Extract partition columns from write options (set by .partitionBy())
     // Spark sets this as a JSON array string like ["col1","col2"]
@@ -103,7 +103,9 @@ class IndexTables4SparkStandardWrite(
           partitionCols
         } catch {
           case e: Exception =>
-            logger.debug(s"PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}")
+            logger.debug(
+              s"PARTITION DEBUG: Failed to parse partition columns JSON: $partitionColumnsJson, error: ${e.getMessage}"
+            )
             logger.warn(s"Failed to parse partition columns from options: $partitionColumnsJson", e)
             Seq.empty
         }
@@ -213,19 +215,19 @@ class IndexTables4SparkStandardWrite(
       // For DataSource V2, SaveMode.Overwrite might not trigger truncate()/overwrite() methods
       // Instead, we need to detect overwrite by checking the logical write info or options
       val saveMode = serializedOptions.get("saveMode") match {
-        case Some("Overwrite")     =>
+        case Some("Overwrite") =>
           logger.debug("SAVEMODE DEBUG: saveMode=Overwrite in options, returning true")
           true
         case Some("ErrorIfExists") =>
           logger.debug("SAVEMODE DEBUG: saveMode=ErrorIfExists in options, returning false")
           false
-        case Some("Ignore")        =>
+        case Some("Ignore") =>
           logger.debug("SAVEMODE DEBUG: saveMode=Ignore in options, returning false")
           false
-        case Some("Append")        =>
+        case Some("Append") =>
           logger.debug("SAVEMODE DEBUG: saveMode=Append in options, returning false")
           false
-        case None                  =>
+        case None =>
           // Check if this looks like an initial write (no existing files) - treat as overwrite
           logger.debug("SAVEMODE DEBUG: No saveMode in options, checking existing files")
           try {
@@ -275,9 +277,7 @@ class IndexTables4SparkStandardWrite(
         // Log what's in the transaction log after this operation
         val filesAfter = transactionLog.listFiles()
         logger.debug(s"COMMIT DEBUG: After OVERWRITE, transaction log contains ${filesAfter.length} files:")
-        filesAfter.foreach { action =>
-          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
-        }
+        filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
 
         logger.info(s"Overwrite completed in transaction version $version, added ${addActions.length} files")
       } else {
@@ -289,9 +289,7 @@ class IndexTables4SparkStandardWrite(
         // Log what's in the transaction log after this operation
         val filesAfter = transactionLog.listFiles()
         logger.debug(s"COMMIT DEBUG: After APPEND, transaction log contains ${filesAfter.length} files:")
-        filesAfter.foreach { action =>
-          logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records")
-        }
+        filesAfter.foreach(action => logger.debug(s"  - ${action.path}: ${action.numRecords.getOrElse(0)} records"))
 
         logger.info(s"Added ${addActions.length} files in transaction version $version")
       }
@@ -389,7 +387,7 @@ class IndexTables4SparkStandardWrite(
                   // Note: "json" config maps to "object" type in tantivy, these are equivalent
                   val typesCompatible = existingType.isEmpty || {
                     val existing = existingType.get
-                    val current = currentType
+                    val current  = currentType
                     existing == current ||
                     (existing == "object" && current == "json") ||
                     (existing == "json" && current == "object")
@@ -436,14 +434,12 @@ class IndexTables4SparkStandardWrite(
    * Evaluate if merge-on-write should run after transaction commit.
    *
    * This method:
-   * 1. Checks if merge-on-write is enabled
-   * 2. Counts mergeable groups from the transaction log
-   * 3. Compares against threshold (defaultParallelism * mergeGroupMultiplier)
-   * 4. Invokes MERGE SPLITS command if worthwhile
+   *   1. Checks if merge-on-write is enabled 2. Counts mergeable groups from the transaction log 3. Compares against
+   *      threshold (defaultParallelism * mergeGroupMultiplier) 4. Invokes MERGE SPLITS command if worthwhile
    */
   private def evaluateAndExecuteMergeOnWrite(
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): Boolean = {
+  ): Boolean =
     try {
       // Check if merge-on-write is enabled
       val mergeOnWriteEnabled = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.enabled", "false").toBoolean
@@ -456,17 +452,21 @@ class IndexTables4SparkStandardWrite(
       logger.info("🔀 Merge-on-write enabled - evaluating if merge is worthwhile...")
 
       // Get configuration
-      val mergeGroupMultiplier = writeOptions.getOrDefault(
-        "spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0"
-      ).toDouble
+      val mergeGroupMultiplier = writeOptions
+        .getOrDefault(
+          "spark.indextables.mergeOnWrite.mergeGroupMultiplier",
+          "2.0"
+        )
+        .toDouble
       val targetSize = writeOptions.getOrDefault(
-        "spark.indextables.mergeOnWrite.targetSize", "4G"
+        "spark.indextables.mergeOnWrite.targetSize",
+        "4G"
       )
 
       // Get Spark session for default parallelism
-      val spark = org.apache.spark.sql.SparkSession.active
+      val spark              = org.apache.spark.sql.SparkSession.active
       val defaultParallelism = spark.sparkContext.defaultParallelism
-      val threshold = (defaultParallelism * mergeGroupMultiplier).toInt
+      val threshold          = (defaultParallelism * mergeGroupMultiplier).toInt
 
       logger.info(s"Merge threshold: $threshold merge groups (parallelism: $defaultParallelism × multiplier: $mergeGroupMultiplier)")
 
@@ -490,26 +490,27 @@ class IndexTables4SparkStandardWrite(
         logger.warn(s"Failed to evaluate merge-on-write: ${e.getMessage}", e)
         false // Merge was not executed due to error
     }
-  }
 
   /**
-   * Count number of merge groups using MergeSplitsExecutor's dry-run logic.
-   * This ensures we use the exact same algorithm as the actual merge operation,
-   * avoiding any discrepancies between decision-making and execution.
+   * Count number of merge groups using MergeSplitsExecutor's dry-run logic. This ensures we use the exact same
+   * algorithm as the actual merge operation, avoiding any discrepancies between decision-making and execution.
    */
   private def countMergeGroupsUsingExecutor(
     targetSizeStr: String,
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): Int = {
+  ): Int =
     try {
       import io.indextables.spark.sql.MergeSplitsExecutor
       import scala.jdk.CollectionConverters._
 
       val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
-      val spark = org.apache.spark.sql.SparkSession.active
+      val spark           = org.apache.spark.sql.SparkSession.active
 
       // Extract options to pass to executor (same as executeMergeSplitsCommand)
-      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+      val optionsFromWrite = writeOptions
+        .asCaseSensitiveMap()
+        .asScala
+        .toMap
         .filter { case (key, _) => key.startsWith("spark.indextables.") }
 
       // Merge with serializedHadoopConf to include credentials
@@ -537,20 +538,19 @@ class IndexTables4SparkStandardWrite(
         logger.warn(s"Failed to count merge groups using executor: ${e.getMessage}", e)
         0
     }
-  }
 
   /**
    * Execute MERGE SPLITS command programmatically with write options.
    *
-   * This method passes write options directly to MergeSplitsExecutor so it has access
-   * to AWS/Azure credentials, temp directories, heap size, and all other write-time configuration.
+   * This method passes write options directly to MergeSplitsExecutor so it has access to AWS/Azure credentials, temp
+   * directories, heap size, and all other write-time configuration.
    */
-  private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit = {
+  private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit =
     try {
       import io.indextables.spark.sql.MergeSplitsExecutor
       import scala.jdk.CollectionConverters._
 
-      val targetSizeStr = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
+      val targetSizeStr   = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
       val targetSizeBytes = io.indextables.spark.util.SizeParser.parseSize(targetSizeStr)
 
       logger.info(s"Executing MERGE SPLITS for table: ${tablePath.toString} with target size: $targetSizeStr ($targetSizeBytes bytes)")
@@ -558,7 +558,10 @@ class IndexTables4SparkStandardWrite(
       val spark = org.apache.spark.sql.SparkSession.active
 
       // Extract all indextables options from writeOptions to pass to merge executor
-      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+      val optionsFromWrite = writeOptions
+        .asCaseSensitiveMap()
+        .asScala
+        .toMap
         .filter { case (key, _) => key.startsWith("spark.indextables.") }
 
       // CRITICAL FIX: Merge with serializedHadoopConf to include credentials from enrichedHadoopConf
@@ -566,9 +569,15 @@ class IndexTables4SparkStandardWrite(
       val optionsToPass = serializedHadoopConf ++ optionsFromWrite
 
       logger.info(s"Passing ${optionsToPass.size} options to MERGE SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
-      optionsToPass.foreach { case (key, value) =>
-        val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
-        logger.debug(s"  Passing option: $key = $displayValue")
+      optionsToPass.foreach {
+        case (key, value) =>
+          val displayValue =
+            if (
+              key.toLowerCase.contains("secret") || key.toLowerCase
+                .contains("key") || key.toLowerCase.contains("password")
+            ) "***"
+            else value
+          logger.debug(s"  Passing option: $key = $displayValue")
       }
 
       // Create executor with transaction log and write options
@@ -589,7 +598,9 @@ class IndexTables4SparkStandardWrite(
       // Log first row of results (contains metrics)
       if (results.nonEmpty) {
         val firstRow = results.head
-        logger.info(s"✅ MERGE SPLITS completed: ${firstRow.getString(0)} - merged ${firstRow.getStruct(1).getLong(1)} files")
+        logger.info(
+          s"✅ MERGE SPLITS completed: ${firstRow.getString(0)} - merged ${firstRow.getStruct(1).getLong(1)} files"
+        )
       } else {
         logger.info(s"✅ MERGE SPLITS completed with no results")
       }
@@ -599,25 +610,25 @@ class IndexTables4SparkStandardWrite(
         // Don't fail the write if merge fails
         logger.warn(s"Failed to execute MERGE SPLITS: ${e.getMessage}", e)
     }
-  }
 
   /**
    * Evaluate if purge-on-write should run after transaction commit.
    *
    * This is a POST-COMMIT evaluation that:
-   * 1. Checks if purge-on-write is enabled
-   * 2. Checks if purge should trigger based on configuration:
-   *    - After merge-on-write completion (if triggerAfterMerge=true)
-   *    - After N write transactions (if triggerAfterWrites > 0)
-   * 3. Invokes PURGE ORPHANED SPLITS command with configured retention periods
+   *   1. Checks if purge-on-write is enabled 2. Checks if purge should trigger based on configuration:
+   *      - After merge-on-write completion (if triggerAfterMerge=true)
+   *      - After N write transactions (if triggerAfterWrites > 0) 3. Invokes PURGE ORPHANED SPLITS command with
+   *        configured retention periods
    *
-   * @param writeOptions Write options containing purge-on-write configuration
-   * @param mergeWasExecuted Whether merge-on-write just executed
+   * @param writeOptions
+   *   Write options containing purge-on-write configuration
+   * @param mergeWasExecuted
+   *   Whether merge-on-write just executed
    */
   private def evaluateAndExecutePurgeOnWrite(
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap,
     mergeWasExecuted: Boolean
-  ): Unit = {
+  ): Unit =
     try {
       import io.indextables.spark.purge.{PurgeOnWriteConfig, PurgeOnWriteTransactionCounter}
 
@@ -639,7 +650,7 @@ class IndexTables4SparkStandardWrite(
       } else if (config.triggerAfterWrites > 0) {
         // Trigger 2: After N write transactions
         val txCount = PurgeOnWriteTransactionCounter.incrementAndGet(tablePath.toString)
-        logger.debug(s"Transaction count for ${tablePath}: $txCount (threshold: ${config.triggerAfterWrites})")
+        logger.debug(s"Transaction count for $tablePath: $txCount (threshold: ${config.triggerAfterWrites})")
 
         if (txCount >= config.triggerAfterWrites) {
           logger.info(s"✅ Purge triggered: transaction count $txCount ≥ threshold ${config.triggerAfterWrites}")
@@ -651,7 +662,9 @@ class IndexTables4SparkStandardWrite(
           false
         }
       } else {
-        logger.debug("Purge-on-write enabled but no trigger conditions met (triggerAfterMerge=false, triggerAfterWrites=0)")
+        logger.debug(
+          "Purge-on-write enabled but no trigger conditions met (triggerAfterMerge=false, triggerAfterWrites=0)"
+        )
         false
       }
 
@@ -664,21 +677,22 @@ class IndexTables4SparkStandardWrite(
         // Don't fail the write operation if purge evaluation fails
         logger.warn(s"Failed to evaluate purge-on-write: ${e.getMessage}", e)
     }
-  }
 
   /**
    * Execute PURGE ORPHANED SPLITS command programmatically with write options.
    *
-   * This method passes write options directly to PurgeOrphanedSplitsExecutor so it has access
-   * to AWS/Azure credentials, cache directories, and all other write-time configuration.
+   * This method passes write options directly to PurgeOrphanedSplitsExecutor so it has access to AWS/Azure credentials,
+   * cache directories, and all other write-time configuration.
    *
-   * @param config Purge-on-write configuration
-   * @param writeOptions Write options containing credentials and configuration
+   * @param config
+   *   Purge-on-write configuration
+   * @param writeOptions
+   *   Write options containing credentials and configuration
    */
   private def executePurgeOrphanedSplitsCommand(
     config: io.indextables.spark.purge.PurgeOnWriteConfig,
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): Unit = {
+  ): Unit =
     try {
       import io.indextables.spark.sql.PurgeOrphanedSplitsExecutor
       import scala.jdk.CollectionConverters._
@@ -689,7 +703,10 @@ class IndexTables4SparkStandardWrite(
       val spark = org.apache.spark.sql.SparkSession.active
 
       // Extract all indextables options from writeOptions to pass to purge executor
-      val optionsFromWrite = writeOptions.asCaseSensitiveMap().asScala.toMap
+      val optionsFromWrite = writeOptions
+        .asCaseSensitiveMap()
+        .asScala
+        .toMap
         .filter { case (key, _) => key.startsWith("spark.indextables.") }
 
       // CRITICAL: Merge with serializedHadoopConf to include credentials from enrichedHadoopConf
@@ -697,9 +714,15 @@ class IndexTables4SparkStandardWrite(
       val optionsToPass = serializedHadoopConf ++ optionsFromWrite
 
       logger.info(s"Passing ${optionsToPass.size} options to PURGE ORPHANED SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
-      optionsToPass.foreach { case (key, value) =>
-        val displayValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("key") || key.toLowerCase.contains("password")) "***" else value
-        logger.debug(s"  Passing option: $key = $displayValue")
+      optionsToPass.foreach {
+        case (key, value) =>
+          val displayValue =
+            if (
+              key.toLowerCase.contains("secret") || key.toLowerCase
+                .contains("key") || key.toLowerCase.contains("password")
+            ) "***"
+            else value
+          logger.debug(s"  Passing option: $key = $displayValue")
       }
 
       // Convert retention from hours to milliseconds for transaction log
@@ -731,6 +754,5 @@ class IndexTables4SparkStandardWrite(
         // Don't fail the write if purge fails
         logger.warn(s"Failed to execute PURGE ORPHANED SPLITS: ${e.getMessage}", e)
     }
-  }
 
 }

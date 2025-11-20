@@ -41,9 +41,8 @@ object IndexQueryRegistry {
     queryId
   }
 
-  def setCurrentQuery(queryId: String): Unit = {
+  def setCurrentQuery(queryId: String): Unit =
     currentQueryId.set(queryId)
-  }
 
   def getCurrentQueryId(): Option[String] =
     Option(currentQueryId.get())
@@ -54,7 +53,7 @@ object IndexQueryRegistry {
         val filters = queryIndexQueries.getOrElseUpdate(queryId, mutable.Buffer.empty)
         filters += IndexQueryFilter(columnName, queryString)
       case None =>
-        // Silently skip if no current query ID
+      // Silently skip if no current query ID
     }
 
   def registerIndexQueryAll(queryString: String): Unit =
@@ -63,7 +62,7 @@ object IndexQueryRegistry {
         val filters = queryIndexQueryAlls.getOrElseUpdate(queryId, mutable.Buffer.empty)
         filters += IndexQueryAllFilter(queryString)
       case None =>
-        // Silently skip if no current query ID
+      // Silently skip if no current query ID
     }
 
   def getIndexQueriesForQuery(queryId: String): Seq[Any] = {

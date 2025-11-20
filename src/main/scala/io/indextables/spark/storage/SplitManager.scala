@@ -20,6 +20,7 @@ package io.indextables.spark.storage
 import java.io.File
 import java.nio.file.{Files, Paths}
 import java.time.Instant
+import java.util.concurrent.Semaphore
 import java.util.UUID
 
 import scala.util.Try
@@ -34,13 +35,12 @@ import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFact
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
 import org.slf4j.LoggerFactory
-import java.util.concurrent.Semaphore
 
 /**
  * Throttle for controlling parallelism of tantivy index to quickwit split conversions.
  *
- * The conversion process (QuickwitSplit.convertIndexFromPath) is CPU and I/O intensive, so we limit
- * how many can run concurrently across the executor to prevent resource exhaustion.
+ * The conversion process (QuickwitSplit.convertIndexFromPath) is CPU and I/O intensive, so we limit how many can run
+ * concurrently across the executor to prevent resource exhaustion.
  *
  * Configuration:
  *   - spark.indextables.splitConversion.maxParallelism: Maximum concurrent conversions
@@ -50,13 +50,14 @@ object SplitConversionThrottle {
   private val logger = LoggerFactory.getLogger(getClass)
 
   @volatile private var semaphore: Option[Semaphore] = None
-  @volatile private var currentMaxParallelism: Int = -1
-  private val lock = new Object
+  @volatile private var currentMaxParallelism: Int   = -1
+  private val lock                                   = new Object
 
   /**
    * Initialize or update the throttle with the given max parallelism.
    *
-   * @param maxParallelism Maximum number of concurrent split conversions
+   * @param maxParallelism
+   *   Maximum number of concurrent split conversions
    */
   def initialize(maxParallelism: Int): Unit = lock.synchronized {
     if (maxParallelism <= 0) {
@@ -71,8 +72,8 @@ object SplitConversionThrottle {
   }
 
   /**
-   * Execute a block of code with throttling applied.
-   * Acquires a permit before execution and releases it after completion.
+   * Execute a block of code with throttling applied. Acquires a permit before execution and releases it after
+   * completion.
    */
   def withThrottle[T](block: => T): T = {
     val sem = semaphore.getOrElse {
@@ -90,14 +91,10 @@ object SplitConversionThrottle {
     }
   }
 
-  /**
-   * Get the current max parallelism setting.
-   */
+  /** Get the current max parallelism setting. */
   def getMaxParallelism: Int = currentMaxParallelism
 
-  /**
-   * Get the number of available permits.
-   */
+  /** Get the number of available permits. */
   def getAvailablePermits: Int = semaphore.map(_.availablePermits()).getOrElse(0)
 }
 

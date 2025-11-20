@@ -17,8 +17,9 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
 import org.slf4j.LoggerFactory
 
 /**
@@ -33,31 +34,34 @@ import org.slf4j.LoggerFactory
  */
 class SparkToTantivyConverter(
   schema: StructType,
-  schemaMapper: SparkSchemaToTantivyMapper
-) {
+  schemaMapper: SparkSchemaToTantivyMapper) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Converts a Spark StructType Row to a Java Map for tantivy4java JSON field.
    *
-   * @param row Spark Row containing struct data
-   * @param structType Schema of the struct
-   * @return Java Map representing the JSON object
+   * @param row
+   *   Spark Row containing struct data
+   * @param structType
+   *   Schema of the struct
+   * @return
+   *   Java Map representing the JSON object
    */
   def structToJsonMap(row: Row, structType: StructType): java.util.Map[String, Object] = {
     val map = new java.util.HashMap[String, Object]()
 
-    structType.fields.zipWithIndex.foreach { case (field, idx) =>
-      val value = row.get(idx)
-      if (value != null) {
-        val jsonValue = convertToJsonValue(value, field.dataType)
-        logger.debug(s"  Adding field '${field.name}' (${field.name.getClass.getName}) = $jsonValue (${jsonValue.getClass.getName})")
-        map.put(field.name, jsonValue)
-      } else {
-        // Explicitly add null values to JSON map so they can be detected on read
-        map.put(field.name, null)
-        logger.debug(s"  Adding null field '${field.name}'")
-      }
+    structType.fields.zipWithIndex.foreach {
+      case (field, idx) =>
+        val value = row.get(idx)
+        if (value != null) {
+          val jsonValue = convertToJsonValue(value, field.dataType)
+          logger.debug(s"  Adding field '${field.name}' (${field.name.getClass.getName}) = $jsonValue (${jsonValue.getClass.getName})")
+          map.put(field.name, jsonValue)
+        } else {
+          // Explicitly add null values to JSON map so they can be detected on read
+          map.put(field.name, null)
+          logger.debug(s"  Adding null field '${field.name}'")
+        }
     }
 
     logger.debug(s"Converted struct to JSON map with ${map.size()} fields: $map")
@@ -65,12 +69,15 @@ class SparkToTantivyConverter(
   }
 
   /**
-   * Converts a Spark StructType InternalRow to a Java Map for tantivy4java JSON field.
-   * This handles UnsafeRow instances from Spark's internal execution.
+   * Converts a Spark StructType InternalRow to a Java Map for tantivy4java JSON field. This handles UnsafeRow instances
+   * from Spark's internal execution.
    *
-   * @param internalRow Spark InternalRow containing struct data
-   * @param structType Schema of the struct
-   * @return Java Map representing the JSON object
+   * @param internalRow
+   *   Spark InternalRow containing struct data
+   * @param structType
+   *   Schema of the struct
+   * @return
+   *   Java Map representing the JSON object
    */
   def structToJsonMapFromInternalRow(
     internalRow: org.apache.spark.sql.catalyst.InternalRow,
@@ -78,17 +85,18 @@ class SparkToTantivyConverter(
   ): java.util.Map[String, Object] = {
     val map = new java.util.HashMap[String, Object]()
 
-    structType.fields.zipWithIndex.foreach { case (field, idx) =>
-      if (!internalRow.isNullAt(idx)) {
-        val value = internalRow.get(idx, field.dataType)
-        val jsonValue = convertToJsonValue(value, field.dataType)
-        logger.debug(s"  Adding field '${field.name}' from InternalRow = $jsonValue")
-        map.put(field.name, jsonValue)
-      } else {
-        // Explicitly add null values to JSON map so they can be detected on read
-        map.put(field.name, null)
-        logger.debug(s"  Adding null field '${field.name}' from InternalRow")
-      }
+    structType.fields.zipWithIndex.foreach {
+      case (field, idx) =>
+        if (!internalRow.isNullAt(idx)) {
+          val value     = internalRow.get(idx, field.dataType)
+          val jsonValue = convertToJsonValue(value, field.dataType)
+          logger.debug(s"  Adding field '${field.name}' from InternalRow = $jsonValue")
+          map.put(field.name, jsonValue)
+        } else {
+          // Explicitly add null values to JSON map so they can be detected on read
+          map.put(field.name, null)
+          logger.debug(s"  Adding null field '${field.name}' from InternalRow")
+        }
     }
 
     logger.debug(s"Converted InternalRow struct to JSON map with ${map.size()} fields")
@@ -98,9 +106,12 @@ class SparkToTantivyConverter(
   /**
    * Converts a Spark ArrayType to a Java List for tantivy4java JSON field.
    *
-   * @param value Spark Seq value
-   * @param arrayType Schema of the array
-   * @return Java List representing the JSON array
+   * @param value
+   *   Spark Seq value
+   * @param arrayType
+   *   Schema of the array
+   * @return
+   *   Java List representing the JSON array
    */
   def arrayToJsonList(value: Any, arrayType: ArrayType): java.util.List[Object] = {
     val sparkSeq = value.asInstanceOf[Seq[_]]
@@ -120,22 +131,26 @@ class SparkToTantivyConverter(
   /**
    * Converts a Spark MapType to a Java Map for tantivy4java JSON field.
    *
-   * @param value Spark Map value
-   * @param mapType Schema of the map
-   * @return Java Map representing the JSON object
+   * @param value
+   *   Spark Map value
+   * @param mapType
+   *   Schema of the map
+   * @return
+   *   Java Map representing the JSON object
    */
   def mapToJsonMap(value: Any, mapType: MapType): java.util.Map[String, Object] = {
     val sparkMap = value.asInstanceOf[scala.collection.Map[_, _]]
-    val javaMap = new java.util.HashMap[String, Object]()
+    val javaMap  = new java.util.HashMap[String, Object]()
 
-    sparkMap.foreach { case (key, mapValue) =>
-      if (mapValue != null) {
-        // Convert key to string (Spark maps can have non-string keys)
-        val keyString = convertToJsonValue(key, mapType.keyType).toString
-        val jsonValue = convertToJsonValue(mapValue, mapType.valueType)
-        logger.debug(s"  Adding map entry '$keyString' = $jsonValue (${jsonValue.getClass.getName})")
-        javaMap.put(keyString, jsonValue)
-      }
+    sparkMap.foreach {
+      case (key, mapValue) =>
+        if (mapValue != null) {
+          // Convert key to string (Spark maps can have non-string keys)
+          val keyString = convertToJsonValue(key, mapType.keyType).toString
+          val jsonValue = convertToJsonValue(mapValue, mapType.valueType)
+          logger.debug(s"  Adding map entry '$keyString' = $jsonValue (${jsonValue.getClass.getName})")
+          javaMap.put(keyString, jsonValue)
+        }
     }
 
     logger.debug(s"Converted map to JSON map with ${javaMap.size()} entries")
@@ -145,11 +160,14 @@ class SparkToTantivyConverter(
   /**
    * Recursively converts a Spark value to a Java object suitable for JSON serialization.
    *
-   * @param value Spark value
-   * @param dataType Spark data type
-   * @return Java Object for JSON
+   * @param value
+   *   Spark value
+   * @param dataType
+   *   Spark data type
+   * @return
+   *   Java Object for JSON
    */
-  def convertToJsonValue(value: Any, dataType: DataType): Object = {
+  def convertToJsonValue(value: Any, dataType: DataType): Object =
     dataType match {
       case st: StructType =>
         // Handle both Row and InternalRow (UnsafeRow)
@@ -159,7 +177,9 @@ class SparkToTantivyConverter(
           case row: Row =>
             structToJsonMap(row, st)
           case other =>
-            throw new IllegalArgumentException(s"Expected Row or InternalRow for StructType, got ${other.getClass.getName}")
+            throw new IllegalArgumentException(
+              s"Expected Row or InternalRow for StructType, got ${other.getClass.getName}"
+            )
         }
 
       case at: ArrayType =>
@@ -172,8 +192,8 @@ class SparkToTantivyConverter(
         // Handle both UTF8String (from InternalRow) and regular String
         value match {
           case utf8: org.apache.spark.unsafe.types.UTF8String => utf8.toString
-          case str: String => str
-          case other => other.toString
+          case str: String                                    => str
+          case other                                          => other.toString
         }
 
       case IntegerType =>
@@ -210,19 +230,21 @@ class SparkToTantivyConverter(
         logger.warn(s"Unsupported type for JSON conversion: $dataType, using toString")
         value.toString
     }
-  }
 
   /**
    * Parses a JSON string into a Java Map.
    *
-   * @param jsonString JSON string to parse
-   * @param config JSON field configuration
-   * @return Java Map representing the JSON object, or a map with "_raw" key if parsing fails
+   * @param jsonString
+   *   JSON string to parse
+   * @param config
+   *   JSON field configuration
+   * @return
+   *   Java Map representing the JSON object, or a map with "_raw" key if parsing fails
    */
-  def parseJsonString(jsonString: String, config: JsonFieldConfig): java.util.Map[String, Object] = {
-    try {
+  def parseJsonString(jsonString: String, config: JsonFieldConfig): java.util.Map[String, Object] =
+    try
       JsonUtils.parseJson(jsonString)
-    } catch {
+    catch {
       case e: Exception =>
         if (config.failOnInvalidJson) {
           throw new RuntimeException(s"Invalid JSON string: $jsonString", e)
@@ -234,14 +256,15 @@ class SparkToTantivyConverter(
           map
         }
     }
-  }
 
   /**
-   * Wraps an array in a JSON object for tantivy4java storage.
-   * Since tantivy4java JSON fields expect objects, we wrap arrays with a "_values" key.
+   * Wraps an array in a JSON object for tantivy4java storage. Since tantivy4java JSON fields expect objects, we wrap
+   * arrays with a "_values" key.
    *
-   * @param jsonList Java List representing the array
-   * @return Java Map with "_values" key containing the list
+   * @param jsonList
+   *   Java List representing the array
+   * @return
+   *   Java Map with "_values" key containing the list
    */
   def wrapArrayInObject(jsonList: java.util.List[Object]): java.util.Map[String, Object] = {
     val map = new java.util.HashMap[String, Object]()
@@ -250,40 +273,42 @@ class SparkToTantivyConverter(
   }
 }
 
-/**
- * JSON parsing and serialization utilities.
- */
+/** JSON parsing and serialization utilities. */
 object JsonUtils {
   private val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   /**
    * Parses a JSON string into a Java Map.
    *
-   * @param jsonString JSON string
-   * @return Java Map
-   * @throws com.fasterxml.jackson.core.JsonParseException if JSON is invalid
+   * @param jsonString
+   *   JSON string
+   * @return
+   *   Java Map
+   * @throws com.fasterxml.jackson.core.JsonParseException
+   *   if JSON is invalid
    */
-  def parseJson(jsonString: String): java.util.Map[String, Object] = {
+  def parseJson(jsonString: String): java.util.Map[String, Object] =
     mapper.readValue(jsonString, classOf[java.util.Map[String, Object]])
-  }
 
   /**
    * Serializes a Java Map to a JSON string.
    *
-   * @param jsonMap Java Map
-   * @return JSON string
+   * @param jsonMap
+   *   Java Map
+   * @return
+   *   JSON string
    */
-  def serializeToJson(jsonMap: java.util.Map[String, Object]): String = {
+  def serializeToJson(jsonMap: java.util.Map[String, Object]): String =
     mapper.writeValueAsString(jsonMap)
-  }
 
   /**
    * Serializes a Java List to a JSON string.
    *
-   * @param jsonList Java List
-   * @return JSON string
+   * @param jsonList
+   *   Java List
+   * @return
+   *   JSON string
    */
-  def serializeListToJson(jsonList: java.util.List[Object]): String = {
+  def serializeListToJson(jsonList: java.util.List[Object]): String =
     mapper.writeValueAsString(jsonList)
-  }
 }

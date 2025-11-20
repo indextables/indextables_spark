@@ -22,46 +22,52 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction._
 import io.indextables.spark.io.{CloudStorageProvider, CloudStorageProviderFactory}
+import io.indextables.spark.transaction._
 import org.slf4j.LoggerFactory
 
 /**
  * File information for purge operation.
  *
- * @param path Absolute path to the file (for deletion)
- * @param fileName Filename only (for comparison with transaction log)
- * @param size File size in bytes
- * @param modificationTime Last modification timestamp in milliseconds
+ * @param path
+ *   Absolute path to the file (for deletion)
+ * @param fileName
+ *   Filename only (for comparison with transaction log)
+ * @param size
+ *   File size in bytes
+ * @param modificationTime
+ *   Last modification timestamp in milliseconds
  */
 case class FileInfo(
-    path: String,
-    fileName: String,
-    size: Long,
-    modificationTime: Long)
+  path: String,
+  fileName: String,
+  size: Long,
+  modificationTime: Long)
 
 /**
  * Executor for PURGE ORPHANED SPLITS command.
  *
  * Implementation follows Delta Lake VACUUM and Iceberg DeleteOrphanFiles patterns:
- *  - Two-dataset anti-join to identify orphaned files
- *  - Distributed file listing and deletion across executors
- *  - Retention-based safety filtering
- *  - Graceful partial failure handling
- *  - Retry logic for transient cloud storage errors
+ *   - Two-dataset anti-join to identify orphaned files
+ *   - Distributed file listing and deletion across executors
+ *   - Retention-based safety filtering
+ *   - Graceful partial failure handling
+ *   - Retry logic for transient cloud storage errors
  *
- * @param overrideOptions Optional map of configuration overrides (e.g., from write options).
- *                        Used to pass AWS/Azure credentials and other settings from write operations.
+ * @param overrideOptions
+ *   Optional map of configuration overrides (e.g., from write options). Used to pass AWS/Azure credentials and other
+ *   settings from write operations.
  */
 class PurgeOrphanedSplitsExecutor(
-    spark: SparkSession,
-    tablePath: String,
-    retentionHours: Long,
-    txLogRetentionDuration: Option[Long],
-    dryRun: Boolean,
-    overrideOptions: Option[Map[String, String]] = None) {
+  spark: SparkSession,
+  tablePath: String,
+  retentionHours: Long,
+  txLogRetentionDuration: Option[Long],
+  dryRun: Boolean,
+  overrideOptions: Option[Map[String, String]] = None) {
 
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
@@ -70,13 +76,13 @@ class PurgeOrphanedSplitsExecutor(
 
     // Step 1: Get transaction log
     val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val txLog = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
+    val txLog    = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
 
     // Step 2: Determine which transaction log files will be deleted
     // Get the list of versions that will remain after cleanup (for time travel support)
     val versionsBeforeCleanup = txLog.getVersions()
-    val versionsToDelete = getTransactionLogVersionsToDelete(txLog)
-    val versionsToKeep = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
+    val versionsToDelete      = getTransactionLogVersionsToDelete(txLog)
+    val versionsToKeep        = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
     logger.info(s"Transaction log versions: ${versionsBeforeCleanup.size} total, ${versionsToDelete.size} to delete, ${versionsToKeep.size} to keep")
 
     // Step 3: Clean up old transaction log files
@@ -92,7 +98,7 @@ class PurgeOrphanedSplitsExecutor(
     logger.info(s"Files referenced in remaining transaction log versions: ${allFiles.size}")
 
     // Step 2: List all .split and .crc files from filesystem (distributed)
-    val allSplitFiles = listAllSplitFiles(tablePath)
+    val allSplitFiles        = listAllSplitFiles(tablePath)
     val totalFilesystemCount = allSplitFiles.count()
     logger.info(s"Total split/crc files found in filesystem: $totalFilesystemCount")
 
@@ -104,7 +110,8 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
         transactionLogsDeleted = transactionLogsDeleted,
-        message = Some(s"No split files found in table directory. Deleted $transactionLogsDeleted old transaction log files.")
+        message =
+          Some(s"No split files found in table directory. Deleted $transactionLogsDeleted old transaction log files.")
       )
     }
 
@@ -131,7 +138,7 @@ class PurgeOrphanedSplitsExecutor(
     }
 
     // Step 5: Apply retention filter
-    val retentionTimestamp = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
+    val retentionTimestamp  = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
     val eligibleForDeletion = orphanedFiles.filter(col("modificationTime") < retentionTimestamp)
 
     val eligibleCount = eligibleForDeletion.count()
@@ -145,7 +152,8 @@ class PurgeOrphanedSplitsExecutor(
         orphanedFilesDeleted = 0,
         sizeMBDeleted = 0.0,
         transactionLogsDeleted = transactionLogsDeleted,
-        message = Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours). Deleted $transactionLogsDeleted old transaction log files.")
+        message =
+          Some(s"$orphanedCount orphaned files found, but all are newer than retention period ($retentionHours hours). Deleted $transactionLogsDeleted old transaction log files.")
       )
     }
 
@@ -171,12 +179,13 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * Clean up old transaction log files based on checkpoint and retention policy.
-   * This is called BEFORE purging orphaned splits.
+   * Clean up old transaction log files based on checkpoint and retention policy. This is called BEFORE purging orphaned
+   * splits.
    *
-   * @return Number of transaction log files deleted (or would be deleted in DRY RUN)
+   * @return
+   *   Number of transaction log files deleted (or would be deleted in DRY RUN)
    */
-  private def cleanupOldTransactionLogFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long = {
+  private def cleanupOldTransactionLogFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
     try {
       logger.info(s"Cleaning up old transaction log files (dryRun=$dryRun)...")
 
@@ -193,12 +202,12 @@ class PurgeOrphanedSplitsExecutor(
               .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
           }
 
-          val currentTime = System.currentTimeMillis()
+          val currentTime        = System.currentTimeMillis()
           val transactionLogPath = new Path(tablePath, "_transaction_log")
 
           // Use CloudStorageProvider for multi-cloud support with credentials
           val cloudConfigs = extractCloudStorageConfigs()
-          val optionsMap = new java.util.HashMap[String, String]()
+          val optionsMap   = new java.util.HashMap[String, String]()
           cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
           val configOptions = new CaseInsensitiveStringMap(optionsMap)
 
@@ -222,7 +231,9 @@ class PurgeOrphanedSplitsExecutor(
 
             val currentVersion = if (versions.nonEmpty) versions.max else 0L
 
-            logger.info(s"Cleanup: checkpoint=$checkpointVersion, current=$currentVersion, retention=${logRetentionDuration}ms")
+            logger.info(
+              s"Cleanup: checkpoint=$checkpointVersion, current=$currentVersion, retention=${logRetentionDuration}ms"
+            )
 
             // Only cleanup versions older than checkpoint
             val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
@@ -238,7 +249,9 @@ class PurgeOrphanedSplitsExecutor(
 
                   if (fileAge > logRetentionDuration) {
                     if (dryRun) {
-                      logger.info(s"DRY RUN: Would delete transaction log file: $versionFileName (age: ${fileAge / 1000}s)")
+                      logger.info(
+                        s"DRY RUN: Would delete transaction log file: $versionFileName (age: ${fileAge / 1000}s)"
+                      )
                       deletedCount += 1
                     } else {
                       if (provider.deleteFile(fileInfo.path)) {
@@ -247,7 +260,9 @@ class PurgeOrphanedSplitsExecutor(
                       }
                     }
                   } else {
-                    logger.debug(s"Skipping transaction log file $versionFileName (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)")
+                    logger.debug(
+                      s"Skipping transaction log file $versionFileName (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
+                    )
                   }
                 case None =>
                   // File doesn't exist, skip
@@ -257,15 +272,16 @@ class PurgeOrphanedSplitsExecutor(
 
             if (deletedCount > 0) {
               val action = if (dryRun) "Would delete" else "Deleted"
-              logger.info(s"$action $deletedCount old transaction log files (retention: ${logRetentionDuration / 1000}s)")
+              logger.info(
+                s"$action $deletedCount old transaction log files (retention: ${logRetentionDuration / 1000}s)"
+              )
             } else {
               logger.info("No old transaction log files to delete")
             }
 
             deletedCount
-          } finally {
+          } finally
             provider.close()
-          }
 
         case None =>
           logger.info("No checkpoint available - skipping transaction log cleanup")
@@ -277,11 +293,10 @@ class PurgeOrphanedSplitsExecutor(
         logger.warn(s"Failed to clean up old transaction log files: ${e.getMessage}", e)
         0L
     }
-  }
 
   /**
-   * Determine which transaction log versions will be deleted based on checkpoint and retention policy.
-   * This duplicates the logic from cleanupOldTransactionLogFiles but doesn't actually delete.
+   * Determine which transaction log versions will be deleted based on checkpoint and retention policy. This duplicates
+   * the logic from cleanupOldTransactionLogFiles but doesn't actually delete.
    *
    * Returns: Set of version numbers that will be deleted
    */
@@ -297,11 +312,11 @@ class PurgeOrphanedSplitsExecutor(
             .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
         }
 
-        val currentTime = System.currentTimeMillis()
+        val currentTime        = System.currentTimeMillis()
         val transactionLogPath = new Path(tablePath, "_transaction_log")
 
         val cloudConfigs = extractCloudStorageConfigs()
-        val optionsMap = new java.util.HashMap[String, String]()
+        val optionsMap   = new java.util.HashMap[String, String]()
         cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
         val configOptions = new CaseInsensitiveStringMap(optionsMap)
 
@@ -320,7 +335,7 @@ class PurgeOrphanedSplitsExecutor(
             .filterNot(_.startsWith("_"))
             .map(_.replace(".json", "").toLong)
 
-          val currentVersion = if (versions.nonEmpty) versions.max else 0L
+          val currentVersion  = if (versions.nonEmpty) versions.max else 0L
           val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
 
           val toDelete = versionsToCheck.filter { version =>
@@ -335,9 +350,8 @@ class PurgeOrphanedSplitsExecutor(
 
           logger.debug(s"Identified ${toDelete.size} transaction log versions to delete (< checkpoint v$checkpointVersion, older than retention)")
           toDelete
-        } finally {
+        } finally
           provider.close()
-        }
 
       case None =>
         logger.debug("No checkpoint available - no transaction logs will be deleted")
@@ -346,18 +360,19 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * Get ALL files referenced in ANY of the specified transaction log versions.
-   * This is critical for time travel support - we can't delete files that might be
-   * referenced by historical versions within the retention window.
+   * Get ALL files referenced in ANY of the specified transaction log versions. This is critical for time travel support
+   * \- we can't delete files that might be referenced by historical versions within the retention window.
    *
-   * @param versionsToScan The specific versions to scan (typically versions that will remain after cleanup)
-   * Returns: Seq[AddAction] containing all files that appear in any of the specified versions
+   * @param versionsToScan
+   *   The specific versions to scan (typically versions that will remain after cleanup) Returns: Seq[AddAction]
+   *   containing all files that appear in any of the specified versions
    */
-  private def getAllFilesFromVersions(txLog: io.indextables.spark.transaction.TransactionLog, versionsToScan: Seq[Long]): Seq[AddAction] = {
+  private def getAllFilesFromVersions(txLog: io.indextables.spark.transaction.TransactionLog, versionsToScan: Seq[Long])
+    : Seq[AddAction] = {
     logger.info(s"Scanning ${versionsToScan.size} transaction log versions for file references (time travel support)")
 
     // Collect all unique file paths that appear in ANY of the specified versions
-    val allFilePaths = scala.collection.mutable.Set[String]()
+    val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
     versionsToScan.sorted.foreach { version =>
@@ -376,24 +391,22 @@ class PurgeOrphanedSplitsExecutor(
       }
     }
 
-    logger.info(s"Found ${allFilePaths.size} unique files referenced across ${versionsToScan.size} transaction log versions")
+    logger.info(
+      s"Found ${allFilePaths.size} unique files referenced across ${versionsToScan.size} transaction log versions"
+    )
     filePathToAction.values.toSeq
   }
 
   /**
-   * Extract all spark.indextables.* configuration from Spark configuration.
-   * Returns a map of configuration keys/values to broadcast to executors.
-   * This includes AWS credentials, Azure credentials, and any other indextables settings.
+   * Extract all spark.indextables.* configuration from Spark configuration. Returns a map of configuration keys/values
+   * to broadcast to executors. This includes AWS credentials, Azure credentials, and any other indextables settings.
    *
    * Priority order (highest to lowest):
-   *   1. overrideOptions (from write options)
-   *   2. Spark session configuration
+   *   1. overrideOptions (from write options) 2. Spark session configuration
    */
   private def extractCloudStorageConfigs(): Map[String, String] = {
     // Get configs from Spark session
-    val sparkConfigs = spark.conf.getAll
-      .filter { case (key, _) => key.startsWith("spark.indextables.") }
-      .toMap
+    val sparkConfigs = spark.conf.getAll.filter { case (key, _) => key.startsWith("spark.indextables.") }.toMap
 
     // Merge with override options (override takes precedence)
     val configs = overrideOptions match {
@@ -410,15 +423,15 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * List all .split and .crc files from the table directory.
-   * Uses distributed listing across executors (Iceberg pattern).
+   * List all .split and .crc files from the table directory. Uses distributed listing across executors (Iceberg
+   * pattern).
    */
   private def listAllSplitFiles(basePath: String): Dataset[FileInfo] = {
     import spark.implicits._
 
     // Use CloudStorageProvider for multi-cloud support with credentials
     val cloudConfigs = extractCloudStorageConfigs()
-    val optionsMap = new java.util.HashMap[String, String]()
+    val optionsMap   = new java.util.HashMap[String, String]()
     cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
     val configOptions = new CaseInsensitiveStringMap(optionsMap)
 
@@ -444,8 +457,8 @@ class PurgeOrphanedSplitsExecutor(
           val fileName = fileInfo.path.split('/').last
 
           FileInfo(
-            path = fileInfo.path,  // Full path for deletion
-            fileName = fileName,    // Filename only for comparison
+            path = fileInfo.path, // Full path for deletion
+            fileName = fileName,  // Filename only for comparison
             size = fileInfo.size,
             modificationTime = fileInfo.modificationTime
           )
@@ -453,17 +466,17 @@ class PurgeOrphanedSplitsExecutor(
 
       logger.info(s"Listed ${files.size} split/crc files from filesystem")
       spark.createDataset(files)
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   /**
-   * Get all valid split files from the transaction log.
-   * Includes files from current state and their corresponding .crc files.
+   * Get all valid split files from the transaction log. Includes files from current state and their corresponding .crc
+   * files.
    */
   private def getValidSplitFilesFromTransactionLog(
-      addActions: Seq[AddAction]): Dataset[String] = {
+    addActions: Seq[AddAction]
+  ): Dataset[String] = {
     import spark.implicits._
 
     // Delta Lake approach: use relative paths for comparison
@@ -481,12 +494,13 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * Find orphaned files using LEFT ANTI JOIN pattern (Delta Lake/Iceberg).
-   * Files in filesystem that are NOT in transaction log are orphaned.
+   * Find orphaned files using LEFT ANTI JOIN pattern (Delta Lake/Iceberg). Files in filesystem that are NOT in
+   * transaction log are orphaned.
    */
   private def findOrphanedFiles(
-      allFiles: Dataset[FileInfo],
-      validFiles: Dataset[String]): Dataset[FileInfo] = {
+    allFiles: Dataset[FileInfo],
+    validFiles: Dataset[String]
+  ): Dataset[FileInfo] = {
     import spark.implicits._
 
     // Compare using fileName field (basename comparison)
@@ -499,16 +513,19 @@ class PurgeOrphanedSplitsExecutor(
       .as[FileInfo]
   }
 
-  /**
-   * Preview deletion (DRY RUN mode).
-   */
-  private def previewDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long, transactionLogsDeleted: Long): PurgeResult = {
+  /** Preview deletion (DRY RUN mode). */
+  private def previewDeletion(
+    files: Dataset[FileInfo],
+    totalEligibleCount: Long,
+    orphanedCount: Long,
+    transactionLogsDeleted: Long
+  ): PurgeResult = {
     val filesToPreview = files.collect()
     val totalSizeBytes = filesToPreview.map(_.size).sum
-    val totalSizeMB = totalSizeBytes / (1024.0 * 1024.0)
-    val count = filesToPreview.length
+    val totalSizeMB    = totalSizeBytes / (1024.0 * 1024.0)
+    val count          = filesToPreview.length
 
-    logger.info(s"DRY RUN: Would delete $count files (${totalSizeMB} MB)")
+    logger.info(s"DRY RUN: Would delete $count files ($totalSizeMB MB)")
 
     // Show sample of files that would be deleted
     println("\n=== DRY RUN: Files that would be deleted ===")
@@ -519,9 +536,9 @@ class PurgeOrphanedSplitsExecutor(
       .sortBy(-_.size) // Sort by size descending
       .take(20)
       .foreach { file =>
-        val sizeMB = file.size / (1024.0 * 1024.0)
+        val sizeMB       = file.size / (1024.0 * 1024.0)
         val modifiedDate = new java.util.Date(file.modificationTime)
-        println(f"${file.path}%-100s ${sizeMB}%12.2f ${modifiedDate}%20s")
+        println(f"${file.path}%-100s $sizeMB%12.2f $modifiedDate%20s")
       }
 
     if (filesToPreview.length > 20) {
@@ -535,20 +552,24 @@ class PurgeOrphanedSplitsExecutor(
       orphanedFilesDeleted = 0,
       sizeMBDeleted = totalSizeMB,
       transactionLogsDeleted = transactionLogsDeleted,
-      message = Some(s"Dry run completed. $count split files would be deleted (${totalSizeMB} MB). ${transactionLogsDeleted} transaction log files would be deleted.")
+      message =
+        Some(s"Dry run completed. $count split files would be deleted ($totalSizeMB MB). $transactionLogsDeleted transaction log files would be deleted.")
     )
   }
 
-  /**
-   * Execute file deletion (distributed across executors).
-   */
-  private def executeDeletion(files: Dataset[FileInfo], totalEligibleCount: Long, orphanedCount: Long, transactionLogsDeleted: Long): PurgeResult = {
+  /** Execute file deletion (distributed across executors). */
+  private def executeDeletion(
+    files: Dataset[FileInfo],
+    totalEligibleCount: Long,
+    orphanedCount: Long,
+    transactionLogsDeleted: Long
+  ): PurgeResult = {
     import spark.implicits._
 
-    val filesToDelete = files.collect()
+    val filesToDelete  = files.collect()
     val totalSizeBytes = filesToDelete.map(_.size).sum
-    val totalSizeMB = totalSizeBytes / (1024.0 * 1024.0)
-    val totalCount = filesToDelete.length
+    val totalSizeMB    = totalSizeBytes / (1024.0 * 1024.0)
+    val totalCount     = filesToDelete.length
 
     // Get parallelism config
     val parallelism = spark.conf
@@ -567,7 +588,7 @@ class PurgeOrphanedSplitsExecutor(
     // CRITICAL FIX: Extract cloud storage credentials from Spark config and broadcast to executors
     // This allows executors to authenticate with S3/Azure when deleting files
     val cloudStorageConfigs = extractCloudStorageConfigs()
-    val broadcastConfigs = spark.sparkContext.broadcast(cloudStorageConfigs)
+    val broadcastConfigs    = spark.sparkContext.broadcast(cloudStorageConfigs)
 
     // Distribute deletion across executors using CloudStorageProvider
     val hadoopConf = spark.sparkContext.broadcast(
@@ -578,20 +599,20 @@ class PurgeOrphanedSplitsExecutor(
       .createDataset(filesToDelete)
       .repartition(parallelism)
       .mapPartitions { fileIter =>
-        val conf = hadoopConf.value.value
-        val configs = broadcastConfigs.value
+        val conf         = hadoopConf.value.value
+        val configs      = broadcastConfigs.value
         var successCount = 0L
-        var failCount = 0L
+        var failCount    = 0L
         var deletedBytes = 0L
-        val retries = maxRetries
+        val retries      = maxRetries
 
         // Create CloudStorageProvider for this partition WITH credentials
         val optionsMap = new java.util.HashMap[String, String]()
         configs.foreach { case (k, v) => optionsMap.put(k, v) }
-        val configOptions = new CaseInsensitiveStringMap(optionsMap)
+        val configOptions                  = new CaseInsensitiveStringMap(optionsMap)
         var provider: CloudStorageProvider = null
 
-        try {
+        try
           fileIter.foreach { fileInfo =>
             // Lazy initialize provider on first file (to get base path)
             if (provider == null) {
@@ -601,10 +622,10 @@ class PurgeOrphanedSplitsExecutor(
             }
 
             // Inline retry logic to avoid serialization issues
-            var attempt = 0
-            var deleted = false
+            var attempt  = 0
+            var deleted  = false
             var retrying = true
-            while (retrying && attempt < retries) {
+            while (retrying && attempt < retries)
               try {
                 deleted = provider.deleteFile(fileInfo.path)
                 retrying = false
@@ -620,7 +641,6 @@ class PurgeOrphanedSplitsExecutor(
                   deleted = false
                   retrying = false
               }
-            }
 
             if (deleted) {
               successCount += 1
@@ -629,11 +649,10 @@ class PurgeOrphanedSplitsExecutor(
               failCount += 1
             }
           }
-        } finally {
+        finally
           if (provider != null) {
             provider.close()
           }
-        }
 
         Iterator((successCount, failCount, deletedBytes))
       }
@@ -648,7 +667,7 @@ class PurgeOrphanedSplitsExecutor(
     val deletedSizeMB = totalDeletedBytes / (1024.0 * 1024.0)
 
     logger.info(s"Deletion complete: $totalSuccess succeeded, $totalFailed failed")
-    logger.info(s"Total size deleted: ${deletedSizeMB} MB")
+    logger.info(s"Total size deleted: $deletedSizeMB MB")
 
     PurgeResult(
       status = if (totalFailed == 0) "SUCCESS" else "PARTIAL_SUCCESS",
@@ -659,7 +678,7 @@ class PurgeOrphanedSplitsExecutor(
       message = if (totalFailed > 0) {
         Some(s"Successfully deleted $totalSuccess split files, $totalFailed files failed to delete. Deleted $transactionLogsDeleted transaction log files.")
       } else {
-        Some(s"Successfully deleted $totalSuccess orphaned split files (${deletedSizeMB} MB) and $transactionLogsDeleted transaction log files.")
+        Some(s"Successfully deleted $totalSuccess orphaned split files ($deletedSizeMB MB) and $transactionLogsDeleted transaction log files.")
       }
     )
   }

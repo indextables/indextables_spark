@@ -17,11 +17,12 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.types._
-import org.slf4j.LoggerFactory
-
 import scala.jdk.CollectionConverters._
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+import org.slf4j.LoggerFactory
 
 /**
  * Converts tantivy4java JSON data back to Spark Row format.
@@ -35,16 +36,18 @@ import scala.jdk.CollectionConverters._
  */
 class TantivyToSparkConverter(
   schema: StructType,
-  schemaMapper: SparkSchemaToTantivyMapper
-) {
+  schemaMapper: SparkSchemaToTantivyMapper) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Converts a Java Map to a Spark InternalRow for StructType.
    *
-   * @param jsonMap Java Map from tantivy4java JSON field
-   * @param structType Target Spark StructType
-   * @return Spark InternalRow
+   * @param jsonMap
+   *   Java Map from tantivy4java JSON field
+   * @param structType
+   *   Target Spark StructType
+   * @return
+   *   Spark InternalRow
    */
   def jsonMapToRow(
     jsonMap: java.util.Map[String, Object],
@@ -66,17 +69,18 @@ class TantivyToSparkConverter(
   /**
    * Converts a Java List to a Spark ArrayData for ArrayType.
    *
-   * @param jsonList Java List from tantivy4java JSON field
-   * @param arrayType Target Spark ArrayType
-   * @return Spark ArrayData
+   * @param jsonList
+   *   Java List from tantivy4java JSON field
+   * @param arrayType
+   *   Target Spark ArrayType
+   * @return
+   *   Spark ArrayData
    */
   def jsonListToArray(
     jsonList: java.util.List[Object],
     arrayType: ArrayType
   ): org.apache.spark.sql.catalyst.util.ArrayData = {
-    val result = jsonList.asScala.map { element =>
-      convertFromJsonValue(element, arrayType.elementType)
-    }.toArray
+    val result = jsonList.asScala.map(element => convertFromJsonValue(element, arrayType.elementType)).toArray
 
     logger.debug(s"Converted JSON list to ArrayData with ${result.length} elements")
     org.apache.spark.sql.catalyst.util.ArrayData.toArrayData(result)
@@ -85,9 +89,12 @@ class TantivyToSparkConverter(
   /**
    * Converts a Java Map to a Spark MapData for MapType.
    *
-   * @param jsonMap Java Map from tantivy4java JSON field
-   * @param mapType Target Spark MapType
-   * @return Spark MapData
+   * @param jsonMap
+   *   Java Map from tantivy4java JSON field
+   * @param mapType
+   *   Target Spark MapType
+   * @return
+   *   Spark MapData
    */
   def jsonMapToMapData(
     jsonMap: java.util.Map[String, Object],
@@ -101,9 +108,7 @@ class TantivyToSparkConverter(
       convertFromJsonValue(entry.getKey, mapType.keyType)
     }.toArray
 
-    val values = entries.map { entry =>
-      convertFromJsonValue(entry.getValue, mapType.valueType)
-    }.toArray
+    val values = entries.map(entry => convertFromJsonValue(entry.getValue, mapType.valueType)).toArray
 
     logger.debug(s"Converted JSON map to MapData with ${keys.length} entries")
     org.apache.spark.sql.catalyst.util.ArrayBasedMapData(keys, values)
@@ -112,9 +117,12 @@ class TantivyToSparkConverter(
   /**
    * Recursively converts a JSON value to a Spark type.
    *
-   * @param jsonValue Java Object from JSON
-   * @param dataType Target Spark data type
-   * @return Spark value
+   * @param jsonValue
+   *   Java Object from JSON
+   * @param dataType
+   *   Target Spark data type
+   * @return
+   *   Spark value
    */
   def convertFromJsonValue(jsonValue: Object, dataType: DataType): Any = {
     if (jsonValue == null) {
@@ -135,7 +143,7 @@ class TantivyToSparkConverter(
         // Convert to UTF8String for Spark's internal format
         val stringValue = jsonValue match {
           case s: String => s
-          case _ => jsonValue.toString
+          case _         => jsonValue.toString
         }
         org.apache.spark.unsafe.types.UTF8String.fromString(stringValue)
 
@@ -143,34 +151,34 @@ class TantivyToSparkConverter(
         jsonValue match {
           case n: Number => n.intValue()
           case s: String => s.toInt
-          case _ => jsonValue.toString.toInt
+          case _         => jsonValue.toString.toInt
         }
 
       case LongType =>
         jsonValue match {
           case n: Number => n.longValue()
           case s: String => s.toLong
-          case _ => jsonValue.toString.toLong
+          case _         => jsonValue.toString.toLong
         }
 
       case FloatType =>
         jsonValue match {
           case n: Number => n.floatValue()
           case s: String => s.toFloat
-          case _ => jsonValue.toString.toFloat
+          case _         => jsonValue.toString.toFloat
         }
 
       case DoubleType =>
         jsonValue match {
           case n: Number => n.doubleValue()
           case s: String => s.toDouble
-          case _ => jsonValue.toString.toDouble
+          case _         => jsonValue.toString.toDouble
         }
 
       case BooleanType =>
         jsonValue match {
           case b: java.lang.Boolean => b.booleanValue()
-          case _ => jsonValue.toString.toLowerCase == "true"
+          case _                    => jsonValue.toString.toLowerCase == "true"
         }
 
       case DateType =>
@@ -186,9 +194,9 @@ class TantivyToSparkConverter(
       case BinaryType =>
         // Decode base64 string back to bytes
         jsonValue match {
-          case s: String => java.util.Base64.getDecoder.decode(s)
+          case s: String          => java.util.Base64.getDecoder.decode(s)
           case bytes: Array[Byte] => bytes
-          case _ => throw new IllegalArgumentException(s"Cannot convert $jsonValue to BinaryType")
+          case _                  => throw new IllegalArgumentException(s"Cannot convert $jsonValue to BinaryType")
         }
 
       case _ =>
@@ -200,9 +208,12 @@ class TantivyToSparkConverter(
   /**
    * Retrieves JSON field from document and converts to Spark type.
    *
-   * @param document tantivy4java Document
-   * @param field Spark StructField
-   * @return Converted Spark value
+   * @param document
+   *   tantivy4java Document
+   * @param field
+   *   Spark StructField
+   * @return
+   *   Converted Spark value
    */
   def retrieveJsonField(
     document: io.indextables.tantivy4java.core.Document,
@@ -213,12 +224,14 @@ class TantivyToSparkConverter(
     if (jsonValue == null) return null
 
     // Parse JSON string to Map (tantivy4java stores JSON fields as strings)
-    val jsonString = jsonValue.asInstanceOf[String]
+    val jsonString   = jsonValue.asInstanceOf[String]
     val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
-    val jsonMap = objectMapper.readValue(
-      jsonString,
-      classOf[java.util.Map[String, Object]]
-    ).asInstanceOf[java.util.Map[String, Object]]
+    val jsonMap = objectMapper
+      .readValue(
+        jsonString,
+        classOf[java.util.Map[String, Object]]
+      )
+      .asInstanceOf[java.util.Map[String, Object]]
 
     field.dataType match {
       case st: StructType =>
@@ -248,11 +261,12 @@ class TantivyToSparkConverter(
   }
 
   /**
-   * Unwraps an array from JSON object wrapper.
-   * Extracts the "_values" key that was used to wrap the array.
+   * Unwraps an array from JSON object wrapper. Extracts the "_values" key that was used to wrap the array.
    *
-   * @param jsonMap Java Map containing "_values" key
-   * @return Java List from the "_values" key
+   * @param jsonMap
+   *   Java Map containing "_values" key
+   * @return
+   *   Java List from the "_values" key
    */
   def unwrapArrayFromObject(jsonMap: java.util.Map[String, Object]): java.util.List[Object] = {
     val values = jsonMap.get("_values")

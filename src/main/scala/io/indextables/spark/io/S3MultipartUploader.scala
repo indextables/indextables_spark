@@ -31,8 +31,8 @@ import scala.util.{Failure, Success, Try}
 import org.slf4j.LoggerFactory
 import software.amazon.awssdk.core.async.AsyncRequestBody
 import software.amazon.awssdk.core.sync.RequestBody
-import software.amazon.awssdk.services.s3.model._
 import software.amazon.awssdk.services.s3.{S3AsyncClient, S3Client}
+import software.amazon.awssdk.services.s3.model._
 
 /**
  * High-performance S3 multipart uploader with parallel part uploads using AWS async SDK.
@@ -188,11 +188,11 @@ class S3MultipartUploader(
         .build()
 
       // Upload using AsyncRequestBody with mapped buffer (zero-copy!)
-      val asyncBody = AsyncRequestBody.fromByteBuffer(mappedBuffer)
+      val asyncBody    = AsyncRequestBody.fromByteBuffer(mappedBuffer)
       val uploadFuture = s3AsyncClient.putObject(request, asyncBody)
 
       // Wait for completion
-      val response = uploadFuture.get()
+      val response   = uploadFuture.get()
       val uploadTime = System.currentTimeMillis() - startTime
 
       logger.info(s"✅ Single-part memory-mapped upload completed: s3://$bucket/$key in ${uploadTime}ms")
@@ -211,9 +211,8 @@ class S3MultipartUploader(
       case ex: Exception =>
         logger.error(s"❌ Single-part memory-mapped upload failed: s3://$bucket/$key", ex)
         throw new RuntimeException(s"Single-part memory-mapped upload failed: ${ex.getMessage}", ex)
-    } finally {
+    } finally
       if (fileChannel != null) fileChannel.close()
-    }
   }
 
   /** Multipart upload using memory-mapped I/O with zero-copy parts */
@@ -226,7 +225,7 @@ class S3MultipartUploader(
     val startTime = System.currentTimeMillis()
 
     // Calculate part size and count
-    val partSize = calculateOptimalPartSize(fileSize)
+    val partSize  = calculateOptimalPartSize(fileSize)
     val partCount = ((fileSize + partSize - 1) / partSize).toInt
 
     logger.info(s"🚀 Starting memory-mapped multipart upload: s3://$bucket/$key")
@@ -235,7 +234,7 @@ class S3MultipartUploader(
     logger.info(s"   Part count: $partCount")
     logger.info(s"   Max concurrency: ${config.maxConcurrency}")
 
-    var uploadId: String = null
+    var uploadId: String         = null
     var fileChannel: FileChannel = null
 
     try {
@@ -264,8 +263,9 @@ class S3MultipartUploader(
       )
 
       // 3. Complete multipart upload
-      val completedParts = etags.zipWithIndex.map { case (etag, index) =>
-        CompletedPart.builder().partNumber(index + 1).eTag(etag).build()
+      val completedParts = etags.zipWithIndex.map {
+        case (etag, index) =>
+          CompletedPart.builder().partNumber(index + 1).eTag(etag).build()
       }
 
       val completeRequest = CompleteMultipartUploadRequest
@@ -277,7 +277,7 @@ class S3MultipartUploader(
         .build()
 
       val completeResponse = s3Client.completeMultipartUpload(completeRequest)
-      val uploadTime = System.currentTimeMillis() - startTime
+      val uploadTime       = System.currentTimeMillis() - startTime
 
       logger.info(s"✅ Memory-mapped multipart upload completed: s3://$bucket/$key")
       logger.info(s"   Upload time: ${uploadTime}ms")
@@ -314,9 +314,8 @@ class S3MultipartUploader(
 
         logger.error(s"❌ Memory-mapped multipart upload failed: s3://$bucket/$key", ex)
         throw new RuntimeException(s"Memory-mapped multipart upload failed: ${ex.getMessage}", ex)
-    } finally {
+    } finally
       if (fileChannel != null) fileChannel.close()
-    }
   }
 
   /**
@@ -335,8 +334,8 @@ class S3MultipartUploader(
 
     // Create CompletableFutures for all parts using memory-mapped buffers
     val futures = (0 until partCount).map { partIndex =>
-      val partNumber = partIndex + 1
-      val startOffset = partIndex * partSize
+      val partNumber      = partIndex + 1
+      val startOffset     = partIndex * partSize
       val currentPartSize = math.min(partSize, fileSize - startOffset)
 
       // Memory-map this specific part (zero-copy view!)
@@ -389,62 +388,63 @@ class S3MultipartUploader(
       // Chain callbacks without blocking
       val resultFuture = new CompletableFuture[String]()
 
-      uploadFuture.whenComplete(new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
-        override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable): Unit = {
-          if (ex != null) {
-            // Upload failed - retry if we have attempts left
-            if (attemptNum < config.maxRetries) {
-              val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
-              logger.warn(
-                s"⚠️ Part $partNumber memory-mapped upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
-                ex
-              )
-
-              // Schedule retry asynchronously (no thread blocking!)
-              val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
-              scheduler.schedule(
-                new Runnable {
-                  override def run(): Unit = {
-                    try {
-                      // Retry upload (recursive call)
-                      attemptUpload(attemptNum + 1, startTime).whenComplete(
-                        new java.util.function.BiConsumer[String, Throwable] {
-                          override def accept(retryResult: String, retryEx: Throwable): Unit = {
-                            if (retryEx != null) resultFuture.completeExceptionally(retryEx)
-                            else resultFuture.complete(retryResult)
-                            scheduler.shutdown()
-                          }
-                        }
-                      )
-                    } catch {
-                      case retryEx: Exception =>
-                        resultFuture.completeExceptionally(retryEx)
-                        scheduler.shutdown()
-                    }
-                  }
-                },
-                delay,
-                java.util.concurrent.TimeUnit.MILLISECONDS
-              )
-            } else {
-              // All retries exhausted
-              resultFuture.completeExceptionally(
-                new RuntimeException(
-                  s"Part $partNumber memory-mapped upload failed after ${config.maxRetries} attempts",
+      uploadFuture.whenComplete(
+        new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
+          override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable)
+            : Unit =
+            if (ex != null) {
+              // Upload failed - retry if we have attempts left
+              if (attemptNum < config.maxRetries) {
+                val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
+                logger.warn(
+                  s"⚠️ Part $partNumber memory-mapped upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
                   ex
                 )
+
+                // Schedule retry asynchronously (no thread blocking!)
+                val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
+                scheduler.schedule(
+                  new Runnable {
+                    override def run(): Unit =
+                      try
+                        // Retry upload (recursive call)
+                        attemptUpload(attemptNum + 1, startTime).whenComplete(
+                          new java.util.function.BiConsumer[String, Throwable] {
+                            override def accept(retryResult: String, retryEx: Throwable): Unit = {
+                              if (retryEx != null) resultFuture.completeExceptionally(retryEx)
+                              else resultFuture.complete(retryResult)
+                              scheduler.shutdown()
+                            }
+                          }
+                        )
+                      catch {
+                        case retryEx: Exception =>
+                          resultFuture.completeExceptionally(retryEx)
+                          scheduler.shutdown()
+                      }
+                  },
+                  delay,
+                  java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+              } else {
+                // All retries exhausted
+                resultFuture.completeExceptionally(
+                  new RuntimeException(
+                    s"Part $partNumber memory-mapped upload failed after ${config.maxRetries} attempts",
+                    ex
+                  )
+                )
+              }
+            } else {
+              // Success!
+              val partTime = System.currentTimeMillis() - startTime
+              logger.debug(
+                s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC ZERO-COPY): ${formatBytes(partSize)} in ${partTime}ms"
               )
+              resultFuture.complete(response.eTag())
             }
-          } else {
-            // Success!
-            val partTime = System.currentTimeMillis() - startTime
-            logger.debug(
-              s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC ZERO-COPY): ${formatBytes(partSize)} in ${partTime}ms"
-            )
-            resultFuture.complete(response.eTag())
-          }
         }
-      })
+      )
 
       resultFuture
     }
@@ -593,8 +593,8 @@ class S3MultipartUploader(
   }
 
   /**
-   * Upload parts in parallel using CompletableFuture for true async I/O.
-   * Uses S3AsyncClient with CompletableFuture.allOf() to avoid blocking.
+   * Upload parts in parallel using CompletableFuture for true async I/O. Uses S3AsyncClient with
+   * CompletableFuture.allOf() to avoid blocking.
    */
   private def uploadPartsInParallel(
     bucket: String,
@@ -686,9 +686,8 @@ class S3MultipartUploader(
   }
 
   /**
-   * Upload a single part using ASYNC S3 client with retry logic.
-   * This provides true async I/O instead of just threading.
-   * DEPRECATED: Blocks on .get() - use uploadSinglePartAsyncNonBlocking instead
+   * Upload a single part using ASYNC S3 client with retry logic. This provides true async I/O instead of just
+   * threading. DEPRECATED: Blocks on .get() - use uploadSinglePartAsyncNonBlocking instead
    */
   private def uploadSinglePartAsync(
     bucket: String,
@@ -747,12 +746,15 @@ class S3MultipartUploader(
           }
       }
 
-    throw new RuntimeException(s"Part $partNumber async upload failed after ${config.maxRetries} attempts", lastException)
+    throw new RuntimeException(
+      s"Part $partNumber async upload failed after ${config.maxRetries} attempts",
+      lastException
+    )
   }
 
   /**
-   * Upload a single part using ASYNC S3 client with retry logic - NON-BLOCKING version.
-   * Returns CompletableFuture[String] to allow true async composition without blocking.
+   * Upload a single part using ASYNC S3 client with retry logic - NON-BLOCKING version. Returns
+   * CompletableFuture[String] to allow true async composition without blocking.
    */
   private def uploadSinglePartAsyncNonBlocking(
     bucket: String,
@@ -780,60 +782,63 @@ class S3MultipartUploader(
       // Chain callbacks without blocking
       val resultFuture = new CompletableFuture[String]()
 
-      uploadFuture.whenComplete(new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
-        override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable): Unit = {
-          if (ex != null) {
-            // Upload failed - retry if we have attempts left
-            if (attemptNum < config.maxRetries) {
-              val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
-              logger.warn(
-                s"⚠️ Part $partNumber async upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
-                ex
-              )
-
-              // Schedule retry asynchronously (no thread blocking!)
-              val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
-              scheduler.schedule(
-                new Runnable {
-                  override def run(): Unit = {
-                    try {
-                      // Retry upload (recursive call)
-                      attemptUpload(attemptNum + 1, startTime).whenComplete(
-                        new java.util.function.BiConsumer[String, Throwable] {
-                          override def accept(retryResult: String, retryEx: Throwable): Unit = {
-                            if (retryEx != null) resultFuture.completeExceptionally(retryEx)
-                            else resultFuture.complete(retryResult)
-                            scheduler.shutdown()
-                          }
-                        }
-                      )
-                    } catch {
-                      case retryEx: Exception =>
-                        resultFuture.completeExceptionally(retryEx)
-                        scheduler.shutdown()
-                    }
-                  }
-                },
-                delay,
-                java.util.concurrent.TimeUnit.MILLISECONDS
-              )
-            } else {
-              // All retries exhausted
-              resultFuture.completeExceptionally(
-                new RuntimeException(
-                  s"Part $partNumber async upload failed after ${config.maxRetries} attempts",
+      uploadFuture.whenComplete(
+        new java.util.function.BiConsumer[software.amazon.awssdk.services.s3.model.UploadPartResponse, Throwable] {
+          override def accept(response: software.amazon.awssdk.services.s3.model.UploadPartResponse, ex: Throwable)
+            : Unit =
+            if (ex != null) {
+              // Upload failed - retry if we have attempts left
+              if (attemptNum < config.maxRetries) {
+                val delay = config.baseRetryDelay * math.pow(2, attemptNum - 1).toLong
+                logger.warn(
+                  s"⚠️ Part $partNumber async upload failed (attempt $attemptNum/${config.maxRetries}), retrying in ${delay}ms",
                   ex
                 )
+
+                // Schedule retry asynchronously (no thread blocking!)
+                val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1)
+                scheduler.schedule(
+                  new Runnable {
+                    override def run(): Unit =
+                      try
+                        // Retry upload (recursive call)
+                        attemptUpload(attemptNum + 1, startTime).whenComplete(
+                          new java.util.function.BiConsumer[String, Throwable] {
+                            override def accept(retryResult: String, retryEx: Throwable): Unit = {
+                              if (retryEx != null) resultFuture.completeExceptionally(retryEx)
+                              else resultFuture.complete(retryResult)
+                              scheduler.shutdown()
+                            }
+                          }
+                        )
+                      catch {
+                        case retryEx: Exception =>
+                          resultFuture.completeExceptionally(retryEx)
+                          scheduler.shutdown()
+                      }
+                  },
+                  delay,
+                  java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+              } else {
+                // All retries exhausted
+                resultFuture.completeExceptionally(
+                  new RuntimeException(
+                    s"Part $partNumber async upload failed after ${config.maxRetries} attempts",
+                    ex
+                  )
+                )
+              }
+            } else {
+              // Success!
+              val partTime = System.currentTimeMillis() - startTime
+              logger.debug(
+                s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC): ${formatBytes(partData.length)} in ${partTime}ms"
               )
+              resultFuture.complete(response.eTag())
             }
-          } else {
-            // Success!
-            val partTime = System.currentTimeMillis() - startTime
-            logger.debug(s"✅ Part $partNumber uploaded (EVENT-BASED ASYNC): ${formatBytes(partData.length)} in ${partTime}ms")
-            resultFuture.complete(response.eTag())
-          }
         }
-      })
+      )
 
       resultFuture
     }
@@ -893,14 +898,15 @@ class S3MultipartUploader(
       // Producer thread: Read from stream and queue parts
       val producerFuture = CompletableFuture.runAsync(
         new Runnable {
-          override def run(): Unit = {
+          override def run(): Unit =
             try {
               val buffer     = new Array[Byte](config.partSize.toInt)
               var partNumber = 1
               var bytesRead  = 0
 
               while ({ bytesRead = readFully(inputStream, buffer); bytesRead } > 0) {
-                val partData = if (bytesRead == buffer.length) buffer.clone() else java.util.Arrays.copyOf(buffer, bytesRead)
+                val partData =
+                  if (bytesRead == buffer.length) buffer.clone() else java.util.Arrays.copyOf(buffer, bytesRead)
 
                 // This blocks if queue is full - natural backpressure
                 partQueue.put((partNumber, partData, bytesRead))
@@ -921,7 +927,6 @@ class S3MultipartUploader(
                 try partQueue.put((-1, Array.empty, 0))
                 catch { case _: InterruptedException => () }
             }
-          }
         },
         uploadExecutor
       )
@@ -930,7 +935,7 @@ class S3MultipartUploader(
       val consumerFutures = (1 to config.maxConcurrency).map { workerId =>
         CompletableFuture.runAsync(
           new Runnable {
-            override def run(): Unit = {
+            override def run(): Unit =
               try {
                 var continue = true
                 while (continue) {
@@ -955,7 +960,6 @@ class S3MultipartUploader(
                   consumerErrors.add(ex)
                   logger.error(s"❌ Worker $workerId failed", ex)
               }
-            }
           },
           uploadExecutor
         )
@@ -1040,17 +1044,17 @@ class S3MultipartUploader(
     }
   }
 
-  /**
-   * Read from input stream fully, filling the buffer as much as possible.
-   * Returns the total number of bytes read.
-   */
+  /** Read from input stream fully, filling the buffer as much as possible. Returns the total number of bytes read. */
   private def readFully(inputStream: InputStream, buffer: Array[Byte]): Int = {
     var totalRead = 0
     var bytesRead = 0
 
-    while (totalRead < buffer.length && { bytesRead = inputStream.read(buffer, totalRead, buffer.length - totalRead); bytesRead } != -1) {
+    while (
+      totalRead < buffer.length && {
+        bytesRead = inputStream.read(buffer, totalRead, buffer.length - totalRead); bytesRead
+      } != -1
+    )
       totalRead += bytesRead
-    }
 
     totalRead
   }

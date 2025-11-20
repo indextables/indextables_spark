@@ -315,7 +315,8 @@ object CloudStorageProviderFactory {
     logger.info(s"⚙️ EXTRACT CLOUD CONFIG DEBUG - Extracting cloud config from options:")
     options.entrySet().asScala.foreach { entry =>
       val key = entry.getKey.toLowerCase
-      val isSensitive = key.contains("secret") || key.contains("sessiontoken") || key.contains("password") || key.contains("key") && key.contains("account")
+      val isSensitive = key.contains("secret") || key.contains("sessiontoken") || key.contains("password") || key
+        .contains("key") && key.contains("account")
       val displayValue = if (isSensitive) "***[REDACTED]***" else entry.getValue
       logger.info(s"  ${entry.getKey} = $displayValue")
     }

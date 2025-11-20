@@ -17,45 +17,63 @@
 
 package io.indextables.spark.json
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import io.indextables.spark.core.IndexTables4SparkOptions
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import scala.jdk.CollectionConverters._
-
 class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
 
-  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions = {
+  private def createOptions(configMap: Map[String, String] = Map.empty): IndexTables4SparkOptions =
     new IndexTables4SparkOptions(new CaseInsensitiveStringMap(configMap.asJava))
-  }
 
-  private val structSchema = StructType(Seq(
-    StructField("id", StringType),
-    StructField("user", StructType(Seq(
-      StructField("name", StringType),
-      StructField("age", IntegerType),
-      StructField("city", StringType)
-    )))
-  ))
+  private val structSchema = StructType(
+    Seq(
+      StructField("id", StringType),
+      StructField(
+        "user",
+        StructType(
+          Seq(
+            StructField("name", StringType),
+            StructField("age", IntegerType),
+            StructField("city", StringType)
+          )
+        )
+      )
+    )
+  )
 
-  private val arraySchema = StructType(Seq(
-    StructField("id", StringType),
-    StructField("tags", ArrayType(StringType))
-  ))
+  private val arraySchema = StructType(
+    Seq(
+      StructField("id", StringType),
+      StructField("tags", ArrayType(StringType))
+    )
+  )
 
-  private val nestedArraySchema = StructType(Seq(
-    StructField("id", StringType),
-    StructField("reviews", ArrayType(StructType(Seq(
-      StructField("rating", IntegerType),
-      StructField("comment", StringType)
-    ))))
-  ))
+  private val nestedArraySchema = StructType(
+    Seq(
+      StructField("id", StringType),
+      StructField(
+        "reviews",
+        ArrayType(
+          StructType(
+            Seq(
+              StructField("rating", IntegerType),
+              StructField("comment", StringType)
+            )
+          )
+        )
+      )
+    )
+  )
 
   test("canPushDown detects nested equality filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = EqualTo("user.name", "Alice")
@@ -64,7 +82,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects nested range filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     translator.canPushDown(GreaterThan("user.age", 25)) shouldBe true
@@ -74,21 +92,21 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects IsNotNull filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     translator.canPushDown(IsNotNull("user.name")) shouldBe true
   }
 
   test("canPushDown detects IsNull filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     translator.canPushDown(IsNull("user.name")) shouldBe true
   }
 
   test("canPushDown detects And filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = And(
@@ -100,7 +118,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects Or filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Or(
@@ -112,7 +130,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects Not filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Not(EqualTo("user.name", "Alice"))
@@ -121,7 +139,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown rejects non-nested filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = EqualTo("id", "123")
@@ -130,7 +148,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown rejects unsupported filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = StringStartsWith("user.name", "Ali")
@@ -139,7 +157,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects array contains filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(arraySchema, mapper)
 
     val filter = StringContains("tags", "laptop")
@@ -148,7 +166,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown detects nested array field filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(nestedArraySchema, mapper)
 
     val filter = GreaterThan("reviews.rating", 4)
@@ -157,7 +175,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown handles complex boolean combinations") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Or(
@@ -172,12 +190,12 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("canPushDown rejects mixed supported and unsupported filters") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = And(
       EqualTo("user.name", "Alice"),
-      StringStartsWith("user.city", "New")  // Not supported
+      StringStartsWith("user.city", "New") // Not supported
     )
 
     // And requires both sides to be pushable
@@ -185,7 +203,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("splitNestedAttribute correctly splits simple nested path") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     // Use reflection to access private method for testing
@@ -197,15 +215,27 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("splitNestedAttribute correctly splits multi-level nested path") {
-    val deepSchema = StructType(Seq(
-      StructField("user", StructType(Seq(
-        StructField("address", StructType(Seq(
-          StructField("city", StringType)
-        )))
-      )))
-    ))
+    val deepSchema = StructType(
+      Seq(
+        StructField(
+          "user",
+          StructType(
+            Seq(
+              StructField(
+                "address",
+                StructType(
+                  Seq(
+                    StructField("city", StringType)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(deepSchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("splitNestedAttribute", classOf[String])
@@ -216,7 +246,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("isNestedAttribute detects nested struct field") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("isNestedAttribute", classOf[String])
@@ -226,7 +256,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("isNestedAttribute detects nested array field") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(nestedArraySchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("isNestedAttribute", classOf[String])
@@ -236,7 +266,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("isNestedAttribute returns false for non-nested field") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("isNestedAttribute", classOf[String])
@@ -246,7 +276,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("isArrayField detects array field") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(arraySchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("isArrayField", classOf[String])
@@ -256,7 +286,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("isArrayField returns false for non-array field") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val method = translator.getClass.getDeclaredMethod("isArrayField", classOf[String])
@@ -268,7 +298,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   // ========== parseQuery String Generation Tests ==========
 
   test("translateFilterToParseQuery generates correct term query") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = EqualTo("user.name", "Alice")
@@ -278,7 +308,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery generates correct range queries") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     translator.translateFilterToParseQuery(GreaterThan("user.age", 25)) shouldBe Some("user.age:>25")
@@ -288,7 +318,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery generates correct existence queries") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     translator.translateFilterToParseQuery(IsNotNull("user.name")) shouldBe Some("user.name:*")
@@ -296,7 +326,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery generates correct AND query") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = And(
@@ -309,7 +339,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery generates correct OR query") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Or(
@@ -322,7 +352,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery generates correct NOT query") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Not(EqualTo("user.name", "Alice"))
@@ -332,7 +362,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery handles complex boolean combinations") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Or(
@@ -348,7 +378,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery handles array contains filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(arraySchema, mapper)
 
     val filter = StringContains("tags", "laptop")
@@ -358,7 +388,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery escapes special characters in values") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     // Test escaping quotes
@@ -373,7 +403,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery returns None for non-nested filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = EqualTo("id", "123")
@@ -383,7 +413,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery returns None for unsupported filter") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = StringStartsWith("user.name", "Ali")
@@ -393,17 +423,34 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery handles deep nested paths") {
-    val deepSchema = StructType(Seq(
-      StructField("profile", StructType(Seq(
-        StructField("user", StructType(Seq(
-          StructField("address", StructType(Seq(
-            StructField("city", StringType)
-          )))
-        )))
-      )))
-    ))
+    val deepSchema = StructType(
+      Seq(
+        StructField(
+          "profile",
+          StructType(
+            Seq(
+              StructField(
+                "user",
+                StructType(
+                  Seq(
+                    StructField(
+                      "address",
+                      StructType(
+                        Seq(
+                          StructField("city", StringType)
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
 
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(deepSchema, mapper)
 
     val filter = EqualTo("profile.user.address.city", "NYC")
@@ -413,29 +460,36 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery handles numeric values in range queries") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     // Integer
     translator.translateFilterToParseQuery(GreaterThan("user.age", 30)) shouldBe Some("user.age:>30")
 
     // Double
-    val schemaWithDouble = StructType(Seq(
-      StructField("metrics", StructType(Seq(
-        StructField("score", DoubleType)
-      )))
-    ))
+    val schemaWithDouble = StructType(
+      Seq(
+        StructField(
+          "metrics",
+          StructType(
+            Seq(
+              StructField("score", DoubleType)
+            )
+          )
+        )
+      )
+    )
     val translator2 = new JsonPredicateTranslator(schemaWithDouble, mapper)
     translator2.translateFilterToParseQuery(GreaterThan("metrics.score", 95.5)) shouldBe Some("metrics.score:>95.5")
   }
 
   test("translateFilterToParseQuery returns None when And child fails") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = And(
       EqualTo("user.name", "Alice"),
-      StringStartsWith("user.city", "New")  // Not supported
+      StringStartsWith("user.city", "New") // Not supported
     )
 
     val result = translator.translateFilterToParseQuery(filter)
@@ -443,12 +497,12 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery returns None when Or child fails") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
     val filter = Or(
       EqualTo("user.name", "Alice"),
-      StringStartsWith("user.city", "New")  // Not supported
+      StringStartsWith("user.city", "New") // Not supported
     )
 
     val result = translator.translateFilterToParseQuery(filter)
@@ -456,10 +510,10 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
   }
 
   test("translateFilterToParseQuery returns None when Not child fails") {
-    val mapper = new SparkSchemaToTantivyMapper(createOptions())
+    val mapper     = new SparkSchemaToTantivyMapper(createOptions())
     val translator = new JsonPredicateTranslator(structSchema, mapper)
 
-    val filter = Not(StringStartsWith("user.name", "Ali"))  // Not supported
+    val filter = Not(StringStartsWith("user.name", "Ali")) // Not supported
 
     val result = translator.translateFilterToParseQuery(filter)
     result shouldBe None

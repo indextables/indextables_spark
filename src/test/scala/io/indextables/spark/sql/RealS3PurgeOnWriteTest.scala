@@ -22,11 +22,12 @@ import java.util.{Properties, UUID}
 
 import scala.util.Using
 
-import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.sql.SaveMode
 
-import io.indextables.spark.RealS3TestBase
+import org.apache.hadoop.fs.{FileSystem, Path}
+
 import io.indextables.spark.purge.PurgeOnWriteTransactionCounter
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Real AWS S3 integration tests for purge-on-write feature.
@@ -91,8 +92,8 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
     }
   }
 
-  override def afterAll(): Unit = {
-    try {
+  override def afterAll(): Unit =
+    try
       // Cleanup test directory if it exists
       if (awsCredentials.isDefined && fs != null) {
         val basePath = new Path(testBasePath)
@@ -101,10 +102,8 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
           fs.delete(basePath, true)
         }
       }
-    } finally {
+    finally
       super.afterAll()
-    }
-  }
 
   override def beforeEach(): Unit = {
     super.beforeEach()
@@ -145,8 +144,10 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode(SaveMode.Append)
       .save(tablePath)
-    assert(PurgeOnWriteTransactionCounter.get(tablePath) === 0,
-      "Counter should reset to 0 after purge triggers on 3rd write")
+    assert(
+      PurgeOnWriteTransactionCounter.get(tablePath) === 0,
+      "Counter should reset to 0 after purge triggers on 3rd write"
+    )
   }
 
   test("purge-on-write should clean up old orphaned split files on S3 using sleep") {
@@ -159,7 +160,7 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
     spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterWrites", "2")
     spark.conf.set("spark.indextables.purgeOnWrite.triggerAfterMerge", "false")
     spark.conf.set("spark.indextables.purgeOnWrite.splitRetentionHours", "0") // 0 hours
-    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false") // Disable check for testing
+    spark.conf.set("spark.indextables.purge.retentionCheckEnabled", "false")  // Disable check for testing
 
     val df = spark.range(50).toDF("id")
 
@@ -196,7 +197,7 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
   test("purge-on-write should clean up old transaction log files on S3 using sleep") {
     assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
 
-    val tablePath = s"$testBasePath/cleanup_txlog_sleep"
+    val tablePath              = s"$testBasePath/cleanup_txlog_sleep"
     val (accessKey, secretKey) = awsCredentials.get
 
     val df = spark.range(10).toDF("id")
@@ -209,10 +210,10 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
         .option("spark.indextables.aws.accessKey", accessKey)
         .option("spark.indextables.aws.secretKey", secretKey)
         .option("spark.indextables.aws.region", S3_REGION)
-        .option("spark.indextables.checkpoint.enabled", "true")  // Enable checkpoints
-        .option("spark.indextables.checkpoint.interval", "10")    // Checkpoint every 10 writes
+        .option("spark.indextables.checkpoint.enabled", "true") // Enable checkpoints
+        .option("spark.indextables.checkpoint.interval", "10")  // Checkpoint every 10 writes
         .option("spark.indextables.purgeOnWrite.enabled", "true")
-        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12")  // Trigger after 12 writes
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "12") // Trigger after 12 writes
         .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")
         .option("spark.indextables.purgeOnWrite.txLogRetentionHours", "0")
         .option("spark.indextables.purge.retentionCheckEnabled", "false")
@@ -257,15 +258,21 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
 
     // Verify old transaction log files before checkpoint are deleted
     // Checkpoint is at version 10, so versions 0-8 should be candidates for deletion
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000000.json")),
-      "Old version 0 (before checkpoint) should be deleted")
-    assert(!fs.exists(new Path(txLogPath, "00000000000000000001.json")),
-      "Old version 1 (before checkpoint) should be deleted")
+    assert(
+      !fs.exists(new Path(txLogPath, "00000000000000000000.json")),
+      "Old version 0 (before checkpoint) should be deleted"
+    )
+    assert(
+      !fs.exists(new Path(txLogPath, "00000000000000000001.json")),
+      "Old version 1 (before checkpoint) should be deleted"
+    )
 
     // Verify recent files after checkpoint are kept
-    assert(fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
-           fs.exists(new Path(txLogPath, "00000000000000000011.json")),
-      "Recent version (10 or 11) should be kept")
+    assert(
+      fs.exists(new Path(txLogPath, "00000000000000000010.json")) ||
+        fs.exists(new Path(txLogPath, "00000000000000000011.json")),
+      "Recent version (10 or 11) should be kept"
+    )
   }
 
   test("purge-on-write should propagate S3 credentials from write options") {
@@ -280,7 +287,7 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
     spark.conf.set("spark.indextables.purgeOnWrite.splitRetentionHours", "24")
 
     val (accessKey, secretKey) = awsCredentials.get
-    val df = spark.range(50).toDF("id")
+    val df                     = spark.range(50).toDF("id")
 
     // Write with explicit S3 credentials - purge should inherit these
     df.write
@@ -364,11 +371,11 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
         .option("spark.indextables.aws.region", S3_REGION)
         .option("spark.indextables.mergeOnWrite.enabled", "true")
         .option("spark.indextables.mergeOnWrite.targetSize", "100M")
-        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0")  // Low threshold
-        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")  // Low requirement for testing
+        .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "1.0") // Low threshold
+        .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")         // Low requirement for testing
         .option("spark.indextables.purgeOnWrite.enabled", "true")
         .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
-        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0")  // Delete immediately for testing
+        .option("spark.indextables.purgeOnWrite.splitRetentionHours", "0") // Delete immediately for testing
         .option("spark.indextables.purge.retentionCheckEnabled", "false")  // Disable safety check
         .save(tablePath)
     }
@@ -416,7 +423,7 @@ class RealS3PurgeOnWriteTest extends RealS3TestBase {
         .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
         .option("spark.indextables.purgeOnWrite.enabled", "true")
         .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
-        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "0")  // Only trigger after merge
+        .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "0") // Only trigger after merge
         .option("spark.indextables.purgeOnWrite.splitRetentionHours", "24")
         .save(tablePath)
     }
