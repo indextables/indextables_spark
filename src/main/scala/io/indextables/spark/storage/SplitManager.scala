@@ -32,6 +32,7 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import io.indextables.spark.util.SizeParser
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitCacheManager
 import org.slf4j.LoggerFactory
@@ -630,30 +631,7 @@ object SplitCacheConfig {
    * Parse size string with support for units: "123456" (bytes), "1K", "1M", "1G". Examples: "512K" -> 524288, "16M" ->
    * 16777216, "1G" -> 1073741824
    */
-  def parseSizeString(sizeStr: String): Long = {
-    val trimmed = sizeStr.trim.toUpperCase
-
-    if (trimmed.matches("\\d+")) {
-      // Plain number, interpret as bytes
-      trimmed.toLong
-    } else if (trimmed.matches("\\d+K")) {
-      // Kilobytes
-      val num = trimmed.dropRight(1).toLong
-      num * 1024L
-    } else if (trimmed.matches("\\d+M")) {
-      // Megabytes
-      val num = trimmed.dropRight(1).toLong
-      num * 1024L * 1024L
-    } else if (trimmed.matches("\\d+G")) {
-      // Gigabytes
-      val num = trimmed.dropRight(1).toLong
-      num * 1024L * 1024L * 1024L
-    } else {
-      throw new IllegalArgumentException(
-        s"Invalid size format: $sizeStr. Use plain number (bytes) or add K/M/G suffix (e.g., '512K', '16M', '1G')"
-      )
-    }
-  }
+  def parseSizeString(sizeStr: String): Long = SizeParser.parseSize(sizeStr)
 }
 
 /**
