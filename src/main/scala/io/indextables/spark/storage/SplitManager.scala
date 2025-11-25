@@ -1104,6 +1104,9 @@ object BatchOptMetricsRegistry {
   // Thread-safe map of table path -> metrics accumulator
   private val accumulators = new java.util.concurrent.ConcurrentHashMap[String, BatchOptimizationMetricsAccumulator]()
 
+  // Thread-safe map of table path -> baseline metrics (captured at scan start)
+  private val baselines = new java.util.concurrent.ConcurrentHashMap[String, BatchOptMetrics]()
+
   /**
    * Register a metrics accumulator for a table path.
    *
@@ -1214,4 +1217,76 @@ object BatchOptMetricsRegistry {
    *   Number of tables with registered metrics
    */
   def size(): Int = accumulators.size()
+
+  /**
+   * Capture baseline metrics at scan start for delta computation.
+   *
+   * Called automatically by IndexTables4SparkScan at the start of planInputPartitions(). This captures the current
+   * global metrics values so that getMetricsDelta() can compute per-query metrics.
+   *
+   * @param tablePath
+   *   Table path (e.g., "s3://bucket/path")
+   */
+  def captureBaseline(tablePath: String): Unit = {
+    val baseline = BatchOptMetrics.fromJavaMetrics()
+    baselines.put(tablePath, baseline)
+    logger.debug(s"📊 Captured baseline metrics for $tablePath: ops=${baseline.totalOperations}, docs=${baseline.totalDocuments}")
+  }
+
+  /**
+   * Get per-query metrics delta since baseline was captured.
+   *
+   * Call this after a query completes to get metrics for just that query (not cumulative). The delta is computed as
+   * (current global metrics - baseline captured at scan start).
+   *
+   * @param tablePath
+   *   Table path (e.g., "s3://bucket/path")
+   * @return
+   *   Metrics delta since baseline, or current metrics if no baseline exists
+   */
+  def getMetricsDelta(tablePath: String): BatchOptMetrics = {
+    val current  = BatchOptMetrics.fromJavaMetrics()
+    val baseline = Option(baselines.get(tablePath)).getOrElse(BatchOptMetrics.empty)
+
+    val delta = BatchOptMetrics(
+      totalOperations = current.totalOperations - baseline.totalOperations,
+      totalDocuments = current.totalDocuments - baseline.totalDocuments,
+      totalRequests = current.totalRequests - baseline.totalRequests,
+      consolidatedRequests = current.consolidatedRequests - baseline.consolidatedRequests,
+      bytesTransferred = current.bytesTransferred - baseline.bytesTransferred,
+      bytesWasted = current.bytesWasted - baseline.bytesWasted
+    )
+
+    logger.debug(s"📊 Metrics delta for $tablePath: ops=${delta.totalOperations}, docs=${delta.totalDocuments}, " +
+      s"requests=${delta.totalRequests}, consolidated=${delta.consolidatedRequests}")
+
+    delta
+  }
+
+  /**
+   * Get current global metrics (not delta).
+   *
+   * For per-query metrics, use getMetricsDelta() instead.
+   *
+   * @return
+   *   Current global batch optimization metrics
+   */
+  def getGlobalMetrics(): BatchOptMetrics = BatchOptMetrics.fromJavaMetrics()
+
+  /**
+   * Clear baseline for a specific table.
+   *
+   * @param tablePath
+   *   Table path to clear baseline for
+   */
+  def clearBaseline(tablePath: String): Unit = {
+    baselines.remove(tablePath)
+  }
+
+  /**
+   * Clear all baselines.
+   */
+  def clearAllBaselines(): Unit = {
+    baselines.clear()
+  }
 }

@@ -410,6 +410,12 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
         metrics.costSavingsPercent should (be >= 0.0 and be <= 100.0)
       }
 
+      // CRITICAL: Validate that batch optimization is consolidating requests
+      // With default config, we should retrieve more documents than requests made
+      withClue("totalDocuments should be greater than totalRequests (proves request consolidation): ") {
+        metrics.totalDocuments should be > metrics.totalRequests
+      }
+
       // For real S3 splits with good consolidation, expect high values
       if (metrics.consolidationRatio >= 10.0) {
         info(s"   ✅ EXCELLENT consolidation: ${metrics.consolidationRatio}x")
@@ -428,6 +434,79 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
       info(s"   ✅ All metrics validations passed!")
     } else {
       info(s"   ⚠️  No batch operations recorded - optimization may not have run (local file?)")
+    }
+  }
+
+  test("CRITICAL: validate totalDocuments > totalRequests with default config") {
+    if (awsCredentials.isEmpty) {
+      info("⚠️  Skipping test: AWS credentials not available")
+      pending
+    }
+
+    val testPath = s"$testBasePath/request-consolidation-validation"
+
+    // Create test dataset with enough rows to trigger batch optimization
+    // Default minDocsForOptimization is 50, so we need at least that many
+    val rowCount = 500
+    spark
+      .range(0, rowCount)
+      .toDF("id")
+      .selectExpr("id", "id % 10 as category", "concat('data_', id) as value")
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(testPath)
+
+    info(s"✅ Written $rowCount rows to $testPath")
+
+    // Use DEFAULT config - only enable metrics, everything else uses defaults
+    // batchOptimization.enabled defaults to true
+    // batchOptimization.profile defaults to "balanced"
+    spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "true")
+
+    // Execute query to retrieve all documents
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+      .limit(rowCount * 2) // Ensure we get all rows
+      .collect()
+
+    info(s"✅ Retrieved ${result.length} rows")
+    result.length shouldEqual rowCount
+
+    // Get metrics
+    val metricsOpt = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetrics(testPath)
+    metricsOpt shouldBe defined
+
+    val metrics = metricsOpt.get
+
+    info(s"📊 REQUEST CONSOLIDATION VALIDATION:")
+    info(s"   Documents Retrieved:   ${metrics.totalDocuments}")
+    info(s"   S3 Requests Made:      ${metrics.totalRequests}")
+    info(s"   Docs Per Request:      ${if (metrics.totalRequests > 0) metrics.totalDocuments.toDouble / metrics.totalRequests else 0}")
+    info(s"   Consolidation Ratio:   ${metrics.consolidationRatio}x")
+
+    // CRITICAL ASSERTION: With batch optimization enabled (default), we MUST retrieve
+    // more documents than the number of S3 requests made
+    if (metrics.totalRequests > 0) {
+      withClue(
+        s"BATCH OPTIMIZATION FAILURE: totalDocuments (${metrics.totalDocuments}) should be > totalRequests (${metrics.totalRequests}). " +
+          "This indicates batch optimization is NOT consolidating requests - each document is causing a separate S3 request!"
+      ) {
+        metrics.totalDocuments should be > metrics.totalRequests
+      }
+
+      // Additional validation: average batch size should be reasonable
+      val avgDocsPerRequest = metrics.totalDocuments.toDouble / metrics.totalRequests
+      info(s"   Avg Docs Per Request:  $avgDocsPerRequest")
+
+      withClue(s"Average docs per request ($avgDocsPerRequest) should be at least 2 with default config: ") {
+        avgDocsPerRequest should be >= 2.0
+      }
+
+      info(s"   ✅ Request consolidation validated: ${avgDocsPerRequest}x docs per request")
+    } else {
+      info(s"   ⚠️  No requests recorded - unable to validate consolidation")
     }
   }
 }

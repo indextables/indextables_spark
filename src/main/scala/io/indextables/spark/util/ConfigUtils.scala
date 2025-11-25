@@ -56,9 +56,11 @@ object ConfigUtils {
     val configMap = config
 
     // Helper function to get config with defaults
+    // Tries both original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
     def getConfig(configKey: String, default: String = ""): String = {
-      val value = configMap.getOrElse(configKey, default)
-      Option(value).getOrElse(default)
+      configMap.get(configKey)
+        .orElse(configMap.get(configKey.toLowerCase))
+        .getOrElse(default)
     }
 
     def getConfigOption(configKey: String): Option[String] =
@@ -101,6 +103,8 @@ object ConfigUtils {
         }
       },
       enableQueryCache = getConfig("spark.indextables.cache.queryCache", "true").toBoolean,
+      enableDocBatch = getConfig("spark.indextables.docBatch.enabled", "true").toBoolean,
+      docBatchMaxSize = getConfig("spark.indextables.docBatch.maxSize", "1000").toInt,
       splitCachePath = getConfigOption("spark.indextables.cache.directoryPath")
         .orElse(SplitCacheConfig.getDefaultCachePath()),
       // AWS configuration from broadcast

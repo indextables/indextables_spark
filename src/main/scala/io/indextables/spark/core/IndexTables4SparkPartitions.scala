@@ -426,29 +426,10 @@ class IndexTables4SparkPartitionReader(
     }
 
   override def close(): Unit = {
-    try {
-      // Collect batch optimization metrics before closing
-      metricsAccumulator.foreach { acc =>
-        try {
-          val metrics = io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
-          if (!metrics.isEmpty) {
-            acc.add(metrics)
-            logger.debug(
-              s"Collected batch optimization metrics for ${addAction.path}: " +
-                s"ops=${metrics.totalOperations}, docs=${metrics.totalDocuments}, " +
-                s"consolidation=${metrics.consolidationRatio}x, savings=${metrics.costSavingsPercent}%"
-            )
-          }
-        } catch {
-          case e: Exception =>
-            logger.warn(s"Failed to collect batch optimization metrics: ${e.getMessage}")
-        }
-      }
-    } finally {
-      // Always close the search engine
-      if (splitSearchEngine != null) {
-        splitSearchEngine.close()
-      }
+    // Note: Batch optimization metrics are collected once after scan completes
+    // via BatchOptMetricsRegistry, not per-partition (to avoid N× overcounting)
+    if (splitSearchEngine != null) {
+      splitSearchEngine.close()
     }
   }
 

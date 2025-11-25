@@ -68,6 +68,17 @@ class IndexTables4SparkScan(
     logger.debug(s"PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
     pushedFilters.foreach(f => logger.debug(s"PLAN PARTITIONS:   - Filter: $f"))
 
+    // Capture baseline metrics at scan start for delta computation
+    // User can call getMetricsDelta() after query to get per-query metrics
+    val tablePath = transactionLog.getTablePath().toString
+    try {
+      io.indextables.spark.storage.BatchOptMetricsRegistry.captureBaseline(tablePath)
+      logger.debug(s"Captured baseline batch optimization metrics for scan: $tablePath")
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to capture baseline batch optimization metrics: ${ex.getMessage}")
+    }
+
     val addActions = transactionLog.listFiles()
     logger.debug(s"PLAN PARTITIONS: Found ${addActions.length} files in transaction log")
 
