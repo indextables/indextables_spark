@@ -287,11 +287,10 @@ class SplitSearchEngine private (
       // Use configurable document retrieval strategy
       val documents: Array[io.indextables.tantivy4java.core.Document] =
         if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-          logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
+          logger.debug(s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
 
           // Process in batches to respect maximum batch size
           val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
-          logger.debug(s"Processing ${batches.length} batch(es) of documents")
 
           batches.flatMap { batchAddresses =>
             try {

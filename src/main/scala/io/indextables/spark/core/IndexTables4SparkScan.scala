@@ -53,6 +53,10 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
+  // Optional metrics accumulator for collecting batch optimization statistics
+  // Set via enableMetricsCollection() for testing/monitoring
+  private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
+
   logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
   pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
 
@@ -78,6 +82,20 @@ class IndexTables4SparkScan(
     } catch {
       case ex: Exception =>
         logger.warn("Failed to update broadcast locality information", ex)
+    }
+
+    // Auto-register metrics accumulator if metrics collection is enabled
+    val metricsEnabled = config.getOrElse("spark.indextables.read.batchOptimization.metrics.enabled", "false").toBoolean
+    if (metricsEnabled && metricsAccumulator.isEmpty) {
+      try {
+        val acc        = enableMetricsCollection()
+        val tablePath  = transactionLog.getTablePath().toString
+        io.indextables.spark.storage.BatchOptMetricsRegistry.register(tablePath, acc)
+        logger.debug(s"Auto-registered batch optimization metrics for table: $tablePath")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to register batch optimization metrics: ${ex.getMessage}", ex)
+      }
     }
 
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
@@ -142,7 +160,38 @@ class IndexTables4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath)
+    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath, metricsAccumulator)
+  }
+
+  /**
+   * Enable metrics collection for batch optimization validation.
+   *
+   * This method registers an accumulator with Spark to collect batch optimization statistics from executors. The
+   * accumulator can be read after query completion to validate consolidation ratios, cost savings, and other metrics.
+   *
+   * Usage:
+   * {{{
+   * val scan = ... // get scan from ScanBuilder
+   * val metricsAcc = scan.enableMetricsCollection(spark)
+   *
+   * // Execute query
+   * val result = df.collect()
+   *
+   * // Check metrics
+   * val metrics = metricsAcc.value
+   * println(s"Consolidation ratio: \${metrics.consolidationRatio}x")
+   * println(s"Cost savings: \${metrics.costSavingsPercent}%")
+   * }}}
+   *
+   * @return
+   *   The metrics accumulator that will collect statistics
+   */
+  def enableMetricsCollection(): io.indextables.spark.storage.BatchOptimizationMetricsAccumulator = {
+    val acc = new io.indextables.spark.storage.BatchOptimizationMetricsAccumulator()
+    sparkSession.sparkContext.register(acc, "batch-optimization-metrics")
+    metricsAccumulator = Some(acc)
+    logger.debug("Enabled batch optimization metrics collection")
+    acc
   }
 
   override def estimateStatistics(): Statistics =

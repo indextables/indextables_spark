@@ -176,6 +176,42 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       }
   }
 
+  // ===== Batch Optimization Configuration =====
+
+  /** Whether to enable batch retrieval optimization (reduces S3 requests by 90-95%). */
+  def batchOptimizationEnabled: Option[Boolean] =
+    Option(options.get("spark.indextables.read.batchOptimization.enabled")).map(_.toBoolean)
+
+  /** Preset batch optimization profile: "conservative", "balanced", "aggressive", or "disabled". */
+  def batchOptimizationProfile: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.profile")).map(_.toLowerCase)
+
+  /** Maximum size of a consolidated byte range. Supports formats: "16M", "512K", or bytes. */
+  def batchOptMaxRangeSize: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.maxRangeSize"))
+
+  /** Maximum gap between documents to merge into single range. Supports formats: "512K", "1M", or bytes. */
+  def batchOptGapTolerance: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.gapTolerance"))
+
+  /** Minimum batch size to trigger optimization. Default: 50 documents. */
+  def batchOptMinDocs: Option[Int] =
+    Option(options.get("spark.indextables.read.batchOptimization.minDocsForOptimization")).map(_.toInt)
+
+  /** Number of parallel range fetch requests. Default: 8. */
+  def batchOptMaxConcurrentPrefetch: Option[Int] =
+    Option(options.get("spark.indextables.read.batchOptimization.maxConcurrentPrefetch")).map(_.toInt)
+
+  // ===== Adaptive Tuning Configuration =====
+
+  /** Whether to enable adaptive parameter tuning based on performance metrics. Default: true. */
+  def adaptiveTuningEnabled: Option[Boolean] =
+    Option(options.get("spark.indextables.read.adaptiveTuning.enabled")).map(_.toBoolean)
+
+  /** Minimum batches to track before making parameter adjustments. Default: 5. */
+  def adaptiveTuningMinBatches: Option[Int] =
+    Option(options.get("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment")).map(_.toInt)
+
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
     val fieldTypeMapping   = getFieldTypeMapping
@@ -238,4 +274,16 @@ object IndexTables4SparkOptions {
   val INDEXING_INDEXONLY_FIELDS = "spark.indextables.indexing.indexonlyfields"
   val INDEXING_TOKENIZER_PREFIX = "spark.indextables.indexing.tokenizer."
   val INDEXING_JSON_MODE        = "spark.indextables.indexing.json.mode"
+
+  // Batch optimization configuration keys
+  val BATCH_OPTIMIZATION_ENABLED              = "spark.indextables.read.batchOptimization.enabled"
+  val BATCH_OPTIMIZATION_PROFILE              = "spark.indextables.read.batchOptimization.profile"
+  val BATCH_OPTIMIZATION_MAX_RANGE_SIZE       = "spark.indextables.read.batchOptimization.maxRangeSize"
+  val BATCH_OPTIMIZATION_GAP_TOLERANCE        = "spark.indextables.read.batchOptimization.gapTolerance"
+  val BATCH_OPTIMIZATION_MIN_DOCS             = "spark.indextables.read.batchOptimization.minDocsForOptimization"
+  val BATCH_OPTIMIZATION_MAX_CONCURRENT_PREFETCH = "spark.indextables.read.batchOptimization.maxConcurrentPrefetch"
+
+  // Adaptive tuning configuration keys
+  val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
+  val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 }

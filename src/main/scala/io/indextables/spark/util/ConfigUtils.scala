@@ -123,7 +123,21 @@ object ConfigUtils {
       gcpProjectId = getConfigOption("spark.indextables.gcp.projectId"),
       gcpServiceAccountKey = getConfigOption("spark.indextables.gcp.serviceAccountKey"),
       gcpCredentialsFile = getConfigOption("spark.indextables.gcp.credentialsFile"),
-      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint")
+      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint"),
+      // Batch optimization configuration
+      batchOptimizationEnabled = getConfigOption("spark.indextables.read.batchOptimization.enabled").map(_.toBoolean),
+      batchOptimizationProfile = getConfigOption("spark.indextables.read.batchOptimization.profile"),
+      batchOptMaxRangeSize = getConfigOption("spark.indextables.read.batchOptimization.maxRangeSize")
+        .map(SplitCacheConfig.parseSizeString),
+      batchOptGapTolerance = getConfigOption("spark.indextables.read.batchOptimization.gapTolerance")
+        .map(SplitCacheConfig.parseSizeString),
+      batchOptMinDocs = getConfigOption("spark.indextables.read.batchOptimization.minDocsForOptimization").map(_.toInt),
+      batchOptMaxConcurrentPrefetch =
+        getConfigOption("spark.indextables.read.batchOptimization.maxConcurrentPrefetch").map(_.toInt),
+      // Adaptive tuning configuration
+      adaptiveTuningEnabled = getConfigOption("spark.indextables.read.adaptiveTuning.enabled").map(_.toBoolean),
+      adaptiveTuningMinBatches =
+        getConfigOption("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment").map(_.toInt)
     )
   }
 

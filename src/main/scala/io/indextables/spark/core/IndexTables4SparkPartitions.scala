@@ -144,7 +144,8 @@ class IndexTables4SparkReaderFactory(
   readSchema: StructType,
   limit: Option[Int] = None,
   config: Map[String, String], // Direct config instead of broadcast
-  tablePath: Path)
+  tablePath: Path,
+  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
     extends PartitionReaderFactory {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkReaderFactory])
@@ -160,7 +161,8 @@ class IndexTables4SparkReaderFactory(
       tantivyPartition.limit.orElse(limit),
       config,
       tablePath,
-      tantivyPartition.indexQueryFilters
+      tantivyPartition.indexQueryFilters,
+      metricsAccumulator
     )
   }
 }
@@ -172,7 +174,8 @@ class IndexTables4SparkPartitionReader(
   limit: Option[Int] = None,
   config: Map[String, String], // Direct config instead of broadcast
   tablePath: Path,
-  indexQueryFilters: Array[Any] = Array.empty)
+  indexQueryFilters: Array[Any] = Array.empty,
+  metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None)
     extends PartitionReader[InternalRow] {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
@@ -253,7 +256,7 @@ class IndexTables4SparkPartitionReader(
         logger.debug(s"  - addAction.path: ${addAction.path}")
         logger.debug(s"  - tablePath: ${tablePath.toString}")
         logger.debug(s"  - filePath (resolved): $filePath")
-        logger.debug(s"  - actualPath (normalized): $actualPath")
+        logger.debug(s"actualPath (normalized) passed to tantivy4java: $actualPath")
 
         // Footer offset metadata is required for all split reading operations
         if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
@@ -422,10 +425,32 @@ class IndexTables4SparkPartitionReader(
       throw new IllegalStateException(s"No data available for ${addAction.path}")
     }
 
-  override def close(): Unit =
-    if (splitSearchEngine != null) {
-      splitSearchEngine.close()
+  override def close(): Unit = {
+    try {
+      // Collect batch optimization metrics before closing
+      metricsAccumulator.foreach { acc =>
+        try {
+          val metrics = io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
+          if (!metrics.isEmpty) {
+            acc.add(metrics)
+            logger.debug(
+              s"Collected batch optimization metrics for ${addAction.path}: " +
+                s"ops=${metrics.totalOperations}, docs=${metrics.totalDocuments}, " +
+                s"consolidation=${metrics.consolidationRatio}x, savings=${metrics.costSavingsPercent}%"
+            )
+          }
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to collect batch optimization metrics: ${e.getMessage}")
+        }
+      }
+    } finally {
+      // Always close the search engine
+      if (splitSearchEngine != null) {
+        splitSearchEngine.close()
+      }
     }
+  }
 
   /** Generate a consistent hash for the query filters to identify warmup futures. */
   private def generateQueryHash(allFilters: Array[Any]): String = {
