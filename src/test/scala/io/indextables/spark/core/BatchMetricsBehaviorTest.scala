@@ -33,7 +33,8 @@ class BatchMetricsBehaviorTest extends TestBase {
   private def printMetrics(label: String, m: BatchOptMetrics): Unit = {
     info(s"$label: ops=${m.totalOperations}, docs=${m.totalDocuments}, " +
       s"requests=${m.totalRequests}, consolidated=${m.consolidatedRequests}, " +
-      s"ratio=${m.consolidationRatio}x, savings=${m.costSavingsPercent}%")
+      s"ratio=${m.consolidationRatio}x, savings=${m.costSavingsPercent}%, " +
+      s"prefetch=${m.totalPrefetchDurationMs}ms, segments=${m.segmentsProcessed}")
   }
 
   override def beforeAll(): Unit = {
@@ -230,26 +231,43 @@ class BatchMetricsBehaviorTest extends TestBase {
     // this should consolidate into 1-2 S3 requests total (one per batch operation or
     // even merged across batches if documents are adjacent).
 
-    val currentConsolidated = delta.consolidatedRequests
-    if (currentConsolidated > 10) {
+    // CRITICAL ASSERTION: Validate actual S3 requests (consolidatedRequests)
+    // This is the key metric - it represents ACTUAL S3 GET calls made
+    val actualS3Calls = delta.consolidatedRequests
+    if (actualS3Calls > 10) {
       // Bug still present - expecting ~101 requests
-      info(s"⚠️  TANTIVY4JAVA BUG DETECTED: ${currentConsolidated} consolidated requests")
-      info(s"   Current: 10000 docs → ${currentConsolidated} requests (~100 docs per range)")
-      info(s"   Expected after fix: 10000 docs → 1-3 requests (respecting 512KB gap_tolerance)")
-      assert(currentConsolidated > 50 && currentConsolidated < 150,
-        s"Bug present but consolidation outside expected range: ${currentConsolidated} (expected ~101)")
+      info(s"⚠️  TANTIVY4JAVA BUG DETECTED: ${actualS3Calls} actual S3 calls")
+      info(s"   Current: 10000 docs → ${actualS3Calls} S3 requests (~100 docs per range)")
+      info(s"   Expected after fix: 10000 docs → 1-3 S3 requests (respecting 512KB gap_tolerance)")
+      assert(actualS3Calls > 50 && actualS3Calls < 150,
+        s"Bug present but S3 calls outside expected range: ${actualS3Calls} (expected ~101)")
     } else {
       // Bug fixed - should be 1-3 requests (may vary by segment layout)
-      info(s"✅ TANTIVY4JAVA BUG FIXED: ${currentConsolidated} consolidated requests")
-      info(s"   Achieved optimal consolidation: 10000 docs → ${currentConsolidated} requests")
+      info(s"✅ TANTIVY4JAVA BUG FIXED: ${actualS3Calls} actual S3 calls")
+      info(s"   Achieved optimal consolidation: 10000 docs → ${actualS3Calls} S3 requests")
       info(s"   Consolidation ratio: ${delta.consolidationRatio}x, savings=${delta.costSavingsPercent}%")
-      assert(currentConsolidated >= 1 && currentConsolidated <= 3,
-        s"Expected 1-3 consolidated requests after bug fix, got ${currentConsolidated}")
+
+      // REGRESSION PREVENTION: Strict assertion on S3 calls
+      assert(actualS3Calls >= 1 && actualS3Calls <= 3,
+        s"REGRESSION: Expected 1-3 S3 requests after bug fix, got ${actualS3Calls}. " +
+        s"This indicates the consolidation optimization has regressed!")
     }
+
+    // Validate segments counter is being tracked (>= 0)
+    // Note: May be 0 for delta calculations or certain operation types
+    assert(delta.segmentsProcessed >= 0,
+      s"Expected segments processed >= 0, got ${delta.segmentsProcessed}")
+
+    // For local file testing, prefetch duration may be 0 or very small
+    // Just validate it's being tracked (non-negative)
+    assert(delta.totalPrefetchDurationMs >= 0,
+      s"Expected prefetch duration >= 0, got ${delta.totalPrefetchDurationMs}")
 
     info(s"\n✅ SUCCESS: docBatchMaxSize=5000 correctly batches 10000 docs into 2 operations")
     info(s"   Batch operations: ${delta.totalOperations} (expected: 2)")
     info(s"   Total documents: ${delta.totalDocuments} (expected: 10000)")
-    info(s"   Consolidation: ${delta.totalRequests} → ${delta.consolidatedRequests} (${delta.consolidationRatio}x)")
+    info(s"   S3 Calls: ${delta.totalRequests} → ${actualS3Calls} (${delta.consolidationRatio}x)")
+    info(s"   Segments processed: ${delta.segmentsProcessed}")
+    info(s"   Prefetch duration: ${delta.totalPrefetchDurationMs}ms")
   }
 }

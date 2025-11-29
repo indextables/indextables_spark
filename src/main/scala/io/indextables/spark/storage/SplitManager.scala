@@ -874,7 +874,9 @@ case class BatchOptMetrics(
   totalRequests: Long = 0,
   consolidatedRequests: Long = 0,
   bytesTransferred: Long = 0,
-  bytesWasted: Long = 0
+  bytesWasted: Long = 0,
+  totalPrefetchDurationMs: Long = 0,
+  segmentsProcessed: Long = 0
 ) {
 
   /** Check if metrics are empty (no operations recorded). */
@@ -894,7 +896,9 @@ case class BatchOptMetrics(
     totalRequests = this.totalRequests + other.totalRequests,
     consolidatedRequests = this.consolidatedRequests + other.consolidatedRequests,
     bytesTransferred = this.bytesTransferred + other.bytesTransferred,
-    bytesWasted = this.bytesWasted + other.bytesWasted
+    bytesWasted = this.bytesWasted + other.bytesWasted,
+    totalPrefetchDurationMs = this.totalPrefetchDurationMs + other.totalPrefetchDurationMs,
+    segmentsProcessed = this.segmentsProcessed + other.segmentsProcessed
   )
 
   /**
@@ -994,7 +998,9 @@ object BatchOptMetrics {
         totalRequests = javaMetrics.getTotalRequests(),
         consolidatedRequests = javaMetrics.getConsolidatedRequests(),
         bytesTransferred = javaMetrics.getBytesTransferred(),
-        bytesWasted = javaMetrics.getBytesWasted()
+        bytesWasted = javaMetrics.getBytesWasted(),
+        totalPrefetchDurationMs = javaMetrics.getTotalPrefetchDurationMs(),
+        segmentsProcessed = javaMetrics.getSegmentsProcessed()
       )
     } catch {
       case e: Exception =>
