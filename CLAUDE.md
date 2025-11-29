@@ -54,7 +54,11 @@ spark.indextables.transaction.compression.enabled: true (default)
 
 // Statistics Truncation (enabled by default)
 spark.indextables.stats.truncation.enabled: true
-spark.indextables.stats.truncation.maxLength: 256
+spark.indextables.stats.truncation.maxLength: 32
+
+// Data Skipping Statistics (Delta Lake compatible)
+spark.indextables.dataSkippingStatsColumns: <column_list> (comma-separated, takes precedence over numIndexedCols)
+spark.indextables.dataSkippingNumIndexedCols: 32 (default: 32, -1 for all eligible columns, 0 to disable)
 
 // Merge-On-Write (automatic split consolidation during writes via Spark shuffle)
 spark.indextables.mergeOnWrite.enabled: false (default: false)

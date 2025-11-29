@@ -543,7 +543,7 @@ class IndexTables4SparkDataWriter(
       Some(
         (
           new TantivySearchEngine(writeSchema, options, hadoopConf),
-          new StatisticsCalculator.DatasetStatistics(writeSchema),
+          new StatisticsCalculator.DatasetStatistics(writeSchema, serializedOptions),
           0L
         )
       )
@@ -572,7 +572,7 @@ class IndexTables4SparkDataWriter(
           logger.info(s"Creating new writer for partition values: $partitionValues")
           (
             new TantivySearchEngine(writeSchema, options, hadoopConf),
-            new StatisticsCalculator.DatasetStatistics(writeSchema),
+            new StatisticsCalculator.DatasetStatistics(writeSchema, serializedOptions),
             0L
           )
         }

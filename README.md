@@ -1260,7 +1260,9 @@ df.write
 | `spark.indextables.transaction.cache.enabled` | `true` | Enable transaction log caching |
 | `spark.indextables.transaction.cache.expirationSeconds` | `300` | Transaction cache TTL (5 minutes) |
 | `spark.indextables.stats.truncation.enabled` | `true` | Enable automatic statistics truncation for long values (enabled by default) |
-| `spark.indextables.stats.truncation.maxLength` | `256` | Maximum character length for min/max statistics values |
+| `spark.indextables.stats.truncation.maxLength` | `32` | Maximum character length for min/max statistics values |
+| `spark.indextables.dataSkippingStatsColumns` | (none) | Explicit comma-separated list of columns to collect statistics for (takes precedence over numIndexedCols) |
+| `spark.indextables.dataSkippingNumIndexedCols` | `32` | Number of eligible columns to collect statistics for (-1 for all, 0 to disable) |
 | `spark.indextables.transaction.compression.enabled` | `true` | Enable GZIP compression for transaction log files (enabled by default) |
 | `spark.indextables.transaction.compression.codec` | `"gzip"` | Compression codec to use for transaction logs |
 | `spark.indextables.transaction.compression.gzip.level` | `6` | GZIP compression level (1-9, where 9 is maximum compression) |

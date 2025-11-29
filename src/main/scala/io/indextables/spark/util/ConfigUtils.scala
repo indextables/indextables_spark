@@ -31,9 +31,16 @@ object ConfigUtils {
   val STATS_TRUNCATION_ENABLED    = "spark.indextables.stats.truncation.enabled"
   val STATS_TRUNCATION_MAX_LENGTH = "spark.indextables.stats.truncation.maxLength"
 
+  // Data skipping statistics column configuration (Delta Lake compatible)
+  // spark.indextables.dataSkippingStatsColumns - explicit list of columns to collect stats for (comma-separated)
+  // spark.indextables.dataSkippingNumIndexedCols - number of columns to index (default 32, -1 for all)
+  val DATA_SKIPPING_STATS_COLUMNS     = "spark.indextables.dataSkippingStatsColumns"
+  val DATA_SKIPPING_NUM_INDEXED_COLS  = "spark.indextables.dataSkippingNumIndexedCols"
+
   // Default values
-  val DEFAULT_STATS_TRUNCATION_ENABLED    = true
-  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH = 32
+  val DEFAULT_STATS_TRUNCATION_ENABLED     = true
+  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH  = 32
+  val DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS = 32
 
   /**
    * Create a SplitCacheConfig from configuration map.
@@ -219,4 +226,36 @@ object ConfigUtils {
     defaultValue: String
   ): String =
     config.getOrElse(key, defaultValue)
+
+  /**
+   * Get the explicit list of columns to collect statistics for.
+   * Returns None if not configured (will fall back to numIndexedCols).
+   *
+   * @param config
+   *   Configuration map
+   * @return
+   *   Optional set of column names
+   */
+  def getDataSkippingStatsColumns(config: Map[String, String]): Option[Set[String]] =
+    config.get(DATA_SKIPPING_STATS_COLUMNS)
+      .orElse(config.get(DATA_SKIPPING_STATS_COLUMNS.toLowerCase))
+      .filter(_.trim.nonEmpty)
+      .map { value =>
+        value.split(",").map(_.trim).filter(_.nonEmpty).toSet
+      }
+
+  /**
+   * Get the number of columns to collect statistics for.
+   * Returns -1 if all columns should be indexed.
+   *
+   * @param config
+   *   Configuration map
+   * @return
+   *   Number of columns to index (-1 for all)
+   */
+  def getDataSkippingNumIndexedCols(config: Map[String, String]): Int =
+    config.get(DATA_SKIPPING_NUM_INDEXED_COLS)
+      .orElse(config.get(DATA_SKIPPING_NUM_INDEXED_COLS.toLowerCase))
+      .map(_.toInt)
+      .getOrElse(DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS)
 }
