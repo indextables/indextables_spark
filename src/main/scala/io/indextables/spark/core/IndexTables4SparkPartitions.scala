@@ -545,7 +545,12 @@ class IndexTables4SparkPartitionReader(
     // Parse timestamp/date values from statistics and filter values
     // Statistics store timestamps as microseconds (Long string) and dates as days since epoch
     def parseTimestamp(value: Any, fromStats: Boolean = false): Option[Long] = value match {
-      case ts: Timestamp     => Some(ts.getTime * 1000) // Convert millis to micros
+      // getTime() returns millis since epoch (includes sub-second millis)
+      // getNanos() returns the fractional second in nanos (0-999,999,999) INCLUDING the millis
+      // To avoid double-counting millis: use epochSeconds (truncated) + getNanos()/1000
+      case ts: Timestamp     =>
+        val epochSeconds = ts.getTime / 1000
+        Some(epochSeconds * 1000000 + ts.getNanos / 1000)
       case s: String         =>
         // Statistics are stored as microseconds (Long as String)
         try {
@@ -554,11 +559,16 @@ class IndexTables4SparkPartitionReader(
         } catch {
           case _: NumberFormatException =>
             // Try parsing as ISO instant or timestamp string
-            try Some(Instant.parse(s).toEpochMilli * 1000)
-            catch {
+            try {
+              val instant = Instant.parse(s)
+              Some(instant.getEpochSecond * 1000000 + instant.getNano / 1000)
+            } catch {
               case _: Exception =>
-                try Some(Timestamp.valueOf(s).getTime * 1000)
-                catch { case _: Exception => None }
+                try {
+                  val ts = Timestamp.valueOf(s)
+                  val epochSeconds = ts.getTime / 1000
+                  Some(epochSeconds * 1000000 + ts.getNanos / 1000)
+                } catch { case _: Exception => None }
             }
         }
       case l: Long           => Some(if (fromStats) l else l * 1000) // Stats already in micros
