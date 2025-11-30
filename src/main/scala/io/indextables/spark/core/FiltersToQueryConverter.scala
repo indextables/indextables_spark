@@ -41,16 +41,39 @@ object FiltersToQueryConverter {
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
-  // Store range optimization information globally
-  private val rangeOptimizations = scala.collection.mutable.Map[String, RangeInfo]()
+  // Store range optimization information in ThreadLocal for thread-safety
+  // This ensures concurrent query planning from different Spark tasks doesn't cause data races
+  private val rangeOptimizations: ThreadLocal[scala.collection.mutable.Map[String, RangeInfo]] =
+    ThreadLocal.withInitial(() => scala.collection.mutable.Map[String, RangeInfo]())
+
+  // Cache for JsonPredicateTranslator to avoid repeated object creation per filter
+  // Key: (sparkSchema hashCode, options hashCode), Value: (jsonMapper, jsonTranslator)
+  private val jsonTranslatorCache: ThreadLocal[scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]] =
+    ThreadLocal.withInitial(() => scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]())
+
+  /** Get or create a cached JsonPredicateTranslator for the given schema and options. */
+  private def getJsonTranslator(
+    sparkSchema: org.apache.spark.sql.types.StructType,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
+  ): JsonPredicateTranslator = {
+    val cacheKey = sparkSchema.hashCode() * 31 + options.hashCode()
+    val cache = jsonTranslatorCache.get()
+
+    cache.getOrElseUpdate(cacheKey, {
+      val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
+      val jsonMapper = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
+      val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
+      (jsonMapper, jsonTranslator)
+    })._2
+  }
 
   /**
    * Optimize range filters by detecting >= and < operations on the same field and storing the optimization information
    * for later use.
    */
   def optimizeRangeFilters(filters: Array[Filter]): Array[Filter] = {
-    // Clear previous optimizations
-    rangeOptimizations.clear()
+    // Clear previous optimizations (thread-local)
+    rangeOptimizations.get().clear()
 
     // Group filters by field name for range detection
     val filtersByField = filters.groupBy {
@@ -75,7 +98,7 @@ object FiltersToQueryConverter {
             val rangeInfo = analyzeRangeFilters(fieldFilters)
             if (rangeInfo.min.isDefined || rangeInfo.max.isDefined) {
               // Store optimization info and exclude these filters from regular processing
-              rangeOptimizations(field) = rangeInfo
+              rangeOptimizations.get()(field) = rangeInfo
               queryLog(s"Detected range optimization for field '$field': $rangeInfo")
             } else {
               // Keep filters as-is if no optimization possible
@@ -189,11 +212,17 @@ object FiltersToQueryConverter {
    */
   private def withSchemaCopy[T](splitSearchEngine: SplitSearchEngine)(f: Schema => T): T = {
     val originalSchema = splitSearchEngine.getSchema()
-    val schemaCopy     = originalSchema.copy()
-    try
-      f(schemaCopy)
-    finally
-      schemaCopy.close()
+    try {
+      val schemaCopy = originalSchema.copy()
+      try
+        f(schemaCopy)
+      finally
+        schemaCopy.close()
+    } finally {
+      // CRITICAL: Close the original schema to prevent native memory leak
+      // Schema.getSchema() returns a NEW Schema object each time with its own native pointer
+      originalSchema.close()
+    }
   }
 
   /** Convert Spark filters to a tantivy4java SplitQuery object using the new API. */
@@ -269,7 +298,7 @@ object FiltersToQueryConverter {
 
     // Add optimized range queries for fields that had multiple range conditions
     val optimizedRangeQueries = withSchemaCopy(splitSearchEngine) { schema =>
-      rangeOptimizations.toList.flatMap {
+      rangeOptimizations.get().toList.flatMap {
         case (field, rangeInfo) =>
           createOptimizedRangeQuery(field, rangeInfo, schema, splitSearchEngine).toList
       }
@@ -582,26 +611,31 @@ object FiltersToQueryConverter {
     logger.debug(msg)
 
   /**
-   * Create a temporary index from schema for parseQuery operations. Uses the same schema so tokenizer configuration
-   * should be consistent.
+   * Thread-local cache for temporary index directory to avoid repeated directory creation.
+   * Each thread gets its own temp directory that is reused across multiple parseQuery calls.
+   * The directory is cleaned up when the thread terminates or on JVM shutdown.
    */
-  private def withTemporaryIndex[T](schema: Schema)(f: Index => T): T = {
+  private val tempIndexDir: ThreadLocal[java.nio.file.Path] = ThreadLocal.withInitial { () =>
     import java.nio.file.Files
     val tempDir = Files.createTempDirectory("tantivy4spark_parsequery_")
-    try {
-      val tempIndex = new Index(schema, tempDir.toAbsolutePath.toString)
-      try
-        f(tempIndex)
-      finally
-        tempIndex.close()
-    } finally
-      // Clean up temp directory
-      try {
-        import java.nio.file.{Path, Files}
-        import java.nio.file.attribute.BasicFileAttributes
-        import java.nio.file.SimpleFileVisitor
-        import java.nio.file.FileVisitResult
 
+    // Register cleanup on JVM shutdown
+    Runtime.getRuntime.addShutdownHook(new Thread(() => {
+      cleanupTempDir(tempDir)
+    }))
+
+    tempDir
+  }
+
+  /** Clean up a temp directory and all its contents. */
+  private def cleanupTempDir(tempDir: java.nio.file.Path): Unit = {
+    try {
+      import java.nio.file.{Path, Files}
+      import java.nio.file.attribute.BasicFileAttributes
+      import java.nio.file.SimpleFileVisitor
+      import java.nio.file.FileVisitResult
+
+      if (Files.exists(tempDir)) {
         Files.walkFileTree(
           tempDir,
           new SimpleFileVisitor[Path] {
@@ -615,10 +649,31 @@ object FiltersToQueryConverter {
             }
           }
         )
-      } catch {
-        case e: Exception =>
-          logger.warn(s"Failed to clean up temp directory $tempDir: ${e.getMessage}")
       }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to clean up temp directory $tempDir: ${e.getMessage}")
+    }
+  }
+
+  /**
+   * Create a temporary index from schema for parseQuery operations. Uses thread-local cached
+   * temp directory to avoid repeated directory creation overhead.
+   */
+  private def withTemporaryIndex[T](schema: Schema)(f: Index => T): T = {
+    val tempDir = tempIndexDir.get()
+    // Create a unique subdirectory for this index to avoid conflicts
+    val indexDir = java.nio.file.Files.createTempDirectory(tempDir, "idx_")
+    try {
+      val tempIndex = new Index(schema, indexDir.toAbsolutePath.toString)
+      try
+        f(tempIndex)
+      finally
+        tempIndex.close()
+    } finally {
+      // Clean up this specific index subdirectory
+      cleanupTempDir(indexDir)
+    }
   }
 
   /** Convert a single Spark Filter to a tantivy4java Query. */
@@ -1088,11 +1143,9 @@ object FiltersToQueryConverter {
     import org.apache.spark.sql.sources._
 
     // Check if this is a nested field filter (JSON field) first
-    // Create JSON predicate translator with Spark schema and options
+    // Use cached JSON predicate translator to avoid repeated object creation
     val sparkSchema    = splitSearchEngine.getSparkSchema()
-    val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
-    val jsonMapper     = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
-    val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
+    val jsonTranslator = getJsonTranslator(sparkSchema, options)
 
     // Try to translate as JSON field filter using parseQuery syntax
     jsonTranslator.translateFilterToParseQuery(filter) match {

@@ -376,9 +376,11 @@ object PreWarmManager {
    * Safely extract schema field names from SplitSearchEngine using Schema cloning. This prevents Arc reference counting
    * issues by creating an independent Schema copy.
    */
-  private def extractSchemaFieldNames(splitSearchEngine: SplitSearchEngine): Option[Set[String]] =
+  private def extractSchemaFieldNames(splitSearchEngine: SplitSearchEngine): Option[Set[String]] = {
+    // CRITICAL: Both original and copy schemas must be closed to prevent native memory leak
+    var originalSchema: io.indextables.tantivy4java.core.Schema = null
     try {
-      val originalSchema = splitSearchEngine.getSchema()
+      originalSchema = splitSearchEngine.getSchema()
       // Create an independent copy of the schema to avoid Arc reference counting issues
       val schemaCopy = originalSchema.copy()
 
@@ -399,7 +401,17 @@ object PreWarmManager {
       case e: Exception =>
         logger.warn(s"Error extracting schema field names: ${e.getMessage}, using None for splitFieldNames")
         None
+    } finally {
+      // Close the original schema to prevent native memory leak
+      if (originalSchema != null) {
+        try {
+          originalSchema.close()
+        } catch {
+          case _: Exception => // Ignore close errors
+        }
+      }
     }
+  }
 
   /** Generate a hash for the query to uniquely identify warmup futures. */
   private def generateQueryHash(allFilters: Array[Any]): String = {

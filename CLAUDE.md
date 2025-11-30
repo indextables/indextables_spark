@@ -86,6 +86,9 @@ spark.indextables.read.batchOptimization.maxConcurrentPrefetch: 8 (default: 8, p
 // Adaptive Tuning (automatic parameter optimization based on performance metrics)
 spark.indextables.read.adaptiveTuning.enabled: true (default: true, auto-adjust parameters)
 spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5, minimum batches to track)
+
+// Read Limits (controls default result set size when no explicit LIMIT is specified)
+spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)

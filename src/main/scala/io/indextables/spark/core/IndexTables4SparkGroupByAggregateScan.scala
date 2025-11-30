@@ -608,10 +608,12 @@ class IndexTables4SparkGroupByAggregateReader(
           logger.debug(s"GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
 
           // Get the split field names for schema validation
-          val splitFieldNames =
+          // CRITICAL: Schema must be closed to prevent native memory leak
+          val splitFieldNames = {
+            var schema: io.indextables.tantivy4java.core.Schema = null
             try {
               import scala.collection.JavaConverters._
-              val schema = splitSearchEngine.getSchema()
+              schema = splitSearchEngine.getSchema()
               if (schema != null) {
                 Some(schema.getFieldNames().asScala.toSet)
               } else {
@@ -622,7 +624,12 @@ class IndexTables4SparkGroupByAggregateReader(
               case e: Exception =>
                 logger.warn(s"GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
                 None
+            } finally {
+              if (schema != null) {
+                schema.close() // Prevent native memory leak
+              }
             }
+          }
 
           // Create options from broadcast config
           import scala.jdk.CollectionConverters._

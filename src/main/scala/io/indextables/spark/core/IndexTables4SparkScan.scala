@@ -238,7 +238,6 @@ class IndexTables4SparkScan(
     )
     filters.foreach { f =>
       logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
-      logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
     }
 
     if (filters.isEmpty) {

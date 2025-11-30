@@ -186,8 +186,13 @@ class IndexTables4SparkPartitionReader(
   logger.debug(s"PARTITION READER: Created for split ${addAction.path} with ${filters.length} filters")
   filters.foreach(f => logger.debug(s"PARTITION READER:   - Filter: $f"))
 
-  // Calculate effective limit: use pushed limit or fall back to default 250
-  private val effectiveLimit: Int = limit.getOrElse(250)
+  // Calculate effective limit: use pushed limit, then configurable default, then hardcoded fallback
+  // Configuration key: spark.indextables.read.defaultLimit (default: 250)
+  private val configuredDefaultLimit: Int = config
+    .get("spark.indextables.read.defaultLimit")
+    .flatMap(s => scala.util.Try(s.toInt).toOption)
+    .getOrElse(250)
+  private val effectiveLimit: Int = limit.getOrElse(configuredDefaultLimit)
 
   // Resolve relative path from AddAction against table path
   private val filePath = PathResolutionUtils.resolveSplitPathAsString(addAction.path, tablePath.toString)
@@ -195,6 +200,13 @@ class IndexTables4SparkPartitionReader(
   private var splitSearchEngine: SplitSearchEngine  = _
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized                           = false
+
+  // Lazy cached Hadoop Configuration and options map to avoid repeated creation
+  private lazy val cachedHadoopConf = new org.apache.hadoop.conf.Configuration()
+  private lazy val cachedOptionsMap = {
+    import scala.jdk.CollectionConverters._
+    new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
+  }
 
   private def createCacheConfig(): SplitCacheConfig =
     io.indextables.spark.util.ConfigUtils.createSplitCacheConfig(
@@ -242,16 +254,11 @@ class IndexTables4SparkPartitionReader(
           filePath.toString // Keep file URIs as-is for tantivy4java
         } else {
           // Use CloudStorageProviderFactory's static normalization method
-          import org.apache.hadoop.conf.Configuration
-          import org.apache.spark.sql.util.CaseInsensitiveStringMap
-          import scala.jdk.CollectionConverters._
-
-          val hadoopConf = new Configuration()
-          val optionsMap = new CaseInsensitiveStringMap(config.asJava)
+          // Use cached Configuration and options map to avoid repeated creation
           io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
             filePath.toString,
-            optionsMap,
-            hadoopConf
+            cachedOptionsMap,
+            cachedHadoopConf
           )
         }
 
@@ -325,8 +332,9 @@ class IndexTables4SparkPartitionReader(
           SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig, options)
 
         // Get the schema from the split to validate filters
-        val splitSchema = splitSearchEngine.getSchema()
-        val splitFieldNames =
+        // CRITICAL: Schema must be closed to prevent native memory leak
+        val splitFieldNames = {
+          val splitSchema = splitSearchEngine.getSchema()
           try {
             import scala.jdk.CollectionConverters._
             val fieldNames = splitSchema.getFieldNames().asScala.toSet
@@ -336,7 +344,10 @@ class IndexTables4SparkPartitionReader(
             case e: Exception =>
               logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
               Set.empty[String]
+          } finally {
+            splitSchema.close() // Prevent native memory leak
           }
+        }
 
         // Log the filters and limit for debugging
         logger.debug(s"PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
@@ -385,24 +396,21 @@ class IndexTables4SparkPartitionReader(
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {
-          // Create options map from broadcast config for field configuration
-          import scala.jdk.CollectionConverters._
-          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)
-
+          // Use cached options map for field configuration (avoid repeated creation)
           val queryObj = if (splitFieldNames.nonEmpty) {
             // Use mixed filter converter to handle both Spark filters and IndexQuery filters
             val validatedQuery = FiltersToQueryConverter.convertToSplitQuery(
               allFilters,
               splitSearchEngine,
               Some(splitFieldNames),
-              Some(optionsFromBroadcast)
+              Some(cachedOptionsMap)
             )
             logger.info(s"  - SplitQuery (with schema validation): ${validatedQuery.getClass.getSimpleName}")
             validatedQuery
           } else {
             // Fall back to no schema validation if we can't get field names
             val fallbackQuery =
-              FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None, Some(optionsFromBroadcast))
+              FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, None, Some(cachedOptionsMap))
             logger.info(s"  - SplitQuery (no schema validation): ${fallbackQuery.getClass.getSimpleName}")
             fallbackQuery
           }
@@ -460,7 +468,13 @@ class IndexTables4SparkPartitionReader(
     // Note: Batch optimization metrics are collected once after scan completes
     // via BatchOptMetricsRegistry, not per-partition (to avoid N× overcounting)
     if (splitSearchEngine != null) {
-      splitSearchEngine.close()
+      try {
+        splitSearchEngine.close()
+      } catch {
+        case ex: Exception =>
+          // Log but don't rethrow - close() should be idempotent and not fail the task
+          logger.warn(s"Error closing splitSearchEngine for ${addAction.path}", ex)
+      }
     }
   }
 
