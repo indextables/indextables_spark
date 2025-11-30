@@ -473,4 +473,90 @@ class PartitionFilterOptimizationTest extends TestBase with BeforeAndAfterEach {
     result(1).getInt(0) shouldBe 2
     result(2).getInt(0) shouldBe 3
   }
+
+  test("should apply non-redundant filters when timestamp filter is redundant by stats") {
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
+    import java.sql.Timestamp
+    import java.time.Instant
+
+    // Create test data with timestamps and a name column for filtering
+    val df = Seq(
+      (1, "alice", Timestamp.from(Instant.parse("2024-02-01T10:00:00.000Z"))),
+      (2, "bob", Timestamp.from(Instant.parse("2024-02-15T12:00:00.000Z"))),
+      (3, "charlie", Timestamp.from(Instant.parse("2024-03-01T14:00:00.000Z"))),
+      (4, "alice", Timestamp.from(Instant.parse("2024-03-15T16:00:00.000Z")))
+    ).toDF("id", "name", "created_at")
+
+    val tablePath = s"$tempDir/mixed_redundant_filter_test"
+
+    // Write - statistics will have min=2024-02-01, max=2024-03-15
+    df.coalesce(1).write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Query with TWO filters:
+    // 1. created_at >= 2024-01-01 - REDUNDANT (splitMin 2024-02-01 > filterVal 2024-01-01)
+    // 2. name === "alice" - NOT REDUNDANT (needs to be applied)
+    //
+    // The timestamp filter should be excluded, but the name filter MUST still be applied
+    val filterVal = Timestamp.from(Instant.parse("2024-01-01T00:00:00.000Z"))
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      .filter($"created_at" >= filterVal && $"name" === "alice")
+      .select("id", "name")
+      .orderBy("id")
+      .collect()
+
+    // Should only return the 2 alice records (id 1 and 4)
+    // If the name filter was incorrectly excluded, we'd get all 4 records
+    result.length shouldBe 2
+    result(0).getInt(0) shouldBe 1
+    result(0).getString(1) shouldBe "alice"
+    result(1).getInt(0) shouldBe 4
+    result(1).getString(1) shouldBe "alice"
+  }
+
+  test("should apply non-redundant numeric filter when date filter is redundant by stats") {
+    val sparkImplicits = spark.implicits
+    import sparkImplicits._
+    import java.sql.Date
+
+    // Create test data with dates and scores
+    val df = Seq(
+      (1, "alice", 100, Date.valueOf("2024-02-01")),
+      (2, "bob", 250, Date.valueOf("2024-02-15")),
+      (3, "charlie", 150, Date.valueOf("2024-03-01")),
+      (4, "diana", 300, Date.valueOf("2024-03-15"))
+    ).toDF("id", "name", "score", "event_date")
+
+    val tablePath = s"$tempDir/mixed_redundant_numeric_filter_test"
+
+    // Write - date statistics will have min=2024-02-01, max=2024-03-15
+    df.coalesce(1).write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Query with TWO filters:
+    // 1. event_date <= 2024-12-31 - REDUNDANT (splitMax 2024-03-15 <= filterVal 2024-12-31)
+    // 2. score > 200 - NOT REDUNDANT (needs to be applied)
+    //
+    // The date filter should be excluded, but the score filter MUST still be applied
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+      .filter($"event_date" <= Date.valueOf("2024-12-31") && $"score" > 200)
+      .select("id", "name", "score")
+      .orderBy("id")
+      .collect()
+
+    // Should only return bob (score=250) and diana (score=300)
+    // If the score filter was incorrectly excluded, we'd get all 4 records
+    result.length shouldBe 2
+    result(0).getInt(0) shouldBe 2
+    result(0).getString(1) shouldBe "bob"
+    result(0).getInt(2) shouldBe 250
+    result(1).getInt(0) shouldBe 4
+    result(1).getString(1) shouldBe "diana"
+    result(1).getInt(2) shouldBe 300
+  }
 }
