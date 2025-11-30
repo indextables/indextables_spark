@@ -344,12 +344,12 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing metadata from transaction log")
 
-        // Try checkpoint first if available - this allows reading even when early versions are deleted
-        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+        // Try checkpoint first if available - uses cached checkpoint actions
+        getCheckpointActionsCached() match {
           case Some(checkpointActions) =>
             checkpointActions.collectFirst { case metadata: MetadataAction => metadata } match {
               case Some(metadata) =>
-                logger.info("Found metadata in checkpoint")
+                logger.info("Found metadata in checkpoint (cached)")
                 return metadata
               case None => // Continue searching in version files
             }
@@ -376,12 +376,12 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing protocol from transaction log")
 
-        // Try checkpoint first if available - this allows reading even when early versions are deleted
-        checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+        // Try checkpoint first if available - uses cached checkpoint actions
+        getCheckpointActionsCached() match {
           case Some(checkpointActions) =>
             checkpointActions.collectFirst { case protocol: ProtocolAction => protocol } match {
               case Some(protocol) =>
-                logger.info("Found protocol in checkpoint")
+                logger.info("Found protocol in checkpoint (cached)")
                 return protocol
               case None => // Continue searching in version files
             }
@@ -651,6 +651,34 @@ class OptimizedTransactionLog(
     // Use cache with proper invalidation - version-specific caching should be safe
     enhancedCache.getOrComputeVersionActions(tablePath.toString, version, readVersionDirect(version))
 
+  /**
+   * Get checkpoint actions with caching.
+   * This is the key optimization: caches both the last checkpoint info and the checkpoint actions
+   * to avoid repeated reads of _last_checkpoint and checkpoint files.
+   */
+  private def getCheckpointActionsCached(): Option[Seq[Action]] = {
+    // First, get the last checkpoint info (cached)
+    val lastCheckpointInfo = enhancedCache.getOrComputeLastCheckpointInfo(
+      tablePath.toString,
+      checkpoint.flatMap(_.getLastCheckpointInfo())
+    )
+
+    // If no checkpoint info, return None
+    lastCheckpointInfo match {
+      case None =>
+        logger.debug(s"No checkpoint info available for $tablePath")
+        None
+      case Some(info) =>
+        // Get checkpoint actions for this version (cached)
+        enhancedCache.getOrComputeCheckpointActions(
+          tablePath.toString,
+          info.version,
+          // Only read from storage if not cached
+          checkpoint.flatMap(_.getActionsFromCheckpoint())
+        )
+    }
+  }
+
   private def readVersionDirect(version: Long): Seq[Action] = {
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
@@ -842,8 +870,8 @@ class OptimizedTransactionLog(
       case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
         logger.info(s"Loading initial state from checkpoint at version $checkpointVersion for getAllCurrentActions")
 
-        // Load state from checkpoint
-        checkpoint.flatMap(_.getActionsFromCheckpoint()).foreach { checkpointActions =>
+        // Load state from checkpoint (uses cached checkpoint actions)
+        getCheckpointActionsCached().foreach { checkpointActions =>
           checkpointActions.foreach {
             case add: AddAction =>
               initialFiles(add.path) = add
@@ -1007,8 +1035,8 @@ class OptimizedTransactionLog(
       case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
         logger.info(s"Starting reconstruction from checkpoint at version $checkpointVersion")
 
-        // Load state from checkpoint
-        checkpoint.flatMap(_.getActionsFromCheckpoint()).foreach { checkpointActions =>
+        // Load state from checkpoint (uses cached checkpoint actions)
+        getCheckpointActionsCached().foreach { checkpointActions =>
           checkpointActions.foreach {
             case add: AddAction =>
               files(add.path) = add

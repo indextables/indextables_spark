@@ -112,6 +112,34 @@ class EnhancedTransactionLogCache(
     .recordStats()
     .build[String, CheckpointInfo]()
 
+  // Checkpoint actions cache - caches the actual parsed actions from checkpoint files
+  // This is the key cache for avoiding repeated checkpoint file reads
+  // Key: tablePath + checkpointVersion
+  case class CheckpointActionsKey(tablePath: String, checkpointVersion: Long)
+
+  private val checkpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = CacheBuilder
+    .newBuilder()
+    .expireAfterAccess(metadataCacheTTLMinutes, TimeUnit.MINUTES) // Same TTL as metadata
+    .maximumSize(100)
+    .recordStats()
+    .removalListener(new RemovalListener[CheckpointActionsKey, Seq[Action]] {
+      override def onRemoval(notification: RemovalNotification[CheckpointActionsKey, Seq[Action]]): Unit =
+        logger.debug(s"Evicted checkpoint actions cache entry: ${notification.getKey}, reason: ${notification.getCause}")
+    })
+    .build[CheckpointActionsKey, Seq[Action]]()
+
+  // Last checkpoint info cache - caches the _last_checkpoint file content
+  // This avoids reading _last_checkpoint file on every operation
+  private val lastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = CacheBuilder
+    .newBuilder()
+    .expireAfterAccess(metadataCacheTTLMinutes, TimeUnit.MINUTES)
+    .maximumSize(100)
+    .recordStats()
+    .build[String, LastCheckpointInfoCached]()
+
+  // Wrapper for LastCheckpointInfo to include timestamp for staleness detection
+  case class LastCheckpointInfoCached(info: Option[LastCheckpointInfo], cachedAt: Long)
+
   // Lazy value cache for expensive computations
   private val lazyValueCache = new TrieMap[String, LazyValue[_]]()
 
@@ -248,6 +276,68 @@ class EnhancedTransactionLogCache(
         info
     }
 
+  /**
+   * Get or compute checkpoint ACTIONS - the actual parsed Seq[Action] from checkpoint file.
+   * This is the key method for avoiding repeated checkpoint file reads.
+   * The checkpoint actions are immutable once written, so caching by version is safe.
+   */
+  def getOrComputeCheckpointActions(
+    tablePath: String,
+    checkpointVersion: Long,
+    compute: => Option[Seq[Action]]
+  ): Option[Seq[Action]] = {
+    val key = CheckpointActionsKey(tablePath, checkpointVersion)
+    Option(checkpointActionsCache.getIfPresent(key)) match {
+      case Some(actions) =>
+        logger.debug(s"Checkpoint actions cache HIT for $tablePath version $checkpointVersion (${actions.size} actions)")
+        Some(actions)
+      case None =>
+        logger.debug(s"Checkpoint actions cache MISS for $tablePath version $checkpointVersion - reading from storage")
+        compute match {
+          case Some(actions) =>
+            checkpointActionsCache.put(key, actions)
+            logger.debug(s"Cached ${actions.size} checkpoint actions for $tablePath version $checkpointVersion")
+            Some(actions)
+          case None =>
+            logger.debug(s"No checkpoint actions found for $tablePath version $checkpointVersion")
+            None
+        }
+    }
+  }
+
+  /**
+   * Get or compute last checkpoint info - caches the _last_checkpoint file content.
+   * This avoids reading the _last_checkpoint file on every operation.
+   */
+  def getOrComputeLastCheckpointInfo(
+    tablePath: String,
+    compute: => Option[LastCheckpointInfo]
+  ): Option[LastCheckpointInfo] = {
+    Option(lastCheckpointInfoCache.getIfPresent(tablePath)) match {
+      case Some(cached) =>
+        logger.debug(s"Last checkpoint info cache HIT for $tablePath: ${cached.info.map(_.version)}")
+        cached.info
+      case None =>
+        logger.debug(s"Last checkpoint info cache MISS for $tablePath - reading from storage")
+        val info = compute
+        lastCheckpointInfoCache.put(tablePath, LastCheckpointInfoCached(info, System.currentTimeMillis()))
+        logger.debug(s"Cached last checkpoint info for $tablePath: ${info.map(_.version)}")
+        info
+    }
+  }
+
+  /** Invalidate last checkpoint info cache for a table (call when new checkpoint is written) */
+  def invalidateLastCheckpointInfo(tablePath: String): Unit = {
+    lastCheckpointInfoCache.invalidate(tablePath)
+    logger.debug(s"Invalidated last checkpoint info cache for $tablePath")
+  }
+
+  /** Invalidate checkpoint actions cache for a specific version */
+  def invalidateCheckpointActions(tablePath: String, checkpointVersion: Long): Unit = {
+    checkpointActionsCache.invalidate(CheckpointActionsKey(tablePath, checkpointVersion))
+    logger.debug(s"Invalidated checkpoint actions cache for $tablePath version $checkpointVersion")
+  }
+
   /** Get or create a lazy value for expensive computations */
   def getOrCreateLazyValue[T](key: String, compute: => T): LazyValue[T] =
     lazyValueCache.getOrElseUpdate(key, new LazyValue(compute)).asInstanceOf[LazyValue[T]]
@@ -306,9 +396,11 @@ class EnhancedTransactionLogCache(
     invalidateByPredicate(snapshotCache, (key: SnapshotCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(fileListCache, (key: FileListCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(versionCache, (key: LogCacheKey) => key.tablePath == tablePath)
+    invalidateByPredicate(checkpointActionsCache, (key: CheckpointActionsKey) => key.tablePath == tablePath)
     metadataCache.invalidate(MetadataCacheKey(tablePath))
     protocolCache.invalidate(MetadataCacheKey(tablePath))
     checkpointCache.invalidate(tablePath)
+    lastCheckpointInfoCache.invalidate(tablePath)
 
     // Clear lazy values for this table
     val keysToRemove = lazyValueCache.keys.filter(_.startsWith(tablePath)).toList
@@ -350,6 +442,8 @@ class EnhancedTransactionLogCache(
       versionCacheStats = versionCache.stats(),
       checkpointCacheStats = checkpointCache.stats(),
       protocolCacheStats = protocolCache.stats(),
+      checkpointActionsCacheStats = checkpointActionsCache.stats(),
+      lastCheckpointInfoCacheStats = lastCheckpointInfoCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -363,6 +457,8 @@ class EnhancedTransactionLogCache(
     protocolCache.invalidateAll()
     versionCache.invalidateAll()
     checkpointCache.invalidateAll()
+    checkpointActionsCache.invalidateAll()
+    lastCheckpointInfoCache.invalidateAll()
     lazyValueCache.clear()
   }
 
@@ -375,6 +471,8 @@ class EnhancedTransactionLogCache(
     protocolCache.cleanUp()
     versionCache.cleanUp()
     checkpointCache.cleanUp()
+    checkpointActionsCache.cleanUp()
+    lastCheckpointInfoCache.cleanUp()
   }
 }
 
@@ -431,6 +529,8 @@ case class CacheStatistics(
   versionCacheStats: GuavaCacheStats,
   checkpointCacheStats: GuavaCacheStats,
   protocolCacheStats: GuavaCacheStats,
+  checkpointActionsCacheStats: GuavaCacheStats,
+  lastCheckpointInfoCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -440,7 +540,9 @@ case class CacheStatistics(
       metadataCacheStats,
       versionCacheStats,
       checkpointCacheStats,
-      protocolCacheStats
+      protocolCacheStats,
+      checkpointActionsCacheStats,
+      lastCheckpointInfoCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -458,6 +560,22 @@ case class CacheStatistics(
       metadataCacheStats,
       versionCacheStats,
       checkpointCacheStats,
-      protocolCacheStats
+      protocolCacheStats,
+      checkpointActionsCacheStats,
+      lastCheckpointInfoCacheStats
     ).map(_.evictionCount()).sum
+
+  /** Get checkpoint actions cache hit rate specifically - useful for monitoring the fix */
+  def checkpointActionsHitRate: Double = {
+    val requests = checkpointActionsCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else checkpointActionsCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get last checkpoint info cache hit rate specifically */
+  def lastCheckpointInfoHitRate: Double = {
+    val requests = lastCheckpointInfoCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else lastCheckpointInfoCacheStats.hitCount().toDouble / requests
+  }
 }
