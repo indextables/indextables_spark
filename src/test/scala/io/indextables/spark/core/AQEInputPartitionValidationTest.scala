@@ -97,6 +97,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
+            fullTableSchema = readSchema,
             filters = filters,
             partitionId = index,
             limit = Some(10),
@@ -181,6 +182,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
+            fullTableSchema = readSchema,
             filters = Array.empty,
             partitionId = index,
             limit = Some(15)
@@ -251,6 +253,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
           val inputPartition = new IndexTables4SparkInputPartition(
             addAction = addAction,
             readSchema = readSchema,
+            fullTableSchema = readSchema,
             filters = Array.empty,
             partitionId = index
           )
@@ -406,6 +409,7 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         val inputPartition = new IndexTables4SparkInputPartition(
           addAction = addAction,
           readSchema = data.schema,
+          fullTableSchema = data.schema,
           filters = Array.empty,
           partitionId = 0
         )

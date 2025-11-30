@@ -112,6 +112,7 @@ object PathResolutionUtils {
 class IndexTables4SparkInputPartition(
   val addAction: AddAction,
   val readSchema: StructType,
+  val fullTableSchema: StructType, // Full table schema for type lookup (filters may reference non-projected columns)
   val filters: Array[Filter],
   val partitionId: Int,
   val limit: Option[Int] = None,
@@ -157,6 +158,7 @@ class IndexTables4SparkReaderFactory(
     new IndexTables4SparkPartitionReader(
       tantivyPartition.addAction,
       readSchema,
+      tantivyPartition.fullTableSchema,
       tantivyPartition.filters,
       tantivyPartition.limit.orElse(limit),
       config,
@@ -170,6 +172,7 @@ class IndexTables4SparkReaderFactory(
 class IndexTables4SparkPartitionReader(
   addAction: AddAction,
   readSchema: StructType,
+  fullTableSchema: StructType, // Full table schema for type lookup (filters may reference non-projected columns)
   filters: Array[Filter],
   limit: Option[Int] = None,
   config: Map[String, String], // Direct config instead of broadcast
@@ -343,10 +346,38 @@ class IndexTables4SparkPartitionReader(
         )
         logger.info(s"  - Limit: $effectiveLimit")
 
-        // Since partition values are stored in splits, we can apply all filters at the split level
-        // (no need to exclude partition filters since they're queryable in the split data)
-        val allFilters: Array[Any] = filters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.debug(s"Combined filters: ${allFilters.length} total (${filters.length} regular + ${indexQueryFilters.length} IndexQuery)")
+        // Get partition column names from the AddAction
+        val partitionColumnNames: Set[String] = addAction.partitionValues.keys.toSet
+
+        // Filter out partition-only filters - these are already handled by partition pruning
+        // and are unnecessary/expensive for Tantivy (especially range queries like >, <, between)
+        val nonPartitionFilters = if (partitionColumnNames.nonEmpty) {
+          val (partitionOnly, nonPartition) = filters.partition(f => isPartitionOnlyFilter(f, partitionColumnNames))
+          if (partitionOnly.nonEmpty) {
+            logger.info(s"Excluding ${partitionOnly.length} partition filter(s) from Tantivy query: ${partitionOnly.mkString(", ")}")
+          }
+          nonPartition
+        } else {
+          filters
+        }
+
+        // Filter out range filters that are redundant based on statistics
+        // If min/max values indicate ALL data in split is within the filter's range, skip the filter
+        // Use fullTableSchema for type lookup since filters may reference non-projected columns
+        val optimizedFilters = if (addAction.minValues.nonEmpty && addAction.maxValues.nonEmpty) {
+          val (redundantByStats, remaining) = nonPartitionFilters.partition(f =>
+            isRangeFilterRedundantByStats(f, addAction.minValues.get, addAction.maxValues.get, fullTableSchema)
+          )
+          if (redundantByStats.nonEmpty) {
+            logger.info(s"Excluding ${redundantByStats.length} range filter(s) redundant by statistics: ${redundantByStats.mkString(", ")}")
+          }
+          remaining
+        } else {
+          nonPartitionFilters
+        }
+
+        val allFilters: Array[Any] = optimizedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+        logger.debug(s"Combined filters: ${allFilters.length} total (${nonPartitionFilters.length} regular + ${indexQueryFilters.length} IndexQuery)")
         if (logger.isDebugEnabled) {
           filters.foreach(f => logger.debug(s"  - Regular filter: $f"))
           indexQueryFilters.foreach(f => logger.debug(s"  - IndexQuery filter: $f"))
@@ -437,6 +468,173 @@ class IndexTables4SparkPartitionReader(
   private def generateQueryHash(allFilters: Array[Any]): String = {
     val filterString = allFilters.map(_.toString).mkString("|")
     java.util.UUID.nameUUIDFromBytes(filterString.getBytes).toString.take(8)
+  }
+
+  /**
+   * Check if a filter only references partition columns.
+   * These filters are already handled by partition pruning and don't need to be sent to Tantivy.
+   *
+   * @param filter The Spark filter to check
+   * @param partitionColumns Set of partition column names
+   * @return true if the filter only references partition columns
+   */
+  private def isPartitionOnlyFilter(filter: Filter, partitionColumns: Set[String]): Boolean = {
+    import org.apache.spark.sql.sources._
+
+    def getFilterFieldNames(f: Filter): Set[String] = f match {
+      case EqualTo(attribute, _)            => Set(attribute)
+      case EqualNullSafe(attribute, _)      => Set(attribute)
+      case GreaterThan(attribute, _)        => Set(attribute)
+      case GreaterThanOrEqual(attribute, _) => Set(attribute)
+      case LessThan(attribute, _)           => Set(attribute)
+      case LessThanOrEqual(attribute, _)    => Set(attribute)
+      case In(attribute, _)                 => Set(attribute)
+      case IsNull(attribute)                => Set(attribute)
+      case IsNotNull(attribute)             => Set(attribute)
+      case StringStartsWith(attribute, _)   => Set(attribute)
+      case StringEndsWith(attribute, _)     => Set(attribute)
+      case StringContains(attribute, _)     => Set(attribute)
+      case And(left, right)                 => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Or(left, right)                  => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Not(child)                       => getFilterFieldNames(child)
+      case _                                => Set.empty
+    }
+
+    val fieldNames = getFilterFieldNames(filter)
+    // A filter is partition-only if ALL its fields are partition columns
+    // Empty field set means unknown filter type - don't exclude it
+    fieldNames.nonEmpty && fieldNames.forall(partitionColumns.contains)
+  }
+
+  /**
+   * Check if a range filter is redundant based on min/max statistics.
+   * A filter is redundant if the split's entire data range is within the filter's range,
+   * meaning all records in the split would pass the filter anyway.
+   *
+   * Only applies to Date and Timestamp columns to avoid type conversion complexity.
+   *
+   * @param filter The Spark filter to check
+   * @param minValues Min values from split statistics
+   * @param maxValues Max values from split statistics
+   * @param schema The read schema to determine column types
+   * @return true if the filter is redundant (all data passes), false otherwise
+   */
+  private def isRangeFilterRedundantByStats(
+    filter: Filter,
+    minValues: Map[String, String],
+    maxValues: Map[String, String],
+    schema: StructType
+  ): Boolean = {
+    import org.apache.spark.sql.sources._
+    import org.apache.spark.sql.types._
+    import java.sql.{Date, Timestamp}
+    import java.time.{Instant, LocalDate}
+
+    def isDateOrTimestampColumn(attribute: String): Boolean = {
+      schema.fields.find(_.name == attribute).exists { field =>
+        field.dataType match {
+          case DateType | TimestampType => true
+          case _                        => false
+        }
+      }
+    }
+
+    def getColumnType(attribute: String): Option[DataType] =
+      schema.fields.find(_.name == attribute).map(_.dataType)
+
+    // Parse timestamp/date values from statistics and filter values
+    // Statistics store timestamps as microseconds (Long string) and dates as days since epoch
+    def parseTimestamp(value: Any, fromStats: Boolean = false): Option[Long] = value match {
+      case ts: Timestamp     => Some(ts.getTime * 1000) // Convert millis to micros
+      case s: String         =>
+        // Statistics are stored as microseconds (Long as String)
+        try {
+          val micros = s.toLong
+          Some(micros)
+        } catch {
+          case _: NumberFormatException =>
+            // Try parsing as ISO instant or timestamp string
+            try Some(Instant.parse(s).toEpochMilli * 1000)
+            catch {
+              case _: Exception =>
+                try Some(Timestamp.valueOf(s).getTime * 1000)
+                catch { case _: Exception => None }
+            }
+        }
+      case l: Long           => Some(if (fromStats) l else l * 1000) // Stats already in micros
+      case i: Int            => Some(i.toLong * 1000)
+      case _                 => None
+    }
+
+    def parseDate(value: Any, fromStats: Boolean = false): Option[Long] = value match {
+      case d: Date   => Some(d.toLocalDate.toEpochDay) // Convert to days since epoch
+      case s: String =>
+        // Statistics are stored as days since epoch (Int as String)
+        try {
+          val days = s.toLong
+          Some(days)
+        } catch {
+          case _: NumberFormatException =>
+            // Try parsing as ISO date string
+            try Some(LocalDate.parse(s).toEpochDay)
+            catch {
+              case _: Exception =>
+                try Some(Date.valueOf(s).toLocalDate.toEpochDay)
+                catch { case _: Exception => None }
+            }
+        }
+      case l: Long   => Some(l) // Already days since epoch
+      case i: Int    => Some(i.toLong)
+      case _         => None
+    }
+
+    def parseValue(value: Any, dataType: DataType, fromStats: Boolean = false): Option[Long] = dataType match {
+      case TimestampType => parseTimestamp(value, fromStats)
+      case DateType      => parseDate(value, fromStats)
+      case _             => None
+    }
+
+    // Check if filter is redundant:
+    // - GreaterThan(attr, v): redundant if splitMin > v (all values greater than v)
+    // - GreaterThanOrEqual(attr, v): redundant if splitMin >= v
+    // - LessThan(attr, v): redundant if splitMax < v (all values less than v)
+    // - LessThanOrEqual(attr, v): redundant if splitMax <= v
+    filter match {
+      case GreaterThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
+        (for {
+          dataType   <- getColumnType(attribute)
+          splitMin   <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal  <- parseValue(value, dataType, fromStats = false)
+        } yield splitMin > filterVal).getOrElse(false)
+
+      case GreaterThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
+        (for {
+          dataType   <- getColumnType(attribute)
+          splitMin   <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal  <- parseValue(value, dataType, fromStats = false)
+        } yield splitMin >= filterVal).getOrElse(false)
+
+      case LessThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
+        (for {
+          dataType   <- getColumnType(attribute)
+          splitMax   <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal  <- parseValue(value, dataType, fromStats = false)
+        } yield splitMax < filterVal).getOrElse(false)
+
+      case LessThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
+        (for {
+          dataType   <- getColumnType(attribute)
+          splitMax   <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal  <- parseValue(value, dataType, fromStats = false)
+        } yield splitMax <= filterVal).getOrElse(false)
+
+      // For AND filters, both sides must be redundant for the whole filter to be redundant
+      case And(left, right) =>
+        isRangeFilterRedundantByStats(left, minValues, maxValues, schema) &&
+          isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
+
+      case _ => false
+    }
   }
 }
 

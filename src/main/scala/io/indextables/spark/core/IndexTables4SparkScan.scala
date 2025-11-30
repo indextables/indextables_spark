@@ -53,6 +53,10 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
+  // Full table schema for data skipping type lookup (not just projected columns)
+  // This is needed because filters may reference columns not in the projection
+  private lazy val fullTableSchema: StructType = transactionLog.getSchema().getOrElse(readSchema)
+
   // Optional metrics accumulator for collecting batch optimization statistics
   // Set via enableMetricsCollection() for testing/monitoring
   private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
@@ -151,7 +155,7 @@ class IndexTables4SparkScan(
         logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
         pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
-          new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
+          new IndexTables4SparkInputPartition(addAction, readSchema, fullTableSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()
         if (preferredHosts.nonEmpty) {
           logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
@@ -554,11 +558,9 @@ class IndexTables4SparkScan(
     import java.sql.Date
     import org.apache.spark.sql.types.TimestampType
 
-    // Find the field data type in the schema
-    val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
-
-    // logger.debug(s"TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
-    // logger.debug(s"TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
+    // Find the field data type in the FULL table schema (not just projected columns)
+    // This is critical because filters may reference columns not in the projection
+    val fieldType = fullTableSchema.fields.find(_.name == attribute).map(_.dataType)
 
     fieldType match {
       case Some(DateType) =>
