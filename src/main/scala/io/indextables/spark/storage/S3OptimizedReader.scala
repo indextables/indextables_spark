@@ -18,7 +18,8 @@
 package io.indextables.spark.storage
 
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, Executors}
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, Executors, TimeUnit}
+import java.util.concurrent.atomic.AtomicLong
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
@@ -38,10 +39,14 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   private val key    = uri.getPath.substring(1) // Remove leading slash
 
   private val s3Client: S3Client = {
-    val region = Option(conf.get("fs.s3a.endpoint.region"))
+    val configuredRegion = Option(conf.get("fs.s3a.endpoint.region"))
       .orElse(Option(System.getProperty("aws.region")))
-      .map(Region.of)
-      .getOrElse(Region.US_EAST_1)
+
+    val region = configuredRegion.map(Region.of).getOrElse {
+      logger.info(s"No AWS region configured for s3://$bucket/$key, falling back to US_EAST_1. " +
+        "Set 'fs.s3a.endpoint.region' or 'aws.region' system property to avoid this.")
+      Region.US_EAST_1
+    }
 
     S3Client
       .builder()
@@ -53,6 +58,10 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   private val executor         = Executors.newCachedThreadPool()
   private val chunkCache       = new ConcurrentHashMap[Long, Array[Byte]]()
   private val defaultChunkSize = 1024 * 1024 // 1MB chunks
+
+  // Track total cached bytes for memory management
+  private val cachedBytes      = new AtomicLong(0L)
+  private val maxCachedBytes   = 100L * 1024 * 1024 // 100MB max cache size per reader
 
   private lazy val fileSize: Long =
     try {
@@ -112,8 +121,8 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
         val chunkLength = Math.min(defaultChunkSize, fileSize - chunkKey)
         val chunk       = readS3Range(chunkKey, chunkLength)
 
-        // Cache the chunk
-        chunkCache.put(chunkKey, chunk)
+        // Cache the chunk if within memory limits, evict old entries if needed
+        maybeCacheChunk(chunkKey, chunk)
 
         // Predictively read next chunk if this is a sequential read
         if (offset + length > chunkKey + chunkLength) {
@@ -124,7 +133,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
                 try {
                   val nextChunkLength = Math.min(defaultChunkSize, fileSize - nextChunkKey)
                   val nextChunk       = readS3Range(nextChunkKey, nextChunkLength)
-                  chunkCache.put(nextChunkKey, nextChunk)
+                  maybeCacheChunk(nextChunkKey, nextChunk)
                   logger.debug(s"Predictively cached chunk at offset $nextChunkKey")
                 } catch {
                   case ex: Exception =>
@@ -141,6 +150,32 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
         val result       = new Array[Byte](actualLength)
         System.arraycopy(chunk, chunkOffset, result, 0, actualLength)
         result
+    }
+  }
+
+  /**
+   * Cache a chunk if within memory limits. Evicts oldest entries if cache is full.
+   */
+  private def maybeCacheChunk(chunkKey: Long, chunk: Array[Byte]): Unit = {
+    val chunkSize = chunk.length.toLong
+
+    // Evict old entries if adding this chunk would exceed limit
+    while (cachedBytes.get() + chunkSize > maxCachedBytes && !chunkCache.isEmpty) {
+      // Find and remove the oldest entry (lowest key = earliest offset)
+      val oldestKey = chunkCache.keys().asIterator().next()
+      val removed = chunkCache.remove(oldestKey)
+      if (removed != null) {
+        cachedBytes.addAndGet(-removed.length)
+        logger.debug(s"Evicted chunk at offset $oldestKey to make room (cached: ${cachedBytes.get()} bytes)")
+      }
+    }
+
+    // Only cache if it fits
+    if (cachedBytes.get() + chunkSize <= maxCachedBytes) {
+      chunkCache.put(chunkKey, chunk)
+      cachedBytes.addAndGet(chunkSize)
+    } else {
+      logger.debug(s"Skipping cache for chunk at $chunkKey (size: $chunkSize, would exceed limit)")
     }
   }
 
@@ -167,8 +202,25 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   override def getFileSize(): Long = fileSize
 
   override def close(): Unit = {
+    // Gracefully shutdown executor, waiting for pending tasks
     executor.shutdown()
+    try {
+      if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+        logger.debug(s"Executor did not terminate gracefully, forcing shutdown for s3://$bucket/$key")
+        executor.shutdownNow()
+        // Wait a bit more for tasks to respond to interruption
+        if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+          logger.warn(s"Executor did not terminate after shutdownNow for s3://$bucket/$key")
+        }
+      }
+    } catch {
+      case _: InterruptedException =>
+        executor.shutdownNow()
+        Thread.currentThread().interrupt()
+    }
+
     chunkCache.clear()
+    cachedBytes.set(0)
     s3Client.close()
     logger.debug(s"Closed S3OptimizedReader for s3://$bucket/$key")
   }

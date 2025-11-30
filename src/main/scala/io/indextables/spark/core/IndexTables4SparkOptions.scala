@@ -80,100 +80,68 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /**
    * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
-   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    *
    * NOTE: Field names are stored in lowercase to handle case-insensitive matching with schema field names.
    */
   def getFieldTypeMapping: Map[String, String] = {
     import scala.jdk.CollectionConverters._
+    val prefix = "spark.indextables.indexing.typemap."
     options
       .asCaseSensitiveMap()
       .asScala
       .toMap
-      .filter {
-        case (key, _) =>
-          key.startsWith("spark.indextables.indexing.typemap.") ||
-          key.startsWith("spark.indextables.indexing.typemap.")
-      }
-      .map {
-        case (key, value) =>
-          val fieldName = if (key.startsWith("spark.indextables.indexing.typemap.")) {
-            key.substring("spark.indextables.indexing.typemap.".length)
-          } else {
-            key.substring("spark.indextables.indexing.typemap.".length)
-          }
-          // Normalize field name to lowercase for case-insensitive matching
-          fieldName.toLowerCase -> value.toLowerCase
+      .filter { case (key, _) => key.startsWith(prefix) }
+      .map { case (key, value) =>
+        // Normalize field name to lowercase for case-insensitive matching
+        key.substring(prefix.length).toLowerCase -> value.toLowerCase
       }
   }
 
   /**
-   * Get fast fields configuration. Returns set of field names that should get "fast" indexing. Supports both
-   * spark.tantivy4spark and spark.indextables prefixes.
+   * Get fast fields configuration. Returns set of field names that should get "fast" indexing.
    */
   def getFastFields: Set[String] =
-    // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.fastfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.fastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
    * Get non-fast fields configuration. Returns set of field names that should be excluded from default fast field
-   * behavior. This allows users to exclude specific fields from being auto-configured as fast. Supports both
-   * spark.tantivy4spark and spark.indextables prefixes.
+   * behavior. This allows users to exclude specific fields from being auto-configured as fast.
    */
   def getNonFastFields: Set[String] =
-    // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.nonfastfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.nonfastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get store-only fields configuration. Returns set of field names that should be stored but not indexed. Supports
-   * both spark.tantivy4spark and spark.indextables prefixes.
+   * Get store-only fields configuration. Returns set of field names that should be stored but not indexed.
    */
   def getStoreOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.storeonlyfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.storeonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get index-only fields configuration. Returns set of field names that should be indexed but not stored. Supports
-   * both spark.tantivy4spark and spark.indextables prefixes.
+   * Get index-only fields configuration. Returns set of field names that should be indexed but not stored.
    */
   def getIndexOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.indexonlyfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.indexonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get tokenizer override configuration. Maps field names to their tokenizer types. Supports both spark.tantivy4spark
-   * and spark.indextables prefixes.
+   * Get tokenizer override configuration. Maps field names to their tokenizer types.
    */
   def getTokenizerOverrides: Map[String, String] = {
     import scala.jdk.CollectionConverters._
+    val prefix = "spark.indextables.indexing.tokenizer."
     options
       .asCaseSensitiveMap()
       .asScala
       .toMap
-      .filter {
-        case (key, _) =>
-          key.startsWith("spark.indextables.indexing.tokenizer.") ||
-          key.startsWith("spark.indextables.indexing.tokenizer.")
-      }
-      .map {
-        case (key, value) =>
-          val fieldName = if (key.startsWith("spark.indextables.indexing.tokenizer.")) {
-            key.substring("spark.indextables.indexing.tokenizer.".length)
-          } else {
-            key.substring("spark.indextables.indexing.tokenizer.".length)
-          }
-          fieldName -> value
-      }
+      .filter { case (key, _) => key.startsWith(prefix) }
+      .map { case (key, value) => key.substring(prefix.length) -> value }
   }
 
   // ===== Batch Optimization Configuration =====

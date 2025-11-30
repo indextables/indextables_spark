@@ -525,7 +525,8 @@ case class SplitCacheConfig(
         return Some(config)
 
       case Some(other) =>
-        logger.warn(s"Unknown batch optimization profile: $other, using balanced")
+        logger.warn(s"Unknown batch optimization profile: '$other'. " +
+          "Valid profiles: conservative, balanced, aggressive, disabled. Using 'balanced' as default.")
         var config = BatchOptimizationConfig.balanced()
         config = applyCustomBatchOptParams(config)
         return Some(config)
@@ -1204,15 +1205,17 @@ object BatchOptMetricsRegistry {
   }
 
   /**
-   * Clear all registered metrics.
+   * Clear all registered metrics and baselines.
    *
    * Useful for test suite cleanup or production maintenance.
    */
   def clearAll(): Unit = {
-    val count = accumulators.size()
+    val accCount = accumulators.size()
+    val baselineCount = baselines.size()
     accumulators.clear()
-    if (count > 0) {
-      logger.debug(s"🧹 Cleared all batch optimization metrics ($count tables)")
+    baselines.clear()
+    if (accCount > 0 || baselineCount > 0) {
+      logger.debug(s"🧹 Cleared all batch optimization metrics ($accCount accumulators, $baselineCount baselines)")
     }
   }
 
@@ -1245,14 +1248,23 @@ object BatchOptMetricsRegistry {
    * Call this after a query completes to get metrics for just that query (not cumulative). The delta is computed as
    * (current global metrics - baseline captured at scan start).
    *
+   * Note: This method removes the baseline after reading to prevent memory leaks in long-running applications.
+   * If you need to read the delta multiple times, call captureBaseline() again before each query.
+   *
    * @param tablePath
    *   Table path (e.g., "s3://bucket/path")
    * @return
-   *   Metrics delta since baseline, or current metrics if no baseline exists
+   *   Metrics delta since baseline, or current metrics if no baseline exists (with warning)
    */
   def getMetricsDelta(tablePath: String): BatchOptMetrics = {
     val current  = BatchOptMetrics.fromJavaMetrics()
-    val baseline = Option(baselines.get(tablePath)).getOrElse(BatchOptMetrics.empty)
+
+    // Remove baseline after reading to prevent memory leak
+    val baseline = Option(baselines.remove(tablePath)).getOrElse {
+      logger.warn(s"📊 No baseline captured for $tablePath - returning cumulative metrics. " +
+        "Call captureBaseline() before query execution for accurate per-query metrics.")
+      BatchOptMetrics.empty
+    }
 
     val delta = BatchOptMetrics(
       totalOperations = current.totalOperations - baseline.totalOperations,
