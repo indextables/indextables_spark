@@ -322,6 +322,73 @@ class CheckpointCacheBypassTest extends TestBase {
     }
   }
 
+  test("VERIFY: global cache is shared across TransactionLog instances") {
+    // This test verifies that checkpoint data cached during schema inference
+    // is reused by subsequent table operations (the bug fix)
+
+    withTempPath { tempPath =>
+      // First, create a table with checkpoint
+      val df = spark.range(100).selectExpr("id", "concat('text_', id) as content")
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear the global cache to start fresh
+      EnhancedTransactionLogCache.clearGlobalCaches()
+
+      // Get initial global cache stats
+      val (actionsStatsBefore, lastCheckpointStatsBefore) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val missCountBefore = actionsStatsBefore.missCount() + lastCheckpointStatsBefore.missCount()
+
+      println(s"\n=== Global cache before any reads ===")
+      println(s"Checkpoint actions: hits=${actionsStatsBefore.hitCount()}, misses=${actionsStatsBefore.missCount()}")
+      println(s"Last checkpoint info: hits=${lastCheckpointStatsBefore.hitCount()}, misses=${lastCheckpointStatsBefore.missCount()}")
+
+      // First read - this triggers inferSchema which creates TransactionLog #1
+      // and should populate the global cache
+      val readDf1 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      // Force schema resolution (this is what triggers the checkpoint read)
+      val schema1 = readDf1.schema
+
+      val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema) = EnhancedTransactionLogCache.getGlobalCacheStats()
+
+      println(s"\n=== Global cache after schema inference ===")
+      println(s"Checkpoint actions: hits=${actionsStatsAfterSchema.hitCount()}, misses=${actionsStatsAfterSchema.missCount()}")
+      println(s"Last checkpoint info: hits=${lastCheckpointStatsAfterSchema.hitCount()}, misses=${lastCheckpointStatsAfterSchema.missCount()}")
+
+      // Now create a SECOND DataFrame - this creates TransactionLog #2
+      // but should HIT the global cache (no new misses)
+      val readDf2 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      val schema2 = readDf2.schema
+
+      val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond) = EnhancedTransactionLogCache.getGlobalCacheStats()
+
+      println(s"\n=== Global cache after second schema read ===")
+      println(s"Checkpoint actions: hits=${actionsStatsAfterSecond.hitCount()}, misses=${actionsStatsAfterSecond.missCount()}")
+      println(s"Last checkpoint info: hits=${lastCheckpointStatsAfterSecond.hitCount()}, misses=${lastCheckpointStatsAfterSecond.missCount()}")
+
+      // Verify: Second read should have MORE HITS but SAME MISSES
+      // (global cache was reused across TransactionLog instances)
+      val hitCountAfterSecond = actionsStatsAfterSecond.hitCount() + lastCheckpointStatsAfterSecond.hitCount()
+      val hitCountAfterSchema = actionsStatsAfterSchema.hitCount() + lastCheckpointStatsAfterSchema.hitCount()
+
+      assert(hitCountAfterSecond > hitCountAfterSchema,
+        s"Second read should have more cache hits (${hitCountAfterSecond}) than first read (${hitCountAfterSchema})")
+
+      println(s"\n✅ Global cache sharing verified: second TransactionLog instance reused cached checkpoint data")
+      println(s"   Hits increased from ${hitCountAfterSchema} to ${hitCountAfterSecond}")
+    }
+  }
+
   test("QUANTIFY: cache miss penalty with simulated network latency") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
