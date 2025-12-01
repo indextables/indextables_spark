@@ -201,6 +201,10 @@ class IndexTables4SparkPartitionReader(
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized                           = false
 
+  // Note: recordsRead is automatically tracked by Spark's V2 DataSourceRDD (MetricsHandler)
+  // We only need to track bytesRead since Spark's Hadoop filesystem callbacks don't work
+  // for our direct S3/Azure/local file reading via tantivy4java
+
   // Capture baseline metrics at partition reader creation for delta computation
   // This allows accurate per-partition metrics when using the accumulator
   private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
@@ -497,6 +501,14 @@ class IndexTables4SparkPartitionReader(
         case ex: Exception =>
           logger.warn(s"Error collecting batch optimization metrics for ${addAction.path}", ex)
       }
+    }
+
+    // Report bytesRead to Spark UI
+    // Note: recordsRead is automatically tracked by Spark's V2 DataSourceRDD (MetricsHandler)
+    // We only report bytesRead since Spark's Hadoop filesystem callbacks don't work for our direct file reading
+    val bytesRead = addAction.size
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for ${addAction.path}: $bytesRead bytes")
     }
 
     if (splitSearchEngine != null) {
@@ -875,7 +887,14 @@ class IndexTables4SparkDataWriter(
       return IndexTables4SparkCommitMessage(Seq.empty)
     }
 
-    logger.info(s"Committed partition $partitionId with ${allActions.size} splits")
+    // Report output metrics to Spark UI (bytesWritten, recordsWritten)
+    val totalBytes = allActions.map(_.size).sum
+    val totalRecords = allActions.flatMap(_.numRecords).sum
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(totalBytes, totalRecords)) {
+      logger.debug(s"Reported output metrics: $totalBytes bytes, $totalRecords records")
+    }
+
+    logger.info(s"Committed partition $partitionId with ${allActions.size} splits, $totalBytes bytes, $totalRecords records")
     IndexTables4SparkCommitMessage(allActions.toSeq)
   }
 

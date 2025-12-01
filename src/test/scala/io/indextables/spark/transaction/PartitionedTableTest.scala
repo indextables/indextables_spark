@@ -123,6 +123,39 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
     assert(partitionValues("active") == "true")
   }
 
+  test("should fail when extracting partition values with invalid column name") {
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType),
+        StructField("name", StringType),
+        StructField("year", IntegerType)
+      )
+    )
+
+    // Use a partition column that doesn't exist in schema
+    val invalidPartitionColumns = Seq("year", "nonexistent_column")
+
+    // Create test data
+    val df = spark.createDataFrame(
+      spark.sparkContext.parallelize(Seq(Row(1, "Alice", 2023))),
+      schema
+    )
+
+    val _   = df.collect()
+    val row = df.queryExecution.toRdd.first()
+
+    // Should throw IllegalArgumentException with helpful message
+    val exception = intercept[IllegalArgumentException] {
+      PartitionUtils.extractPartitionValues(row, schema, invalidPartitionColumns)
+    }
+
+    assert(exception.getMessage.contains("nonexistent_column"))
+    assert(exception.getMessage.contains("not found in schema"))
+    assert(exception.getMessage.contains("id")) // Should list available columns
+    assert(exception.getMessage.contains("name"))
+    assert(exception.getMessage.contains("year"))
+  }
+
   test("should create ADD actions with partition values") {
     val transactionLog = TransactionLogFactory.create(tablePath, spark)
 
