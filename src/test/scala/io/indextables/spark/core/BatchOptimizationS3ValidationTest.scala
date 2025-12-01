@@ -406,9 +406,11 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     }
 
     // CRITICAL: Validate that batch optimization is consolidating requests
-    // With default config, we should retrieve more documents than requests made
-    withClue("totalDocuments should be greater than totalRequests (proves request consolidation): ") {
-      metrics.totalDocuments should be > metrics.totalRequests
+    // totalRequests = baseline requests (one per document)
+    // consolidatedRequests = actual S3 requests after consolidation
+    // Consolidation means consolidatedRequests < totalRequests
+    withClue("consolidatedRequests should be less than totalRequests (proves request consolidation): ") {
+      metrics.consolidatedRequests should be < metrics.totalRequests
     }
 
     // For real S3 splits with good consolidation, expect high values
@@ -471,8 +473,8 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
 
     info(s"📊 REQUEST CONSOLIDATION VALIDATION:")
     info(s"   Documents Retrieved:   ${metrics.totalDocuments}")
-    info(s"   S3 Requests Made:      ${metrics.totalRequests}")
-    info(s"   Docs Per Request:      ${if (metrics.totalRequests > 0) metrics.totalDocuments.toDouble / metrics.totalRequests else 0}")
+    info(s"   Baseline Requests:     ${metrics.totalRequests} (one per document)")
+    info(s"   Actual S3 Requests:    ${metrics.consolidatedRequests}")
     info(s"   Consolidation Ratio:   ${metrics.consolidationRatio}x")
 
     // CRITICAL: For S3 tests, metrics MUST be non-zero - fail if they're not
@@ -480,23 +482,25 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
       metrics.totalRequests should be > 0L
     }
 
-    // CRITICAL ASSERTION: With batch optimization enabled (default), we MUST retrieve
-    // more documents than the number of S3 requests made
+    // CRITICAL ASSERTION: With batch optimization enabled (default), we MUST have
+    // fewer actual S3 requests than baseline requests (consolidation)
     withClue(
-      s"BATCH OPTIMIZATION FAILURE: totalDocuments (${metrics.totalDocuments}) should be > totalRequests (${metrics.totalRequests}). " +
+      s"BATCH OPTIMIZATION FAILURE: consolidatedRequests (${metrics.consolidatedRequests}) should be < totalRequests (${metrics.totalRequests}). " +
         "This indicates batch optimization is NOT consolidating requests - each document is causing a separate S3 request!"
     ) {
-      metrics.totalDocuments should be > metrics.totalRequests
+      metrics.consolidatedRequests should be < metrics.totalRequests
     }
 
-    // Additional validation: average batch size should be reasonable
-    val avgDocsPerRequest = metrics.totalDocuments.toDouble / metrics.totalRequests
-    info(s"   Avg Docs Per Request:  $avgDocsPerRequest")
+    // Additional validation: average docs per actual S3 request should be reasonable
+    val avgDocsPerS3Request = if (metrics.consolidatedRequests > 0) {
+      metrics.totalDocuments.toDouble / metrics.consolidatedRequests
+    } else 0.0
+    info(s"   Avg Docs Per S3 Request: $avgDocsPerS3Request")
 
-    withClue(s"Average docs per request ($avgDocsPerRequest) should be at least 2 with default config: ") {
-      avgDocsPerRequest should be >= 2.0
+    withClue(s"Average docs per S3 request ($avgDocsPerS3Request) should be at least 2 with default config: ") {
+      avgDocsPerS3Request should be >= 2.0
     }
 
-    info(s"   ✅ Request consolidation validated: ${avgDocsPerRequest}x docs per request")
+    info(s"   ✅ Request consolidation validated: ${avgDocsPerS3Request}x docs per S3 request")
   }
 }
