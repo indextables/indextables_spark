@@ -270,4 +270,47 @@ class BatchMetricsBehaviorTest extends TestBase {
     info(s"   Segments processed: ${delta.segmentsProcessed}")
     info(s"   Prefetch duration: ${delta.totalPrefetchDurationMs}ms")
   }
+
+  test("accumulator-based getMetrics() should now be populated") {
+    info("\n=== ACCUMULATOR (getMetrics) VALIDATION ===")
+
+    // Enable metrics collection via session config
+    spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "true")
+
+    // Clear any existing accumulator for this path
+    BatchOptMetricsRegistry.clear(testPath)
+
+    // Execute a query that should trigger batch optimization
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(testPath)
+      .limit(200)
+      .collect()
+
+    info(s"Query returned ${result.length} rows")
+
+    // Check both methods return metrics
+    val accumulatorMetrics = BatchOptMetricsRegistry.getMetrics(testPath)
+    val deltaMetrics = BatchOptMetricsRegistry.getMetricsDelta(testPath)
+
+    info(s"Accumulator (getMetrics): ${accumulatorMetrics.map(m => s"ops=${m.totalOperations}, docs=${m.totalDocuments}").getOrElse("None")}")
+    info(s"Delta (getMetricsDelta): ops=${deltaMetrics.totalOperations}, docs=${deltaMetrics.totalDocuments}")
+
+    // Accumulator should now be defined and populated
+    assert(accumulatorMetrics.isDefined,
+      "getMetrics() should return Some() when metrics collection is enabled")
+
+    val accMetrics = accumulatorMetrics.get
+    assert(accMetrics.totalOperations > 0,
+      s"Accumulator should have totalOperations > 0, got ${accMetrics.totalOperations}")
+    assert(accMetrics.totalDocuments > 0,
+      s"Accumulator should have totalDocuments > 0, got ${accMetrics.totalDocuments}")
+
+    info(s"\n✅ SUCCESS: Both getMetrics() and getMetricsDelta() return non-zero metrics")
+    info(s"   Accumulator: ops=${accMetrics.totalOperations}, docs=${accMetrics.totalDocuments}")
+    info(s"   Delta: ops=${deltaMetrics.totalOperations}, docs=${deltaMetrics.totalDocuments}")
+
+    // Reset config
+    spark.conf.unset("spark.indextables.read.batchOptimization.metrics.enabled")
+  }
 }

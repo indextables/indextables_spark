@@ -1084,13 +1084,13 @@ class BatchOptimizationMetricsAccumulator extends org.apache.spark.util.Accumula
  * // Execute query
  * val result = spark.read.format("indextables").load("s3://bucket/path").collect()
  *
- * // Access metrics
- * val metrics = BatchOptMetricsRegistry.getMetrics("s3://bucket/path").get
+ * // Access metrics using getMetricsDelta (computes delta from baseline captured at scan start)
+ * val metrics = BatchOptMetricsRegistry.getMetricsDelta("s3://bucket/path")
  * assert(metrics.consolidationRatio >= 10.0)
  * assert(metrics.costSavingsPercent >= 90.0)
  *
- * // Cleanup
- * BatchOptMetricsRegistry.clear("s3://bucket/path")
+ * // Cleanup baselines
+ * BatchOptMetricsRegistry.clearAllBaselines()
  * }}}
  *
  * Usage in production:

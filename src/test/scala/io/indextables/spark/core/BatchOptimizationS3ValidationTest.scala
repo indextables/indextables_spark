@@ -159,10 +159,8 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     result1.length shouldEqual 1000
     info(s"📊 With optimization: ${time1}ms")
 
-    // Check metrics were collected
-    val metrics1Opt = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetrics(testPath)
-    metrics1Opt shouldBe defined
-    val metrics1 = metrics1Opt.get
+    // Check metrics were collected using getMetricsDelta (not getMetrics which uses accumulator)
+    val metrics1 = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetricsDelta(testPath)
 
     info(s"📊 Batch Optimization Metrics:")
     info(s"   Total Operations:      ${metrics1.totalOperations}")
@@ -171,16 +169,15 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     info(s"   Cost Savings:          ${metrics1.costSavingsPercent}%")
     info(s"   Bandwidth Efficiency:  ${metrics1.efficiencyPercent}%")
 
-    // Validate metrics (only if optimization actually ran - S3 splits only)
-    if (metrics1.totalOperations > 0) {
-      metrics1.consolidationRatio should be >= 1.0
-      info(s"   ✅ Metrics validation passed!")
-    } else {
-      info(s"   ⚠️  No batch operations recorded (may be local file or small dataset)")
+    // CRITICAL: For S3 tests, metrics MUST be non-zero - fail if they're not
+    withClue("METRICS REGRESSION: Batch operations should have been recorded for S3 test: ") {
+      metrics1.totalOperations should be > 0L
     }
+    metrics1.consolidationRatio should be >= 1.0
+    info(s"   ✅ Metrics validation passed!")
 
-    // Clear metrics for next test
-    io.indextables.spark.storage.BatchOptMetricsRegistry.clear(testPath)
+    // Clear metrics baselines for next test
+    io.indextables.spark.storage.BatchOptMetricsRegistry.clearAllBaselines()
 
     // Test 2: Without batch optimization
     spark.conf.set("spark.indextables.read.batchOptimization.enabled", "false")
@@ -375,11 +372,9 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     result.length should be > 0
     info(s"✅ Retrieved ${result.length} rows")
 
-    // Get and validate metrics
-    val metricsOpt = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetrics(testPath)
-    metricsOpt shouldBe defined
-
-    val metrics = metricsOpt.get
+    // Get and validate metrics using getMetricsDelta (not getMetrics which uses accumulator)
+    // getMetricsDelta computes (current - baseline) where current is from tantivy4java directly
+    val metrics = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetricsDelta(testPath)
 
     info(s"📊 METRICS VALIDATION:")
     info(s"   Total Operations:      ${metrics.totalOperations}")
@@ -392,49 +387,46 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     info(s"   Bytes Wasted:          ${metrics.bytesWasted}")
     info(s"   Bandwidth Efficiency:  ${metrics.efficiencyPercent}%")
 
-    // CRITICAL VALIDATIONS (only if batch optimization actually ran)
-    if (metrics.totalOperations > 0) {
-      withClue("Batch operations should have been recorded: ") {
-        metrics.totalOperations should be > 0L
-      }
-
-      withClue("Documents should have been requested: ") {
-        metrics.totalDocuments should be > 0L
-      }
-
-      withClue("Consolidation ratio should be at least 1.0: ") {
-        metrics.consolidationRatio should be >= 1.0
-      }
-
-      withClue("Cost savings should be between 0 and 100: ") {
-        metrics.costSavingsPercent should (be >= 0.0 and be <= 100.0)
-      }
-
-      // CRITICAL: Validate that batch optimization is consolidating requests
-      // With default config, we should retrieve more documents than requests made
-      withClue("totalDocuments should be greater than totalRequests (proves request consolidation): ") {
-        metrics.totalDocuments should be > metrics.totalRequests
-      }
-
-      // For real S3 splits with good consolidation, expect high values
-      if (metrics.consolidationRatio >= 10.0) {
-        info(s"   ✅ EXCELLENT consolidation: ${metrics.consolidationRatio}x")
-        withClue("With 10x+ consolidation, cost savings should be 90%+: ") {
-          metrics.costSavingsPercent should be >= 90.0
-        }
-      } else if (metrics.consolidationRatio >= 5.0) {
-        info(s"   ✅ GOOD consolidation: ${metrics.consolidationRatio}x")
-        withClue("With 5x+ consolidation, cost savings should be 80%+: ") {
-          metrics.costSavingsPercent should be >= 80.0
-        }
-      } else {
-        info(s"   ⚠️  MODERATE consolidation: ${metrics.consolidationRatio}x (expected 10-20x for large batches)")
-      }
-
-      info(s"   ✅ All metrics validations passed!")
-    } else {
-      info(s"   ⚠️  No batch operations recorded - optimization may not have run (local file?)")
+    // CRITICAL: For S3 tests, metrics MUST be non-zero - fail if they're not
+    // This catches regressions where tantivy4java stops recording metrics
+    withClue("METRICS REGRESSION: Batch operations should have been recorded for S3 test: ") {
+      metrics.totalOperations should be > 0L
     }
+
+    withClue("METRICS REGRESSION: Documents should have been requested for S3 test: ") {
+      metrics.totalDocuments should be > 0L
+    }
+
+    withClue("Consolidation ratio should be at least 1.0: ") {
+      metrics.consolidationRatio should be >= 1.0
+    }
+
+    withClue("Cost savings should be between 0 and 100: ") {
+      metrics.costSavingsPercent should (be >= 0.0 and be <= 100.0)
+    }
+
+    // CRITICAL: Validate that batch optimization is consolidating requests
+    // With default config, we should retrieve more documents than requests made
+    withClue("totalDocuments should be greater than totalRequests (proves request consolidation): ") {
+      metrics.totalDocuments should be > metrics.totalRequests
+    }
+
+    // For real S3 splits with good consolidation, expect high values
+    if (metrics.consolidationRatio >= 10.0) {
+      info(s"   ✅ EXCELLENT consolidation: ${metrics.consolidationRatio}x")
+      withClue("With 10x+ consolidation, cost savings should be 90%+: ") {
+        metrics.costSavingsPercent should be >= 90.0
+      }
+    } else if (metrics.consolidationRatio >= 5.0) {
+      info(s"   ✅ GOOD consolidation: ${metrics.consolidationRatio}x")
+      withClue("With 5x+ consolidation, cost savings should be 80%+: ") {
+        metrics.costSavingsPercent should be >= 80.0
+      }
+    } else {
+      info(s"   ⚠️  MODERATE consolidation: ${metrics.consolidationRatio}x (expected 10-20x for large batches)")
+    }
+
+    info(s"   ✅ All metrics validations passed!")
   }
 
   test("CRITICAL: validate totalDocuments > totalRequests with default config") {
@@ -474,11 +466,8 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     info(s"✅ Retrieved ${result.length} rows")
     result.length shouldEqual rowCount
 
-    // Get metrics
-    val metricsOpt = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetrics(testPath)
-    metricsOpt shouldBe defined
-
-    val metrics = metricsOpt.get
+    // Get metrics using getMetricsDelta (not getMetrics which uses accumulator)
+    val metrics = io.indextables.spark.storage.BatchOptMetricsRegistry.getMetricsDelta(testPath)
 
     info(s"📊 REQUEST CONSOLIDATION VALIDATION:")
     info(s"   Documents Retrieved:   ${metrics.totalDocuments}")
@@ -486,27 +475,28 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     info(s"   Docs Per Request:      ${if (metrics.totalRequests > 0) metrics.totalDocuments.toDouble / metrics.totalRequests else 0}")
     info(s"   Consolidation Ratio:   ${metrics.consolidationRatio}x")
 
+    // CRITICAL: For S3 tests, metrics MUST be non-zero - fail if they're not
+    withClue("METRICS REGRESSION: totalRequests should be > 0 for S3 test: ") {
+      metrics.totalRequests should be > 0L
+    }
+
     // CRITICAL ASSERTION: With batch optimization enabled (default), we MUST retrieve
     // more documents than the number of S3 requests made
-    if (metrics.totalRequests > 0) {
-      withClue(
-        s"BATCH OPTIMIZATION FAILURE: totalDocuments (${metrics.totalDocuments}) should be > totalRequests (${metrics.totalRequests}). " +
-          "This indicates batch optimization is NOT consolidating requests - each document is causing a separate S3 request!"
-      ) {
-        metrics.totalDocuments should be > metrics.totalRequests
-      }
-
-      // Additional validation: average batch size should be reasonable
-      val avgDocsPerRequest = metrics.totalDocuments.toDouble / metrics.totalRequests
-      info(s"   Avg Docs Per Request:  $avgDocsPerRequest")
-
-      withClue(s"Average docs per request ($avgDocsPerRequest) should be at least 2 with default config: ") {
-        avgDocsPerRequest should be >= 2.0
-      }
-
-      info(s"   ✅ Request consolidation validated: ${avgDocsPerRequest}x docs per request")
-    } else {
-      info(s"   ⚠️  No requests recorded - unable to validate consolidation")
+    withClue(
+      s"BATCH OPTIMIZATION FAILURE: totalDocuments (${metrics.totalDocuments}) should be > totalRequests (${metrics.totalRequests}). " +
+        "This indicates batch optimization is NOT consolidating requests - each document is causing a separate S3 request!"
+    ) {
+      metrics.totalDocuments should be > metrics.totalRequests
     }
+
+    // Additional validation: average batch size should be reasonable
+    val avgDocsPerRequest = metrics.totalDocuments.toDouble / metrics.totalRequests
+    info(s"   Avg Docs Per Request:  $avgDocsPerRequest")
+
+    withClue(s"Average docs per request ($avgDocsPerRequest) should be at least 2 with default config: ") {
+      avgDocsPerRequest should be >= 2.0
+    }
+
+    info(s"   ✅ Request consolidation validated: ${avgDocsPerRequest}x docs per request")
   }
 }

@@ -201,6 +201,15 @@ class IndexTables4SparkPartitionReader(
   private var resultIterator: Iterator[InternalRow] = Iterator.empty
   private var initialized                           = false
 
+  // Capture baseline metrics at partition reader creation for delta computation
+  // This allows accurate per-partition metrics when using the accumulator
+  private val baselineMetrics: io.indextables.spark.storage.BatchOptMetrics =
+    if (metricsAccumulator.isDefined) {
+      io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
+    } else {
+      io.indextables.spark.storage.BatchOptMetrics.empty
+    }
+
   // Lazy cached Hadoop Configuration and options map to avoid repeated creation
   private lazy val cachedHadoopConf = new org.apache.hadoop.conf.Configuration()
   private lazy val cachedOptionsMap = {
@@ -465,8 +474,31 @@ class IndexTables4SparkPartitionReader(
     }
 
   override def close(): Unit = {
-    // Note: Batch optimization metrics are collected once after scan completes
-    // via BatchOptMetricsRegistry, not per-partition (to avoid N× overcounting)
+    // Collect batch optimization metrics delta for this partition
+    // Each partition contributes its delta to the accumulator, which aggregates across all partitions
+    metricsAccumulator.foreach { acc =>
+      try {
+        val currentMetrics = io.indextables.spark.storage.BatchOptMetrics.fromJavaMetrics()
+        val delta = io.indextables.spark.storage.BatchOptMetrics(
+          totalOperations = currentMetrics.totalOperations - baselineMetrics.totalOperations,
+          totalDocuments = currentMetrics.totalDocuments - baselineMetrics.totalDocuments,
+          totalRequests = currentMetrics.totalRequests - baselineMetrics.totalRequests,
+          consolidatedRequests = currentMetrics.consolidatedRequests - baselineMetrics.consolidatedRequests,
+          bytesTransferred = currentMetrics.bytesTransferred - baselineMetrics.bytesTransferred,
+          bytesWasted = currentMetrics.bytesWasted - baselineMetrics.bytesWasted,
+          totalPrefetchDurationMs = currentMetrics.totalPrefetchDurationMs - baselineMetrics.totalPrefetchDurationMs,
+          segmentsProcessed = currentMetrics.segmentsProcessed - baselineMetrics.segmentsProcessed
+        )
+        if (delta.totalOperations > 0 || delta.totalDocuments > 0) {
+          acc.add(delta)
+          logger.debug(s"Added batch metrics delta for ${addAction.path}: ops=${delta.totalOperations}, docs=${delta.totalDocuments}")
+        }
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Error collecting batch optimization metrics for ${addAction.path}", ex)
+      }
+    }
+
     if (splitSearchEngine != null) {
       try {
         splitSearchEngine.close()
