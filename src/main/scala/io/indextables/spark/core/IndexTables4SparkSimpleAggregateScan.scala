@@ -458,8 +458,9 @@ class IndexTables4SparkSimpleAggregateReader(
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Searcher created successfully")
 
       // Get schema field names for filter validation
-      val splitSchema = splitSearchEngine.getSchema()
-      val splitFieldNames =
+      // CRITICAL: Schema must be closed to prevent native memory leak
+      val splitFieldNames = {
+        val splitSchema = splitSearchEngine.getSchema()
         try {
           import scala.jdk.CollectionConverters._
           val fieldNames = splitSchema.getFieldNames().asScala.toSet
@@ -469,7 +470,10 @@ class IndexTables4SparkSimpleAggregateReader(
           case e: Exception =>
             logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
             Set.empty[String]
+        } finally {
+          splitSchema.close() // Prevent native memory leak
         }
+      }
 
       // Merge IndexQuery filters with pushed filters
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")

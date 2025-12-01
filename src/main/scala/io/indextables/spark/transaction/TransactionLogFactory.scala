@@ -156,6 +156,9 @@ class TransactionLogAdapter(
   override def getMetadata(): MetadataAction =
     optimizedLog.getMetadata()
 
+  override def getSchema(): Option[org.apache.spark.sql.types.StructType] =
+    optimizedLog.getSchema()
+
   override def getLastCheckpointVersion(): Option[Long] =
     optimizedLog.getLastCheckpointVersion()
 

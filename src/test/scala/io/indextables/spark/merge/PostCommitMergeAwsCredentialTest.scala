@@ -78,7 +78,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     result.count() shouldBe 1000
 
     // Verify all IDs are present (no data loss)
-    val ids = result.select("id").collect().map(_.getLong(0)).sorted
+    val ids = result.select("id").limit(1000).collect().map(_.getLong(0)).sorted
     ids shouldBe (0L until 1000L).toArray
 
     logger.info("✅ AWS credentials successfully passed to merge executor")

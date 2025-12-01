@@ -28,6 +28,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
+- **Batch retrieval optimization**: 90-95% reduction in S3 GET requests for read operations, 2-3x faster (enabled by default)
 
 ## Key Configuration Settings
 
@@ -53,7 +54,11 @@ spark.indextables.transaction.compression.enabled: true (default)
 
 // Statistics Truncation (enabled by default)
 spark.indextables.stats.truncation.enabled: true
-spark.indextables.stats.truncation.maxLength: 256
+spark.indextables.stats.truncation.maxLength: 32
+
+// Data Skipping Statistics (Delta Lake compatible)
+spark.indextables.dataSkippingStatsColumns: <column_list> (comma-separated, takes precedence over numIndexedCols)
+spark.indextables.dataSkippingNumIndexedCols: 32 (default: 32, -1 for all eligible columns, 0 to disable)
 
 // Merge-On-Write (automatic split consolidation during writes via Spark shuffle)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
@@ -69,6 +74,21 @@ spark.indextables.purgeOnWrite.triggerAfterMerge: true (default: true, run purge
 spark.indextables.purgeOnWrite.triggerAfterWrites: 0 (default: 0 = disabled, run purge after N writes)
 spark.indextables.purgeOnWrite.splitRetentionHours: 168 (default: 168 = 7 days)
 spark.indextables.purgeOnWrite.txLogRetentionHours: 720 (default: 720 = 30 days)
+
+// Batch Retrieval Optimization (reduces S3 requests by 90-95% for read operations)
+spark.indextables.read.batchOptimization.enabled: true (default: true, transparent optimization)
+spark.indextables.read.batchOptimization.profile: "balanced" (options: conservative, balanced, aggressive, disabled)
+spark.indextables.read.batchOptimization.maxRangeSize: "16M" (default: 16MB, range: 2MB-32MB)
+spark.indextables.read.batchOptimization.gapTolerance: "512K" (default: 512KB, range: 64KB-2MB)
+spark.indextables.read.batchOptimization.minDocsForOptimization: 50 (default: 50, range: 10-200)
+spark.indextables.read.batchOptimization.maxConcurrentPrefetch: 8 (default: 8, per-batch-operation, range: 2-32)
+
+// Adaptive Tuning (automatic parameter optimization based on performance metrics)
+spark.indextables.read.adaptiveTuning.enabled: true (default: true, auto-adjust parameters)
+spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5, minimum batches to track)
+
+// Read Limits (controls default result set size when no explicit LIMIT is specified)
+spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)
@@ -172,6 +192,88 @@ df.filter($"content" indexquery "machine learning").show()
 // Aggregations (pushed down to tantivy)
 df.agg(count("*"), sum("score"), avg("score")).show()
 ```
+
+### Batch Retrieval Optimization
+
+**Overview**: Batch optimization dramatically reduces S3 GET requests (90-95%) and improves read latency (2-3x) for queries returning 50+ documents. Enabled by default with balanced profile.
+
+**Performance Impact:**
+- Without optimization: 1,000 docs = 1,000 S3 requests, ~3.4 seconds
+- With optimization: 1,000 docs = 50-100 S3 requests, ~1.5-2.0 seconds
+- **Per-batch-operation concurrency**: Each batch retrieval uses up to `maxConcurrentPrefetch` concurrent requests (scales with Spark executors)
+
+#### Example 1: Default Behavior (Automatic)
+```scala
+// Batch optimization enabled by default - no configuration needed
+val df = spark.read.format("indextables").load("s3://bucket/path")
+df.filter($"score" > 0.5).collect()  // Automatically optimized for batches ≥50 docs
+```
+
+#### Example 2: Aggressive Profile for Cost Optimization
+```scala
+// Maximize S3 request consolidation
+val df = spark.read.format("indextables")
+  .option("spark.indextables.read.batchOptimization.profile", "aggressive")
+  .load("s3://bucket/path")
+
+// Large aggregation - maximum consolidation
+df.groupBy("category").count().show()
+```
+
+#### Example 3: Custom Parameters
+```scala
+// Fine-tune optimization parameters
+val df = spark.read.format("indextables")
+  .option("spark.indextables.read.batchOptimization.profile", "balanced")
+  .option("spark.indextables.read.batchOptimization.maxRangeSize", "32M")
+  .option("spark.indextables.read.batchOptimization.gapTolerance", "2M")
+  .option("spark.indextables.read.batchOptimization.maxConcurrentPrefetch", "16")
+  .load("s3://bucket/path")
+
+df.count()  // Optimized with custom parameters
+```
+
+#### Example 4: Conservative Profile for Memory-Constrained Environments
+```scala
+// Smaller memory footprint, fewer concurrent requests
+val df = spark.read.format("indextables")
+  .option("spark.indextables.read.batchOptimization.profile", "conservative")
+  .load("s3://bucket/path")
+
+df.filter($"status" === "active").show()
+```
+
+#### Example 5: Disable Optimization for Debugging
+```scala
+// Turn off optimization completely
+val df = spark.read.format("indextables")
+  .option("spark.indextables.read.batchOptimization.enabled", "false")
+  .load("s3://bucket/path")
+
+df.show()  // Standard retrieval without optimization
+```
+
+#### Example 6: Session-Level Configuration
+```scala
+// Configure globally for all read operations
+spark.conf.set("spark.indextables.read.batchOptimization.profile", "aggressive")
+spark.conf.set("spark.indextables.read.adaptiveTuning.enabled", "true")
+
+val df = spark.read.format("indextables").load("s3://bucket/path")
+// All queries automatically use aggressive optimization
+df.filter($"date" >= "2024-01-01").count()
+```
+
+**When to Use:**
+- ✅ Queries returning 50+ documents
+- ✅ High-frequency read workloads
+- ✅ Cost-sensitive S3 operations
+- ✅ Aggregate queries with large result sets
+
+**When NOT to Use:**
+- ❌ Single document lookups (automatically bypassed)
+- ❌ Very small result sets (<10 documents)
+- ❌ Already disabled via configuration
 
 ### JSON Fields (Struct/Array/Map)
 ```scala

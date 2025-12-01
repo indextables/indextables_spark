@@ -27,6 +27,58 @@ import com.google.common.cache.{CacheStats => GuavaCacheStats}
 import org.slf4j.LoggerFactory
 
 /**
+ * Companion object with GLOBAL/STATIC caches for checkpoint data.
+ * Checkpoint data is immutable once written, so safe to share across TransactionLog instances.
+ */
+object EnhancedTransactionLogCache {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  // Global cache key types
+  case class CheckpointActionsKey(tablePath: String, checkpointVersion: Long)
+  case class LastCheckpointInfoCached(info: Option[LastCheckpointInfo], cachedAt: Long)
+
+  // GLOBAL checkpoint actions cache - shared across all TransactionLog instances
+  private[transaction] val globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = CacheBuilder
+    .newBuilder()
+    .expireAfterAccess(30, TimeUnit.MINUTES)
+    .maximumSize(200)
+    .recordStats()
+    .removalListener(new RemovalListener[CheckpointActionsKey, Seq[Action]] {
+      override def onRemoval(notification: RemovalNotification[CheckpointActionsKey, Seq[Action]]): Unit =
+        logger.debug(s"Evicted global checkpoint actions: ${notification.getKey}, reason: ${notification.getCause}")
+    })
+    .build[CheckpointActionsKey, Seq[Action]]()
+
+  // GLOBAL last checkpoint info cache - shared across all TransactionLog instances
+  private[transaction] val globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = CacheBuilder
+    .newBuilder()
+    .expireAfterAccess(30, TimeUnit.MINUTES)
+    .maximumSize(200)
+    .recordStats()
+    .build[String, LastCheckpointInfoCached]()
+
+  /** Clear all global caches (for testing) */
+  def clearGlobalCaches(): Unit = {
+    globalCheckpointActionsCache.invalidateAll()
+    globalLastCheckpointInfoCache.invalidateAll()
+    logger.info("Cleared all global checkpoint caches")
+  }
+
+  /** Invalidate global caches for a specific table */
+  def invalidateGlobalCachesForTable(tablePath: String): Unit = {
+    globalLastCheckpointInfoCache.invalidate(tablePath)
+    import scala.jdk.CollectionConverters._
+    globalCheckpointActionsCache.asMap().keySet().asScala
+      .filter(_.tablePath == tablePath)
+      .foreach(globalCheckpointActionsCache.invalidate)
+  }
+
+  /** Get global cache statistics */
+  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats) =
+    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats())
+}
+
+/**
  * Enhanced multi-level caching system for transaction logs using Google Guava cache with proper eviction policies, TTL
  * management, and lazy evaluation support.
  */
@@ -111,6 +163,9 @@ class EnhancedTransactionLogCache(
     .maximumSize(100)
     .recordStats()
     .build[String, CheckpointInfo]()
+
+  // Import global cache types from companion object
+  import EnhancedTransactionLogCache.{CheckpointActionsKey, LastCheckpointInfoCached}
 
   // Lazy value cache for expensive computations
   private val lazyValueCache = new TrieMap[String, LazyValue[_]]()
@@ -248,6 +303,68 @@ class EnhancedTransactionLogCache(
         info
     }
 
+  /**
+   * Get or compute checkpoint ACTIONS - the actual parsed Seq[Action] from checkpoint file.
+   * This is the key method for avoiding repeated checkpoint file reads.
+   * Uses GLOBAL cache shared across all TransactionLog instances.
+   */
+  def getOrComputeCheckpointActions(
+    tablePath: String,
+    checkpointVersion: Long,
+    compute: => Option[Seq[Action]]
+  ): Option[Seq[Action]] = {
+    val key = CheckpointActionsKey(tablePath, checkpointVersion)
+    Option(EnhancedTransactionLogCache.globalCheckpointActionsCache.getIfPresent(key)) match {
+      case Some(actions) =>
+        logger.debug(s"GLOBAL checkpoint actions cache HIT for $tablePath version $checkpointVersion (${actions.size} actions)")
+        Some(actions)
+      case None =>
+        logger.debug(s"GLOBAL checkpoint actions cache MISS for $tablePath version $checkpointVersion - reading from storage")
+        compute match {
+          case Some(actions) =>
+            EnhancedTransactionLogCache.globalCheckpointActionsCache.put(key, actions)
+            logger.info(s"Cached ${actions.size} checkpoint actions in GLOBAL cache for $tablePath version $checkpointVersion")
+            Some(actions)
+          case None =>
+            logger.debug(s"No checkpoint actions found for $tablePath version $checkpointVersion")
+            None
+        }
+    }
+  }
+
+  /**
+   * Get or compute last checkpoint info - caches the _last_checkpoint file content.
+   * Uses GLOBAL cache shared across all TransactionLog instances.
+   */
+  def getOrComputeLastCheckpointInfo(
+    tablePath: String,
+    compute: => Option[LastCheckpointInfo]
+  ): Option[LastCheckpointInfo] = {
+    Option(EnhancedTransactionLogCache.globalLastCheckpointInfoCache.getIfPresent(tablePath)) match {
+      case Some(cached) =>
+        logger.debug(s"GLOBAL last checkpoint info cache HIT for $tablePath: ${cached.info.map(_.version)}")
+        cached.info
+      case None =>
+        logger.debug(s"GLOBAL last checkpoint info cache MISS for $tablePath - reading from storage")
+        val info = compute
+        EnhancedTransactionLogCache.globalLastCheckpointInfoCache.put(tablePath, LastCheckpointInfoCached(info, System.currentTimeMillis()))
+        logger.info(s"Cached last checkpoint info in GLOBAL cache for $tablePath: ${info.map(_.version)}")
+        info
+    }
+  }
+
+  /** Invalidate last checkpoint info cache for a table (call when new checkpoint is written) */
+  def invalidateLastCheckpointInfo(tablePath: String): Unit = {
+    EnhancedTransactionLogCache.globalLastCheckpointInfoCache.invalidate(tablePath)
+    logger.debug(s"Invalidated GLOBAL last checkpoint info cache for $tablePath")
+  }
+
+  /** Invalidate checkpoint actions cache for a specific version */
+  def invalidateCheckpointActions(tablePath: String, checkpointVersion: Long): Unit = {
+    EnhancedTransactionLogCache.globalCheckpointActionsCache.invalidate(CheckpointActionsKey(tablePath, checkpointVersion))
+    logger.debug(s"Invalidated GLOBAL checkpoint actions cache for $tablePath version $checkpointVersion")
+  }
+
   /** Get or create a lazy value for expensive computations */
   def getOrCreateLazyValue[T](key: String, compute: => T): LazyValue[T] =
     lazyValueCache.getOrElseUpdate(key, new LazyValue(compute)).asInstanceOf[LazyValue[T]]
@@ -301,7 +418,7 @@ class EnhancedTransactionLogCache(
   def invalidateTable(tablePath: String): Unit = {
     logger.info(s"Invalidating all caches for table $tablePath")
 
-    // Invalidate entries matching the table path
+    // Invalidate instance-level caches
     invalidateByPredicate(logCache, (key: LogCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(snapshotCache, (key: SnapshotCacheKey) => key.tablePath == tablePath)
     invalidateByPredicate(fileListCache, (key: FileListCacheKey) => key.tablePath == tablePath)
@@ -309,6 +426,9 @@ class EnhancedTransactionLogCache(
     metadataCache.invalidate(MetadataCacheKey(tablePath))
     protocolCache.invalidate(MetadataCacheKey(tablePath))
     checkpointCache.invalidate(tablePath)
+
+    // Invalidate GLOBAL checkpoint caches
+    EnhancedTransactionLogCache.invalidateGlobalCachesForTable(tablePath)
 
     // Clear lazy values for this table
     val keysToRemove = lazyValueCache.keys.filter(_.startsWith(tablePath)).toList
@@ -350,6 +470,8 @@ class EnhancedTransactionLogCache(
       versionCacheStats = versionCache.stats(),
       checkpointCacheStats = checkpointCache.stats(),
       protocolCacheStats = protocolCache.stats(),
+      checkpointActionsCacheStats = EnhancedTransactionLogCache.globalCheckpointActionsCache.stats(),
+      lastCheckpointInfoCacheStats = EnhancedTransactionLogCache.globalLastCheckpointInfoCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -364,6 +486,8 @@ class EnhancedTransactionLogCache(
     versionCache.invalidateAll()
     checkpointCache.invalidateAll()
     lazyValueCache.clear()
+    // Also clear GLOBAL checkpoint caches
+    EnhancedTransactionLogCache.clearGlobalCaches()
   }
 
   /** Cleanup expired entries */
@@ -375,6 +499,9 @@ class EnhancedTransactionLogCache(
     protocolCache.cleanUp()
     versionCache.cleanUp()
     checkpointCache.cleanUp()
+    // Global caches are cleaned up via their own TTL expiration
+    EnhancedTransactionLogCache.globalCheckpointActionsCache.cleanUp()
+    EnhancedTransactionLogCache.globalLastCheckpointInfoCache.cleanUp()
   }
 }
 
@@ -431,6 +558,8 @@ case class CacheStatistics(
   versionCacheStats: GuavaCacheStats,
   checkpointCacheStats: GuavaCacheStats,
   protocolCacheStats: GuavaCacheStats,
+  checkpointActionsCacheStats: GuavaCacheStats,
+  lastCheckpointInfoCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -440,7 +569,9 @@ case class CacheStatistics(
       metadataCacheStats,
       versionCacheStats,
       checkpointCacheStats,
-      protocolCacheStats
+      protocolCacheStats,
+      checkpointActionsCacheStats,
+      lastCheckpointInfoCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -458,6 +589,22 @@ case class CacheStatistics(
       metadataCacheStats,
       versionCacheStats,
       checkpointCacheStats,
-      protocolCacheStats
+      protocolCacheStats,
+      checkpointActionsCacheStats,
+      lastCheckpointInfoCacheStats
     ).map(_.evictionCount()).sum
+
+  /** Get checkpoint actions cache hit rate specifically - useful for monitoring the fix */
+  def checkpointActionsHitRate: Double = {
+    val requests = checkpointActionsCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else checkpointActionsCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get last checkpoint info cache hit rate specifically */
+  def lastCheckpointInfoHitRate: Double = {
+    val requests = lastCheckpointInfoCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else lastCheckpointInfoCacheStats.hitCount().toDouble / requests
+  }
 }

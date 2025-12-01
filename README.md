@@ -72,7 +72,7 @@ spark.sql("""
 df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 ```
 
-> **⚠️ NOTE ON "LIMITS"**: Currently, our integration with the underlying Quickwit search libraries pulls documents in small chunks from S3, which impacts document retrieval performance and increases S3 API usage. We plan to work with the Quickwit team, or fork that part of the implementation, to more efficiently pull and cache large numbers of documents.  For most search applications, a low limit is acceptable since interactive searchers only look at the first few documents. However, we plan to address this for future non-human uses.
+> **✅ BATCH RETRIEVAL OPTIMIZATION**: IndexTables now includes automatic batch retrieval optimization that dramatically reduces S3 GET requests (90-95%) and improves latency (2-3x faster) for queries returning 50+ documents. Enabled by default with no configuration required. See CLAUDE.md for details and tuning options.
 
 ---
 
@@ -140,6 +140,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
+- ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
 
 ---
 
@@ -1259,7 +1260,9 @@ df.write
 | `spark.indextables.transaction.cache.enabled` | `true` | Enable transaction log caching |
 | `spark.indextables.transaction.cache.expirationSeconds` | `300` | Transaction cache TTL (5 minutes) |
 | `spark.indextables.stats.truncation.enabled` | `true` | Enable automatic statistics truncation for long values (enabled by default) |
-| `spark.indextables.stats.truncation.maxLength` | `256` | Maximum character length for min/max statistics values |
+| `spark.indextables.stats.truncation.maxLength` | `32` | Maximum character length for min/max statistics values |
+| `spark.indextables.dataSkippingStatsColumns` | (none) | Explicit comma-separated list of columns to collect statistics for (takes precedence over numIndexedCols) |
+| `spark.indextables.dataSkippingNumIndexedCols` | `32` | Number of eligible columns to collect statistics for (-1 for all, 0 to disable) |
 | `spark.indextables.transaction.compression.enabled` | `true` | Enable GZIP compression for transaction log files (enabled by default) |
 | `spark.indextables.transaction.compression.codec` | `"gzip"` | Compression codec to use for transaction logs |
 | `spark.indextables.transaction.compression.gzip.level` | `6` | GZIP compression level (1-9, where 9 is maximum compression) |

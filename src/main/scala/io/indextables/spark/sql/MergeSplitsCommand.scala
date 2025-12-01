@@ -1618,9 +1618,10 @@ object MergeSplitsExecutor {
           fullPath
         }
       } else {
-        // For local/HDFS paths, use Path concatenation
+        // For local/HDFS paths, use Path concatenation and extract raw path for tantivy4java
         val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
-        fullPath.toString
+        // tantivy4java expects raw filesystem paths, not file: URIs
+        fullPath.toUri.getPath
       }
     }.asJava
 
@@ -1637,8 +1638,8 @@ object MergeSplitsExecutor {
       logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
       outputPath
     } else {
-      // For local/HDFS paths, use Path concatenation
-      new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toString
+      // For local/HDFS paths, extract raw path for tantivy4java (not file: URI)
+      new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toUri.getPath
     }
 
     logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
@@ -1732,6 +1733,7 @@ object MergeSplitsExecutor {
         logger.debug(s"[EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
         logger.debug(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
       } else {
+        // outputSplitPath is now a raw filesystem path (no file: URI prefix)
         val outputFile = new java.io.File(outputSplitPath)
         val exists     = outputFile.exists()
         logger.debug(s"[EXECUTOR] File verification: $outputSplitPath exists = $exists")

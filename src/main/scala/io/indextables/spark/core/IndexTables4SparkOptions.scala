@@ -80,101 +80,105 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /**
    * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
-   * Supports both spark.tantivy4spark and spark.indextables prefixes.
    *
    * NOTE: Field names are stored in lowercase to handle case-insensitive matching with schema field names.
    */
   def getFieldTypeMapping: Map[String, String] = {
     import scala.jdk.CollectionConverters._
+    val prefix = "spark.indextables.indexing.typemap."
     options
       .asCaseSensitiveMap()
       .asScala
       .toMap
-      .filter {
-        case (key, _) =>
-          key.startsWith("spark.indextables.indexing.typemap.") ||
-          key.startsWith("spark.indextables.indexing.typemap.")
-      }
-      .map {
-        case (key, value) =>
-          val fieldName = if (key.startsWith("spark.indextables.indexing.typemap.")) {
-            key.substring("spark.indextables.indexing.typemap.".length)
-          } else {
-            key.substring("spark.indextables.indexing.typemap.".length)
-          }
-          // Normalize field name to lowercase for case-insensitive matching
-          fieldName.toLowerCase -> value.toLowerCase
+      .filter { case (key, _) => key.startsWith(prefix) }
+      .map { case (key, value) =>
+        // Normalize field name to lowercase for case-insensitive matching
+        key.substring(prefix.length).toLowerCase -> value.toLowerCase
       }
   }
 
   /**
-   * Get fast fields configuration. Returns set of field names that should get "fast" indexing. Supports both
-   * spark.tantivy4spark and spark.indextables prefixes.
+   * Get fast fields configuration. Returns set of field names that should get "fast" indexing.
    */
   def getFastFields: Set[String] =
-    // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.fastfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.fastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
    * Get non-fast fields configuration. Returns set of field names that should be excluded from default fast field
-   * behavior. This allows users to exclude specific fields from being auto-configured as fast. Supports both
-   * spark.tantivy4spark and spark.indextables prefixes.
+   * behavior. This allows users to exclude specific fields from being auto-configured as fast.
    */
   def getNonFastFields: Set[String] =
-    // Check indextables prefix first (preferred)
     Option(options.get("spark.indextables.indexing.nonfastfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.nonfastfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get store-only fields configuration. Returns set of field names that should be stored but not indexed. Supports
-   * both spark.tantivy4spark and spark.indextables prefixes.
+   * Get store-only fields configuration. Returns set of field names that should be stored but not indexed.
    */
   def getStoreOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.storeonlyfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.storeonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get index-only fields configuration. Returns set of field names that should be indexed but not stored. Supports
-   * both spark.tantivy4spark and spark.indextables prefixes.
+   * Get index-only fields configuration. Returns set of field names that should be indexed but not stored.
    */
   def getIndexOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.indexonlyfields"))
-      .orElse(Option(options.get("spark.indextables.indexing.indexonlyfields")))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
   /**
-   * Get tokenizer override configuration. Maps field names to their tokenizer types. Supports both spark.tantivy4spark
-   * and spark.indextables prefixes.
+   * Get tokenizer override configuration. Maps field names to their tokenizer types.
    */
   def getTokenizerOverrides: Map[String, String] = {
     import scala.jdk.CollectionConverters._
+    val prefix = "spark.indextables.indexing.tokenizer."
     options
       .asCaseSensitiveMap()
       .asScala
       .toMap
-      .filter {
-        case (key, _) =>
-          key.startsWith("spark.indextables.indexing.tokenizer.") ||
-          key.startsWith("spark.indextables.indexing.tokenizer.")
-      }
-      .map {
-        case (key, value) =>
-          val fieldName = if (key.startsWith("spark.indextables.indexing.tokenizer.")) {
-            key.substring("spark.indextables.indexing.tokenizer.".length)
-          } else {
-            key.substring("spark.indextables.indexing.tokenizer.".length)
-          }
-          fieldName -> value
-      }
+      .filter { case (key, _) => key.startsWith(prefix) }
+      .map { case (key, value) => key.substring(prefix.length) -> value }
   }
+
+  // ===== Batch Optimization Configuration =====
+
+  /** Whether to enable batch retrieval optimization (reduces S3 requests by 90-95%). */
+  def batchOptimizationEnabled: Option[Boolean] =
+    Option(options.get("spark.indextables.read.batchOptimization.enabled")).map(_.toBoolean)
+
+  /** Preset batch optimization profile: "conservative", "balanced", "aggressive", or "disabled". */
+  def batchOptimizationProfile: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.profile")).map(_.toLowerCase)
+
+  /** Maximum size of a consolidated byte range. Supports formats: "16M", "512K", or bytes. */
+  def batchOptMaxRangeSize: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.maxRangeSize"))
+
+  /** Maximum gap between documents to merge into single range. Supports formats: "512K", "1M", or bytes. */
+  def batchOptGapTolerance: Option[String] =
+    Option(options.get("spark.indextables.read.batchOptimization.gapTolerance"))
+
+  /** Minimum batch size to trigger optimization. Default: 50 documents. */
+  def batchOptMinDocs: Option[Int] =
+    Option(options.get("spark.indextables.read.batchOptimization.minDocsForOptimization")).map(_.toInt)
+
+  /** Number of parallel range fetch requests. Default: 8. */
+  def batchOptMaxConcurrentPrefetch: Option[Int] =
+    Option(options.get("spark.indextables.read.batchOptimization.maxConcurrentPrefetch")).map(_.toInt)
+
+  // ===== Adaptive Tuning Configuration =====
+
+  /** Whether to enable adaptive parameter tuning based on performance metrics. Default: true. */
+  def adaptiveTuningEnabled: Option[Boolean] =
+    Option(options.get("spark.indextables.read.adaptiveTuning.enabled")).map(_.toBoolean)
+
+  /** Minimum batches to track before making parameter adjustments. Default: 5. */
+  def adaptiveTuningMinBatches: Option[Int] =
+    Option(options.get("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment")).map(_.toInt)
 
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
@@ -238,4 +242,16 @@ object IndexTables4SparkOptions {
   val INDEXING_INDEXONLY_FIELDS = "spark.indextables.indexing.indexonlyfields"
   val INDEXING_TOKENIZER_PREFIX = "spark.indextables.indexing.tokenizer."
   val INDEXING_JSON_MODE        = "spark.indextables.indexing.json.mode"
+
+  // Batch optimization configuration keys
+  val BATCH_OPTIMIZATION_ENABLED              = "spark.indextables.read.batchOptimization.enabled"
+  val BATCH_OPTIMIZATION_PROFILE              = "spark.indextables.read.batchOptimization.profile"
+  val BATCH_OPTIMIZATION_MAX_RANGE_SIZE       = "spark.indextables.read.batchOptimization.maxRangeSize"
+  val BATCH_OPTIMIZATION_GAP_TOLERANCE        = "spark.indextables.read.batchOptimization.gapTolerance"
+  val BATCH_OPTIMIZATION_MIN_DOCS             = "spark.indextables.read.batchOptimization.minDocsForOptimization"
+  val BATCH_OPTIMIZATION_MAX_CONCURRENT_PREFETCH = "spark.indextables.read.batchOptimization.maxConcurrentPrefetch"
+
+  // Adaptive tuning configuration keys
+  val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
+  val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 }

@@ -151,58 +151,75 @@ class SplitSearchEngine private (
    * Search the split using a SplitQuery object and return results as Spark InternalRows. This is the new preferred
    * method that uses tantivy4java's efficient SplitQuery API.
    */
-  def search(splitQuery: SplitQuery, limit: Int = 100): Array[InternalRow] =
-    try {
-      logger.debug(s"Searching split with SplitQuery object, limit: $limit")
-      logger.warn(s"Running SplitQuery: ${splitQuery.toString()}")
+  def search(splitQuery: SplitQuery, limit: Int = 100): Array[InternalRow] = {
+    logger.debug(s"Searching split with SplitQuery object, limit: $limit")
+    logger.debug(s"Running SplitQuery: ${splitQuery.toString()}")
 
+    // Log schema field names for debugging, ensuring schema is properly closed
+    if (logger.isDebugEnabled) {
       val tantivySchema = splitSearcher.getSchema()
-      logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
+      try {
+        logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
+      } finally {
+        tantivySchema.close() // Prevent native memory leak
+      }
+    }
 
-      // Execute the search using the new SplitQuery API
-      val searchResult = splitSearcher.search(splitQuery, limit)
+    // Execute the search using the new SplitQuery API
+    val searchResult = splitSearcher.search(splitQuery, limit)
 
+    // Use try-finally to ensure SearchResult is always closed (resource safety)
+    try {
       // Convert search results to Spark InternalRows
       val results = convertSearchResultToRows(searchResult)
-
-      // Close the search result to free resources
-      searchResult.close()
-
       logger.debug(s"Search completed: ${results.length} results returned")
       results
-
     } catch {
       case e: Exception =>
         logger.error(s"Search failed for SplitQuery object", e)
         throw e
+    } finally {
+      // Always close the search result to free resources
+      try {
+        searchResult.close()
+      } catch {
+        case closeEx: Exception =>
+          logger.warn(s"Error closing SearchResult for split $splitPath", closeEx)
+      }
     }
+  }
 
   /** Search all documents in the split (equivalent to match-all query). */
-  def searchAll(limit: Int = 1000): Array[InternalRow] =
+  def searchAll(limit: Int = 1000): Array[InternalRow] = {
+    logger.debug(s"Searching all documents with limit: $limit")
+
+    // Create match-all query using SplitMatchAllQuery
+    val splitQuery = new SplitMatchAllQuery()
+    logger.debug(s"Running match-all SplitQuery: ${splitQuery.toString()}")
+
+    // Execute the search using SplitQuery
+    val searchResult = splitSearcher.search(splitQuery, limit)
+
+    // Use try-finally to ensure SearchResult is always closed (resource safety)
     try {
-      logger.debug(s"Searching all documents with limit: $limit")
-
-      // Create match-all query using SplitMatchAllQuery
-      val splitQuery = new SplitMatchAllQuery()
-      logger.warn(s"Running match-all SplitQuery: ${splitQuery.toString()}")
-
-      // Execute the search using SplitQuery
-      val searchResult = splitSearcher.search(splitQuery, limit)
-
       // Convert to InternalRows
       val results = convertSearchResultToRows(searchResult)
-
-      // Close the search result to free resources
-      searchResult.close()
-
       logger.debug(s"SearchAll completed: ${results.length} results returned")
       results
-
     } catch {
       case e: Exception =>
         logger.error("SearchAll failed", e)
         throw e
+    } finally {
+      // Always close the search result to free resources
+      try {
+        searchResult.close()
+      } catch {
+        case closeEx: Exception =>
+          logger.warn(s"Error closing SearchResult for split $splitPath", closeEx)
+      }
     }
+  }
 
   /**
    * Parse a query string using the split's schema and return a SplitQuery. This is the preferred way to create queries
@@ -268,30 +285,30 @@ class SplitSearchEngine private (
     }.toOption
 
   /** Convert SearchResult to InternalRows using the new SchemaMapping system. */
-  private def convertSearchResultToRows(searchResult: SearchResult): Array[InternalRow] =
+  private def convertSearchResultToRows(searchResult: SearchResult): Array[InternalRow] = {
+    // Get the split schema once and ensure it's closed when done (prevent native memory leak)
+    val splitSchema = splitSearcher.getSchema()
     try {
       import scala.jdk.CollectionConverters._
       val hits = searchResult.getHits().asScala.toArray
 
       logger.debug(s"Converting ${hits.length} search hits to InternalRows using SchemaMapping")
       logger.debug(s"Split file path: $splitPath")
-
-      // Get the split schema once
-      val splitSchema = splitSearcher.getSchema()
       logger.debug(s"Split schema from file: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
       logger.debug(s"Expected Spark schema: ${sparkSchema.fields.map(_.name).mkString(", ")}")
 
-      // Collect all DocAddresses first
-      val docAddresses = hits.map(hit => hit.getDocAddress())
+      // Collect all DocAddresses and sort them for sequential I/O access
+      // Sorting addresses improves cache locality and S3 range read efficiency
+      // Sort by (segmentOrd, docId) for sequential reads within segments
+      val docAddresses = hits.map(hit => hit.getDocAddress()).sortBy(addr => (addr.getSegmentOrd, addr.getDoc))
 
       // Use configurable document retrieval strategy
       val documents: Array[io.indextables.tantivy4java.core.Document] =
         if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-          logger.debug(s"Using docBatch for efficient bulk retrieval: ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
+          logger.debug(s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
 
           // Process in batches to respect maximum batch size
           val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
-          logger.debug(s"Processing ${batches.length} batch(es) of documents")
 
           batches.flatMap { batchAddresses =>
             try {
@@ -305,28 +322,31 @@ class SplitSearchEngine private (
                   s"Error retrieving document batch of size ${batchAddresses.length}, falling back to individual retrieval",
                   e
                 )
-                // Fallback to individual doc calls for this batch
+                // Fallback to individual doc calls for this batch - fail fast on errors
                 batchAddresses.map { address =>
-                  try
+                  try {
                     splitSearcher.doc(address)
-                  catch {
+                  } catch {
                     case ex: Exception =>
-                      logger.warn(s"Error retrieving individual document for address: $address", ex)
-                      null
+                      // Fail fast instead of silently returning null
+                      throw new RuntimeException(
+                        s"Failed to retrieve document at address $address from split $splitPath", ex)
                   }
                 }
             }
           }
         } else {
           logger.debug(s"Using individual document retrieval: enableDocBatch=${cacheConfig.enableDocBatch}, docCount=${docAddresses.length}")
-          // Use individual doc calls when batch is disabled or only one document
-          hits.map { hit =>
-            try
-              splitSearcher.doc(hit.getDocAddress())
-            catch {
+          // Use individual doc calls when batch is disabled or only one document - fail fast on errors
+          // Use sorted docAddresses for sequential I/O access (not hits which is in score order)
+          docAddresses.map { address =>
+            try {
+              splitSearcher.doc(address)
+            } catch {
               case ex: Exception =>
-                logger.warn(s"Error retrieving individual document for address: ${hit.getDocAddress()}", ex)
-                null
+                // Fail fast instead of silently returning null
+                throw new RuntimeException(
+                  s"Failed to retrieve document at address $address from split $splitPath", ex)
             }
           }
         }
@@ -364,9 +384,15 @@ class SplitSearchEngine private (
 
     } catch {
       case e: Exception =>
-        logger.warn("Error converting search results", e)
-        Array.empty[InternalRow]
+        // Fail-fast: propagate conversion errors instead of silently returning empty results
+        logger.error(s"Error converting search results for split $splitPath", e)
+        throw new RuntimeException(s"Failed to convert search results for split $splitPath: ${e.getMessage}", e)
+    } finally {
+      // CRITICAL: Close the schema to prevent native memory leak
+      // Schema.getSchema() returns a NEW Schema object each time with its own native pointer
+      splitSchema.close()
     }
+  }
 
   /** Create an empty row with default values for all fields using SchemaMapping. */
   private def createEmptyRow(): InternalRow = {

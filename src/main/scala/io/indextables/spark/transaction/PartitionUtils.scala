@@ -54,8 +54,10 @@ object PartitionUtils {
           val value = convertPartitionValue(row, index, field.dataType)
           partitionValues(partitionCol) = value
         case None =>
-          logger.warn(s"Partition column '$partitionCol' not found in schema")
-          partitionValues(partitionCol) = null
+          throw new IllegalArgumentException(
+            s"Partition column '$partitionCol' not found in schema. " +
+            s"Available columns: ${schema.fieldNames.mkString(", ")}"
+          )
       }
 
     partitionValues.toMap

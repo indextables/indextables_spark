@@ -31,9 +31,16 @@ object ConfigUtils {
   val STATS_TRUNCATION_ENABLED    = "spark.indextables.stats.truncation.enabled"
   val STATS_TRUNCATION_MAX_LENGTH = "spark.indextables.stats.truncation.maxLength"
 
+  // Data skipping statistics column configuration (Delta Lake compatible)
+  // spark.indextables.dataSkippingStatsColumns - explicit list of columns to collect stats for (comma-separated)
+  // spark.indextables.dataSkippingNumIndexedCols - number of columns to index (default 32, -1 for all)
+  val DATA_SKIPPING_STATS_COLUMNS     = "spark.indextables.dataSkippingStatsColumns"
+  val DATA_SKIPPING_NUM_INDEXED_COLS  = "spark.indextables.dataSkippingNumIndexedCols"
+
   // Default values
-  val DEFAULT_STATS_TRUNCATION_ENABLED    = true
-  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH = 32
+  val DEFAULT_STATS_TRUNCATION_ENABLED     = true
+  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH  = 32
+  val DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS = 32
 
   /**
    * Create a SplitCacheConfig from configuration map.
@@ -56,9 +63,11 @@ object ConfigUtils {
     val configMap = config
 
     // Helper function to get config with defaults
+    // Tries both original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
     def getConfig(configKey: String, default: String = ""): String = {
-      val value = configMap.getOrElse(configKey, default)
-      Option(value).getOrElse(default)
+      configMap.get(configKey)
+        .orElse(configMap.get(configKey.toLowerCase))
+        .getOrElse(default)
     }
 
     def getConfigOption(configKey: String): Option[String] =
@@ -101,6 +110,8 @@ object ConfigUtils {
         }
       },
       enableQueryCache = getConfig("spark.indextables.cache.queryCache", "true").toBoolean,
+      enableDocBatch = getConfig("spark.indextables.docBatch.enabled", "true").toBoolean,
+      docBatchMaxSize = getConfig("spark.indextables.docBatch.maxSize", "1000").toInt,
       splitCachePath = getConfigOption("spark.indextables.cache.directoryPath")
         .orElse(SplitCacheConfig.getDefaultCachePath()),
       // AWS configuration from broadcast
@@ -123,7 +134,21 @@ object ConfigUtils {
       gcpProjectId = getConfigOption("spark.indextables.gcp.projectId"),
       gcpServiceAccountKey = getConfigOption("spark.indextables.gcp.serviceAccountKey"),
       gcpCredentialsFile = getConfigOption("spark.indextables.gcp.credentialsFile"),
-      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint")
+      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint"),
+      // Batch optimization configuration
+      batchOptimizationEnabled = getConfigOption("spark.indextables.read.batchOptimization.enabled").map(_.toBoolean),
+      batchOptimizationProfile = getConfigOption("spark.indextables.read.batchOptimization.profile"),
+      batchOptMaxRangeSize = getConfigOption("spark.indextables.read.batchOptimization.maxRangeSize")
+        .map(SplitCacheConfig.parseSizeString),
+      batchOptGapTolerance = getConfigOption("spark.indextables.read.batchOptimization.gapTolerance")
+        .map(SplitCacheConfig.parseSizeString),
+      batchOptMinDocs = getConfigOption("spark.indextables.read.batchOptimization.minDocsForOptimization").map(_.toInt),
+      batchOptMaxConcurrentPrefetch =
+        getConfigOption("spark.indextables.read.batchOptimization.maxConcurrentPrefetch").map(_.toInt),
+      // Adaptive tuning configuration
+      adaptiveTuningEnabled = getConfigOption("spark.indextables.read.adaptiveTuning.enabled").map(_.toBoolean),
+      adaptiveTuningMinBatches =
+        getConfigOption("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment").map(_.toInt)
     )
   }
 
@@ -201,4 +226,36 @@ object ConfigUtils {
     defaultValue: String
   ): String =
     config.getOrElse(key, defaultValue)
+
+  /**
+   * Get the explicit list of columns to collect statistics for.
+   * Returns None if not configured (will fall back to numIndexedCols).
+   *
+   * @param config
+   *   Configuration map
+   * @return
+   *   Optional set of column names
+   */
+  def getDataSkippingStatsColumns(config: Map[String, String]): Option[Set[String]] =
+    config.get(DATA_SKIPPING_STATS_COLUMNS)
+      .orElse(config.get(DATA_SKIPPING_STATS_COLUMNS.toLowerCase))
+      .filter(_.trim.nonEmpty)
+      .map { value =>
+        value.split(",").map(_.trim).filter(_.nonEmpty).toSet
+      }
+
+  /**
+   * Get the number of columns to collect statistics for.
+   * Returns -1 if all columns should be indexed.
+   *
+   * @param config
+   *   Configuration map
+   * @return
+   *   Number of columns to index (-1 for all)
+   */
+  def getDataSkippingNumIndexedCols(config: Map[String, String]): Int =
+    config.get(DATA_SKIPPING_NUM_INDEXED_COLS)
+      .orElse(config.get(DATA_SKIPPING_NUM_INDEXED_COLS.toLowerCase))
+      .map(_.toInt)
+      .getOrElse(DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS)
 }

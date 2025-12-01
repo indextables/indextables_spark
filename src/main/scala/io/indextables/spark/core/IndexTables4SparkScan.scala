@@ -53,6 +53,14 @@ class IndexTables4SparkScan(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkScan])
 
+  // Full table schema for data skipping type lookup (not just projected columns)
+  // This is needed because filters may reference columns not in the projection
+  private lazy val fullTableSchema: StructType = transactionLog.getSchema().getOrElse(readSchema)
+
+  // Optional metrics accumulator for collecting batch optimization statistics
+  // Set via enableMetricsCollection() for testing/monitoring
+  private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
+
   logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
   pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
 
@@ -63,6 +71,17 @@ class IndexTables4SparkScan(
   override def planInputPartitions(): Array[InputPartition] = {
     logger.debug(s"PLAN PARTITIONS: planInputPartitions called with ${pushedFilters.length} pushed filters")
     pushedFilters.foreach(f => logger.debug(s"PLAN PARTITIONS:   - Filter: $f"))
+
+    // Capture baseline metrics at scan start for delta computation
+    // User can call getMetricsDelta() after query to get per-query metrics
+    val tablePath = transactionLog.getTablePath().toString
+    try {
+      io.indextables.spark.storage.BatchOptMetricsRegistry.captureBaseline(tablePath)
+      logger.debug(s"Captured baseline batch optimization metrics for scan: $tablePath")
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to capture baseline batch optimization metrics: ${ex.getMessage}")
+    }
 
     val addActions = transactionLog.listFiles()
     logger.debug(s"PLAN PARTITIONS: Found ${addActions.length} files in transaction log")
@@ -78,6 +97,20 @@ class IndexTables4SparkScan(
     } catch {
       case ex: Exception =>
         logger.warn("Failed to update broadcast locality information", ex)
+    }
+
+    // Auto-register metrics accumulator if metrics collection is enabled
+    val metricsEnabled = config.getOrElse("spark.indextables.read.batchOptimization.metrics.enabled", "false").toBoolean
+    if (metricsEnabled && metricsAccumulator.isEmpty) {
+      try {
+        val acc        = enableMetricsCollection()
+        val tablePath  = transactionLog.getTablePath().toString
+        io.indextables.spark.storage.BatchOptMetricsRegistry.register(tablePath, acc)
+        logger.debug(s"Auto-registered batch optimization metrics for table: $tablePath")
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to register batch optimization metrics: ${ex.getMessage}", ex)
+      }
     }
 
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
@@ -122,7 +155,7 @@ class IndexTables4SparkScan(
         logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
         pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
-          new IndexTables4SparkInputPartition(addAction, readSchema, pushedFilters, index, limit, indexQueryFilters)
+          new IndexTables4SparkInputPartition(addAction, readSchema, fullTableSchema, pushedFilters, index, limit, indexQueryFilters)
         val preferredHosts = partition.preferredLocations()
         if (preferredHosts.nonEmpty) {
           logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
@@ -142,7 +175,38 @@ class IndexTables4SparkScan(
 
   override def createReaderFactory(): PartitionReaderFactory = {
     val tablePath = transactionLog.getTablePath()
-    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath)
+    new IndexTables4SparkReaderFactory(readSchema, limit, config, tablePath, metricsAccumulator)
+  }
+
+  /**
+   * Enable metrics collection for batch optimization validation.
+   *
+   * This method registers an accumulator with Spark to collect batch optimization statistics from executors. The
+   * accumulator can be read after query completion to validate consolidation ratios, cost savings, and other metrics.
+   *
+   * Usage:
+   * {{{
+   * val scan = ... // get scan from ScanBuilder
+   * val metricsAcc = scan.enableMetricsCollection(spark)
+   *
+   * // Execute query
+   * val result = df.collect()
+   *
+   * // Check metrics
+   * val metrics = metricsAcc.value
+   * println(s"Consolidation ratio: \${metrics.consolidationRatio}x")
+   * println(s"Cost savings: \${metrics.costSavingsPercent}%")
+   * }}}
+   *
+   * @return
+   *   The metrics accumulator that will collect statistics
+   */
+  def enableMetricsCollection(): io.indextables.spark.storage.BatchOptimizationMetricsAccumulator = {
+    val acc = new io.indextables.spark.storage.BatchOptimizationMetricsAccumulator()
+    sparkSession.sparkContext.register(acc, "batch-optimization-metrics")
+    metricsAccumulator = Some(acc)
+    logger.debug("Enabled batch optimization metrics collection")
+    acc
   }
 
   override def estimateStatistics(): Statistics =
@@ -173,7 +237,6 @@ class IndexTables4SparkScan(
       s"DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
     )
     filters.foreach { f =>
-      logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
       logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
     }
 
@@ -494,11 +557,9 @@ class IndexTables4SparkScan(
     import java.sql.Date
     import org.apache.spark.sql.types.TimestampType
 
-    // Find the field data type in the schema
-    val fieldType = readSchema.fields.find(_.name == attribute).map(_.dataType)
-
-    // logger.debug(s"TYPE CONVERSION DEBUG: attribute=$attribute, filterValue=$filterValue (${filterValue.getClass.getSimpleName}), fieldType=$fieldType")
-    // logger.debug(s"TYPE CONVERSION DEBUG: minValue=$minValue, maxValue=$maxValue")
+    // Find the field data type in the FULL table schema (not just projected columns)
+    // This is critical because filters may reference columns not in the projection
+    val fieldType = fullTableSchema.fields.find(_.name == attribute).map(_.dataType)
 
     fieldType match {
       case Some(DateType) =>
