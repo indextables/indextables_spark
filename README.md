@@ -1782,6 +1782,77 @@ spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 4G MAX GROUPS 5")
 spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 ```
 
+#### Dropping Partitions with DROP INDEXTABLES PARTITIONS
+
+IndexTables4Spark provides SQL-based partition removal to logically delete data from specific partitions without affecting other data.
+
+**Key Features:**
+- **WHERE clause required**: Prevents accidental full table drops
+- **Partition columns only**: Validates that WHERE clause references only partition columns
+- **Logical deletion**: Adds RemoveAction entries to transaction log without physical deletion
+- **Physical cleanup via PURGE**: Use PURGE INDEXTABLE to delete files after retention period
+
+##### SQL Syntax
+
+```sql
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Basic partition drop with equality predicate
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year = '2023';
+
+-- Range predicates
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year > '2020';
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE month < 6;
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE month BETWEEN 1 AND 6;
+
+-- Compound predicates (AND, OR)
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE region = 'us-east' AND year > '2020';
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year = '2022' OR year = '2023';
+
+-- Also works with table identifiers
+DROP INDEXTABLES PARTITIONS FROM my_table WHERE date = '2024-01-01';
+```
+
+##### Scala/DataFrame API
+
+```scala
+// Drop partitions with equality predicate
+spark.sql("DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year = '2023'").show()
+
+// Drop partitions with range predicate
+spark.sql("DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year < '2022'").show()
+
+// Drop partitions with compound predicate
+spark.sql("DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE region = 'us-east' AND status = 'inactive'").show()
+```
+
+##### Complete Workflow Example
+
+```scala
+// 1. Drop old partitions
+val dropResult = spark.sql("DROP INDEXTABLES PARTITIONS FROM 's3://bucket/table' WHERE year < '2022'")
+dropResult.show()
+// +---------------+-------+------------------+--------------+----------------+----------------------------------+
+// |table_path     |status |partitions_dropped|splits_removed|total_size_bytes|message                           |
+// +---------------+-------+------------------+--------------+----------------+----------------------------------+
+// |s3://bucket/...|success|3                 |12            |52428800        |Dropped 3 partitions containing...|
+// +---------------+-------+------------------+--------------+----------------+----------------------------------+
+
+// 2. Verify with DESCRIBE (optional)
+spark.sql("DESCRIBE INDEXTABLES TRANSACTION LOG 's3://bucket/table' INCLUDE ALL")
+  .filter($"action_type" === "remove")
+  .show()
+
+// 3. After retention period, clean up physical files
+spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
+```
+
+**Error Handling:**
+- Fails if WHERE clause references non-partition columns
+- Fails if table has no partition columns defined
+- Returns no_action if no partitions match the predicates
+
 #### Cleaning Up Orphaned Files with PURGE ORPHANED SPLITS
 
 IndexTables4Spark provides SQL-based cleanup to remove orphaned `.split` files and old transaction log files. This helps reclaim storage space and maintain table health.

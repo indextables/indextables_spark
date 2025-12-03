@@ -389,6 +389,27 @@ class TransactionLog(
     version
   }
 
+  /**
+   * Commits remove actions to mark files as logically deleted.
+   *
+   * This operation marks files as removed in the transaction log without physically deleting them. The files become
+   * invisible to queries but remain on disk for recovery and time-travel purposes.
+   */
+  override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
+    if (removeActions.isEmpty) {
+      return getLatestVersion()
+    }
+
+    val version = getNextVersion()
+    writeActions(version, removeActions)
+
+    // Invalidate cache since file list has changed
+    cache.foreach(_.invalidateAll())
+
+    logger.info(s"Committed ${removeActions.length} remove actions in version $version")
+    version
+  }
+
   private def writeAction(version: Long, action: Action): Unit =
     writeActions(version, Seq(action))
 

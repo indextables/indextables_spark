@@ -20,6 +20,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Aggregate pushdown**: COUNT(), SUM(), AVG(), MIN(), MAX() with transaction log optimization
 - **Partitioned datasets**: Full support with partition pruning
 - **Merge operations**: SQL-based split consolidation (`MERGE SPLITS`)
+- **Drop partitions**: SQL-based partition removal with WHERE clause validation (`DROP INDEXTABLES PARTITIONS`)
 - **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
@@ -369,6 +370,53 @@ spark.indextables.purge.deleteRetries: 3
 - Retry logic handles transient cloud storage errors
 - LEFT ANTI JOIN ensures only truly orphaned files deleted
 - Transaction log files referenced by checkpoints are never deleted
+
+### Drop Partitions
+```sql
+-- Register extensions (same as above)
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Drop partitions from a table (logically removes data)
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year = '2023';
+DROP INDEXTABLES PARTITIONS FROM my_table WHERE date = '2024-01-01';
+
+-- Range predicates
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year > '2020';
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE month < 6;
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE month BETWEEN 1 AND 6;
+
+-- Compound predicates (AND, OR)
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE region = 'us-east' AND year > '2020';
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE year = '2022' OR year = '2023';
+DROP INDEXTABLES PARTITIONS FROM 's3://bucket/path' WHERE status = 'inactive' OR created < '2023-01-01';
+
+-- Also works with TANTIVY4SPARK keyword
+DROP TANTIVY4SPARK PARTITIONS FROM 's3://bucket/path' WHERE partition_key = 'value';
+```
+
+**Key features:**
+- **WHERE clause required** - Prevents accidental full table drops
+- **Partition columns only** - Validates that WHERE clause references only partition columns
+- **Logical deletion** - Adds RemoveAction entries to transaction log without physical deletion
+- **Physical cleanup via PURGE** - Use PURGE INDEXTABLE to delete files after retention period
+- **Returns status** - Reports partitions dropped, splits removed, and total size
+
+**Example workflow:**
+```scala
+// 1. Drop old partitions
+spark.sql("DROP INDEXTABLES PARTITIONS FROM 's3://bucket/table' WHERE year < '2022'").show()
+
+// 2. Verify with DESCRIBE (optional)
+spark.sql("DESCRIBE INDEXTABLES TRANSACTION LOG 's3://bucket/table' INCLUDE ALL").show()
+
+// 3. After retention period, clean up physical files
+spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
+```
+
+**Error handling:**
+- Fails if WHERE clause references non-partition columns
+- Fails if table has no partition columns defined
+- Returns no_action if no partitions match the predicates
 
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala

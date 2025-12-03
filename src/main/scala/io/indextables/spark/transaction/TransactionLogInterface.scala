@@ -221,4 +221,20 @@ trait TransactionLogInterface extends AutoCloseable {
     // Default implementation: create a single transaction with removes followed by adds
     // Both TransactionLog and OptimizedTransactionLog override this with custom implementations
     throw new UnsupportedOperationException("commitMergeSplits must be implemented by subclass")
+
+  /**
+   * Commits remove actions to mark files as logically deleted.
+   *
+   * This operation marks files as removed in the transaction log without physically deleting them. The files become
+   * invisible to queries but remain on disk for recovery and time-travel purposes. Physical deletion occurs when
+   * running PURGE INDEXTABLE after the retention period expires.
+   *
+   * @param removeActions
+   *   Sequence of remove actions for files to mark as deleted
+   * @return
+   *   The transaction version number for this operation
+   */
+  def commitRemoveActions(removeActions: Seq[RemoveAction]): Long =
+    // Default implementation can be overridden by subclasses
+    throw new UnsupportedOperationException("commitRemoveActions must be implemented by subclass")
 }

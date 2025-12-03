@@ -25,6 +25,7 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
   DescribeTransactionLogCommand,
+  DropPartitionsCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
@@ -230,6 +231,57 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     } catch {
       case e: Exception =>
         logger.error(s"Exception in visitPurgeIndexTable: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitDropPartitions(ctx: DropPartitionsContext): LogicalPlan = {
+    logger.debug(s"visitDropPartitions called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val (pathOption, tableIdOption) = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        (Some(pathStr), None)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        val tableIdentifier = if (tableId.length == 1) {
+          Some(TableIdentifier(tableId.head))
+        } else if (tableId.length == 2) {
+          Some(TableIdentifier(tableId(1), Some(tableId.head)))
+        } else {
+          throw new IllegalArgumentException(s"Invalid table identifier: ${tableId.mkString(".")}")
+        }
+        (None, tableIdentifier)
+      } else {
+        logger.error("Neither path nor table found")
+        throw new IllegalArgumentException("DROP INDEXTABLES PARTITIONS requires either a path or table identifier")
+      }
+
+      // Extract WHERE clause - REQUIRED for this command
+      val wherePredicates = if (ctx.whereClause != null) {
+        val originalText = extractRawText(ctx.whereClause)
+        logger.debug(s"Found WHERE clause: $originalText")
+        Seq(originalText)
+      } else {
+        throw new IllegalArgumentException(
+          "DROP INDEXTABLES PARTITIONS requires a WHERE clause specifying partition predicates"
+        )
+      }
+
+      // Create command
+      logger.debug(s"Creating DropPartitionsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption")
+      val result = DropPartitionsCommand.apply(pathOption, tableIdOption, wherePredicates)
+      logger.debug(s"Created DropPartitionsCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitDropPartitions: ${e.getMessage}", e)
         throw e
     }
   }
