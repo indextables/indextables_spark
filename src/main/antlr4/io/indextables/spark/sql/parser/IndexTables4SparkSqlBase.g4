@@ -51,6 +51,8 @@ statement
         (OLDER THAN retentionNumber=INTEGER_VALUE retentionUnit=(DAYS | HOURS))?
         (TRANSACTION LOG RETENTION txLogRetentionNumber=INTEGER_VALUE txLogRetentionUnit=(DAYS | HOURS))?
         (DRY RUN)?                                              #purgeIndexTable
+    | DROP indexTablesKeyword PARTITIONS FROM (path=STRING | table=qualifiedName)
+        WHERE whereClause=predicateToken                        #dropPartitions
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
@@ -90,7 +92,7 @@ quotedIdentifier
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
-    | RETENTION | DESCRIBE | INCLUDE | ALL
+    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM
     ;
 
 // Keywords (case-insensitive)
@@ -127,6 +129,9 @@ RETENTION: [Rr][Ee][Tt][Ee][Nn][Tt][Ii][Oo][Nn];
 DESCRIBE: [Dd][Ee][Ss][Cc][Rr][Ii][Bb][Ee];
 INCLUDE: [Ii][Nn][Cc][Ll][Uu][Dd][Ee];
 ALL: [Aa][Ll][Ll];
+DROP: [Dd][Rr][Oo][Pp];
+PARTITIONS: [Pp][Aa][Rr][Tt][Ii][Tt][Ii][Oo][Nn][Ss];
+FROM: [Ff][Rr][Oo][Mm];
 
 // Literals
 STRING

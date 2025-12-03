@@ -284,6 +284,40 @@ class OptimizedTransactionLog(
     version
   }
 
+  /**
+   * Commits a merge splits operation atomically.
+   */
+  override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
+    val version = getNextVersion()
+    val actions = removeActions ++ addActions
+    writeActions(version, actions)
+
+    // Invalidate caches
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    currentSnapshot.set(None)
+
+    version
+  }
+
+  /**
+   * Commits remove actions to mark files as logically deleted.
+   */
+  override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
+    if (removeActions.isEmpty) {
+      return getLatestVersion()
+    }
+
+    val version = getNextVersion()
+    writeActions(version, removeActions)
+
+    // Invalidate caches
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    currentSnapshot.set(None)
+
+    logger.info(s"Committed ${removeActions.length} remove actions in version $version")
+    version
+  }
+
   /** List files with enhanced caching and parallel operations */
   def listFiles(): Seq[AddAction] = {
     // Check protocol before reading
