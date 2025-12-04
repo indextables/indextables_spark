@@ -562,4 +562,4 @@ flowchart LR
     SearchEngine -.->|GC| Close
 ```
 
-This comprehensive documentation shows how all components interact within the Tantivy4Spark system, providing clear visibility into data flows, communication patterns, and optimization strategies.
+This comprehensive documentation shows how all components interact within the IndexTables4Spark system, providing clear visibility into data flows, communication patterns, and optimization strategies.

@@ -1425,17 +1425,17 @@ trait CompressionCodec {
 
 ```scala
 // Default behavior (compression enabled)
-df.write.format("indextables").save("s3://bucket/data")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/data")
 
 // Explicit configuration
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.transaction.compression.enabled", "true")
   .option("spark.indextables.transaction.compression.codec", "gzip")
   .option("spark.indextables.transaction.compression.gzip.level", "6")
   .save("s3://bucket/data")
 
 // Disable compression (not recommended)
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.transaction.compression.enabled", "false")
   .save("s3://bucket/data")
 ```

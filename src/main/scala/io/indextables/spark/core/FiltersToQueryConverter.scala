@@ -549,8 +549,11 @@ object FiltersToQueryConverter {
           val convertedValue = convertSparkValueToTantivy(value, fieldType)
           Query.termQuery(schema, attribute, convertedValue)
         }
-      case IsNotNull(_) =>
-        Query.allQuery()
+      case IsNotNull(attribute) =>
+        // Use wildcard query to match only documents where this field has an indexed value.
+        // Tantivy only indexes non-null values, so fieldname:* matches all docs with non-null values.
+        // Use lenient mode (true) to avoid errors for fields that might not exist in schema.
+        Query.wildcardQuery(schema, attribute, "*", true)
       case _ =>
         Query.allQuery() // Simplified for tests
     }
@@ -806,9 +809,11 @@ object FiltersToQueryConverter {
 
         case IsNotNull(attribute) =>
           queryLog(s"Creating IsNotNull query: $attribute IS NOT NULL")
-          // For NotNull queries, just use AllQuery as requested
-          queryLog(s"Using AllQuery for IsNotNull on field '$attribute'")
-          Query.allQuery()
+          // Use wildcard query to match only documents where this field has an indexed value.
+          // Tantivy only indexes non-null values, so fieldname:* matches all docs with non-null values.
+          // Use lenient mode (true) to avoid errors for fields that might not exist in schema.
+          queryLog(s"Using wildcardQuery for IsNotNull on field '$attribute'")
+          Query.wildcardQuery(schema, attribute, "*", true)
 
         case And(left, right) =>
           queryLog(s"Creating And query: $left AND $right")
@@ -1239,7 +1244,9 @@ object FiltersToQueryConverter {
         }
 
       case IsNotNull(_) =>
-        Some(new SplitMatchAllQuery()) // Match all for IsNotNull
+        // TODO: Use proper exists query when available
+        // For now, MatchAllQuery returns all documents - Spark will filter nulls
+        Some(new SplitMatchAllQuery())
 
       // For complex operations like range queries, wildcard queries, etc., fall back to string parsing
       case GreaterThan(attribute, value) =>

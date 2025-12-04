@@ -96,7 +96,7 @@ class DateAndTimestampQueriesTest extends TestBase {
       // Write data
       println("💾 Writing data...")
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -105,7 +105,7 @@ class DateAndTimestampQueriesTest extends TestBase {
       // Read the data back
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       println(s"📊 Read back ${readData.count()} rows")

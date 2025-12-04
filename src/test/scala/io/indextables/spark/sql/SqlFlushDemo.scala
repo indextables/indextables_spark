@@ -45,10 +45,10 @@ object SqlFlushDemo extends App {
     // Try to write to tantivy4spark (this may fail but that's ok for the demo)
     try {
       val tempPath = java.nio.file.Files.createTempDirectory("tantivy-test").toString
-      testData.write.format("tantivy4spark").save(tempPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
 
       // Read it back to create some cache entries
-      val readData = spark.read.format("tantivy4spark").load(tempPath)
+      val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
       val count    = readData.count()
       println(s"  Successfully wrote and read $count rows to/from IndexTables4Spark")
 

@@ -181,7 +181,7 @@ New test suite with 2 tests:
 ### Enable Checkpoint Truncation (Default)
 ```scala
 // Already enabled by default, no configuration needed
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.checkpoint.enabled", "true")
   .save("s3://bucket/path")
 ```
@@ -190,7 +190,7 @@ df.write.format("indextables")
 ```scala
 // Set custom threshold for checkpoint truncation
 spark.conf.set("spark.indextables.stats.truncation.maxLength", "512")
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.checkpoint.enabled", "true")
   .save("s3://bucket/path")
 ```
@@ -198,7 +198,7 @@ df.write.format("indextables")
 ### Disable Truncation (Not Recommended)
 ```scala
 // Disable truncation completely
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.enabled", "false")
   .option("spark.indextables.checkpoint.enabled", "true")
   .save("s3://bucket/path")

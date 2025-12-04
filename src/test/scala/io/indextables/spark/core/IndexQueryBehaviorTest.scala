@@ -83,7 +83,7 @@ class IndexQueryBehaviorTest extends TestBase {
         (1, "test document", "category")
       ).toDF("id", "title", "category")
 
-      testData.write.format("tantivy4spark").mode("overwrite").save(tempPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
 
       // Verify metadata column implementation
       val tableProvider = new IndexTables4SparkTableProvider()

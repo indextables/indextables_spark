@@ -553,7 +553,7 @@ override def pushAggregation(aggregation: Aggregation): Boolean = {
 
 ```scala
 // ❌ DEPRECATED - V1 API
-df.write.format("indextables").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 
 // ✅ RECOMMENDED - V2 API
 df.write
@@ -576,7 +576,7 @@ The **most important** difference between V1 and V2 is how partition columns are
 
 ```scala
 // V1 API - partition columns NOT indexed
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("date", "hour")
   .save("s3://bucket/logs")
 
@@ -620,7 +620,7 @@ Migration from V1 to V2 is **simple and non-breaking**:
 
 ```scala
 // Before (V1)
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 
 // After (V2)
 val df = spark.read
@@ -648,7 +648,7 @@ Existing tables written with V1 can be read with V2 without issues:
 
 ```scala
 // Table written with V1 API
-df.write.format("indextables").save("s3://bucket/legacy-table")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/legacy-table")
 
 // Read with V2 API - works perfectly
 val legacyDf = spark.read
@@ -697,7 +697,7 @@ df.write.mode(SaveMode.Overwrite)
 
 **Pre-Migration:**
 
-- [ ] Identify all code using `format("indextables")`
+- [ ] Identify all code using `format("io.indextables.spark.core.IndexTables4SparkTableProvider")`
 - [ ] Review partition column usage (will benefit from V2 indexing)
 - [ ] Test V2 reads on existing V1 tables (non-destructive)
 

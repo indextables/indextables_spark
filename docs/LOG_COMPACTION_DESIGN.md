@@ -6,7 +6,7 @@ Transaction log compaction is a Delta Lake optimization that periodically consol
 
 ## Current State
 
-Tantivy4Spark's transaction log currently:
+IndexTables4Spark's transaction log currently:
 - Stores each transaction as a separate JSON file (`000000000000000001.json`, `000000000000000002.json`, etc.)
 - Requires reading all JSON files from version 0 to get the complete table state
 - Grows linearly with the number of write operations

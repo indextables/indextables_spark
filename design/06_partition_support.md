@@ -116,7 +116,7 @@ s3://bucket/logs/
 
 **V1 DataSource API:**
 ```scala
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("date", "hour")
   .save("s3://bucket/path")
 ```

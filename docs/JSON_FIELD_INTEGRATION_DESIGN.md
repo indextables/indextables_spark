@@ -55,7 +55,7 @@ case class Coordinates(lat: Double, lon: Double)
 val df = spark.createDataFrame(users).toDF()
 
 // Current behavior: FAILS with UnsupportedOperationException
-df.write.format("indextables").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 // Error: Arrays, Maps, Structs not supported
 ```
 
@@ -80,10 +80,10 @@ val schema = StructType(Seq(
 ))
 
 // Write works seamlessly
-df.write.format("indextables").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 
 // Read with nested queries
-val result = spark.read.format("indextables").load("s3://bucket/path")
+val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 
 // Predicate pushdown on nested fields
 result.filter($"user.age" > 25).show()
@@ -227,7 +227,7 @@ case class Product(id: String, tags: Seq[String], prices: Seq[Double])
 val df = spark.createDataFrame(products).toDF()
 
 // Current behavior: FAILS
-df.write.format("indextables").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 // Error: Arrays not supported
 ```
 
@@ -246,10 +246,10 @@ val schema = StructType(Seq(
 ))
 
 // Write works seamlessly
-df.write.format("indextables").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 
 // Read with array queries
-val result = spark.read.format("indextables").load("s3://bucket/path")
+val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 
 // Array membership queries (pushdown supported)
 result.filter(array_contains($"tags", "electronics")).show()
@@ -384,13 +384,13 @@ case class Event(id: String, payload: String)
 val df = spark.createDataFrame(events).toDF()
 
 // Configure payload field as JSON-indexed string
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.payload", "json")  // NEW: json type
   .save("s3://bucket/path")
 
 // Query with JSONPath in IndexQuery
 import org.apache.spark.sql.indextables.IndexQueryExpression._
-val result = spark.read.format("indextables").load("s3://bucket/path")
+val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 
 // IndexQuery with JSONPath syntax
 result.filter($"payload" indexquery "user_id:123").show()
@@ -1037,13 +1037,13 @@ val schema = StructType(Seq(
   StructField("tags", ArrayType(StringType))  // Automatically uses JSON
 ))
 
-df.write.format("indextables").save("s3://bucket/path")  // Just works!
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")  // Just works!
 ```
 
 **String-to-JSON requires explicit configuration:**
 ```scala
 // Explicit configuration required for JSON string parsing
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.payload", "json")
   .save("s3://bucket/path")
 ```
@@ -1173,9 +1173,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/simple_struct"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1189,9 +1189,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/nested_struct"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1202,9 +1202,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/struct_nulls"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1233,9 +1233,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )
 
     val path = s"$tempDir/struct_all_types"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1247,9 +1247,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/pushdown_equality"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.name" === "Alice")
 
     checkAnswer(result, Seq(Row("1", Row("Alice", 30))))
@@ -1267,9 +1267,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/pushdown_range"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.age" > 25 && $"user.age" < 35)
 
     checkAnswer(result, Seq(Row("1", Row("Alice", 30))))
@@ -1283,9 +1283,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/pushdown_deep_nested"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.address.city" === "NYC")
 
     checkAnswer(result, Seq(Row("1", Row("Alice", Row("NYC", Row(40.7, -74.0))))))
@@ -1299,9 +1299,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/pushdown_isnotnull"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.email".isNotNull)
 
     checkAnswer(result, Seq(
@@ -1319,9 +1319,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/pushdown_boolean"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(
         ($"user.age" > 25 && $"user.city" === "NYC") ||
         ($"user.name" === "Bob")
@@ -1341,11 +1341,11 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "name", "info")
 
     val path = s"$tempDir/mixed_fields"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.name", "string")
       .save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"name" === "Product A" && $"info.category" === "electronics")
 
     checkAnswer(result, Seq(Row("1", "Product A", Row("electronics", 299.99))))
@@ -1358,9 +1358,9 @@ class StructTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "user")
 
     val path = s"$tempDir/unsupported_struct_op"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.name".startsWith("Ali"))  // Not pushed down
 
     checkAnswer(result, Seq(Row("1", Row("Alice", 30))))
@@ -1386,9 +1386,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "tags")
 
     val path = s"$tempDir/simple_array"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1399,9 +1399,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "reviews")
 
     val path = s"$tempDir/array_of_structs"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1412,9 +1412,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "matrix")
 
     val path = s"$tempDir/nested_arrays"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1425,9 +1425,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "values")
 
     val path = s"$tempDir/array_nulls"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1438,9 +1438,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "ints", "doubles", "bools")
 
     val path = s"$tempDir/array_primitives"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1452,9 +1452,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "tags")
 
     val path = s"$tempDir/pushdown_array_contains"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(array_contains($"tags", "laptop"))
 
     checkAnswer(result, Seq(
@@ -1475,9 +1475,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "reviews")
 
     val path = s"$tempDir/pushdown_array_struct"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"reviews.rating" >= 5)  // Any review with rating >= 5
 
     checkAnswer(result, Seq(
@@ -1494,9 +1494,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "values")
 
     val path = s"$tempDir/pushdown_array_range"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"values" >= 20)  // Any value >= 20
 
     checkAnswer(result, Seq(
@@ -1513,9 +1513,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "tags", "price")
 
     val path = s"$tempDir/array_multiple_conditions"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(array_contains($"tags", "laptop") && $"price" < 1000)
 
     checkAnswer(result, Seq(
@@ -1531,9 +1531,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "tags")
 
     val path = s"$tempDir/empty_arrays"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1544,9 +1544,9 @@ class ArrayTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "tags")
 
     val path = s"$tempDir/array_size"
-    df.write.format("indextables").save(path)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(size($"tags") > 1)  // Not pushed down, Spark fallback
 
     checkAnswer(result, Seq(Row("1", Seq("a", "b", "c"))))
@@ -1568,11 +1568,11 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "payload")
 
     val path = s"$tempDir/json_string"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.payload", "json")
       .save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1583,11 +1583,11 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "event")
 
     val path = s"$tempDir/json_nested"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.event", "json")
       .save(path)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     checkAnswer(result, df)
   }
 
@@ -1599,12 +1599,12 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "payload")
 
     val path = s"$tempDir/json_indexquery"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.payload", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"payload" indexquery "user_id:u123")
 
     checkAnswer(result, Seq(
@@ -1620,12 +1620,12 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "payload")
 
     val path = s"$tempDir/json_nested_query"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.payload", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"payload" indexquery "user.role:admin")
 
     checkAnswer(result, Seq(
@@ -1641,12 +1641,12 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "event")
 
     val path = s"$tempDir/json_boolean_query"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.event", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"event" indexquery "user_id:u123 AND page:/home")
 
     checkAnswer(result, Seq(
@@ -1663,13 +1663,13 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "payload")
 
     val path = s"$tempDir/json_invalid"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.payload", "json")
       .option("spark.indextables.indexing.json.failOnInvalidJson", "false")
       .save(path)
 
     // Should succeed, storing invalid JSON as text
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     assert(result.count() == 3)
   }
 
@@ -1683,7 +1683,7 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
 
     // Should throw exception
     intercept[Exception] {
-      df.write.format("indextables")
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.payload", "json")
         .option("spark.indextables.indexing.json.failOnInvalidJson", "true")
         .save(path)
@@ -1697,12 +1697,12 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "data")
 
     val path = s"$tempDir/json_with_arrays"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.data", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"data" indexquery "tags:laptop")
 
     checkAnswer(result, Seq(
@@ -1718,12 +1718,12 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "product")
 
     val path = s"$tempDir/json_range"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.product", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"product" indexquery "price:[100 TO 500]")
 
     checkAnswer(result, Seq(
@@ -1739,13 +1739,13 @@ class JsonStringTypeTest extends QueryTest with SharedSparkSession {
     )).toDF("id", "title", "metadata")
 
     val path = s"$tempDir/json_mixed"
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.title", "string")
       .option("spark.indextables.indexing.typemap.metadata", "json")
       .save(path)
 
     import org.apache.spark.sql.indextables.IndexQueryExpression._
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"title" === "Title 1" && ($"metadata" indexquery "author:Alice"))
 
     checkAnswer(result, Seq(
@@ -1766,7 +1766,7 @@ class JsonPredicatePushdownTest extends QueryTest with SharedSparkSession {
     val df = createStructDataFrame()
     val path = writeTempTable(df)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.name" === "Alice")
 
     // Verify pushdown in plan
@@ -1781,7 +1781,7 @@ class JsonPredicatePushdownTest extends QueryTest with SharedSparkSession {
     val df = createStructDataFrame()
     val path = writeTempTable(df)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.age" > 25 && $"user.age" < 35)
 
     val plan = result.queryExecution.executedPlan.toString
@@ -1794,7 +1794,7 @@ class JsonPredicatePushdownTest extends QueryTest with SharedSparkSession {
     val df = createArrayDataFrame()
     val path = writeTempTable(df)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(array_contains($"tags", "laptop"))
 
     val plan = result.queryExecution.executedPlan.toString
@@ -1807,7 +1807,7 @@ class JsonPredicatePushdownTest extends QueryTest with SharedSparkSession {
     val df = createStructDataFrame()
     val path = writeTempTable(df)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.name".startsWith("Ali"))
 
     // Should NOT have pushdown for startsWith
@@ -1821,7 +1821,7 @@ class JsonPredicatePushdownTest extends QueryTest with SharedSparkSession {
     val df = createComplexDataFrame()
     val path = writeTempTable(df)
 
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(
         ($"user.age" > 25 && $"user.city" === "NYC") ||
         array_contains($"tags", "premium")
@@ -1854,14 +1854,14 @@ class JsonPerformanceTest extends QueryTest with SharedSparkSession {
 
     // Measure pushdown query
     val start = System.currentTimeMillis()
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.city" === "city_5")
       .count()
     val pushdownTime = System.currentTimeMillis() - start
 
     // Measure Spark-only filtering (disable pushdown)
     val start2 = System.currentTimeMillis()
-    val result2 = spark.read.format("indextables").load(path)
+    val result2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter($"user.name".startsWith("user_5"))  // Not pushed down
       .count()
     val sparkOnlyTime = System.currentTimeMillis() - start2
@@ -1885,7 +1885,7 @@ class JsonPerformanceTest extends QueryTest with SharedSparkSession {
     val path = writeTempTable(df)
 
     val start = System.currentTimeMillis()
-    val result = spark.read.format("indextables").load(path)
+    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
       .filter(array_contains($"tags", "tag_50"))
       .count()
     val queryTime = System.currentTimeMillis() - start
@@ -1911,11 +1911,11 @@ class JsonPerformanceTest extends QueryTest with SharedSparkSession {
 **Existing Tables (Pre-JSON):**
 ```scala
 // Table written before JSON support
-df.write.format("indextables").save("s3://bucket/old-table")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/old-table")
 // Schema: only primitive types, no Struct/Array
 
 // Reading works unchanged
-val oldData = spark.read.format("indextables").load("s3://bucket/old-table")
+val oldData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/old-table")
 // ✅ No changes needed, existing functionality preserved
 ```
 
@@ -1923,9 +1923,9 @@ val oldData = spark.read.format("indextables").load("s3://bucket/old-table")
 ```scala
 // New table with Struct/Array types
 val newDf = createComplexDataFrame()  // Contains Struct and Array fields
-newDf.write.format("indextables").save("s3://bucket/new-table")
+newDf.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/new-table")
 
-val newData = spark.read.format("indextables").load("s3://bucket/new-table")
+val newData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/new-table")
 // ✅ Struct and Array fields work seamlessly
 ```
 
@@ -1993,7 +1993,7 @@ class SchemaCompatibilityChecker {
 val enrichedDf = existingDf.withColumn("data_json",
   parse_json($"data").cast(StructType(...)))
 
-enrichedDf.write.format("indextables")
+enrichedDf.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.data", "string")  // Keep original
   .option("spark.indextables.indexing.typemap.data_json", "json")  // New JSON field
   .mode("overwrite")
@@ -2008,7 +2008,7 @@ val newDf = existingDf.select(
   parse_json($"data").cast(StructType(...)).as("data")
 )
 
-newDf.write.format("indextables")
+newDf.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("overwrite")
   .save("s3://bucket/rewritten-table")
 ```
@@ -2069,7 +2069,7 @@ df.filter($"user.city" === "NYC")  // If pushdown disabled
 2. **Use Partitioning with Nested Fields:**
    ```scala
    // Partition by top-level or nested field
-   df.write.format("indextables")
+   df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
      .partitionBy("user.city")  // Nested partitioning supported
      .save("s3://bucket/partitioned")
    ```

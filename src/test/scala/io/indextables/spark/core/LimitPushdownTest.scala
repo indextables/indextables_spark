@@ -37,12 +37,13 @@ class LimitPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Create temporary view for SQL queries
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("test_table")
 
@@ -69,12 +70,13 @@ class LimitPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Read with DataFrame limit
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       val limitedResult = df.limit(3).collect()
@@ -97,12 +99,13 @@ class LimitPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Read without any limit
       val result = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .collect()
 
@@ -125,12 +128,13 @@ class LimitPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Create temporary view
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("test_filter_table")
 
@@ -156,7 +160,8 @@ class LimitPushdownTest extends TestBase {
       // Write some test data
       val data = spark.range(20).toDF("id")
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Read the transaction log to get the schema

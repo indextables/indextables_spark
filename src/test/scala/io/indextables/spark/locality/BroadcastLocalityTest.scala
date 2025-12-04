@@ -85,7 +85,7 @@ class BroadcastLocalityTest extends TestBase with BeforeAndAfterEach {
       // Write data using IndexTables4Spark
       val tablePath = tempDir.toString
       println(s"🧪 [TEST] Writing data to: $tablePath")
-      df.write.format("tantivy4spark").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Force a broadcast update to collect any locality information
       println("🧪 [TEST] Forcing broadcast update before read...")

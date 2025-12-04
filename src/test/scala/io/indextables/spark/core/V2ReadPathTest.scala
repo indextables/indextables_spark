@@ -42,7 +42,7 @@ class V2ReadPathTest extends TestBase {
 
       // Write data using tantivy4spark format
       writeData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .save(tempPath)
 
       println(s"✅ Successfully wrote ${writeData.count()} records to $tempPath")
@@ -101,7 +101,7 @@ class V2ReadPathTest extends TestBase {
       ).toDF("id", "title", "type")
 
       writeData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .save(tempPath)
 
       // Test V2 read with various configuration options that should be serialized properly

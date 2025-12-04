@@ -33,7 +33,7 @@ class TestGroupBySumSuccess extends AnyFunSuite {
 
       // Write data with BOTH category and amount as fast fields
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "category,amount") // Both fields fast
         .mode("overwrite")

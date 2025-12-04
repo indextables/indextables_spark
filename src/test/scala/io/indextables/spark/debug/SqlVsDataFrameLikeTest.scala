@@ -39,11 +39,9 @@ class SqlVsDataFrameLikeTest extends TestBase {
         println(s"✗ NO PUSHDOWN DETECTED - filters will be applied by Spark after reading all data")
     }
 
-    // Check which DataSource API is being used
-    if (planString.contains("IndexTables4SparkRelation")) {
-      println(s"📋 Using DataSource V1 API (RelationProvider)")
-    } else if (planString.contains("Scan")) {
-      println(s"📋 Using DataSource V2 API (TableProvider)")
+    // Check that DataSource V2 API is being used
+    if (planString.contains("Scan")) {
+      println(s"Using DataSource V2 API (TableProvider)")
     }
 
     println(s"Full plan string:\n$planString")
@@ -68,10 +66,10 @@ class SqlVsDataFrameLikeTest extends TestBase {
       ).toDF("id", "review_text", "category")
 
       // Save the data
-      testData.write.format("tantivy4spark").mode("overwrite").save(testPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
 
       // Read back the data
-      val readDf = spark.read.format("tantivy4spark").load(testPath)
+      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
       readDf.createOrReplaceTempView("review_table")
 
       println(s"Total rows in test table: ${readDf.count()}")

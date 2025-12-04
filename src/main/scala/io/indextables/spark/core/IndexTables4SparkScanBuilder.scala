@@ -55,6 +55,7 @@ class IndexTables4SparkScanBuilder(
   logger.debug(s"SCAN BUILDER CREATED: NEW ScanBuilder instance ${System.identityHashCode(this)}")
   // Filters that have been pushed down and will be applied by the data source
   private var _pushedFilters      = Array.empty[Filter]
+  private var _unsupportedFilters = Array.empty[Filter] // Track filters Spark will re-evaluate
   private var requiredSchema      = schema
   private var _limit: Option[Int] = None
 
@@ -108,6 +109,45 @@ class IndexTables4SparkScanBuilder(
       case None =>
         // Regular scan
         logger.debug(s"BUILD: Creating regular scan (no aggregation pushdown)")
+
+        // CRITICAL: Check if unsupported filters blocked aggregate pushdown
+        // If there are unsupported filters, Spark won't even call pushAggregation(),
+        // which means any aggregation in the query will produce incorrect results.
+        // We check if the query contains an aggregation and fail if so.
+        //
+        // NOTE: Just like effectiveFilters, we must also retrieve unsupported filters from
+        // the relation object storage because build() may be called on a different ScanBuilder
+        // instance than the one where pushFilters() was called.
+        val effectiveUnsupportedFilters = if (_unsupportedFilters.nonEmpty) {
+          logger.debug(s"BUILD: Using instance variable unsupported filters: ${_unsupportedFilters.length}")
+          _unsupportedFilters
+        } else {
+          relationForIndexQuery match {
+            case Some(relation) =>
+              val filters = IndexTables4SparkScanBuilder.getUnsupportedFilters(relation)
+              logger.debug(s"BUILD: Retrieved ${filters.length} unsupported filters from relation object: ${System.identityHashCode(relation)}")
+              filters
+            case None =>
+              logger.debug(s"BUILD: No relation in ThreadLocal, cannot retrieve unsupported filters")
+              Array.empty[Filter]
+          }
+        }
+
+        // Check for unsupported filters that would block aggregate pushdown.
+        // When Spark has unsupported filters, it won't call pushAggregation(), which means
+        // any aggregation in the query will produce incorrect results (due to our default limit).
+        val hasAggregateInPlan = detectAggregateInQueryPlan()
+        if (effectiveUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
+          val unsupportedDesc = effectiveUnsupportedFilters.map(_.toString).mkString(", ")
+          throw new IllegalStateException(
+            s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
+            s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
+            s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
+            s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
+            s"Unsupported: IsNull, StringStartsWith, StringEndsWith, StringContains, JSON field null checks."
+          )
+        }
+
         // DIRECT EXTRACTION: Extract IndexQuery expressions directly from the current logical plan
         val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
@@ -322,6 +362,8 @@ class IndexTables4SparkScanBuilder(
     new TransactionLogCountScan(sparkSession, transactionLog, effectiveFilters, options, config)
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
+    import org.apache.spark.sql.sources._
+
     logger.debug(
       s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters"
     )
@@ -333,8 +375,16 @@ class IndexTables4SparkScanBuilder(
     // we only need to handle regular Spark filters here.
     val (supported, unsupported) = filters.partition(isSupportedFilter)
 
-    // Store supported filters in instance variable
+    // NOTE: IsNull and IsNotNull are marked as "supported" for regular fields (not JSON fields)
+    // in isSupportedFilter. The query converter uses wildcardQuery to properly filter these:
+    // - IsNotNull(field) → wildcardQuery(field, "*") - matches docs where field has a value
+    // - IsNull(field) → for now returns allQuery() (TODO: implement proper null handling)
+    // This allows aggregate pushdown to work correctly with null/not-null filters.
+
+    // Store filters in instance variables
     _pushedFilters = supported
+    _unsupportedFilters = unsupported
+
 
     // CRITICAL FIX: Store by relation object (not table path) to survive across multiple optimization passes
     // Spark runs V2ScanRelationPushDown multiple times, creating fresh ScanBuilders each time
@@ -346,8 +396,9 @@ class IndexTables4SparkScanBuilder(
     IndexTables4SparkScanBuilder.getCurrentRelation() match {
       case Some(relation) =>
         IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
+        IndexTables4SparkScanBuilder.storeUnsupportedFilters(relation, unsupported)
         logger.debug(
-          s"PUSHFILTERS: Stored ${supported.length} filters by relation object: ${System.identityHashCode(relation)}"
+          s"PUSHFILTERS: Stored ${supported.length} supported, ${unsupported.length} unsupported filters by relation object: ${System.identityHashCode(relation)}"
         )
       case None =>
         logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
@@ -412,9 +463,9 @@ class IndexTables4SparkScanBuilder(
   }
 
   override def pushAggregation(aggregation: Aggregation): Boolean = {
-    logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Received aggregation request: $aggregation")
-    logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Number of pushed filters: ${_pushedFilters.length}")
-    _pushedFilters.foreach(f => logger.debug(s"AGGREGATE PUSHDOWN ATTEMPT: Pushed filter: $f"))
+    logger.debug(s"AGGREGATE PUSHDOWN: Received aggregation request: $aggregation")
+    logger.debug(s"AGGREGATE PUSHDOWN: Number of pushed filters: ${_pushedFilters.length}")
+    _pushedFilters.foreach(f => logger.debug(s"AGGREGATE PUSHDOWN: Pushed filter: $f"))
 
     // Check if this is a GROUP BY aggregation
     val groupByExpressions = aggregation.groupByExpressions()
@@ -521,14 +572,14 @@ class IndexTables4SparkScanBuilder(
       case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
       case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
       case _: In                            => true
-      case IsNull(attribute) => !attribute.contains(".") // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
-      case IsNotNull(attribute) => !attribute.contains(".") // NOT supported on JSON fields (tantivy doesn't index nulls), Spark handles
-      case And(left, right)    => isSupportedFilter(left) && isSupportedFilter(right)
+      case _: IsNull            => false // Tantivy doesn't index nulls, can't filter for null values - Spark must post-filter
+      case IsNotNull(attribute) => !attribute.contains(".") // Supported for regular fields (wildcardQuery handles this)
+      case And(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Or(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Not(child)          => isSupportedFilter(child) // NOT is supported only if child is supported
       case _: StringStartsWith => false                    // Tantivy does best-effort, Spark applies final filtering
       case _: StringEndsWith   => false                    // Tantivy does best-effort, Spark applies final filtering
-      case _: StringContains   => true
+      case _: StringContains   => false                    // Tantivy wildcard queries are best-effort, Spark applies final filtering
       case _                   => false
     }
   }
@@ -576,6 +627,57 @@ class IndexTables4SparkScanBuilder(
         // No explicit configuration - assume string type (new default)
         logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
         true
+    }
+  }
+
+  /**
+   * Detect if the current query plan contains an Aggregate operator.
+   * This is used to fail fast when aggregate pushdown is blocked by unsupported filters.
+   *
+   * We inspect the query execution context to find Aggregate nodes in the logical plan.
+   */
+  private def detectAggregateInQueryPlan(): Boolean = {
+    // Detect aggregation by examining the required schema
+    // When an aggregate like COUNT(*) is used, the schema will have aggregate-like column names
+    // or the schema will be radically different from the original table schema
+
+    val aggregatePatterns = Seq("count(", "sum(", "avg(", "min(", "max(", "count_")
+
+    // Check if required schema column names look like aggregate results
+    val schemaLooksLikeAggregate = requiredSchema.fieldNames.exists { name =>
+      val lowerName = name.toLowerCase
+      aggregatePatterns.exists(lowerName.contains)
+    }
+
+    if (schemaLooksLikeAggregate) {
+      logger.debug(s"Detected aggregate in query plan via schema inspection: ${requiredSchema.fieldNames.mkString(", ")}")
+      return true
+    }
+
+    // Fallback: check if the required schema is empty (COUNT(*) case)
+    // or has significantly fewer columns than the original schema
+    if (requiredSchema.isEmpty || (schema.length > 2 && requiredSchema.length == 1)) {
+      // Could be an aggregate query - be conservative and assume yes
+      logger.debug(s"Schema suggests possible aggregate query: original=${schema.length} cols, required=${requiredSchema.length} cols")
+      return true
+    }
+
+    // Try string matching on relation as last resort
+    try {
+      IndexTables4SparkScanBuilder.getCurrentRelation() match {
+        case Some(relation) =>
+          val planStr = relation.toString.toLowerCase
+          val hasAgg = planStr.contains("aggregate") ||
+            aggregatePatterns.exists(planStr.contains)
+          if (hasAgg) {
+            logger.debug("Detected aggregate via string matching on relation")
+          }
+          hasAgg
+        case None =>
+          false
+      }
+    } catch {
+      case _: Exception => false
     }
   }
 
@@ -801,7 +903,7 @@ class IndexTables4SparkScanBuilder(
    */
   private def getActualFastFieldsFromSchema(): Set[String] =
     try {
-      logger.debug("SCHEMA FAST FIELD VALIDATION: Reading actual fast fields from transaction log")
+      logger.debug("Reading actual fast fields from transaction log")
 
       // Read existing files from transaction log to get docMappingJson
       val existingFiles = transactionLog.listFiles()
@@ -810,7 +912,7 @@ class IndexTables4SparkScanBuilder(
         .headOption // Get the first available doc mapping
 
       if (existingDocMapping.isDefined) {
-        logger.debug("SCHEMA FAST FIELD VALIDATION: Found doc mapping, parsing fast fields")
+        logger.debug("Found doc mapping, parsing fast fields")
 
         // Parse the docMappingJson to extract fast field information
         import com.fasterxml.jackson.databind.JsonNode
@@ -818,7 +920,7 @@ class IndexTables4SparkScanBuilder(
         import scala.jdk.CollectionConverters._
 
         val mappingJson = existingDocMapping.get
-        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Full docMappingJson: ${mappingJson
+        logger.debug(s"Full docMappingJson: ${mappingJson
             .take(500)}${if (mappingJson.length > 500) "..." else ""}")
         val docMapping = JsonUtil.mapper.readTree(mappingJson)
 
@@ -830,24 +932,24 @@ class IndexTables4SparkScanBuilder(
               .getOrElse(false)
             val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
 
-            logger.debug(s"SCHEMA FAST FIELD VALIDATION: Field entry: name=${fieldName.getOrElse("N/A")}, fast=$isFast, type=$fieldType")
+            logger.debug(s"Field entry: name=${fieldName.getOrElse("N/A")}, fast=$isFast, type=$fieldType")
 
             if (isFast && fieldName.isDefined) {
-              logger.debug(s"SCHEMA FAST FIELD VALIDATION: ✓ Found fast field: ${fieldName.get}")
+              logger.debug(s"✓ Found fast field: ${fieldName.get}")
               Some(fieldName.get)
             } else {
               None
             }
           }.toSet
 
-          logger.debug(s"SCHEMA FAST FIELD VALIDATION: Actual fast fields from schema: ${fastFields.mkString(", ")}")
+          logger.debug(s"Actual fast fields from schema: ${fastFields.mkString(", ")}")
           fastFields
         } else {
-          logger.debug("SCHEMA FAST FIELD VALIDATION: Doc mapping is not an array - unexpected format")
+          logger.debug("Doc mapping is not an array - unexpected format")
           Set.empty[String]
         }
       } else {
-        logger.debug("SCHEMA FAST FIELD VALIDATION: No doc mapping found - likely new table, falling back to configuration-based validation")
+        logger.debug("No doc mapping found - likely new table, falling back to configuration-based validation")
         // Fall back to configuration-based validation for new tables
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -860,7 +962,7 @@ class IndexTables4SparkScanBuilder(
       }
     } catch {
       case e: Exception =>
-        logger.debug(s"SCHEMA FAST FIELD VALIDATION: Failed to read fast fields from schema: ${e.getMessage}")
+        logger.debug(s"Failed to read fast fields from schema: ${e.getMessage}")
         // Fall back to configuration-based validation
         val fastFieldsStr = config
           .get("spark.indextables.indexing.fastfields")
@@ -1271,6 +1373,9 @@ object IndexTables4SparkScanBuilder {
   // are created across optimization passes, but they all share the same DataSourceV2Relation
   private val relationPushedFilters: WeakHashMap[AnyRef, Array[Filter]] = new WeakHashMap[AnyRef, Array[Filter]]()
 
+  // Store unsupported filters by relation object for aggregate exception detection
+  private val relationUnsupportedFilters: WeakHashMap[AnyRef, Array[Filter]] = new WeakHashMap[AnyRef, Array[Filter]]()
+
   // ThreadLocal to pass the actual relation object from V2 rule to ScanBuilder
   // This works even with AQE because the same relation object is used throughout planning
   // Lifecycle: V2 rule checks relation identity → clears if different → sets new relation → ScanBuilder gets it
@@ -1358,6 +1463,18 @@ object IndexTables4SparkScanBuilder {
   def clearPushedFilters(relation: AnyRef): Unit =
     relationPushedFilters.synchronized {
       relationPushedFilters.remove(relation)
+    }
+
+  /** Store unsupported filters for a specific relation object. */
+  def storeUnsupportedFilters(relation: AnyRef, filters: Array[Filter]): Unit =
+    relationUnsupportedFilters.synchronized {
+      relationUnsupportedFilters.put(relation, filters)
+    }
+
+  /** Retrieve unsupported filters for a specific relation object. */
+  def getUnsupportedFilters(relation: AnyRef): Array[Filter] =
+    relationUnsupportedFilters.synchronized {
+      Option(relationUnsupportedFilters.get(relation)).getOrElse(Array.empty)
     }
 
 }

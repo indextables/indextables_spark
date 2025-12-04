@@ -62,8 +62,8 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
 
       // Write data to create AddActions with footer metadata
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "40")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Read the transaction log to get AddActions
@@ -150,12 +150,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "50") // Multiple splits for AQE
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Create a query that will trigger AQE and task serialization
@@ -213,12 +213,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       mainData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "60")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val mainTable = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Broadcast join that will involve serializing config and metadata
@@ -262,12 +262,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       complexData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "70")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Multi-stage query that crosses AQE stage boundaries
@@ -376,12 +376,12 @@ class AQEMetadataSerializationTest extends TestBase with Matchers {
         )
 
       optimizationData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "45")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Query that should trigger multiple AQE optimizations

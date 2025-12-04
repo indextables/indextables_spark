@@ -89,7 +89,8 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     // Write the empty DataFrame
     emptyData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
@@ -112,7 +113,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     println("✅ Verified: No AddActions created for empty dataset")
 
     // Verify we can still read from the table (should return empty)
-    val readBack = spark.read.format("tantivy4spark").load(tablePath)
+    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     readBack.count() shouldBe 0
 
     println("✅ Verified: Empty table can be read successfully")
@@ -143,7 +144,8 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     // Write initial data
     testData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
@@ -168,7 +170,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     val emptyData = spark.createDataFrame(emptyRDD2, schema)
 
     emptyData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -183,7 +185,7 @@ class ZeroRecordsFilterTest extends AnyFlatSpec with Matchers with BeforeAndAfte
     finalAddActions.length shouldBe initialAddActions.length
 
     // Verify data integrity
-    val readBack = spark.read.format("tantivy4spark").load(tablePath)
+    val readBack = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     readBack.count() shouldBe 2 // Original 2 records should still be there
 
     println("✅ Verified: Empty append operation did not create unnecessary AddActions")

@@ -66,10 +66,10 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
           (rand() * 100).as("score")
         )
 
-      // Write data
-      data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "100") // Create multiple splits
+      // Write data - use repartition to create multiple splits
+      data.repartition(2).write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Validate that footer metadata is present in transaction log
@@ -103,7 +103,7 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
 
       // Now test AQE with LIMIT operations
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Test 1: Simple LIMIT with AQE
@@ -167,10 +167,10 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
           (col("id") * 3).as("metric")
         )
 
-      // Write partitioned data
-      data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "80") // Multiple splits per partition
+      // Write partitioned data - use repartition to create multiple splits per partition
+      data.repartition(16).write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .partitionBy("partition_col")
         .save(tempPath)
 
@@ -200,7 +200,7 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
       }
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Test dynamic partition pruning with AQE
@@ -243,13 +243,14 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
           (col("id") * col("id")).as("squared")
         )
 
-      data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "50") // Force many small splits
+      // Use repartition to create multiple splits
+      data.repartition(4).write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Complex query that should trigger stage coalescing
@@ -303,11 +304,11 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
           )
 
         // Write both datasets
-        df1.write.format("tantivy4spark").save(tempPath1)
-        df2.write.format("tantivy4spark").save(tempPath2)
+        df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath1)
+        df2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath2)
 
-        val table1 = spark.read.format("tantivy4spark").load(tempPath1)
-        val table2 = spark.read.format("tantivy4spark").load(tempPath2)
+        val table1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath1)
+        val table2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath2)
 
         // Skew join that should trigger AQE optimization
         val skewJoinQuery = table1
@@ -344,13 +345,14 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
           (rand() * 1000).as("revenue")
         )
 
-      complexData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "75") // Multiple splits
+      // Use repartition to create multiple splits
+      complexData.repartition(4).write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       df.createOrReplaceTempView("multi_stage_table")

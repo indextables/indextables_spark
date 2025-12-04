@@ -25,8 +25,9 @@ import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
 
 /**
- * Test to verify that credential extraction logic in IndexTables4SparkRelation works correctly. This test validates the
- * actual credential values are properly extracted from different sources.
+ * Test to verify that credential extraction logic works correctly. This test validates the
+ * actual credential values are properly extracted from different sources (Spark session config,
+ * Hadoop config, and read options).
  */
 class CredentialExtractionTest extends TestBase {
 
@@ -186,7 +187,7 @@ class CredentialExtractionTest extends TestBase {
   }
 
   test("should validate that TransactionLog receives the extracted credentials") {
-    // This test simulates what happens in IndexTables4SparkRelation.schema()
+    // This test simulates credential extraction from Spark/Hadoop config
     import io.indextables.spark.transaction.TransactionLog
     import org.apache.hadoop.fs.Path
 
@@ -197,7 +198,7 @@ class CredentialExtractionTest extends TestBase {
 
     val tablePath = "/tmp/validation-test-table"
 
-    // Extract credentials exactly as IndexTables4SparkRelation.schema() does
+    // Extract credentials from Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration
     val tantivyConfigs = hadoopConf
       .iterator()

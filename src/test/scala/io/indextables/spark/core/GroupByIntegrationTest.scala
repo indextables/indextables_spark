@@ -57,7 +57,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with string field for category (should support GROUP BY)
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string") // String fields support GROUP BY
         .option("spark.indextables.indexing.fastfields", "category,score") // Both GROUP BY column and aggregation column must be fast
         .mode("overwrite")
@@ -123,7 +123,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.team", "string") // String field for GROUP BY
         .option("spark.indextables.indexing.fastfields", "team,score") // Both GROUP BY column and SUM column must be fast
         .mode("overwrite")
@@ -182,7 +182,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with all GROUP BY columns as fast fields
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.region", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.typemap.quarter", "string")
@@ -253,7 +253,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.team", "string")
         .option("spark.indextables.indexing.typemap.project", "string")
         .option("spark.indextables.indexing.fastfields", "team,project,effort")
@@ -310,7 +310,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       val tablePath = tempDir.getAbsolutePath
 
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.status", "string")
         .option("spark.indextables.indexing.fastfields", "status,value") // Add both status and value as fast fields
         .mode("overwrite")
@@ -375,7 +375,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
 
       // Write data with string fields for exact matching and fast fields for aggregation
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.referrer", "string")                  // String for exact match
         .option("spark.indextables.indexing.typemap.status", "string")                    // String for GROUP BY
         .option("spark.indextables.indexing.fastfields", "referrer,status,response_time") // All fields as fast

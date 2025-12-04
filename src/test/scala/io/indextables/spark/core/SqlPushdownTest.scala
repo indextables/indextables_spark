@@ -62,10 +62,10 @@ class SqlPushdownTest extends TestBase {
         }
     }
 
-    // Additional verification: look for IndexTables4Spark relation in the plan
-    val hasTantivyRelation = planString.contains("IndexTables4SparkRelation") || planString.contains("tantivy4spark")
-    if (hasTantivyRelation) {
-      println(s"  ✓ Plan contains IndexTables4Spark data source")
+    // Additional verification: look for IndexTables4Spark scan in the plan
+    val hasIndexTablesScan = planString.contains("BatchScanExec") || planString.contains("Scan")
+    if (hasIndexTablesScan) {
+      println(s"  Plan contains IndexTables4Spark V2 data source")
     }
 
     println() // Empty line for readability
@@ -78,12 +78,13 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Create temporary view for SQL queries
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("limit_test")
 
@@ -134,11 +135,12 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("text_filter_test")
 
@@ -182,11 +184,12 @@ class SqlPushdownTest extends TestBase {
 
       // Write data
       largeData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("effectiveness_test")
 
@@ -223,11 +226,12 @@ class SqlPushdownTest extends TestBase {
       val data = spark.range(50).toDF("id")
 
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("plan_test")
 
@@ -263,11 +267,12 @@ class SqlPushdownTest extends TestBase {
       ).toDF("id", "value")
 
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("logging_test")
 
@@ -304,11 +309,12 @@ class SqlPushdownTest extends TestBase {
       ).toDF("id", "name", "category", "price", "organic")
 
       data.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("comprehensive_test")
 
@@ -366,12 +372,12 @@ class SqlPushdownTest extends TestBase {
         )
 
       largeData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "500") // Multiple splits for better test
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
         .createOrReplaceTempView("performance_test")
 

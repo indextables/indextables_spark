@@ -24,7 +24,6 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
-- **Auto-sizing**: Intelligent DataFrame partitioning based on historical split analysis
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
@@ -42,11 +41,6 @@ spark.indextables.indexWriter.threads: 2
 
 // Split Conversion (controls parallelism of tantivy index -> quickwit split conversion)
 spark.indextables.splitConversion.maxParallelism: <auto> (default: max(1, availableProcessors / 4))
-
-// Auto-sizing
-spark.indextables.autoSize.enabled: false
-spark.indextables.autoSize.targetSplitSize: "100M"
-spark.indextables.autoSize.inputRowCount: <row_count> (required for V2 API)
 
 // Transaction Log
 spark.indextables.checkpoint.enabled: true
@@ -154,25 +148,13 @@ spark.indextables.indexing.fastfields: "score,value,timestamp"
 
 ### Basic Write
 ```scala
-// V2 API (recommended for partition columns)
 df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-  .save("s3://bucket/path")
-
-// V1 API (legacy compatibility)
-df.write.format("indextables").save("s3://bucket/path")
-```
-
-### Write with Auto-Sizing (V1 recommended)
-```scala
-df.write.format("indextables")
-  .option("spark.indextables.autoSize.enabled", "true")
-  .option("spark.indextables.autoSize.targetSplitSize", "100M")
   .save("s3://bucket/path")
 ```
 
 ### Write with Field Configuration
 ```scala
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.title", "string")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
@@ -181,7 +163,7 @@ df.write.format("indextables")
 
 ### Read & Query
 ```scala
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 
 // Standard filters (pushed down for string fields)
 df.filter($"title" === "exact title").show()
@@ -206,14 +188,14 @@ df.agg(count("*"), sum("score"), avg("score")).show()
 #### Example 1: Default Behavior (Automatic)
 ```scala
 // Batch optimization enabled by default - no configuration needed
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 df.filter($"score" > 0.5).collect()  // Automatically optimized for batches ≥50 docs
 ```
 
 #### Example 2: Aggressive Profile for Cost Optimization
 ```scala
 // Maximize S3 request consolidation
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.read.batchOptimization.profile", "aggressive")
   .load("s3://bucket/path")
 
@@ -224,7 +206,7 @@ df.groupBy("category").count().show()
 #### Example 3: Custom Parameters
 ```scala
 // Fine-tune optimization parameters
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.read.batchOptimization.profile", "balanced")
   .option("spark.indextables.read.batchOptimization.maxRangeSize", "32M")
   .option("spark.indextables.read.batchOptimization.gapTolerance", "2M")
@@ -237,7 +219,7 @@ df.count()  // Optimized with custom parameters
 #### Example 4: Conservative Profile for Memory-Constrained Environments
 ```scala
 // Smaller memory footprint, fewer concurrent requests
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.read.batchOptimization.profile", "conservative")
   .load("s3://bucket/path")
 
@@ -247,7 +229,7 @@ df.filter($"status" === "active").show()
 #### Example 5: Disable Optimization for Debugging
 ```scala
 // Turn off optimization completely
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.read.batchOptimization.enabled", "false")
   .load("s3://bucket/path")
 
@@ -260,7 +242,7 @@ df.show()  // Standard retrieval without optimization
 spark.conf.set("spark.indextables.read.batchOptimization.profile", "aggressive")
 spark.conf.set("spark.indextables.read.adaptiveTuning.enabled", "true")
 
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 // All queries automatically use aggressive optimization
 df.filter($"date" >= "2024-01-01").count()
 ```
@@ -283,26 +265,26 @@ case class User(name: String, age: Int, city: String)
 val df1 = Seq((1, User("Alice", 30, "NYC"))).toDF("id", "user")
 
 // Default: full mode (all features including fast fields for range queries/aggregations)
-df1.write.format("indextables").save("s3://bucket/path1")
+df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path1")
 
 // Optional: Minimal mode (smaller index, no range queries/aggregations)
-df1.write.format("indextables")
+df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.json.mode", "minimal")
   .save("s3://bucket/path1-minimal")
 
 // Array - automatic detection
 val df2 = Seq((1, Seq("tag1", "tag2", "tag3"))).toDF("id", "tags")
-df2.write.format("indextables").save("s3://bucket/path2")
+df2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path2")
 
 // Map - automatic detection (keys converted to strings in JSON)
 val df3 = Seq(
   (1, Map("color" -> "red", "size" -> "large")),
   (2, Map(1 -> "first", 2 -> "second"))  // Integer keys supported
 ).toDF("id", "attributes")
-df3.write.format("indextables").save("s3://bucket/path3")
+df3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path3")
 
 // Read with filter pushdown (Struct fields)
-val result = spark.read.format("indextables")
+val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://bucket/path1")
   .filter($"user.name" === "Alice")  // Pushed down to tantivy
   .filter($"user.age" > 28)          // Pushed down to tantivy
@@ -313,12 +295,12 @@ val result = spark.read.format("indextables")
 ### Partitioned Datasets
 ```scala
 // Write
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("date", "hour")
   .save("s3://bucket/path")
 
 // Read with partition pruning
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 df.filter($"date" === "2024-01-01" && $"hour" === 10).show()
 ```
 
@@ -421,7 +403,7 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala
 // Enable automatic purge after every 10 writes
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.purgeOnWrite.enabled", "true")
   .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "10")
   .option("spark.indextables.purgeOnWrite.splitRetentionHours", "168")  // 7 days
@@ -429,7 +411,7 @@ df.write.format("indextables")
   .save("s3://bucket/path")
 
 // Enable purge after merge-on-write completes
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.mergeOnWrite.enabled", "true")
   .option("spark.indextables.purgeOnWrite.enabled", "true")
   .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
@@ -456,7 +438,7 @@ df.write.format("indextables")
 **Example: Automatic Hygiene Configuration**
 ```scala
 // Complete automatic table hygiene (merge + purge)
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   // Enable merge-on-write
   .option("spark.indextables.mergeOnWrite.enabled", "true")
   .option("spark.indextables.mergeOnWrite.targetSize", "4G")
@@ -479,10 +461,10 @@ spark.conf.set("spark.indextables.azure.accountName", "mystorageaccount")
 spark.conf.set("spark.indextables.azure.accountKey", "your-account-key")
 
 // Write (supports abfss://, wasbs://, abfs://)
-df.write.format("indextables").save("abfss://container/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("abfss://container/path")
 
 // Read
-val df = spark.read.format("indextables").load("abfss://container/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("abfss://container/path")
 ```
 
 ### Azure OAuth (Service Principal)
@@ -492,7 +474,7 @@ spark.conf.set("spark.indextables.azure.tenantId", "tenant-id")
 spark.conf.set("spark.indextables.azure.clientId", "client-id")
 spark.conf.set("spark.indextables.azure.clientSecret", "client-secret")
 
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("abfss://container@account.dfs.core.windows.net/path")
 ```
 
@@ -546,8 +528,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
   - Real S3/Azure purge-on-write tests available but require credentials
 
 ## Important Notes
-- **V2 DataSource API recommended**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for partition column indexing
-- **Auto-sizing**: V1 API auto-counts DataFrame; V2 requires explicit row count
+- **DataSource API**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations
 - **Field types**: String fields (default) get full filter pushdown; text fields require IndexQuery
 - **Statistics truncation**: Enabled by default to prevent transaction log bloat
 - **Working directories**: Automatic /local_disk0 detection on Databricks/EMR

@@ -55,8 +55,8 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "30")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Get AddActions from transaction log
@@ -149,8 +149,8 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "25")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       // Get transaction log
@@ -232,8 +232,8 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "20")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)
@@ -289,13 +289,13 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       complexData.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "30")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .partitionBy("partition_key")
         .save(tempPath)
 
       val df = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       // Complex query that will create many InputPartitions
@@ -366,8 +366,8 @@ class AQEInputPartitionValidationTest extends TestBase with Matchers {
         )
 
       data.write
-        .format("tantivy4spark")
-        .option("targetRecordsPerSplit", "16")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
         .save(tempPath)
 
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)

@@ -73,14 +73,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform COUNT(*) aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val countResult = df.agg(count(lit(1))).collect()
       val actualCount = countResult(0).getLong(0)
@@ -99,14 +99,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform COUNT(column) aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val countResult = df.agg(count("score")).collect()
       val actualCount = countResult(0).getLong(0)
@@ -125,14 +125,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform SUM aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val sumResult = df.agg(sum("score")).collect()
       val actualSum = sumResult(0).getLong(0)
@@ -152,14 +152,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform AVG aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val avgResult = df.agg(avg("score")).collect()
       val actualAvg = avgResult(0).getDouble(0)
@@ -179,14 +179,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform MIN aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val minResult = df.agg(min("score")).collect()
       val actualMin = minResult(0).getInt(0)
@@ -206,14 +206,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform MAX aggregation
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val maxResult = df.agg(max("score")).collect()
       val actualMax = maxResult(0).getInt(0)
@@ -233,14 +233,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform multiple aggregations
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       val result = df
         .agg(
@@ -277,14 +277,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform aggregations with WHERE clause
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Filter for scores > 20, should include docs with scores 30, 40, 50
       val result = df
@@ -314,14 +314,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and perform aggregations with complex WHERE clause
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Filter for category in ('category_a', 'category_b') AND score >= 20
       // Should include docs: doc2 (score=20), doc3 (score=30), doc4 (score=40)
@@ -456,14 +456,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data and create aggregation query
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Create a simple aggregation query
       val query = df.agg(sum("score").as("total_score"))
@@ -503,14 +503,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,rating")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read data
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Test COUNT(*) without filters - should potentially use transaction log optimization
       val countQuery = df.agg(count(lit(1)))
@@ -651,14 +651,14 @@ class SimpleAggregatePushdownTest extends TestBase {
 
         // Write test data
         testData.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.indexing.typemap.category", "string")
           .option("spark.indextables.indexing.fastfields", "score,rating")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
 
         // Read data and create aggregation query
-        val df = spark.read.format("tantivy4spark").load(tempPath)
+        val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
         // Test multiple aggregation types
         val queries = Seq(
@@ -733,7 +733,7 @@ class SimpleAggregatePushdownTest extends TestBase {
 
       // Write test data with string fields and fast fields
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.referrer", "string")
         .option("spark.indextables.indexing.typemap.status", "string")
         .option("spark.indextables.indexing.fastfields", "referrer,status,response_time")
@@ -741,7 +741,7 @@ class SimpleAggregatePushdownTest extends TestBase {
         .save(tempPath)
 
       // Read data and perform aggregations with exact match filter
-      val df = spark.read.format("tantivy4spark").load(tempPath)
+      val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempPath)
 
       // Filter for exact match: referrer === 'myhost.com'
       // Should include only 4 docs: doc1, doc2, doc3, doc6

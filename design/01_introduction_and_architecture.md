@@ -82,7 +82,7 @@ IndexTables4Spark implements the modern **Spark DataSource V2 API** (introduced 
 - **Statistics reporting**: Table statistics for Spark's cost-based optimizer
 
 **V1 API Deprecation:**
-> **IMPORTANT:** The legacy V1 DataSource API (`format("indextables")`) is deprecated and scheduled for removal. All new code should use the V2 API (`format("io.indextables.spark.core.IndexTables4SparkTableProvider")`). See Section 2.3 for migration details.
+> **IMPORTANT:** The legacy V1 DataSource API (`format("io.indextables.spark.core.IndexTables4SparkTableProvider")`) is deprecated and scheduled for removal. All new code should use the V2 API (`format("io.indextables.spark.core.IndexTables4SparkTableProvider")`). See Section 2.3 for migration details.
 
 **Key Difference:** V2 API **indexes partition columns**, while V1 did not. This enables full-text search across partitioned datasets.
 

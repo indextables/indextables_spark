@@ -127,7 +127,7 @@ class ComplexCompoundQueriesTest extends TestBase {
       // Write comprehensive data - should succeed now
       println("💾 Writing data...")
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -136,14 +136,14 @@ class ComplexCompoundQueriesTest extends TestBase {
       // Read data back and test complex compound queries
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
-      println(s"📊 Read back ${readData.count()} rows")
+      println(s"📊 Read back ${readData.limit(1000).collect().length} rows")
       println(s"📋 Read schema: ${readData.schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
 
       // Verify data was written and can be read
-      readData.count() should be > 0L
+      readData.limit(1000).collect().length should be > 0
 
       println("\n🔍 Testing complex compound queries...")
 
@@ -188,11 +188,12 @@ class ComplexCompoundQueriesTest extends TestBase {
       )
 
       // Execute queries to verify they don't crash (results may vary based on filter pushdown implementation)
+      // Use limit().collect().length instead of count() since some filters (contains, startsWith) are unsupported
       complexQueries.zipWithIndex.foreach {
         case (query, index) =>
           println(s"  🔎 Executing complex query ${index + 1}...")
           noException should be thrownBy {
-            val count = query.count()
+            val count = query.limit(1000).collect().length
             println(s"    Found $count results")
           }
       }

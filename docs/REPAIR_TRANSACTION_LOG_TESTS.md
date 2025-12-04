@@ -33,12 +33,12 @@ test("repaired transaction log should produce identical results after replacemen
       ("doc3", "content three", 300)
     ).toDF("id", "content", "score")
 
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Read original table and collect results
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val originalResults = originalDf.orderBy("id").collect()
     val originalCount = originalDf.count()
 
@@ -66,7 +66,7 @@ test("repaired transaction log should produce identical results after replacemen
     fs.rename(repairedLogPath, originalLogPath)
 
     // 6. Read table with repaired transaction log
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedResults = repairedDf.orderBy("id").collect()
     val repairedCount = repairedDf.count()
 
@@ -106,12 +106,12 @@ test("repaired transaction log should exclude missing splits and remain readable
     val data = (1 to 100).map(i => (s"doc$i", s"content $i", i))
       .toDF("id", "content", "score")
 
-    data.repartition(5).write.format("indextables")
+    data.repartition(5).write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Read original count
-    val originalCount = spark.read.format("indextables").load(tablePath).count()
+    val originalCount = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath).count()
     assert(originalCount === 100)
 
     // 3. Delete 2 split files to simulate missing files
@@ -151,7 +151,7 @@ test("repaired transaction log should exclude missing splits and remain readable
     fs.rename(repairedLogPath, originalLogPath)
 
     // 7. Read table with repaired transaction log (should succeed)
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedCount = repairedDf.count()
 
     // 8. Validate reduced count (fewer documents due to missing splits)
@@ -184,20 +184,20 @@ test("repaired transaction log should consolidate multiple append transactions")
 
     // 1. Create initial table
     val data1 = Seq(("doc1", "content1", 100)).toDF("id", "content", "score")
-    data1.write.format("indextables")
+    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Append more data (transaction 2)
     val data2 = Seq(("doc2", "content2", 200)).toDF("id", "content", "score")
-    data2.write.format("indextables").mode("append").save(tablePath)
+    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
 
     // 3. Append more data (transaction 3)
     val data3 = Seq(("doc3", "content3", 300)).toDF("id", "content", "score")
-    data3.write.format("indextables").mode("append").save(tablePath)
+    data3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
 
     // 4. Verify original table has 3 documents
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val originalCount = originalDf.count()
     assert(originalCount === 3)
     val originalResults = originalDf.orderBy("id").collect()
@@ -236,7 +236,7 @@ test("repaired transaction log should consolidate multiple append transactions")
     fs.rename(repairedLogPath, originalLogPath)
 
     // 9. Read table with consolidated transaction log
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedCount = repairedDf.count()
     val repairedResults = repairedDf.orderBy("id").collect()
 
@@ -279,7 +279,7 @@ test("repaired transaction log should preserve partition structure") {
       .save(tablePath)
 
     // 2. Read original with partition pruning
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val filteredOriginal = originalDf
       .filter($"load_date" === "2024-01-01" && $"load_hour" === 10)
     val originalCount = filteredOriginal.count()
@@ -304,7 +304,7 @@ test("repaired transaction log should preserve partition structure") {
     fs.rename(repairedLogPath, originalLogPath)
 
     // 5. Read table with repaired transaction log
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
     // 6. Validate partition pruning still works
     val filteredRepaired = repairedDf
@@ -341,23 +341,23 @@ test("repaired transaction log should respect overwrite boundaries") {
 
     // 1. Create initial table
     val data1 = Seq(("old1", "old content", 100)).toDF("id", "content", "score")
-    data1.write.format("indextables")
+    data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Append data
     val data2 = Seq(("old2", "old content 2", 200)).toDF("id", "content", "score")
-    data2.write.format("indextables").mode("append").save(tablePath)
+    data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(tablePath)
 
     // 3. Overwrite table (should make old1/old2 invisible)
     val data3 = Seq(
       ("new1", "new content", 300),
       ("new2", "new content 2", 400)
     ).toDF("id", "content", "score")
-    data3.write.format("indextables").mode("overwrite").save(tablePath)
+    data3.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
     // 4. Verify only new data is visible
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val originalCount = originalDf.count()
     assert(originalCount === 2)
 
@@ -384,7 +384,7 @@ test("repaired transaction log should respect overwrite boundaries") {
     fs.rename(repairedLogPath, originalLogPath)
 
     // 7. Read table with repaired transaction log
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedCount = repairedDf.count()
     assert(repairedCount === 2)
 
@@ -418,13 +418,13 @@ test("repaired transaction log should support IndexQuery operations") {
       ("doc3", "spark sql and dataframes", 300)
     ).toDF("id", "content", "score")
 
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Test IndexQuery on original table
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val originalSparkQuery = originalDf
       .filter($"content" indexquery "spark")
       .select("id")
@@ -452,7 +452,7 @@ test("repaired transaction log should support IndexQuery operations") {
     fs.rename(repairedLogPath, originalLogPath)
 
     // 5. Test IndexQuery on repaired table
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedSparkQuery = repairedDf
       .filter($"content" indexquery "spark")
       .select("id")
@@ -505,12 +505,12 @@ test("repaired transaction log should support aggregate pushdown") {
       ("doc4", "content4", 400)
     ).toDF("id", "content", "score")
 
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
     // 2. Test aggregations on original table
-    val originalDf = spark.read.format("indextables").load(tablePath)
+    val originalDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val originalCount = originalDf.count()
     val originalSum = originalDf.agg(sum("score")).collect()(0).getLong(0)
     val originalAvg = originalDf.agg(avg("score")).collect()(0).getDouble(0)
@@ -537,7 +537,7 @@ test("repaired transaction log should support aggregate pushdown") {
     fs.rename(repairedLogPath, originalLogPath)
 
     // 5. Test aggregations on repaired table
-    val repairedDf = spark.read.format("indextables").load(tablePath)
+    val repairedDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val repairedCount = repairedDf.count()
     val repairedSum = repairedDf.agg(sum("score")).collect()(0).getLong(0)
     val repairedAvg = repairedDf.agg(avg("score")).collect()(0).getDouble(0)
@@ -578,7 +578,7 @@ test("repair should reject target location that already exists") {
 
     // 1. Create original table
     val data = Seq(("doc1", "content1", 100)).toDF("id", "content", "score")
-    data.write.format("indextables").save(tablePath)
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(tablePath)
 
     // 2. Create existing target directory with content
     val fs = new Path(repairedPath).getFileSystem(spark.sessionState.newHadoopConf())

@@ -61,7 +61,7 @@ class SimpleTermQueryTest extends TestBase {
       // Write data using tantivy4spark
       println("💾 Writing data...")
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 

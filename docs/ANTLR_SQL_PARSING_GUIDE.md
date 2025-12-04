@@ -1,6 +1,6 @@
 # ANTLR SQL Parsing Implementation Guide
 
-Based on implementing custom MERGE SPLITS SQL command parsing for Tantivy4Spark using ANTLR 4.9.3.
+Based on implementing custom MERGE SPLITS SQL command parsing for IndexTables4Spark using ANTLR 4.9.3.
 
 ## Overview
 
@@ -25,11 +25,11 @@ Custom SQL Command → ANTLR Grammar → AST Builder → Spark LogicalPlan
 
 ### 1. ANTLR Grammar File (.g4)
 
-**File**: `src/main/antlr4/com/tantivy4spark/sql/parser/Tantivy4SparkSqlBase.g4`
+**File**: `src/main/antlr4/io/indextables/spark/sql/parser/IndexTables4SparkSqlBase.g4`
 
 **Key Grammar Patterns**:
 ```antlr
-grammar Tantivy4SparkSqlBase;
+grammar IndexTables4SparkSqlBase;
 
 // Main entry point
 singleStatement
@@ -73,11 +73,11 @@ PRECOMMIT: 'PRECOMMIT';
 
 ### 2. AST Builder (Parse Tree → LogicalPlan)
 
-**File**: `src/main/scala/com/tantivy4spark/sql/parser/Tantivy4SparkSqlAstBuilder.scala`
+**File**: `src/main/scala/io/indextables/spark/sql/parser/IndexTables4SparkSqlAstBuilder.scala`
 
 **Key Implementation Pattern**:
 ```scala
-class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef] {
+class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor[AnyRef] {
   
   // CRITICAL: Override visitSingleStatement to delegate to child
   override def visitSingleStatement(ctx: SingleStatementContext): AnyRef = {
@@ -118,12 +118,12 @@ class Tantivy4SparkSqlAstBuilder extends Tantivy4SparkSqlBaseBaseVisitor[AnyRef]
 
 ### 3. Parser Wrapper (Delegation Pattern)
 
-**File**: `src/main/scala/com/tantivy4spark/sql/Tantivy4SparkSqlParser.scala`
+**File**: `src/main/scala/io/indextables/spark/sql/IndexTables4SparkSqlParser.scala`
 
 **Key Implementation Pattern**:
 ```scala
-class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
-  private val astBuilder = new Tantivy4SparkSqlAstBuilder()
+class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
+  private val astBuilder = new IndexTables4SparkSqlAstBuilder()
 
   override def parsePlan(sqlText: String): LogicalPlan = {
     try {
@@ -149,13 +149,13 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
   }
 
   // ANTLR parsing with error handling
-  private def parse[T](command: String)(toResult: Tantivy4SparkSqlBaseParser => T): T = {
-    val lexer = new Tantivy4SparkSqlBaseLexer(CharStreams.fromString(command))
+  private def parse[T](command: String)(toResult: IndexTables4SparkSqlBaseParser => T): T = {
+    val lexer = new IndexTables4SparkSqlBaseLexer(CharStreams.fromString(command))
     lexer.removeErrorListeners()
     lexer.addErrorListener(ParseErrorListener)
 
     val tokenStream = new CommonTokenStream(lexer)
-    val parser = new Tantivy4SparkSqlBaseParser(tokenStream)
+    val parser = new IndexTables4SparkSqlBaseParser(tokenStream)
     parser.removeErrorListeners()
     parser.addErrorListener(ParseErrorListener)
 
@@ -294,7 +294,7 @@ override def visitMergeSplitsTable(ctx: MergeSplitsTableContext): LogicalPlan = 
 ### 3. Testing Approach
 ```scala
 // Test ANTLR parsing directly
-val parser = new Tantivy4SparkSqlParser(sparkParser)
+val parser = new IndexTables4SparkSqlParser(sparkParser)
 val result = parser.parsePlan("MERGE SPLITS '/path'")
 assert(result.isInstanceOf[MergeSplitsCommand])
 
@@ -314,10 +314,10 @@ assert(!sparkResult.isInstanceOf[MergeSplitsCommand])
 
 ### Spark Session Extension
 ```scala
-class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
+class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
   override def apply(extensions: SparkSessionExtensions): Unit = {
     extensions.injectParser { (_, parser) =>
-      new Tantivy4SparkSqlParser(parser)
+      new IndexTables4SparkSqlParser(parser)
     }
   }
 }
@@ -326,7 +326,7 @@ class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
 ### Registration
 ```scala
 val spark = SparkSession.builder()
-  .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
   .getOrCreate()
 ```
 
@@ -340,7 +340,7 @@ val spark = SparkSession.builder()
 
 ## Reference Implementation
 
-This guide is based on the successful implementation of MERGE SPLITS command parsing for Tantivy4Spark, achieving:
+This guide is based on the successful implementation of MERGE SPLITS command parsing for IndexTables4Spark, achieving:
 - 100% ANTLR grammar matching for target SQL syntax  
 - Seamless integration with Spark's existing SQL parser
 - 50% improvement in test success rate after implementing visitor pattern fix

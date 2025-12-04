@@ -77,10 +77,10 @@ class SplitLocationTrackingTest extends TestBase with BeforeAndAfterEach {
 
       // Write data using IndexTables4Spark
       val tablePath = tempDir.toString
-      df.write.format("tantivy4spark").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Read data back - this should record split access
-      val readDf  = spark.read.format("tantivy4spark").load(tablePath)
+      val readDf  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
       val results = readDf.collect()
 
       // Verify data was read correctly
@@ -106,7 +106,7 @@ class SplitLocationTrackingTest extends TestBase with BeforeAndAfterEach {
 
       // Write data
       val tablePath = tempDir.toString
-      df.write.format("tantivy4spark").save(tablePath)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tablePath)
 
       // Manually record a split access to simulate caching
       val fakeSplitPath = s"$tablePath/part-00000-0.split"

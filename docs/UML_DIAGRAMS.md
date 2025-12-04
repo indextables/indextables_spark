@@ -1,4 +1,4 @@
-# UML Diagrams for Tantivy4Spark
+# UML Diagrams for IndexTables4Spark
 
 ## Table of Contents
 
@@ -56,20 +56,20 @@ classDiagram
         +build() Write
     }
 
-    %% Tantivy4Spark Implementation Classes
-    class Tantivy4SparkDataSource {
+    %% IndexTables4Spark Implementation Classes
+    class IndexTables4SparkDataSource {
         +shortName() String
         +createRelation(SQLContext, Map[String,String]) BaseRelation
         +createRelation(SQLContext, SaveMode, Map[String,String], DataFrame) BaseRelation
     }
 
-    class Tantivy4SparkTableProvider {
+    class IndexTables4SparkTableProvider {
         +inferSchema(CaseInsensitiveStringMap) StructType
         +getTable(StructType, Transform[], CaseInsensitiveStringMap) Table
         -readSchemaFromPath(String) StructType
     }
 
-    class Tantivy4SparkTable {
+    class IndexTables4SparkTable {
         -schema: StructType
         -path: String
         -properties: Map[String, String]
@@ -80,7 +80,7 @@ classDiagram
         +newWriteBuilder(LogicalWriteInfo) WriteBuilder
     }
 
-    class Tantivy4SparkScanBuilder {
+    class IndexTables4SparkScanBuilder {
         -schema: StructType
         -path: String
         -pushedFilters: Array[Filter]
@@ -90,7 +90,7 @@ classDiagram
         -convertFiltersToQuery(Filter[]) String
     }
 
-    class Tantivy4SparkScan {
+    class IndexTables4SparkScan {
         -schema: StructType
         -path: String
         -query: String
@@ -99,14 +99,14 @@ classDiagram
         +planInputPartitions() Array[InputPartition]
     }
 
-    class Tantivy4SparkWriteBuilder {
+    class IndexTables4SparkWriteBuilder {
         -schema: StructType
         -path: String
         -options: CaseInsensitiveStringMap
         +build() Write
     }
 
-    class Tantivy4SparkBatchWrite {
+    class IndexTables4SparkBatchWrite {
         -schema: StructType
         -path: String
         +createBatchTask(Int) DataWriterFactory
@@ -115,21 +115,21 @@ classDiagram
     }
 
     %% Relationships
-    DataSourceRegister <|-- Tantivy4SparkDataSource
-    RelationProvider <|-- Tantivy4SparkDataSource
-    CreatableRelationProvider <|-- Tantivy4SparkDataSource
+    DataSourceRegister <|-- IndexTables4SparkDataSource
+    RelationProvider <|-- IndexTables4SparkDataSource
+    CreatableRelationProvider <|-- IndexTables4SparkDataSource
 
-    TableProvider <|.. Tantivy4SparkTableProvider
-    Table <|.. Tantivy4SparkTable
-    ScanBuilder <|.. Tantivy4SparkScanBuilder
-    WriteBuilder <|.. Tantivy4SparkWriteBuilder
+    TableProvider <|.. IndexTables4SparkTableProvider
+    Table <|.. IndexTables4SparkTable
+    ScanBuilder <|.. IndexTables4SparkScanBuilder
+    WriteBuilder <|.. IndexTables4SparkWriteBuilder
 
-    Tantivy4SparkDataSource --> Tantivy4SparkTableProvider : creates
-    Tantivy4SparkTableProvider --> Tantivy4SparkTable : creates
-    Tantivy4SparkTable --> Tantivy4SparkScanBuilder : creates
-    Tantivy4SparkTable --> Tantivy4SparkWriteBuilder : creates
-    Tantivy4SparkScanBuilder --> Tantivy4SparkScan : builds
-    Tantivy4SparkWriteBuilder --> Tantivy4SparkBatchWrite : builds
+    IndexTables4SparkDataSource --> IndexTables4SparkTableProvider : creates
+    IndexTables4SparkTableProvider --> IndexTables4SparkTable : creates
+    IndexTables4SparkTable --> IndexTables4SparkScanBuilder : creates
+    IndexTables4SparkTable --> IndexTables4SparkWriteBuilder : creates
+    IndexTables4SparkScanBuilder --> IndexTables4SparkScan : builds
+    IndexTables4SparkWriteBuilder --> IndexTables4SparkBatchWrite : builds
 ```
 
 ### Search Engine and Native Integration
@@ -209,9 +209,9 @@ classDiagram
     TantivySearchEngine --> TantivyNative : uses
     TantivySearchEngine --> SchemaConverter : uses
     TantivySearchEngine --> RowConverter : uses
-    Tantivy4SparkScanBuilder --> FiltersToQueryConverter : uses
-    Tantivy4SparkScan --> TantivySearchEngine : creates
-    Tantivy4SparkBatchWrite --> TantivySearchEngine : creates
+    IndexTables4SparkScanBuilder --> FiltersToQueryConverter : uses
+    IndexTables4SparkScan --> TantivySearchEngine : creates
+    IndexTables4SparkBatchWrite --> TantivySearchEngine : creates
 ```
 
 ### Storage Strategy Pattern
@@ -448,8 +448,8 @@ classDiagram
 ```mermaid
 sequenceDiagram
     participant Client as Spark Application
-    participant DS as Tantivy4SparkDataSource
-    participant Table as Tantivy4SparkTable
+    participant DS as IndexTables4SparkDataSource
+    participant Table as IndexTables4SparkTable
     participant WB as WriteBuilder
     participant BatchWrite as BatchWrite
     participant TL as TransactionLog
@@ -457,7 +457,7 @@ sequenceDiagram
     participant JNI as TantivyNative
     participant Storage as StorageStrategy
 
-    Client->>DS: df.write.format("tantivy4spark").save(path)
+    Client->>DS: df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
     DS->>Table: newWriteBuilder(writeInfo)
     Table->>WB: create WriteBuilder
     WB->>BatchWrite: build()
@@ -495,15 +495,15 @@ sequenceDiagram
 sequenceDiagram
     participant Client as Spark SQL Engine
     participant DS as DataSource
-    participant Table as Tantivy4SparkTable
+    participant Table as IndexTables4SparkTable
     participant SB as ScanBuilder
-    participant Scan as Tantivy4SparkScan
+    participant Scan as IndexTables4SparkScan
     participant TL as TransactionLog
     participant SE as SearchEngine
     participant JNI as TantivyNative
     participant Storage as StorageStrategy
 
-    Client->>DS: spark.read.format("tantivy4spark").load(path)
+    Client->>DS: spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     DS->>Table: getTable()
     Table->>TL: getSchema()
     TL-->>Table: schema from transaction log
@@ -741,7 +741,7 @@ graph TB
     subgraph "Spark Cluster"
         subgraph "Driver Node"
             Driver[Spark Driver JVM]
-            DriverLibs[Tantivy4Spark JAR<br/>+ Dependencies]
+            DriverLibs[IndexTables4Spark JAR<br/>+ Dependencies]
         end
         
         subgraph "Executor Node 1"
@@ -806,7 +806,7 @@ graph TB
     subgraph "Region 1 - Primary"
         subgraph "Spark Cluster 1"
             SC1[Spark Cluster<br/>Master + Workers]
-            T4S1[Tantivy4Spark<br/>Deployment]
+            T4S1[IndexTables4Spark<br/>Deployment]
         end
         
         subgraph "Storage Layer 1"
@@ -818,7 +818,7 @@ graph TB
     subgraph "Region 2 - Secondary"
         subgraph "Spark Cluster 2" 
             SC2[Spark Cluster<br/>Master + Workers]
-            T4S2[Tantivy4Spark<br/>Deployment]
+            T4S2[IndexTables4Spark<br/>Deployment]
         end
         
         subgraph "Storage Layer 2"

@@ -31,7 +31,7 @@ indexqueryall()    → IndexQueryAllExpression → IndexQueryAllFilter → Split
 ## Component Specifications
 
 ### 1. IndexQueryAllExpression
-**File**: `src/main/scala/com/tantivy4spark/expressions/IndexQueryAllExpression.scala`
+**File**: `src/main/scala/io/indextables/spark/expressions/IndexQueryAllExpression.scala`
 
 ```scala
 case class IndexQueryAllExpression(child: Expression) extends UnaryExpression with Predicate {
@@ -54,7 +54,7 @@ case class IndexQueryAllExpression(child: Expression) extends UnaryExpression wi
 ```
 
 ### 2. IndexQueryAllFilter
-**File**: `src/main/scala/com/tantivy4spark/filters/IndexQueryAllFilter.scala`
+**File**: `src/main/scala/io/indextables/spark/filters/IndexQueryAllFilter.scala`
 
 ```scala
 case class IndexQueryAllFilter(queryString: String) {
@@ -65,7 +65,7 @@ case class IndexQueryAllFilter(queryString: String) {
 ```
 
 ### 3. SQL Parser Enhancement
-**File**: `src/main/scala/com/tantivy4spark/sql/Tantivy4SparkSqlParser.scala`
+**File**: `src/main/scala/io/indextables/spark/sql/IndexTables4SparkSqlParser.scala`
 
 Add function parsing capability:
 ```scala
@@ -90,7 +90,7 @@ override def parseExpression(sqlText: String): Expression = {
 ```
 
 ### 4. Filter Conversion Integration
-**File**: `src/main/scala/com/tantivy4spark/core/FiltersToQueryConverter.scala`
+**File**: `src/main/scala/io/indextables/spark/core/FiltersToQueryConverter.scala`
 
 ```scala
 case indexQueryAll: IndexQueryAllFilter =>
@@ -102,7 +102,7 @@ case indexQueryAll: IndexQueryAllFilter =>
 ```
 
 ### 5. Expression Utilities Update
-**File**: `src/main/scala/com/tantivy4spark/util/ExpressionUtils.scala`
+**File**: `src/main/scala/io/indextables/spark/util/ExpressionUtils.scala`
 
 ```scala
 def expressionToIndexQueryAllFilter(expr: Expression): Option[IndexQueryAllFilter] = {
@@ -121,7 +121,7 @@ def filterToIndexQueryAllExpression(filter: IndexQueryAllFilter): IndexQueryAllE
 ## Integration Points
 
 ### ScanBuilder Integration
-**File**: `src/main/scala/com/tantivy4spark/core/Tantivy4SparkScanBuilder.scala`
+**File**: `src/main/scala/io/indextables/spark/core/IndexTables4SparkScanBuilder.scala`
 
 ```scala
 override def pushedFilters(): Array[Filter] = {
@@ -156,7 +156,7 @@ WHERE indexqueryall('VERIZON OR T-MOBILE')
 
 ### Programmatic Usage
 ```scala
-import com.tantivy4spark.expressions.IndexQueryAllExpression
+import io.indextables.spark.expressions.IndexQueryAllExpression
 import org.apache.spark.unsafe.types.UTF8String
 
 // Create all-fields query expression
@@ -186,7 +186,7 @@ df.filter(allFieldsQuery).show()
 
 ### Test Files Structure
 ```
-src/test/scala/com/tantivy4spark/
+src/test/scala/io/indextables/spark/
 ├── expressions/
 │   └── IndexQueryAllExpressionTest.scala
 ├── util/
@@ -258,15 +258,15 @@ src/test/scala/com/tantivy4spark/
 ### Final Implementation Summary
 - **Core Components**: `IndexQueryAllExpression`, `IndexQueryAllFilter`, SQL parser integration
 - **Test Coverage**: 44 tests with 100% pass rate across 4 test suites
-- **Integration**: Complete filter pushdown integration with Tantivy4Spark V1 DataSource API
+- **Integration**: Complete filter pushdown integration with IndexTables4Spark V1 DataSource API
 - **Documentation**: Comprehensive documentation in CLAUDE.md, README.md, and this design document
 - **Usage**: Available via SQL function `indexqueryall('query_string')` and programmatic API
 
 ### Files Implemented
-- `src/main/scala/com/tantivy4spark/expressions/IndexQueryAllExpression.scala`
-- `src/main/scala/com/tantivy4spark/filters/IndexQueryAllFilter.scala`
-- Updates to `Tantivy4SparkSqlParser.scala`, `FiltersToQueryConverter.scala`, `ScanBuilder.scala`
-- `src/main/scala/com/tantivy4spark/util/ExpressionUtils.scala` (IndexQueryAll methods)
+- `src/main/scala/io/indextables/spark/expressions/IndexQueryAllExpression.scala`
+- `src/main/scala/io/indextables/spark/filters/IndexQueryAllFilter.scala`
+- Updates to `IndexTables4SparkSqlParser.scala`, `FiltersToQueryConverter.scala`, `ScanBuilder.scala`
+- `src/main/scala/io/indextables/spark/util/ExpressionUtils.scala` (IndexQueryAll methods)
 
 ### Test Suites
 - `IndexQueryAllIntegrationTest.scala` (7 tests) - End-to-end integration

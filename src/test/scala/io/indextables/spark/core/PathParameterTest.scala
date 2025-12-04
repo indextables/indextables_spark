@@ -30,7 +30,7 @@ class PathParameterTest extends TestBase {
       // Test direct path parameter usage - this should work the same as .option("path", tempPath)
       try {
         df.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode(SaveMode.Overwrite)
           .save(tempPath) // Direct path parameter instead of .option("path", tempPath)
 
@@ -53,7 +53,7 @@ class PathParameterTest extends TestBase {
       // Test direct path parameter usage - this should work the same as .option("path", tempPath)
       val exception = intercept[Exception] {
         spark.read
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(tempPath) // Direct path parameter instead of .option("path", tempPath)
           .count()
       }
@@ -70,7 +70,7 @@ class PathParameterTest extends TestBase {
     // Test write with S3 path
     val writeException = intercept[Exception] {
       createTestDataFrame().write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(s3Path)
     }
@@ -80,7 +80,7 @@ class PathParameterTest extends TestBase {
     // Test read with S3 path
     val readException = intercept[Exception] {
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(s3Path)
         .count()
     }
@@ -98,7 +98,7 @@ class PathParameterTest extends TestBase {
 
       // Direct path approach
       try {
-        df.write.format("tantivy4spark").mode(SaveMode.Overwrite).save(tempPath)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Overwrite).save(tempPath)
         directPathWorked = true
       } catch {
         case _: RuntimeException | _: UnsatisfiedLinkError =>
@@ -109,7 +109,7 @@ class PathParameterTest extends TestBase {
 
       // Option-based approach
       try {
-        df.write.format("tantivy4spark").mode(SaveMode.Overwrite).option("path", tempPath).save()
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Overwrite).option("path", tempPath).save()
         optionPathWorked = true
       } catch {
         case _: RuntimeException | _: UnsatisfiedLinkError =>

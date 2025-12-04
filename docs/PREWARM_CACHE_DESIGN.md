@@ -32,7 +32,7 @@ graph TD
 
 ```mermaid
 graph LR
-    A[Tantivy4SparkScan] --> B[PreWarmManager]
+    A[IndexTables4SparkScan] --> B[PreWarmManager]
     B --> C[BroadcastSplitLocalityManager]
     B --> D[Spark Task Distribution]
     D --> E[Executor: PreWarmTask]
@@ -46,7 +46,7 @@ graph LR
 
 ### 1. PreWarmManager
 
-**Location**: `src/main/scala/com/tantivy4spark/prewarm/PreWarmManager.scala`
+**Location**: `src/main/scala/io/indextables/spark/prewarm/PreWarmManager.scala`
 
 The central coordinator for all pre-warm operations:
 
@@ -57,12 +57,12 @@ The central coordinator for all pre-warm operations:
 
 ### 2. Integration Points
 
-#### Tantivy4SparkScan Enhancement
+#### IndexTables4SparkScan Enhancement
 - Added pre-warm phase in `planInputPartitions()`
 - Checks `spark.indextables.cache.prewarm.enabled` configuration
 - Executes pre-warm before partition creation
 
-#### Tantivy4SparkPartitionReader Enhancement
+#### IndexTables4SparkPartitionReader Enhancement
 - Added warmup future joining in `initialize()`
 - Generates consistent query hashes for future lookup
 - Logs success/failure of warmup joining
@@ -88,14 +88,14 @@ spark.indextables.cache.prewarm.enabled = true  // Default: enabled
 ```scala
 // Pre-warm is enabled by default - no configuration needed
 val df = spark.read
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://bucket/path")
 
 df.filter($"content" indexquery "machine learning").show()
 
 // Explicitly disable pre-warm if needed
 val dfNoPrewarm = spark.read
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.prewarm.enabled", "false")
   .load("s3://bucket/path")
 ```
@@ -122,7 +122,7 @@ Based on tantivy4java benchmarks:
 ### 1. Pre-Scan Phase (Driver)
 
 ```scala
-// In Tantivy4SparkScan.planInputPartitions()
+// In IndexTables4SparkScan.planInputPartitions()
 if (isPreWarmEnabled && filteredActions.nonEmpty) {
   val preWarmResult = PreWarmManager.executePreWarm(
     sparkContext,
@@ -172,7 +172,7 @@ def executePreWarmTask(task: PreWarmTask): PreWarmTaskResult = {
 ### 4. Post-Warm Future Joining
 
 ```scala
-// In Tantivy4SparkPartitionReader.initialize()
+// In IndexTables4SparkPartitionReader.initialize()
 if (isPreWarmEnabled) {
   val queryHash = generateQueryHash(allFilters)
   val warmupJoined = PreWarmManager.joinWarmupFuture(

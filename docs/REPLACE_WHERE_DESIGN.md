@@ -6,7 +6,7 @@ ReplaceWhere is a Delta Lake feature that allows selective replacement of data i
 
 ## Current State
 
-Tantivy4Spark currently supports:
+IndexTables4Spark currently supports:
 - **Overwrite mode**: Removes all existing files and replaces with new data
 - **Append mode**: Adds new files alongside existing data
 - **Partition tracking**: Transaction log captures partition values in ADD actions
@@ -74,7 +74,7 @@ def replaceWhere(addActions: Seq[AddAction], predicate: String): Long = {
 ```scala
 // User-facing API
 df.write
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("replaceWhere")
   .option("replaceWhere", "year=2023 AND month IN ('11', '12')")
   .save("/path/to/table")
@@ -82,7 +82,7 @@ df.write
 
 #### Internal DataSource Integration
 ```scala
-// In Tantivy4SparkDataSource
+// In IndexTables4SparkDataSource
 override def createWriter(
     jobId: String,
     schema: StructType,
@@ -93,7 +93,7 @@ override def createWriter(
   
   mode match {
     case SaveMode.Append if replaceWhereOption != null =>
-      new Tantivy4SparkReplaceWhereWriter(path, schema, replaceWhereOption, options)
+      new IndexTables4SparkReplaceWhereWriter(path, schema, replaceWhereOption, options)
     case _ =>
       // Existing logic for other modes
   }
@@ -138,8 +138,8 @@ ReplaceWhere operations will be recorded in the transaction log with this format
 4. Unit tests for predicate parsing and partition matching
 
 ### Phase 2: DataSource Integration
-1. Extend `Tantivy4SparkDataSource` to recognize replaceWhere mode
-2. Create `Tantivy4SparkReplaceWhereWriter` 
+1. Extend `IndexTables4SparkDataSource` to recognize replaceWhere mode
+2. Create `IndexTables4SparkReplaceWhereWriter` 
 3. Add validation for partitioned tables and predicate format
 4. Integration tests with simple partition predicates
 
@@ -175,7 +175,7 @@ test("should replace specific partitions with replaceWhere") {
   )
   
   initialData.write
-    .format("tantivy4spark")
+    .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
     .partitionBy("year", "month")
     .save(tablePath)
     
@@ -188,13 +188,13 @@ test("should replace specific partitions with replaceWhere") {
   )
   
   newData.write
-    .format("tantivy4spark")
+    .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
     .mode("replaceWhere")
     .option("replaceWhere", "year=1 AND month=0")
     .save(tablePath)
     
   // Verify only the specified partition was replaced
-  val result = spark.read.format("tantivy4spark").load(tablePath)
+  val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
   val year1Month0Count = result.filter($"year" === "1" && $"month" === "0" && $"data" === "replaced").count()
   val otherPartitionsCount = result.filter(!($"year" === "1" && $"month" === "0")).count()
   
@@ -215,7 +215,7 @@ test("should replace specific partitions with replaceWhere") {
 - **Delta Lake**: Follow Delta Lake's replaceWhere semantics for consistency
 - **Spark Versions**: Compatible with Spark 3.0+ DataSource V2 API
 - **Storage**: Works with all supported storage backends (local, HDFS, S3)
-- **Existing Tables**: Can be applied to any partitioned Tantivy4Spark table
+- **Existing Tables**: Can be applied to any partitioned IndexTables4Spark table
 
 ## Limitations
 

@@ -101,7 +101,7 @@ spark.conf.set("spark.indextables.indexWriter.batchSize", "40000")
 // Value now: 40000
 
 // 5. DataFrame options (highest precedence)
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.batchSize", "50000")
   .save("s3://bucket/path")
 // Final value: 50000
@@ -113,14 +113,14 @@ DataFrame options provide per-operation configuration overrides:
 
 ```scala
 // Write-specific configuration
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.heapSize", "500000000")  // 500MB
   .option("spark.indextables.indexWriter.batchSize", "20000")
   .option("spark.indextables.s3.maxConcurrency", "8")
   .save("s3://bucket/high-priority-writes")
 
 // Read-specific configuration
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.maxSize", "500000000")  // 500MB cache
   .option("spark.indextables.cache.directoryPath", "/fast-nvme/cache")
   .load("s3://bucket/high-priority-reads")
@@ -371,14 +371,14 @@ Controls index creation behavior during write operations:
 
 ```scala
 // Large batch processing
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.heapSize", "500M")
   .option("spark.indextables.indexWriter.batchSize", "50000")
   .option("spark.indextables.indexWriter.threads", "4")
   .save("s3://bucket/large-dataset")
 
 // Memory filesystem for extreme performance
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.tempDirectoryPath", "/dev/shm/tantivy")
   .option("spark.indextables.indexWriter.heapSize", "1G")
   .save("s3://bucket/high-performance")
@@ -400,13 +400,13 @@ Controls automatic write optimization and split sizing:
 
 ```scala
 // Auto-sizing based on historical analysis
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "200M")
   .save("s3://bucket/auto-sized-table")
 
 // Manual optimization with large splits
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.optimizeWrite.enabled", "true")
   .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "5000000")
   .save("s3://bucket/large-splits")
@@ -428,7 +428,7 @@ Controls how fields are indexed and tokenized:
 
 ```scala
 // Mixed field types with fast fields
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.title", "string")      // Exact matching
   .option("spark.indextables.indexing.typemap.content", "text")      // Full-text search
   .option("spark.indextables.indexing.typemap.metadata", "json")     // JSON indexing
@@ -437,7 +437,7 @@ df.write.format("indextables")
   .save("s3://bucket/mixed-types")
 
 // Custom tokenizers
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.tokenizer.title", "raw")        // No tokenization
   .option("spark.indextables.indexing.tokenizer.content", "default")  // Standard tokenizer
   .save("s3://bucket/custom-tokenization")
@@ -465,7 +465,7 @@ spark.conf.set("spark.indextables.cache.maxSize", "1000000000")  // 1GB
 spark.conf.set("spark.indextables.cache.directoryPath", "/fast-nvme/cache")
 
 // Prewarm cache for repeated queries
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.prewarm.enabled", "true")
   .load("s3://bucket/frequently-accessed")
 ```
@@ -485,14 +485,14 @@ Controls S3 upload performance:
 
 ```scala
 // High-throughput uploads for large files
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.s3.maxConcurrency", "12")
   .option("spark.indextables.s3.partSize", "268435456")  // 256MB parts
   .option("spark.indextables.s3.multipartThreshold", "52428800")  // 50MB
   .save("s3://bucket/high-throughput")
 
 // Conservative settings for network-constrained environments
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.s3.maxConcurrency", "2")
   .option("spark.indextables.s3.partSize", "33554432")  // 32MB parts
   .save("s3://bucket/slow-network")
@@ -518,7 +518,7 @@ Controls transaction log performance and compaction:
 
 ```scala
 // High-frequency writes with aggressive checkpointing
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.checkpoint.enabled", "true")
   .option("spark.indextables.checkpoint.interval", "5")       // Every 5 transactions
   .option("spark.indextables.checkpoint.parallelism", "8")    // 8 parallel threads
@@ -590,13 +590,13 @@ Controls AWS credential resolution for S3 storage:
 
 ```scala
 // Explicit credentials
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.aws.accessKey", "AKIA...")
   .option("spark.indextables.aws.secretKey", "secret...")
   .save("s3://bucket/path")
 
 // Session token support
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.aws.accessKey", "ASIA...")
   .option("spark.indextables.aws.secretKey", "secret...")
   .option("spark.indextables.aws.sessionToken", "token...")
@@ -632,7 +632,7 @@ spark.conf.set("spark.indextables.aws.credentialsProviderClass",
 
 ```scala
 // Account Key Authentication
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.azure.accountName", "mystorageaccount")
   .option("spark.indextables.azure.accountKey", "your-account-key")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
@@ -643,17 +643,17 @@ spark.conf.set("spark.indextables.azure.tenantId", "your-tenant-id")
 spark.conf.set("spark.indextables.azure.clientId", "your-client-id")
 spark.conf.set("spark.indextables.azure.clientSecret", "your-client-secret")
 
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
 
 // Connection String Authentication
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.azure.connectionString",
     "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
 
 // Credentials from ~/.azure/credentials file (automatic)
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("abfss://mycontainer@mystorageaccount.dfs.core.windows.net/data")
 ```
 
@@ -703,7 +703,7 @@ spark.indextables.s3.maxConcurrency=8                      // High concurrency
 
 **Bulk Data Loading**:
 ```scala
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.heapSize", "1G")
   .option("spark.indextables.indexWriter.batchSize", "100000")
   .option("spark.indextables.indexWriter.threads", "8")
@@ -715,7 +715,7 @@ df.write.format("indextables")
 
 **Incremental Updates**:
 ```scala
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append")
   .option("spark.indextables.indexWriter.batchSize", "10000")
   .option("spark.indextables.checkpoint.interval", "5")
@@ -724,7 +724,7 @@ df.write.format("indextables")
 
 **Query-Heavy Workloads**:
 ```scala
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.maxSize", "5000000000")  // 5GB cache
   .option("spark.indextables.cache.prewarm.enabled", "true")
   .option("spark.indextables.docBatch.enabled", "true")
@@ -814,7 +814,7 @@ Common configuration errors and their resolutions:
 
 ```scala
 try {
-  df.write.format("indextables")
+  df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
     .option("spark.indextables.indexWriter.batchSize", "-500")  // Invalid
     .save("s3://bucket/path")
 } catch {
@@ -840,7 +840,7 @@ spark.conf.set("spark.indextables.cache.maxSize", "200000000")  // 200MB
 spark.conf.set("spark.indextables.cache.maxSize", "1000000000")  // 1GB
 
 // Next read operation will use new cache size
-val df = spark.read.format("indextables").load("s3://bucket/path")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
 ```
 
 **Note**: Some configurations are read during specific lifecycle events:
@@ -878,7 +878,7 @@ To change table properties, you must update the table metadata:
 ```sql
 -- Not supported directly - would require ALTER TABLE implementation
 -- Workaround: Use DataFrame options to override
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append")
   .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "3000000")
   .save("s3://bucket/events")

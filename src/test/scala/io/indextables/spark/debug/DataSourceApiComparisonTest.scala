@@ -37,19 +37,15 @@ class DataSourceApiComparisonTest extends TestBase {
         println(s"✗ NO PUSHDOWN DETECTED - filters will be applied by Spark after reading all data")
     }
 
-    // Check which DataSource API is being used
-    if (planString.contains("IndexTables4SparkRelation")) {
-      println(s"📋 Using DataSource V1 API (RelationProvider)")
-    } else if (planString.contains("BatchScanExec") || planString.contains("Scan tantivy4spark")) {
-      println(s"📋 Using DataSource V2 API (TableProvider)")
+    // Check that DataSource V2 API is being used
+    if (planString.contains("BatchScanExec") || planString.contains("Scan")) {
+      println(s"Using DataSource V2 API (TableProvider)")
     }
 
     // Show the execution strategy being used
     val executionPlan = queryExecution.toString
     if (executionPlan.contains("DataSourceV2Strategy")) {
-      println(s"🚀 Execution Strategy: DataSourceV2Strategy")
-    } else if (executionPlan.contains("DataSourceV1Strategy")) {
-      println(s"🚀 Execution Strategy: DataSourceV1Strategy")
+      println(s"Execution Strategy: DataSourceV2Strategy")
     }
 
     println(s"Physical plan: $planString")
@@ -72,13 +68,13 @@ class DataSourceApiComparisonTest extends TestBase {
       ).toDF("id", "review_text", "category")
 
       // Save the data
-      testData.write.format("tantivy4spark").mode("overwrite").save(testPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
 
       // Test with current default configuration
       println("=== TESTING WITH DEFAULT SPARK CONFIGURATION ===")
 
       // Read back the data for DataFrame operations
-      val readDf = spark.read.format("tantivy4spark").load(testPath)
+      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
       readDf.createOrReplaceTempView("api_test_table")
 
       // Test 1: DataFrame API
@@ -113,7 +109,7 @@ class DataSourceApiComparisonTest extends TestBase {
       println(s"Results: ${sqlResultsV2.length} rows")
 
       // Test 4: DataFrame with forced V2
-      val dfQueryV2 = spark.read.format("tantivy4spark").load(testPath).filter($"review_text".contains("dog"))
+      val dfQueryV2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).filter($"review_text".contains("dog"))
       analyzePushdown("DataFrame API (.filter) - Forced V2", dfQueryV2.queryExecution)
       val dfResultsV2 = dfQueryV2.collect()
       println(s"Results: ${dfResultsV2.length} rows")
@@ -163,9 +159,9 @@ class DataSourceApiComparisonTest extends TestBase {
         }
         .toDF("id", "content", "category")
 
-      testData.write.format("tantivy4spark").mode("overwrite").save(testPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
 
-      val readDf = spark.read.format("tantivy4spark").load(testPath)
+      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
       readDf.createOrReplaceTempView("performance_test")
 
       println(s"Created test dataset with ${testData.count()} rows")
@@ -176,7 +172,8 @@ class DataSourceApiComparisonTest extends TestBase {
       // DataFrame approach
       val startDf  = System.currentTimeMillis()
       val dfResult = readDf.filter($"content".contains("dog"))
-      val dfCount  = dfResult.count() // Force evaluation
+      // Use limit().collect().length since StringContains is unsupported for pushdown
+      val dfCount  = dfResult.limit(2000).collect().length
       val endDf    = System.currentTimeMillis()
 
       analyzePushdown("DataFrame .contains('dog')", dfResult.queryExecution)
@@ -185,7 +182,8 @@ class DataSourceApiComparisonTest extends TestBase {
       // SQL approach
       val startSql  = System.currentTimeMillis()
       val sqlResult = spark.sql("SELECT * FROM performance_test WHERE content LIKE '%dog%'")
-      val sqlCount  = sqlResult.count() // Force evaluation
+      // Use limit().collect().length since LIKE is unsupported for pushdown
+      val sqlCount  = sqlResult.limit(2000).collect().length
       val endSql    = System.currentTimeMillis()
 
       analyzePushdown("SQL LIKE '%dog%'", sqlResult.queryExecution)

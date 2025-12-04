@@ -45,7 +45,7 @@ The provider uses **process-global static variables** for the WorkspaceClient an
 ### 1. Class Structure
 
 ```java
-package com.tantivy4spark.auth.unity;
+package io.indextables.spark.auth.unity;
 
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSCredentialsProvider;
@@ -270,7 +270,7 @@ private void logCredentialRequest(String path, String operation, boolean success
 ## Configuration Properties
 
 ### Required Configuration
-- `spark.indextables.aws.credentialsProviderClass` - Set to `com.tantivy4spark.auth.unity.UnityCredentialProvider`
+- `spark.indextables.aws.credentialsProviderClass` - Set to `io.indextables.spark.auth.unity.UnityCredentialProvider`
 
 ### Databricks Authentication
 The provider automatically inherits Databricks credentials from the environment in the following order:
@@ -290,18 +290,18 @@ The provider automatically inherits Databricks credentials from the environment 
 ```scala
 // Spark configuration (Databricks credentials inherited from environment)
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-               "com.tantivy4spark.auth.unity.UnityCredentialProvider")
+               "io.indextables.spark.auth.unity.UnityCredentialProvider")
 
 // Optional: Configure cache settings
 spark.conf.set("spark.indextables.unity.cache.ttl.minutes", "30")
 spark.conf.set("spark.indextables.unity.cache.maxSize", "200")
 
-// Use with Tantivy4Spark
-df.write.format("tantivy4spark")
+// Use with IndexTables4Spark
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("s3://my-unity-catalog-bucket/path")
 
 // Monitor cache performance (in driver code)
-import com.tantivy4spark.auth.unity.UnityCredentialProvider
+import io.indextables.spark.auth.unity.UnityCredentialProvider
 val stats = UnityCredentialProvider.getCacheStatistics()
 println(s"Cache hit rate: ${stats.hitRate()}")
 ```

@@ -349,14 +349,14 @@ private def canFilterMatchFile(
 
 ```scala
 // Automatic optimal configuration (no configuration needed)
-df.write.format("indextables").save("s3://bucket/data")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/data")
 ```
 
 #### Conservative Truncation (Shorter Threshold)
 
 ```scala
 // Truncate at 512 characters instead of 1024
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.enabled", "true")
   .option("spark.indextables.stats.truncation.maxLength", "512")
   .option("spark.indextables.stats.truncation.strategy", "drop")
@@ -367,7 +367,7 @@ df.write.format("indextables")
 
 ```scala
 // Use truncate strategy for debugging purposes
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.strategy", "truncate")
   .option("spark.indextables.stats.truncation.maxLength", "200")
   .save("s3://bucket/data")
@@ -377,7 +377,7 @@ df.write.format("indextables")
 
 ```scala
 // Disable for testing or compatibility reasons
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.enabled", "false")
   .save("s3://bucket/data")
 ```
@@ -391,8 +391,8 @@ spark.conf.set("spark.indextables.stats.truncation.maxLength", "1024")
 spark.conf.set("spark.indextables.stats.truncation.strategy", "drop")
 
 // All subsequent writes use these settings
-df1.write.format("indextables").save("s3://bucket/data1")
-df2.write.format("indextables").save("s3://bucket/data2")
+df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/data1")
+df2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/data2")
 ```
 
 ### 7. Monitoring and Observability
@@ -549,7 +549,7 @@ test("write and read table with truncated statistics") {
     ).toDF("id", "long_text", "score")
 
     // Write with default truncation
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
@@ -561,7 +561,7 @@ test("write and read table with truncated statistics") {
     assert(totalSize < 100000, s"Transaction log too large: $totalSize bytes")
 
     // Verify data is readable and complete
-    val df = spark.read.format("indextables").load(tablePath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     assert(df.count() === 2)
 
     val results = df.orderBy("id").collect()
@@ -582,11 +582,11 @@ test("data skipping works for columns with stats, falls back for truncated colum
       ("doc3", "z" * 2000, 300)
     ).toDF("id", "long_text", "score")
 
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "score")
       .save(tablePath)
 
-    val df = spark.read.format("indextables").load(tablePath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
     // Filter on column WITH stats (should skip files)
     val filteredByScore = df.filter($"score" === 100).collect()
@@ -631,15 +631,15 @@ test("data skipping works for columns with stats, falls back for truncated colum
 
 ```scala
 // Default behavior (recommended)
-df.write.format("indextables").save("s3://bucket/data")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/data")
 
 // Custom threshold
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.maxLength", "512")
   .save("s3://bucket/data")
 
 // Disable truncation (not recommended)
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.stats.truncation.enabled", "false")
   .save("s3://bucket/data")
 ```

@@ -67,21 +67,18 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
 
       // Write data in separate operations to create multiple splits
       testData1.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
-        .option("targetRecordsPerSplit", "50")
         .save(outputPath)
 
       testData2.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
-        .option("targetRecordsPerSplit", "50")
         .save(outputPath)
 
       testData3.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
-        .option("targetRecordsPerSplit", "50")
         .save(outputPath)
 
       // Step 2: Read transaction log to get current state
@@ -93,7 +90,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       beforeMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
       // Step 3: Verify we can read all data before merge
-      val beforeMergeDF      = spark.read.format("tantivy4spark").load(outputPath)
+      val beforeMergeDF      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
       val beforeMergeRecords = beforeMergeDF.count()
       beforeMergeRecords shouldBe 150
 
@@ -112,7 +109,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         afterMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
         // Step 6: Verify data integrity
-        val afterMergeDF      = spark.read.format("tantivy4spark").load(outputPath)
+        val afterMergeDF      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
         val afterMergeRecords = afterMergeDF.count()
 
         println(s"Data integrity check: $beforeMergeRecords -> $afterMergeRecords records")
@@ -132,7 +129,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       }
 
       // Step 8: Verify that all data is still accessible
-      val finalDF    = spark.read.format("tantivy4spark").load(outputPath)
+      val finalDF    = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
       val finalCount = finalDF.count()
       finalCount shouldBe 150
 
@@ -153,9 +150,8 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
-        .option("targetRecordsPerSplit", "25") // Create multiple small splits
         .save(outputPath)
 
       // Get initial transaction log state
@@ -171,7 +167,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       val mergeResult = spark.sql(s"MERGE SPLITS '$outputPath' TARGET SIZE 2097152") // 2MB target
 
       // Verify data integrity after merge
-      val afterMergeDF = spark.read.format("tantivy4spark").load(outputPath)
+      val afterMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
       val finalCount   = afterMergeDF.count()
       finalCount shouldBe 100
 
@@ -255,7 +251,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       initialData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(outputPath)
 
@@ -275,7 +271,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         )
 
       additionalData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
         .save(outputPath)
 
@@ -299,7 +295,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       afterMergeFiles.foreach(file => println(s"  - ${file.path} (${file.size} bytes)"))
 
       // Verify data integrity
-      val finalData  = spark.read.format("tantivy4spark").load(outputPath)
+      val finalData  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
       val finalCount = finalData.count()
       finalCount shouldBe 40
 

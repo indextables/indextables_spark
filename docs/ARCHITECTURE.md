@@ -1,4 +1,4 @@
-# Tantivy4Spark Architecture and Design Documentation
+# IndexTables4Spark Architecture and Design Documentation
 
 ## Table of Contents
 
@@ -13,7 +13,7 @@
 
 ## System Overview
 
-**Tantivy4Spark** is a high-performance file format and search engine integration for Apache Spark that embeds the Tantivy full-text search engine directly within Spark executors via JNI. The system provides fast full-text search capabilities without requiring external server components.
+**IndexTables4Spark** is a high-performance file format and search engine integration for Apache Spark that embeds the Tantivy full-text search engine directly within Spark executors via JNI. The system provides fast full-text search capabilities without requiring external server components.
 
 ### Core Design Principles
 
@@ -40,8 +40,8 @@ graph TB
         Local[Local Storage]
     end
 
-    subgraph "Tantivy4Spark Components"
-        DataSource[Tantivy4Spark DataSource V2]
+    subgraph "IndexTables4Spark Components"
+        DataSource[IndexTables4Spark DataSource V2]
         TxLog[Transaction Log]
         SearchEngine[Tantivy Search Engine]
         JNI[JNI Bridge]
@@ -72,9 +72,9 @@ graph TB
 
 ## Component Breakdown
 
-### 1. Core Layer (`com.tantivy4spark.core`)
+### 1. Core Layer (`io.indextables.spark.core`)
 
-#### Tantivy4SparkDataSource
+#### IndexTables4SparkDataSource
 - **Purpose**: Main entry point implementing Spark DataSource V2 API
 - **Responsibilities**:
   - Dataset registration and discovery
@@ -82,7 +82,7 @@ graph TB
   - Schema management and validation
 - **Key Methods**: `createRelation()`, `getTable()`, `shortName()`
 
-#### Tantivy4SparkScanBuilder
+#### IndexTables4SparkScanBuilder
 - **Purpose**: Query planning and optimization
 - **Responsibilities**:
   - Filter pushdown to native search engine
@@ -97,7 +97,7 @@ graph TB
   - Support for text search, range queries, boolean logic
   - Null handling and type conversion
 
-### 2. Search Layer (`com.tantivy4spark.search`)
+### 2. Search Layer (`io.indextables.spark.search`)
 
 #### TantivySearchEngine
 - **Purpose**: Core search functionality wrapper
@@ -121,7 +121,7 @@ graph TB
   - Method call marshalling
   - Memory management and cleanup
 
-### 3. Storage Layer (`com.tantivy4spark.storage`)
+### 3. Storage Layer (`io.indextables.spark.storage`)
 
 #### StorageStrategy
 - **Purpose**: Protocol detection and I/O optimization selection
@@ -145,7 +145,7 @@ graph TB
   - Standard read/write operations
   - Metadata access and directory listing
 
-### 4. Transaction Layer (`com.tantivy4spark.transaction`)
+### 4. Transaction Layer (`io.indextables.spark.transaction`)
 
 #### TransactionLog
 - **Purpose**: ACID transaction management similar to Delta Lake
@@ -273,18 +273,18 @@ classDiagram
         +createRelation(SQLContext, SaveMode, Map, DataFrame) BaseRelation
     }
 
-    class Tantivy4SparkDataSource {
+    class IndexTables4SparkDataSource {
         +shortName() String
         +createRelation(SQLContext, Map) BaseRelation
         +createRelation(SQLContext, SaveMode, Map, DataFrame) BaseRelation
     }
 
-    class Tantivy4SparkTableProvider {
+    class IndexTables4SparkTableProvider {
         +inferSchema(CaseInsensitiveStringMap) StructType
         +getTable(StructType, Transform[], CaseInsensitiveStringMap) Table
     }
 
-    class Tantivy4SparkTable {
+    class IndexTables4SparkTable {
         -schema: StructType
         -properties: Map[String, String]
         +name() String
@@ -315,14 +315,14 @@ classDiagram
         +getSchema() StructType
     }
 
-    DataSourceRegister <|-- Tantivy4SparkDataSource
-    RelationProvider <|-- Tantivy4SparkDataSource
-    CreatableRelationProvider <|-- Tantivy4SparkDataSource
+    DataSourceRegister <|-- IndexTables4SparkDataSource
+    RelationProvider <|-- IndexTables4SparkDataSource
+    CreatableRelationProvider <|-- IndexTables4SparkDataSource
     
-    Tantivy4SparkDataSource --> Tantivy4SparkTableProvider
-    Tantivy4SparkTableProvider --> Tantivy4SparkTable
-    Tantivy4SparkTable --> TantivySearchEngine
-    Tantivy4SparkTable --> TransactionLog
+    IndexTables4SparkDataSource --> IndexTables4SparkTableProvider
+    IndexTables4SparkTableProvider --> IndexTables4SparkTable
+    IndexTables4SparkTable --> TantivySearchEngine
+    IndexTables4SparkTable --> TransactionLog
 ```
 
 ### Class Diagram - Storage Strategy Pattern
@@ -399,7 +399,7 @@ sequenceDiagram
     participant JNI as JNI Bridge
     participant Tantivy as Native Tantivy
 
-    Client->>DS: spark.read.format("tantivy4spark").load(path)
+    Client->>DS: spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     DS->>TL: getSchema() and listFiles()
     TL-->>DS: schema + file list with min/max stats
 
