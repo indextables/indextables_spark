@@ -357,9 +357,8 @@ class IndexTables4SparkPartitionReader(
             case e: Exception =>
               logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
               Set.empty[String]
-          } finally {
+          } finally
             splitSchema.close() // Prevent native memory leak
-          }
         }
 
         // Log the filters and limit for debugging
@@ -512,9 +511,9 @@ class IndexTables4SparkPartitionReader(
     }
 
     if (splitSearchEngine != null) {
-      try {
+      try
         splitSearchEngine.close()
-      } catch {
+      catch {
         case ex: Exception =>
           // Log but don't rethrow - close() should be idempotent and not fail the task
           logger.warn(s"Error closing splitSearchEngine for ${addAction.path}", ex)
@@ -529,12 +528,15 @@ class IndexTables4SparkPartitionReader(
   }
 
   /**
-   * Check if a filter only references partition columns.
-   * These filters are already handled by partition pruning and don't need to be sent to Tantivy.
+   * Check if a filter only references partition columns. These filters are already handled by partition pruning and
+   * don't need to be sent to Tantivy.
    *
-   * @param filter The Spark filter to check
-   * @param partitionColumns Set of partition column names
-   * @return true if the filter only references partition columns
+   * @param filter
+   *   The Spark filter to check
+   * @param partitionColumns
+   *   Set of partition column names
+   * @return
+   *   true if the filter only references partition columns
    */
   private def isPartitionOnlyFilter(filter: Filter, partitionColumns: Set[String]): Boolean = {
     import org.apache.spark.sql.sources._
@@ -565,17 +567,21 @@ class IndexTables4SparkPartitionReader(
   }
 
   /**
-   * Check if a range filter is redundant based on min/max statistics.
-   * A filter is redundant if the split's entire data range is within the filter's range,
-   * meaning all records in the split would pass the filter anyway.
+   * Check if a range filter is redundant based on min/max statistics. A filter is redundant if the split's entire data
+   * range is within the filter's range, meaning all records in the split would pass the filter anyway.
    *
    * Only applies to Date and Timestamp columns to avoid type conversion complexity.
    *
-   * @param filter The Spark filter to check
-   * @param minValues Min values from split statistics
-   * @param maxValues Max values from split statistics
-   * @param schema The read schema to determine column types
-   * @return true if the filter is redundant (all data passes), false otherwise
+   * @param filter
+   *   The Spark filter to check
+   * @param minValues
+   *   Min values from split statistics
+   * @param maxValues
+   *   Max values from split statistics
+   * @param schema
+   *   The read schema to determine column types
+   * @return
+   *   true if the filter is redundant (all data passes), false otherwise
    */
   private def isRangeFilterRedundantByStats(
     filter: Filter,
@@ -588,14 +594,13 @@ class IndexTables4SparkPartitionReader(
     import java.sql.{Date, Timestamp}
     import java.time.{Instant, LocalDate}
 
-    def isDateOrTimestampColumn(attribute: String): Boolean = {
+    def isDateOrTimestampColumn(attribute: String): Boolean =
       schema.fields.find(_.name == attribute).exists { field =>
         field.dataType match {
           case DateType | TimestampType => true
           case _                        => false
         }
       }
-    }
 
     def getColumnType(attribute: String): Option[DataType] =
       schema.fields.find(_.name == attribute).map(_.dataType)
@@ -606,10 +611,10 @@ class IndexTables4SparkPartitionReader(
       // getTime() returns millis since epoch (includes sub-second millis)
       // getNanos() returns the fractional second in nanos (0-999,999,999) INCLUDING the millis
       // To avoid double-counting millis: use epochSeconds (truncated) + getNanos()/1000
-      case ts: Timestamp     =>
+      case ts: Timestamp =>
         val epochSeconds = ts.getTime / 1000
         Some(epochSeconds * 1000000 + ts.getNanos / 1000)
-      case s: String         =>
+      case s: String =>
         // Statistics are stored as microseconds (Long as String)
         try {
           val micros = s.toLong
@@ -623,15 +628,15 @@ class IndexTables4SparkPartitionReader(
             } catch {
               case _: Exception =>
                 try {
-                  val ts = Timestamp.valueOf(s)
+                  val ts           = Timestamp.valueOf(s)
                   val epochSeconds = ts.getTime / 1000
                   Some(epochSeconds * 1000000 + ts.getNanos / 1000)
                 } catch { case _: Exception => None }
             }
         }
-      case l: Long           => Some(if (fromStats) l else l * 1000) // Stats already in micros
-      case i: Int            => Some(i.toLong * 1000)
-      case _                 => None
+      case l: Long => Some(if (fromStats) l else l * 1000) // Stats already in micros
+      case i: Int  => Some(i.toLong * 1000)
+      case _       => None
     }
 
     def parseDate(value: Any, fromStats: Boolean = false): Option[Long] = value match {
@@ -651,12 +656,16 @@ class IndexTables4SparkPartitionReader(
                 catch { case _: Exception => None }
             }
         }
-      case l: Long   => Some(l) // Already days since epoch
-      case i: Int    => Some(i.toLong)
-      case _         => None
+      case l: Long => Some(l) // Already days since epoch
+      case i: Int  => Some(i.toLong)
+      case _       => None
     }
 
-    def parseValue(value: Any, dataType: DataType, fromStats: Boolean = false): Option[Long] = dataType match {
+    def parseValue(
+      value: Any,
+      dataType: DataType,
+      fromStats: Boolean = false
+    ): Option[Long] = dataType match {
       case TimestampType => parseTimestamp(value, fromStats)
       case DateType      => parseDate(value, fromStats)
       case _             => None
@@ -670,36 +679,36 @@ class IndexTables4SparkPartitionReader(
     filter match {
       case GreaterThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
         (for {
-          dataType   <- getColumnType(attribute)
-          splitMin   <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal  <- parseValue(value, dataType, fromStats = false)
+          dataType  <- getColumnType(attribute)
+          splitMin  <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal <- parseValue(value, dataType, fromStats = false)
         } yield splitMin > filterVal).getOrElse(false)
 
       case GreaterThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
         (for {
-          dataType   <- getColumnType(attribute)
-          splitMin   <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal  <- parseValue(value, dataType, fromStats = false)
+          dataType  <- getColumnType(attribute)
+          splitMin  <- minValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal <- parseValue(value, dataType, fromStats = false)
         } yield splitMin >= filterVal).getOrElse(false)
 
       case LessThan(attribute, value) if isDateOrTimestampColumn(attribute) =>
         (for {
-          dataType   <- getColumnType(attribute)
-          splitMax   <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal  <- parseValue(value, dataType, fromStats = false)
+          dataType  <- getColumnType(attribute)
+          splitMax  <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal <- parseValue(value, dataType, fromStats = false)
         } yield splitMax < filterVal).getOrElse(false)
 
       case LessThanOrEqual(attribute, value) if isDateOrTimestampColumn(attribute) =>
         (for {
-          dataType   <- getColumnType(attribute)
-          splitMax   <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
-          filterVal  <- parseValue(value, dataType, fromStats = false)
+          dataType  <- getColumnType(attribute)
+          splitMax  <- maxValues.get(attribute).flatMap(parseValue(_, dataType, fromStats = true))
+          filterVal <- parseValue(value, dataType, fromStats = false)
         } yield splitMax <= filterVal).getOrElse(false)
 
       // For AND filters, both sides must be redundant for the whole filter to be redundant
       case And(left, right) =>
         isRangeFilterRedundantByStats(left, minValues, maxValues, schema) &&
-          isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
+        isRangeFilterRedundantByStats(right, minValues, maxValues, schema)
 
       case _ => false
     }
@@ -888,13 +897,15 @@ class IndexTables4SparkDataWriter(
     }
 
     // Report output metrics to Spark UI (bytesWritten, recordsWritten)
-    val totalBytes = allActions.map(_.size).sum
+    val totalBytes   = allActions.map(_.size).sum
     val totalRecords = allActions.flatMap(_.numRecords).sum
     if (org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(totalBytes, totalRecords)) {
       logger.debug(s"Reported output metrics: $totalBytes bytes, $totalRecords records")
     }
 
-    logger.info(s"Committed partition $partitionId with ${allActions.size} splits, $totalBytes bytes, $totalRecords records")
+    logger.info(
+      s"Committed partition $partitionId with ${allActions.size} splits, $totalBytes bytes, $totalRecords records"
+    )
     IndexTables4SparkCommitMessage(allActions.toSeq)
   }
 

@@ -375,7 +375,8 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
           val column = new org.apache.spark.sql.Column(indexQueryAllExpr)
 
           // Read the IndexTables4Spark data and apply the IndexQueryAll filter
-          val tantivyDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tantivy4sparkPath)
+          val tantivyDF =
+            spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tantivy4sparkPath)
 
           // Apply the IndexQueryAll filter - in production this would be pushed down
           // In test environment, it falls back to returning all rows (returns true)

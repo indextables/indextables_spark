@@ -18,10 +18,10 @@
 package io.indextables.spark.storage
 
 import java.io.ByteArrayOutputStream
+import java.util.{Collections, LinkedHashMap}
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, Executors, TimeUnit}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
 import java.util.concurrent.locks.ReentrantLock
-import java.util.{LinkedHashMap, Collections}
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
@@ -45,8 +45,10 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
       .orElse(Option(System.getProperty("aws.region")))
 
     val region = configuredRegion.map(Region.of).getOrElse {
-      logger.info(s"No AWS region configured for s3://$bucket/$key, falling back to US_EAST_1. " +
-        "Set 'fs.s3a.endpoint.region' or 'aws.region' system property to avoid this.")
+      logger.info(
+        s"No AWS region configured for s3://$bucket/$key, falling back to US_EAST_1. " +
+          "Set 'fs.s3a.endpoint.region' or 'aws.region' system property to avoid this."
+      )
       Region.US_EAST_1
     }
 
@@ -64,7 +66,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
 
   // LRU cache using LinkedHashMap with access-order (true = access order, not insertion order)
   // This ensures proper LRU eviction - most recently accessed entries are at the end
-  private val maxCacheEntries  = 100 // Maximum number of chunks to cache
+  private val maxCacheEntries = 100 // Maximum number of chunks to cache
   private val chunkCache: java.util.Map[Long, Array[Byte]] = Collections.synchronizedMap(
     new LinkedHashMap[Long, Array[Byte]](maxCacheEntries, 0.75f, true) {
       override def removeEldestEntry(eldest: java.util.Map.Entry[Long, Array[Byte]]): Boolean = {
@@ -77,15 +79,15 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
       }
     }
   )
-  private val cacheLock        = new ReentrantLock()
+  private val cacheLock = new ReentrantLock()
 
   // Track total cached bytes for memory management
-  private val cachedBytes      = new AtomicLong(0L)
-  private val maxCachedBytes   = 100L * 1024 * 1024 // 100MB max cache size per reader
+  private val cachedBytes    = new AtomicLong(0L)
+  private val maxCachedBytes = 100L * 1024 * 1024 // 100MB max cache size per reader
 
   // Prefetch concurrency control - limit concurrent prefetch operations
-  private val inFlightPrefetches   = new ConcurrentHashMap[Long, CompletableFuture[_]]()
-  private val prefetchCount        = new AtomicInteger(0)
+  private val inFlightPrefetches     = new ConcurrentHashMap[Long, CompletableFuture[_]]()
+  private val prefetchCount          = new AtomicInteger(0)
   private val maxPrefetchConcurrency = 2 // Limit concurrent prefetch operations
 
   private lazy val fileSize: Long =
@@ -165,17 +167,18 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   }
 
   /**
-   * Prefetch the next chunk with bounded concurrency.
-   * Limits concurrent prefetch operations to prevent S3 throttling.
+   * Prefetch the next chunk with bounded concurrency. Limits concurrent prefetch operations to prevent S3 throttling.
    */
   private def maybePrefetchNextChunk(currentChunkKey: Long): Unit = {
     val nextChunkKey = currentChunkKey + defaultChunkSize
 
     // Skip if: already cached, already prefetching, beyond file size, or at concurrency limit
-    if (nextChunkKey >= fileSize ||
-        chunkCache.containsKey(nextChunkKey) ||
-        inFlightPrefetches.containsKey(nextChunkKey) ||
-        prefetchCount.get() >= maxPrefetchConcurrency) {
+    if (
+      nextChunkKey >= fileSize ||
+      chunkCache.containsKey(nextChunkKey) ||
+      inFlightPrefetches.containsKey(nextChunkKey) ||
+      prefetchCount.get() >= maxPrefetchConcurrency
+    ) {
       return
     }
 
@@ -202,8 +205,8 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   }
 
   /**
-   * Cache a chunk. LRU eviction is handled automatically by the LinkedHashMap's
-   * removeEldestEntry method when the cache exceeds size or memory limits.
+   * Cache a chunk. LRU eviction is handled automatically by the LinkedHashMap's removeEldestEntry method when the cache
+   * exceeds size or memory limits.
    */
   private def maybeCacheChunk(chunkKey: Long, chunk: Array[Byte]): Unit = {
     val chunkSize = chunk.length.toLong
@@ -216,15 +219,14 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
 
     // Put into cache - LinkedHashMap's removeEldestEntry handles LRU eviction automatically
     cacheLock.lock()
-    try {
+    try
       // Check if already cached (avoid double-counting bytes)
       if (!chunkCache.containsKey(chunkKey)) {
         chunkCache.put(chunkKey, chunk)
         cachedBytes.addAndGet(chunkSize)
       }
-    } finally {
+    finally
       cacheLock.unlock()
-    }
   }
 
   private def readS3Range(offset: Long, length: Long): Array[Byte] = {
@@ -252,7 +254,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
   override def close(): Unit = {
     // Gracefully shutdown executor, waiting for pending tasks
     executor.shutdown()
-    try {
+    try
       if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
         logger.debug(s"Executor did not terminate gracefully, forcing shutdown for s3://$bucket/$key")
         executor.shutdownNow()
@@ -261,7 +263,7 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
           logger.warn(s"Executor did not terminate after shutdownNow for s3://$bucket/$key")
         }
       }
-    } catch {
+    catch {
       case _: InterruptedException =>
         executor.shutdownNow()
         Thread.currentThread().interrupt()

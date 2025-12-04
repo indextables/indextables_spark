@@ -624,11 +624,10 @@ class IndexTables4SparkGroupByAggregateReader(
               case e: Exception =>
                 logger.warn(s"GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
                 None
-            } finally {
+            } finally
               if (schema != null) {
                 schema.close() // Prevent native memory leak
               }
-            }
           }
 
           // Create options from broadcast config

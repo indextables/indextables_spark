@@ -158,11 +158,10 @@ class SplitSearchEngine private (
     // Log schema field names for debugging, ensuring schema is properly closed
     if (logger.isDebugEnabled) {
       val tantivySchema = splitSearcher.getSchema()
-      try {
+      try
         logger.debug(s"Available fields in schema: ${tantivySchema.getFieldNames()}")
-      } finally {
+      finally
         tantivySchema.close() // Prevent native memory leak
-      }
     }
 
     // Execute the search using the new SplitQuery API
@@ -178,15 +177,14 @@ class SplitSearchEngine private (
       case e: Exception =>
         logger.error(s"Search failed for SplitQuery object", e)
         throw e
-    } finally {
+    } finally
       // Always close the search result to free resources
-      try {
+      try
         searchResult.close()
-      } catch {
+      catch {
         case closeEx: Exception =>
           logger.warn(s"Error closing SearchResult for split $splitPath", closeEx)
       }
-    }
   }
 
   /** Search all documents in the split (equivalent to match-all query). */
@@ -210,15 +208,14 @@ class SplitSearchEngine private (
       case e: Exception =>
         logger.error("SearchAll failed", e)
         throw e
-    } finally {
+    } finally
       // Always close the search result to free resources
-      try {
+      try
         searchResult.close()
-      } catch {
+      catch {
         case closeEx: Exception =>
           logger.warn(s"Error closing SearchResult for split $splitPath", closeEx)
       }
-    }
   }
 
   /**
@@ -305,7 +302,9 @@ class SplitSearchEngine private (
       // Use configurable document retrieval strategy
       val documents: Array[io.indextables.tantivy4java.core.Document] =
         if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
-          logger.debug(s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})")
+          logger.debug(
+            s"Using docBatch for ${docAddresses.length} addresses (max batch size: ${cacheConfig.docBatchMaxSize})"
+          )
 
           // Process in batches to respect maximum batch size
           val batches = docAddresses.grouped(cacheConfig.docBatchMaxSize).toArray
@@ -324,13 +323,15 @@ class SplitSearchEngine private (
                 )
                 // Fallback to individual doc calls for this batch - fail fast on errors
                 batchAddresses.map { address =>
-                  try {
+                  try
                     splitSearcher.doc(address)
-                  } catch {
+                  catch {
                     case ex: Exception =>
                       // Fail fast instead of silently returning null
                       throw new RuntimeException(
-                        s"Failed to retrieve document at address $address from split $splitPath", ex)
+                        s"Failed to retrieve document at address $address from split $splitPath",
+                        ex
+                      )
                   }
                 }
             }
@@ -340,13 +341,12 @@ class SplitSearchEngine private (
           // Use individual doc calls when batch is disabled or only one document - fail fast on errors
           // Use sorted docAddresses for sequential I/O access (not hits which is in score order)
           docAddresses.map { address =>
-            try {
+            try
               splitSearcher.doc(address)
-            } catch {
+            catch {
               case ex: Exception =>
                 // Fail fast instead of silently returning null
-                throw new RuntimeException(
-                  s"Failed to retrieve document at address $address from split $splitPath", ex)
+                throw new RuntimeException(s"Failed to retrieve document at address $address from split $splitPath", ex)
             }
           }
         }
@@ -387,11 +387,10 @@ class SplitSearchEngine private (
         // Fail-fast: propagate conversion errors instead of silently returning empty results
         logger.error(s"Error converting search results for split $splitPath", e)
         throw new RuntimeException(s"Failed to convert search results for split $splitPath: ${e.getMessage}", e)
-    } finally {
+    } finally
       // CRITICAL: Close the schema to prevent native memory leak
       // Schema.getSchema() returns a NEW Schema object each time with its own native pointer
       splitSchema.close()
-    }
   }
 
   /** Create an empty row with default values for all fields using SchemaMapping. */

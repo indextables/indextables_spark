@@ -25,10 +25,10 @@ import io.indextables.spark.TestBase
  * Test suite for string pattern filter pushdown configuration.
  *
  * Tests verify that:
- * - StringStartsWith, StringEndsWith, StringContains filters work correctly
- * - Pushdown can be enabled via configuration
- * - Aggregate pushdown is blocked when pattern filters are not enabled
- * - Aggregate pushdown works when pattern filters are enabled
+ *   - StringStartsWith, StringEndsWith, StringContains filters work correctly
+ *   - Pushdown can be enabled via configuration
+ *   - Aggregate pushdown is blocked when pattern filters are not enabled
+ *   - Aggregate pushdown works when pattern filters are enabled
  */
 class StringPatternPushdownTest extends TestBase {
 
@@ -56,7 +56,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Read WITHOUT enabling startsWith pushdown (default)
       val result = spark.read
@@ -77,7 +78,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Read WITH startsWith pushdown enabled
       val result = spark.read
@@ -98,7 +100,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Without pushdown enabled, aggregate should fail
       val df = spark.read
@@ -123,7 +126,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // WITH pushdown enabled, aggregate should work
       val count = spark.read
@@ -143,7 +147,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -164,7 +169,8 @@ class StringPatternPushdownTest extends TestBase {
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -185,7 +191,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -204,7 +211,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -224,7 +232,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val df = spark.read
         .format(format)
@@ -248,7 +257,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val count = spark.read
         .format(format)
@@ -267,7 +277,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -287,7 +298,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -308,7 +320,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -327,7 +340,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -347,7 +361,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val df = spark.read
         .format(format)
@@ -371,7 +386,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val count = spark.read
         .format(format)
@@ -390,7 +406,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -410,7 +427,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -431,7 +449,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Enable only startsWith, not endsWith
       val result = spark.read
@@ -452,7 +471,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -477,7 +497,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Use master switch to enable all pattern pushdowns
       val result = spark.read
@@ -501,7 +522,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Use master switch and verify aggregates work
       val count = spark.read
@@ -522,7 +544,8 @@ class StringPatternPushdownTest extends TestBase {
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.typemap.category", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -552,7 +575,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       val result = spark.read
         .format(format)
@@ -571,7 +595,8 @@ class StringPatternPushdownTest extends TestBase {
         .format(format)
         .option("spark.indextables.indexing.typemap.filename", "string")
         .option("spark.indextables.indexing.fastfields", "score,filename,category")
-        .mode("overwrite").save(path)
+        .mode("overwrite")
+        .save(path)
 
       // Empty string contains should match all
       val result = spark.read

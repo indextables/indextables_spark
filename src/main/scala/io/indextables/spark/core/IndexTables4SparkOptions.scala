@@ -52,15 +52,14 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .asScala
       .toMap
       .filter { case (key, _) => key.startsWith(prefix) }
-      .map { case (key, value) =>
-        // Normalize field name to lowercase for case-insensitive matching
-        key.substring(prefix.length).toLowerCase -> value.toLowerCase
+      .map {
+        case (key, value) =>
+          // Normalize field name to lowercase for case-insensitive matching
+          key.substring(prefix.length).toLowerCase -> value.toLowerCase
       }
   }
 
-  /**
-   * Get fast fields configuration. Returns set of field names that should get "fast" indexing.
-   */
+  /** Get fast fields configuration. Returns set of field names that should get "fast" indexing. */
   def getFastFields: Set[String] =
     Option(options.get("spark.indextables.indexing.fastfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
@@ -75,25 +74,19 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
-  /**
-   * Get store-only fields configuration. Returns set of field names that should be stored but not indexed.
-   */
+  /** Get store-only fields configuration. Returns set of field names that should be stored but not indexed. */
   def getStoreOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.storeonlyfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
-  /**
-   * Get index-only fields configuration. Returns set of field names that should be indexed but not stored.
-   */
+  /** Get index-only fields configuration. Returns set of field names that should be indexed but not stored. */
   def getIndexOnlyFields: Set[String] =
     Option(options.get("spark.indextables.indexing.indexonlyfields"))
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
-  /**
-   * Get tokenizer override configuration. Maps field names to their tokenizer types.
-   */
+  /** Get tokenizer override configuration. Maps field names to their tokenizer types. */
   def getTokenizerOverrides: Map[String, String] = {
     import scala.jdk.CollectionConverters._
     val prefix = "spark.indextables.indexing.tokenizer."
@@ -185,8 +178,8 @@ object IndexTables4SparkOptions {
   }
 
   // Option keys
-  val BLOOM_FILTERS_ENABLED    = "bloomFiltersEnabled"
-  val FORCE_STANDARD_STORAGE   = "forceStandardStorage"
+  val BLOOM_FILTERS_ENABLED  = "bloomFiltersEnabled"
+  val FORCE_STANDARD_STORAGE = "forceStandardStorage"
 
   // Indexing configuration keys
   val INDEXING_TYPEMAP_PREFIX   = "spark.indextables.indexing.typemap."
@@ -198,11 +191,11 @@ object IndexTables4SparkOptions {
   val INDEXING_JSON_MODE        = "spark.indextables.indexing.json.mode"
 
   // Batch optimization configuration keys
-  val BATCH_OPTIMIZATION_ENABLED              = "spark.indextables.read.batchOptimization.enabled"
-  val BATCH_OPTIMIZATION_PROFILE              = "spark.indextables.read.batchOptimization.profile"
-  val BATCH_OPTIMIZATION_MAX_RANGE_SIZE       = "spark.indextables.read.batchOptimization.maxRangeSize"
-  val BATCH_OPTIMIZATION_GAP_TOLERANCE        = "spark.indextables.read.batchOptimization.gapTolerance"
-  val BATCH_OPTIMIZATION_MIN_DOCS             = "spark.indextables.read.batchOptimization.minDocsForOptimization"
+  val BATCH_OPTIMIZATION_ENABLED                 = "spark.indextables.read.batchOptimization.enabled"
+  val BATCH_OPTIMIZATION_PROFILE                 = "spark.indextables.read.batchOptimization.profile"
+  val BATCH_OPTIMIZATION_MAX_RANGE_SIZE          = "spark.indextables.read.batchOptimization.maxRangeSize"
+  val BATCH_OPTIMIZATION_GAP_TOLERANCE           = "spark.indextables.read.batchOptimization.gapTolerance"
+  val BATCH_OPTIMIZATION_MIN_DOCS                = "spark.indextables.read.batchOptimization.minDocsForOptimization"
   val BATCH_OPTIMIZATION_MAX_CONCURRENT_PREFETCH = "spark.indextables.read.batchOptimization.maxConcurrentPrefetch"
 
   // Adaptive tuning configuration keys

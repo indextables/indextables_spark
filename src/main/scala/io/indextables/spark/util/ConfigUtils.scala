@@ -34,12 +34,12 @@ object ConfigUtils {
   // Data skipping statistics column configuration (Delta Lake compatible)
   // spark.indextables.dataSkippingStatsColumns - explicit list of columns to collect stats for (comma-separated)
   // spark.indextables.dataSkippingNumIndexedCols - number of columns to index (default 32, -1 for all)
-  val DATA_SKIPPING_STATS_COLUMNS     = "spark.indextables.dataSkippingStatsColumns"
-  val DATA_SKIPPING_NUM_INDEXED_COLS  = "spark.indextables.dataSkippingNumIndexedCols"
+  val DATA_SKIPPING_STATS_COLUMNS    = "spark.indextables.dataSkippingStatsColumns"
+  val DATA_SKIPPING_NUM_INDEXED_COLS = "spark.indextables.dataSkippingNumIndexedCols"
 
   // Default values
-  val DEFAULT_STATS_TRUNCATION_ENABLED     = true
-  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH  = 32
+  val DEFAULT_STATS_TRUNCATION_ENABLED       = true
+  val DEFAULT_STATS_TRUNCATION_MAX_LENGTH    = 32
   val DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS = 32
 
   /**
@@ -64,11 +64,11 @@ object ConfigUtils {
 
     // Helper function to get config with defaults
     // Tries both original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-    def getConfig(configKey: String, default: String = ""): String = {
-      configMap.get(configKey)
+    def getConfig(configKey: String, default: String = ""): String =
+      configMap
+        .get(configKey)
         .orElse(configMap.get(configKey.toLowerCase))
         .getOrElse(default)
-    }
 
     def getConfigOption(configKey: String): Option[String] =
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
@@ -228,8 +228,8 @@ object ConfigUtils {
     config.getOrElse(key, defaultValue)
 
   /**
-   * Get the explicit list of columns to collect statistics for.
-   * Returns None if not configured (will fall back to numIndexedCols).
+   * Get the explicit list of columns to collect statistics for. Returns None if not configured (will fall back to
+   * numIndexedCols).
    *
    * @param config
    *   Configuration map
@@ -237,16 +237,14 @@ object ConfigUtils {
    *   Optional set of column names
    */
   def getDataSkippingStatsColumns(config: Map[String, String]): Option[Set[String]] =
-    config.get(DATA_SKIPPING_STATS_COLUMNS)
+    config
+      .get(DATA_SKIPPING_STATS_COLUMNS)
       .orElse(config.get(DATA_SKIPPING_STATS_COLUMNS.toLowerCase))
       .filter(_.trim.nonEmpty)
-      .map { value =>
-        value.split(",").map(_.trim).filter(_.nonEmpty).toSet
-      }
+      .map(value => value.split(",").map(_.trim).filter(_.nonEmpty).toSet)
 
   /**
-   * Get the number of columns to collect statistics for.
-   * Returns -1 if all columns should be indexed.
+   * Get the number of columns to collect statistics for. Returns -1 if all columns should be indexed.
    *
    * @param config
    *   Configuration map
@@ -254,7 +252,8 @@ object ConfigUtils {
    *   Number of columns to index (-1 for all)
    */
   def getDataSkippingNumIndexedCols(config: Map[String, String]): Int =
-    config.get(DATA_SKIPPING_NUM_INDEXED_COLS)
+    config
+      .get(DATA_SKIPPING_NUM_INDEXED_COLS)
       .orElse(config.get(DATA_SKIPPING_NUM_INDEXED_COLS.toLowerCase))
       .map(_.toInt)
       .getOrElse(DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS)

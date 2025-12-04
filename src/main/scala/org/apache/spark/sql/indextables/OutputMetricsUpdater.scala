@@ -22,60 +22,71 @@ import org.apache.spark.TaskContext
 /**
  * Helper object to update Spark's task metrics from external packages.
  *
- * Since InputMetrics/OutputMetrics setter methods are private[spark],
- * this helper class in the org.apache.spark package provides access to them.
+ * Since InputMetrics/OutputMetrics setter methods are private[spark], this helper class in the org.apache.spark package
+ * provides access to them.
  *
- * This allows IndexTables4Spark to report bytes/records read and written
- * to the Spark UI, similar to how native Spark data sources report metrics.
+ * This allows IndexTables4Spark to report bytes/records read and written to the Spark UI, similar to how native Spark
+ * data sources report metrics.
  */
 object OutputMetricsUpdater {
 
   /**
    * Update the output metrics for the current task.
    *
-   * @param bytesWritten   Total bytes written by this task
-   * @param recordsWritten Total records written by this task
-   * @return true if metrics were updated, false if TaskContext is not available
+   * @param bytesWritten
+   *   Total bytes written by this task
+   * @param recordsWritten
+   *   Total records written by this task
+   * @return
+   *   true if metrics were updated, false if TaskContext is not available
    */
-  def updateOutputMetrics(bytesWritten: Long, recordsWritten: Long): Boolean = {
-    Option(TaskContext.get()).map { taskContext =>
-      val outputMetrics = taskContext.taskMetrics().outputMetrics
-      outputMetrics.setBytesWritten(bytesWritten)
-      outputMetrics.setRecordsWritten(recordsWritten)
-      true
-    }.getOrElse(false)
-  }
+  def updateOutputMetrics(bytesWritten: Long, recordsWritten: Long): Boolean =
+    Option(TaskContext.get())
+      .map { taskContext =>
+        val outputMetrics = taskContext.taskMetrics().outputMetrics
+        outputMetrics.setBytesWritten(bytesWritten)
+        outputMetrics.setRecordsWritten(recordsWritten)
+        true
+      }
+      .getOrElse(false)
 
   /**
    * Update the input metrics for the current task.
    *
-   * @param bytesRead   Total bytes read by this task
-   * @param recordsRead Total records read by this task
-   * @return true if metrics were updated, false if TaskContext is not available
+   * @param bytesRead
+   *   Total bytes read by this task
+   * @param recordsRead
+   *   Total records read by this task
+   * @return
+   *   true if metrics were updated, false if TaskContext is not available
    */
-  def updateInputMetrics(bytesRead: Long, recordsRead: Long): Boolean = {
-    Option(TaskContext.get()).map { taskContext =>
-      val inputMetrics = taskContext.taskMetrics().inputMetrics
-      inputMetrics.setBytesRead(bytesRead)
-      inputMetrics.setRecordsRead(recordsRead)
-      true
-    }.getOrElse(false)
-  }
+  def updateInputMetrics(bytesRead: Long, recordsRead: Long): Boolean =
+    Option(TaskContext.get())
+      .map { taskContext =>
+        val inputMetrics = taskContext.taskMetrics().inputMetrics
+        inputMetrics.setBytesRead(bytesRead)
+        inputMetrics.setRecordsRead(recordsRead)
+        true
+      }
+      .getOrElse(false)
 
   /**
-   * Increment the input metrics for the current task.
-   * Use this for incremental updates during iteration.
+   * Increment the input metrics for the current task. Use this for incremental updates during iteration.
    *
-   * @param bytesRead   Additional bytes read
-   * @param recordsRead Additional records read
-   * @return true if metrics were updated, false if TaskContext is not available
+   * @param bytesRead
+   *   Additional bytes read
+   * @param recordsRead
+   *   Additional records read
+   * @return
+   *   true if metrics were updated, false if TaskContext is not available
    */
-  def incInputMetrics(bytesRead: Long, recordsRead: Long): Boolean = {
-    Option(TaskContext.get()).map { taskContext =>
-      val inputMetrics = taskContext.taskMetrics().inputMetrics
-      inputMetrics.incBytesRead(bytesRead)
-      inputMetrics.incRecordsRead(recordsRead)
-      true
-    }.getOrElse(false)
-  }
+  def incInputMetrics(bytesRead: Long, recordsRead: Long): Boolean =
+    Option(TaskContext.get())
+      .map { taskContext =>
+        val inputMetrics = taskContext.taskMetrics().inputMetrics
+        inputMetrics.incBytesRead(bytesRead)
+        inputMetrics.incRecordsRead(recordsRead)
+        true
+      }
+      .getOrElse(false)
 }

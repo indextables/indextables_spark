@@ -32,10 +32,9 @@ import org.scalatest.BeforeAndAfterEach
 /**
  * Test to verify that getSchema() uses caching correctly.
  *
- * REGRESSION TEST: This test was created to catch a bug where getSchema() was
- * not using the cached metadata, causing repeated reads from the transaction log
- * on every query. The TransactionLogAdapter was missing an override for getSchema(),
- * so it fell back to the non-caching parent TransactionLog.getSchema() implementation.
+ * REGRESSION TEST: This test was created to catch a bug where getSchema() was not using the cached metadata, causing
+ * repeated reads from the transaction log on every query. The TransactionLogAdapter was missing an override for
+ * getSchema(), so it fell back to the non-caching parent TransactionLog.getSchema() implementation.
  */
 class TransactionLogSchemaCacheTest extends TestBase with BeforeAndAfterEach {
 
@@ -73,8 +72,8 @@ class TransactionLogSchemaCacheTest extends TestBase with BeforeAndAfterEach {
     transactionLog.addFile(AddAction("file1.split", Map.empty, 1000L, System.currentTimeMillis(), true))
 
     // Get initial cache stats
-    val stats1 = transactionLog.getCacheStats().get
-    val initialHits = stats1.hits
+    val stats1        = transactionLog.getCacheStats().get
+    val initialHits   = stats1.hits
     val initialMisses = stats1.misses
     println(s"Initial cache stats: hits=$initialHits, misses=$initialMisses")
 
@@ -133,7 +132,7 @@ class TransactionLogSchemaCacheTest extends TestBase with BeforeAndAfterEach {
     transactionLog.addFile(AddAction("file1.split", Map.empty, 1000L, System.currentTimeMillis(), true))
 
     // Test getMetadata caching (known to work correctly)
-    val metadataStats1 = transactionLog.getCacheStats().get
+    val metadataStats1      = transactionLog.getCacheStats().get
     val metadataInitialHits = metadataStats1.hits
 
     transactionLog.getMetadata()
@@ -141,14 +140,14 @@ class TransactionLogSchemaCacheTest extends TestBase with BeforeAndAfterEach {
     transactionLog.getMetadata()
 
     val metadataStats2 = transactionLog.getCacheStats().get
-    val metadataHits = metadataStats2.hits - metadataInitialHits
+    val metadataHits   = metadataStats2.hits - metadataInitialHits
     println(s"getMetadata cache hits after 3 calls: $metadataHits")
 
     // Invalidate cache to reset for schema test
     transactionLog.invalidateCache()
 
     // Test getSchema caching
-    val schemaStats1 = transactionLog.getCacheStats().get
+    val schemaStats1      = transactionLog.getCacheStats().get
     val schemaInitialHits = schemaStats1.hits
 
     transactionLog.getSchema()
@@ -156,7 +155,7 @@ class TransactionLogSchemaCacheTest extends TestBase with BeforeAndAfterEach {
     transactionLog.getSchema()
 
     val schemaStats2 = transactionLog.getCacheStats().get
-    val schemaHits = schemaStats2.hits - schemaInitialHits
+    val schemaHits   = schemaStats2.hits - schemaInitialHits
     println(s"getSchema cache hits after 3 calls: $schemaHits")
 
     // Both should have at least 2 cache hits (first call populates, subsequent calls hit)

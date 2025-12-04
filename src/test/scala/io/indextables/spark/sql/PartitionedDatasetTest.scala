@@ -154,7 +154,7 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
-      .option("spark.indextables.indexWriter.batchSize", "5")                // Very small batches to force many files
+      .option("spark.indextables.indexWriter.batchSize", "5") // Very small batches to force many files
       .mode("overwrite")
       .save(testDataPath)
 
@@ -197,7 +197,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity after merge
-    val df                = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 2400, "Should preserve all records after partition merge")
 
@@ -217,7 +217,7 @@ class PartitionedDatasetTest extends TestBase {
     repartitionedData.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
-      .option("spark.indextables.indexWriter.batchSize", "5")                // Small batches
+      .option("spark.indextables.indexWriter.batchSize", "5") // Small batches
       .mode("overwrite")
       .save(testDataPath)
 
@@ -243,7 +243,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity
-    val df                = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 1800, "Should preserve all records after global merge")
 

@@ -23,11 +23,11 @@ import io.indextables.spark.TestBase
  * Comprehensive tests for Batch Retrieval Optimization functionality.
  *
  * Tests cover:
- * - Range consolidation logic (merging adjacent/overlapping byte ranges)
- * - Gap tolerance handling
- * - Prefetch mechanism and concurrency limits
- * - Cache eviction under memory pressure
- * - Error handling during range reads
+ *   - Range consolidation logic (merging adjacent/overlapping byte ranges)
+ *   - Gap tolerance handling
+ *   - Prefetch mechanism and concurrency limits
+ *   - Cache eviction under memory pressure
+ *   - Error handling during range reads
  */
 class BatchRetrievalOptimizationTest extends TestBase {
 
@@ -184,11 +184,13 @@ class BatchRetrievalOptimizationTest extends TestBase {
     val tablePath = s"file://$tempDir/test_memory_limits"
 
     // Create larger dataset
-    val df = spark.range(0, 5000).selectExpr(
-      "id",
-      "CAST(id AS STRING) as text",
-      "REPEAT('x', 100) as padding" // Add some bulk
-    )
+    val df = spark
+      .range(0, 5000)
+      .selectExpr(
+        "id",
+        "CAST(id AS STRING) as text",
+        "REPEAT('x', 100) as padding" // Add some bulk
+      )
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")

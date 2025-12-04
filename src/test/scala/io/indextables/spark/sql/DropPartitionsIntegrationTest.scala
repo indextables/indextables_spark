@@ -24,8 +24,8 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 /** Integration tests for DROP INDEXTABLES PARTITIONS command. */
 class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
@@ -156,7 +156,8 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       .save(tablePath)
 
     // Drop partitions where year = '2023' AND quarter = 'Q1'
-    val result = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2023' AND quarter = 'Q1'").collect()
+    val result =
+      spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2023' AND quarter = 'Q1'").collect()
     assert(result.length == 1)
     assert(result(0).getString(1) == "success")
     assert(result(0).getLong(2) == 1) // Only 1 partition dropped
@@ -293,7 +294,8 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       .save(tablePath)
 
     // Get the split files before drop
-    val splitFiles = fs.listStatus(new Path(tablePath))
+    val splitFiles = fs
+      .listStatus(new Path(tablePath))
       .flatMap { status =>
         if (status.isDirectory && status.getPath.getName.startsWith("year=")) {
           fs.listStatus(status.getPath).filter(_.getPath.getName.endsWith(".split"))
@@ -320,7 +322,8 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
 
     // Set the modification time of dropped files to be old enough for purge
     // First, find all .split files
-    val allSplitFiles = fs.listStatus(new Path(tablePath))
+    val allSplitFiles = fs
+      .listStatus(new Path(tablePath))
       .flatMap { status =>
         if (status.isDirectory && status.getPath.getName.startsWith("year=")) {
           fs.listStatus(status.getPath)
@@ -364,7 +367,8 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       .save(tablePath)
 
     // Drop partitions where year = '2022' OR year = '2024'
-    val result = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2022' OR year = '2024'").collect()
+    val result =
+      spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2022' OR year = '2024'").collect()
     assert(result.length == 1)
     assert(result(0).getString(1) == "success")
     assert(result(0).getLong(2) == 2) // 2 partitions dropped

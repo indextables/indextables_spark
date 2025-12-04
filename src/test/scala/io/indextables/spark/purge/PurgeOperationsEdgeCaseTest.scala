@@ -28,11 +28,11 @@ import org.scalatest.BeforeAndAfterEach
  * Comprehensive tests for Purge Operations edge cases.
  *
  * Tests cover:
- * - Orphaned file detection accuracy
- * - Retention period enforcement
- * - DRY RUN mode accuracy
- * - Transaction log cleanup
- * - Concurrent access during purge
+ *   - Orphaned file detection accuracy
+ *   - Retention period enforcement
+ *   - DRY RUN mode accuracy
+ *   - Transaction log cleanup
+ *   - Concurrent access during purge
  */
 class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
@@ -58,7 +58,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Get split file count before purge
-    val tableDir = new File(s"$tempDir/test_no_delete_referenced")
+    val tableDir     = new File(s"$tempDir/test_no_delete_referenced")
     val splitsBefore = tableDir.listFiles().filter(_.getName.endsWith(".split")).length
 
     // Execute purge with long retention - active files are always excluded regardless
@@ -90,7 +90,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Create orphaned split file (not in transaction log)
-    val tableDir = new File(s"$tempDir/test_orphan_detection")
+    val tableDir   = new File(s"$tempDir/test_orphan_detection")
     val orphanFile = new File(tableDir, s"${UUID.randomUUID()}.split")
     Files.write(orphanFile.toPath, "orphaned content".getBytes)
 
@@ -128,10 +128,10 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Try to purge with very short retention - should be rejected or use minimum
-    try {
+    try
       // Attempting purge with 0 hours should either fail or use minimum
       spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 0 HOURS")
-    } catch {
+    catch {
       case e: Exception =>
         // Expected - minimum retention enforced
         logger.info(s"Minimum retention enforced: ${e.getMessage}")
@@ -186,7 +186,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Create orphaned file
-    val tableDir = new File(s"$tempDir/test_dry_run_no_delete")
+    val tableDir   = new File(s"$tempDir/test_dry_run_no_delete")
     val orphanFile = new File(tableDir, s"${UUID.randomUUID()}.split")
     Files.write(orphanFile.toPath, "orphaned content".getBytes)
     orphanFile.setLastModified(System.currentTimeMillis() - (8 * 24 * 60 * 60 * 1000L))
@@ -227,7 +227,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
 
     // Execute DRY RUN
     val dryRunResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS DRY RUN")
-    val rows = dryRunResult.collect()
+    val rows         = dryRunResult.collect()
 
     logger.info(s"DRY RUN reported ${rows.length} files")
 
@@ -265,7 +265,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     }
 
     // Verify transaction log has many entries
-    val txLogDir = new File(s"$tempDir/test_txlog_cleanup/_transaction_log")
+    val txLogDir       = new File(s"$tempDir/test_txlog_cleanup/_transaction_log")
     val logFilesBefore = txLogDir.listFiles().filter(_.getName.endsWith(".json")).length
 
     logger.info(s"Transaction log has $logFilesBefore entries before purge")
@@ -307,7 +307,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     }
 
     // Verify checkpoint exists
-    val txLogDir = new File(s"$tempDir/test_checkpoint_preserve/_transaction_log")
+    val txLogDir        = new File(s"$tempDir/test_checkpoint_preserve/_transaction_log")
     val checkpointFiles = txLogDir.listFiles().filter(_.getName.contains("checkpoint"))
 
     logger.info(s"Found ${checkpointFiles.length} checkpoint files")
@@ -356,7 +356,7 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
     }
 
     val purgeResult = Await.result(purgeFuture, 60.seconds)
-    val readResult = Await.result(readFuture, 60.seconds)
+    val readResult  = Await.result(readFuture, 60.seconds)
 
     purgeResult shouldBe "purge_done"
     readResult shouldBe 500
@@ -398,11 +398,13 @@ class PurgeOperationsEdgeCaseTest extends TestBase with BeforeAndAfterEach {
   test("should handle purge on partitioned table") {
     val tablePath = s"file://$tempDir/test_partitioned_purge"
 
-    val df = spark.range(0, 200).selectExpr(
-      "id",
-      "CAST(id AS STRING) as text",
-      "CAST(id % 4 AS STRING) as partition_col"
-    )
+    val df = spark
+      .range(0, 200)
+      .selectExpr(
+        "id",
+        "CAST(id AS STRING) as text",
+        "CAST(id % 4 AS STRING) as partition_col"
+      )
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("partition_col")

@@ -28,29 +28,28 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider, HadoopCloudStorageProvider}
+import io.indextables.spark.TestBase
 
 /**
  * Test suite to reproduce and measure the checkpoint cache bypass issue.
  *
- * The issue: When reading metadata from a table with checkpoints, the EnhancedTransactionLogCache
- * correctly caches the computed MetadataAction. However, on cache MISS (first read or after expiration),
- * the compute function calls TransactionLogCheckpoint.getActionsFromCheckpoint() which reads
- * directly from storage WITHOUT using any caching layer.
+ * The issue: When reading metadata from a table with checkpoints, the EnhancedTransactionLogCache correctly caches the
+ * computed MetadataAction. However, on cache MISS (first read or after expiration), the compute function calls
+ * TransactionLogCheckpoint.getActionsFromCheckpoint() which reads directly from storage WITHOUT using any caching
+ * layer.
  *
  * This results in:
- * 1. _last_checkpoint file read (to get checkpoint version)
- * 2. Checkpoint file read (to get actual actions)
+ *   1. _last_checkpoint file read (to get checkpoint version) 2. Checkpoint file read (to get actual actions)
  *
- * Both of these reads happen EVERY TIME the metadata cache misses, even if the same checkpoint
- * was just read moments ago for another operation (like getProtocol).
+ * Both of these reads happen EVERY TIME the metadata cache misses, even if the same checkpoint was just read moments
+ * ago for another operation (like getProtocol).
  */
 class CheckpointCacheBypassTest extends TestBase {
 
   /**
-   * A wrapper around CloudStorageProvider that counts file read operations.
-   * This allows us to measure the actual I/O happening at the storage layer.
+   * A wrapper around CloudStorageProvider that counts file read operations. This allows us to measure the actual I/O
+   * happening at the storage layer.
    */
   class CountingCloudStorageProvider(delegate: CloudStorageProvider) extends CloudStorageProvider {
     val readFileCount = new AtomicInteger(0)
@@ -69,7 +68,11 @@ class CheckpointCacheBypassTest extends TestBase {
       delegate.readFile(path)
     }
 
-    override def readRange(path: String, offset: Long, length: Long): Array[Byte] =
+    override def readRange(
+      path: String,
+      offset: Long,
+      length: Long
+    ): Array[Byte] =
       delegate.readRange(path, offset, length)
 
     override def openInputStream(path: String): InputStream = delegate.openInputStream(path)
@@ -82,7 +85,11 @@ class CheckpointCacheBypassTest extends TestBase {
     override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean =
       delegate.writeFileIfNotExists(path, content)
 
-    override def writeFileFromStream(path: String, inputStream: InputStream, contentLength: Option[Long]): Unit =
+    override def writeFileFromStream(
+      path: String,
+      inputStream: InputStream,
+      contentLength: Option[Long]
+    ): Unit =
       delegate.writeFileFromStream(path, inputStream, contentLength)
 
     override def deleteFile(path: String): Boolean = delegate.deleteFile(path)
@@ -111,13 +118,11 @@ class CheckpointCacheBypassTest extends TestBase {
       readFilePaths.asScala.toSeq
     }
 
-    def getCheckpointReadCount: Int = {
+    def getCheckpointReadCount: Int =
       getReadPaths.count(_.contains("checkpoint"))
-    }
 
-    def getLastCheckpointReadCount: Int = {
+    def getLastCheckpointReadCount: Int =
       getReadPaths.count(_.contains("_last_checkpoint"))
-    }
   }
 
   test("REPRODUCE: checkpoint file reads happen on every metadata cache miss") {
@@ -127,7 +132,7 @@ class CheckpointCacheBypassTest extends TestBase {
       // Create table with checkpoints enabled (interval=3 to trigger checkpoint quickly)
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.enabled"  -> "true",
           "spark.indextables.checkpoint.interval" -> "3"
         ).asJava
       )
@@ -136,10 +141,12 @@ class CheckpointCacheBypassTest extends TestBase {
 
       try {
         // Initialize and write enough data to trigger checkpoint
-        val schema = StructType(Seq(
-          StructField("id", IntegerType, true),
-          StructField("name", StringType, true)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType, true),
+            StructField("name", StringType, true)
+          )
+        )
         txLog.initialize(schema)
 
         // Add files to trigger checkpoint creation (interval=3)
@@ -165,8 +172,8 @@ class CheckpointCacheBypassTest extends TestBase {
         // Count reads during first metadata access
         println("\n=== First getMetadata() call (cache miss expected) ===")
         val startTime1 = System.nanoTime()
-        val metadata1 = txLog.getMetadata()
-        val time1 = (System.nanoTime() - startTime1) / 1000000.0
+        val metadata1  = txLog.getMetadata()
+        val time1      = (System.nanoTime() - startTime1) / 1000000.0
         println(s"Time: ${time1}ms")
         println(s"Metadata id: ${metadata1.id}")
 
@@ -181,8 +188,8 @@ class CheckpointCacheBypassTest extends TestBase {
         // Second read should hit cache
         println("\n=== Second getMetadata() call (cache hit expected) ===")
         val startTime2 = System.nanoTime()
-        val metadata2 = txLog.getMetadata()
-        val time2 = (System.nanoTime() - startTime2) / 1000000.0
+        val metadata2  = txLog.getMetadata()
+        val time2      = (System.nanoTime() - startTime2) / 1000000.0
         println(s"Time: ${time2}ms")
 
         txLog.getCacheStats() match {
@@ -195,14 +202,15 @@ class CheckpointCacheBypassTest extends TestBase {
         }
 
         // The second read should be faster (cached)
-        assert(time2 < time1 * 0.5 || time2 < 5.0,
-          s"Second read ($time2 ms) should be significantly faster than first ($time1 ms)")
+        assert(
+          time2 < time1 * 0.5 || time2 < 5.0,
+          s"Second read ($time2 ms) should be significantly faster than first ($time1 ms)"
+        )
 
         println(s"\nPerformance improvement: ${((time1 - time2) / time1 * 100).formatted("%.1f")}% faster on cache hit")
 
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -212,7 +220,7 @@ class CheckpointCacheBypassTest extends TestBase {
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.enabled"  -> "true",
           "spark.indextables.checkpoint.interval" -> "3"
         ).asJava
       )
@@ -221,21 +229,26 @@ class CheckpointCacheBypassTest extends TestBase {
 
       try {
         // Initialize and create checkpoint
-        val schema = StructType(Seq(
-          StructField("id", IntegerType, true),
-          StructField("name", StringType, true)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType, true),
+            StructField("name", StringType, true)
+          )
+        )
         txLog.initialize(schema)
 
-        for (i <- 1 to 5) {
-          txLog.addFiles(Seq(AddAction(
-            path = s"file$i.split",
-            partitionValues = Map.empty,
-            size = 1000L,
-            modificationTime = System.currentTimeMillis(),
-            dataChange = true
-          )))
-        }
+        for (i <- 1 to 5)
+          txLog.addFiles(
+            Seq(
+              AddAction(
+                path = s"file$i.split",
+                partitionValues = Map.empty,
+                size = 1000L,
+                modificationTime = System.currentTimeMillis(),
+                dataChange = true
+              )
+            )
+          )
 
         assert(txLog.getLastCheckpointVersion().isDefined, "Checkpoint should exist")
 
@@ -254,26 +267,26 @@ class CheckpointCacheBypassTest extends TestBase {
           ("getProtocol() again", () => txLog.getProtocol())
         )
 
-        operations.foreach { case (name, op) =>
-          val start = System.nanoTime()
-          op()
-          val elapsed = (System.nanoTime() - start) / 1000000.0
+        operations.foreach {
+          case (name, op) =>
+            val start = System.nanoTime()
+            op()
+            val elapsed = (System.nanoTime() - start) / 1000000.0
 
-          txLog.getCacheStats() match {
-            case Some(stats) =>
-              println(f"$name%-25s: ${elapsed}%6.2f ms (cache hits: ${stats.hits}, misses: ${stats.misses})")
-            case None =>
-              println(f"$name%-25s: ${elapsed}%6.2f ms")
-          }
+            txLog.getCacheStats() match {
+              case Some(stats) =>
+                println(f"$name%-25s: $elapsed%6.2f ms (cache hits: ${stats.hits}, misses: ${stats.misses})")
+              case None =>
+                println(f"$name%-25s: $elapsed%6.2f ms")
+            }
         }
 
         println("\nExpected behavior:")
         println("- First getMetadata() should cache miss and read checkpoint")
         println("- Subsequent calls should hit cache WITHOUT reading checkpoint again")
 
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 
@@ -287,7 +300,7 @@ class CheckpointCacheBypassTest extends TestBase {
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.checkpoint.enabled", "true")
-        .option("spark.indextables.checkpoint.interval", "1")  // Ensure checkpoint is created
+        .option("spark.indextables.checkpoint.interval", "1") // Ensure checkpoint is created
         .mode("overwrite")
         .save(tempPath)
 
@@ -314,7 +327,7 @@ class CheckpointCacheBypassTest extends TestBase {
         readDf.schema
 
         val elapsed = (System.nanoTime() - start) / 1000000.0
-        println(f"$opName%-35s: ${elapsed}%6.2f ms")
+        println(f"$opName%-35s: $elapsed%6.2f ms")
       }
 
       println("\nIn production with S3, each cache miss adds ~50-200ms of network latency")
@@ -359,7 +372,9 @@ class CheckpointCacheBypassTest extends TestBase {
       val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema) = EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after schema inference ===")
-      println(s"Checkpoint actions: hits=${actionsStatsAfterSchema.hitCount()}, misses=${actionsStatsAfterSchema.missCount()}")
+      println(
+        s"Checkpoint actions: hits=${actionsStatsAfterSchema.hitCount()}, misses=${actionsStatsAfterSchema.missCount()}"
+      )
       println(s"Last checkpoint info: hits=${lastCheckpointStatsAfterSchema.hitCount()}, misses=${lastCheckpointStatsAfterSchema.missCount()}")
 
       // Now create a SECOND DataFrame - this creates TransactionLog #2
@@ -373,7 +388,9 @@ class CheckpointCacheBypassTest extends TestBase {
       val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond) = EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after second schema read ===")
-      println(s"Checkpoint actions: hits=${actionsStatsAfterSecond.hitCount()}, misses=${actionsStatsAfterSecond.missCount()}")
+      println(
+        s"Checkpoint actions: hits=${actionsStatsAfterSecond.hitCount()}, misses=${actionsStatsAfterSecond.missCount()}"
+      )
       println(s"Last checkpoint info: hits=${lastCheckpointStatsAfterSecond.hitCount()}, misses=${lastCheckpointStatsAfterSecond.missCount()}")
 
       // Verify: Second read should have MORE HITS but SAME MISSES
@@ -381,11 +398,13 @@ class CheckpointCacheBypassTest extends TestBase {
       val hitCountAfterSecond = actionsStatsAfterSecond.hitCount() + lastCheckpointStatsAfterSecond.hitCount()
       val hitCountAfterSchema = actionsStatsAfterSchema.hitCount() + lastCheckpointStatsAfterSchema.hitCount()
 
-      assert(hitCountAfterSecond > hitCountAfterSchema,
-        s"Second read should have more cache hits (${hitCountAfterSecond}) than first read (${hitCountAfterSchema})")
+      assert(
+        hitCountAfterSecond > hitCountAfterSchema,
+        s"Second read should have more cache hits ($hitCountAfterSecond) than first read ($hitCountAfterSchema)"
+      )
 
       println(s"\n✅ Global cache sharing verified: second TransactionLog instance reused cached checkpoint data")
-      println(s"   Hits increased from ${hitCountAfterSchema} to ${hitCountAfterSecond}")
+      println(s"   Hits increased from $hitCountAfterSchema to $hitCountAfterSecond")
     }
   }
 
@@ -395,31 +414,36 @@ class CheckpointCacheBypassTest extends TestBase {
 
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.enabled"  -> "true",
           "spark.indextables.checkpoint.interval" -> "3",
           // Short cache TTL to force more misses
-          "spark.indextables.cache.metadata.ttl" -> "1"  // 1 minute
+          "spark.indextables.cache.metadata.ttl" -> "1" // 1 minute
         ).asJava
       )
 
       val txLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
-        val schema = StructType(Seq(
-          StructField("id", IntegerType, true),
-          StructField("name", StringType, true)
-        ))
+        val schema = StructType(
+          Seq(
+            StructField("id", IntegerType, true),
+            StructField("name", StringType, true)
+          )
+        )
         txLog.initialize(schema)
 
-        for (i <- 1 to 5) {
-          txLog.addFiles(Seq(AddAction(
-            path = s"file$i.split",
-            partitionValues = Map.empty,
-            size = 1000L,
-            modificationTime = System.currentTimeMillis(),
-            dataChange = true
-          )))
-        }
+        for (i <- 1 to 5)
+          txLog.addFiles(
+            Seq(
+              AddAction(
+                path = s"file$i.split",
+                partitionValues = Map.empty,
+                size = 1000L,
+                modificationTime = System.currentTimeMillis(),
+                dataChange = true
+              )
+            )
+          )
 
         assert(txLog.getLastCheckpointVersion().isDefined)
 
@@ -441,23 +465,24 @@ class CheckpointCacheBypassTest extends TestBase {
         }
 
         val avgMissTime = missTimings.sum / missTimings.size
-        val avgHitTime = hitTimings.sum / hitTimings.size
+        val avgHitTime  = hitTimings.sum / hitTimings.size
 
         println(f"Average cache MISS time: $avgMissTime%.2f ms (reads checkpoint from storage)")
         println(f"Average cache HIT time:  $avgHitTime%.2f ms (returns cached value)")
-        println(f"Cache miss penalty:      ${avgMissTime - avgHitTime}%.2f ms (${(avgMissTime / avgHitTime).formatted("%.1f")}x slower)")
+        println(
+          f"Cache miss penalty:      ${avgMissTime - avgHitTime}%.2f ms (${(avgMissTime / avgHitTime).formatted("%.1f")}x slower)"
+        )
 
         println("\nWith S3 network latency (~50-100ms per read):")
-        val estimatedS3MissTime = avgMissTime + 100  // Add ~100ms for 2 S3 reads
+        val estimatedS3MissTime = avgMissTime + 100 // Add ~100ms for 2 S3 reads
         println(f"Estimated S3 cache miss: $estimatedS3MissTime%.0f ms")
         println(f"Estimated S3 penalty:    ${estimatedS3MissTime - avgHitTime}%.0f ms")
 
         // The fix should eliminate checkpoint file reads on cache miss by caching
         // the checkpoint data itself, not just the computed metadata
 
-      } finally {
+      } finally
         txLog.close()
-      }
     }
   }
 }

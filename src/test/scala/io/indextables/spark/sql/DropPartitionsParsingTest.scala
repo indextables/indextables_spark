@@ -19,8 +19,8 @@ package io.indextables.spark.sql
 
 import org.apache.spark.sql.SparkSession
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 
 /** Parsing tests for DROP INDEXTABLES PARTITIONS command. */
 class DropPartitionsParsingTest extends AnyFunSuite with BeforeAndAfterEach {
@@ -92,7 +92,8 @@ class DropPartitionsParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("DROP INDEXTABLES PARTITIONS should parse with complex compound predicate") {
-    val sql  = "DROP INDEXTABLES PARTITIONS FROM '/tmp/test_table' WHERE region = 'us-east' AND year > '2020' OR status = 'inactive'"
+    val sql =
+      "DROP INDEXTABLES PARTITIONS FROM '/tmp/test_table' WHERE region = 'us-east' AND year > '2020' OR status = 'inactive'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[DropPartitionsCommand])
   }
@@ -129,7 +130,7 @@ class DropPartitionsParsingTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("DROP INDEXTABLES PARTITIONS should fail without WHERE clause") {
     val sql = "DROP INDEXTABLES PARTITIONS FROM '/tmp/test_table'"
-    val ex  = intercept[Exception] {
+    val ex = intercept[Exception] {
       spark.sessionState.sqlParser.parsePlan(sql)
     }
     // The parsing should fail because WHERE is required - Spark's parser gives a syntax error

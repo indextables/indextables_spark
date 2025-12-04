@@ -163,9 +163,24 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
 
     println("📝 Writing multiple batches with distinct ranges...")
 
-    batch1.coalesce(1).write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Overwrite).save(testTablePath.toString)
-    batch2.coalesce(1).write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Append).save(testTablePath.toString)
-    batch3.coalesce(1).write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Append).save(testTablePath.toString)
+    batch1
+      .coalesce(1)
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode(SaveMode.Overwrite)
+      .save(testTablePath.toString)
+    batch2
+      .coalesce(1)
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode(SaveMode.Append)
+      .save(testTablePath.toString)
+    batch3
+      .coalesce(1)
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode(SaveMode.Append)
+      .save(testTablePath.toString)
 
     // Verify each file has isolated statistics
     val addActions = transactionLog.listFiles().sortBy(_.modificationTime)

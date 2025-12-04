@@ -98,7 +98,10 @@ class PathParameterTest extends TestBase {
 
       // Direct path approach
       try {
-        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Overwrite).save(tempPath)
+        df.write
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .mode(SaveMode.Overwrite)
+          .save(tempPath)
         directPathWorked = true
       } catch {
         case _: RuntimeException | _: UnsatisfiedLinkError =>
@@ -109,7 +112,11 @@ class PathParameterTest extends TestBase {
 
       // Option-based approach
       try {
-        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode(SaveMode.Overwrite).option("path", tempPath).save()
+        df.write
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .mode(SaveMode.Overwrite)
+          .option("path", tempPath)
+          .save()
         optionPathWorked = true
       } catch {
         case _: RuntimeException | _: UnsatisfiedLinkError =>

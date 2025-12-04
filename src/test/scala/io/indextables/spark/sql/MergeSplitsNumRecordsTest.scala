@@ -97,7 +97,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     batch1DF.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode("overwrite")
+      .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
@@ -111,7 +111,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     batch2DF.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode("overwrite")
+      .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -126,7 +126,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     batch3DF.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode("overwrite")
+      .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -141,7 +141,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     batch4DF.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode("overwrite")
+      .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -213,7 +213,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     println(s"✅ Created ${addActionsBeforeMerge.length} separate files ready for merging")
 
     // Verify data integrity
-    val dataCheck         = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val dataCheck = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val actualRecordCount = dataCheck.count()
 
     println(s"Actual record count: $actualRecordCount")
@@ -246,7 +246,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     testData.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .mode("overwrite")
+      .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 

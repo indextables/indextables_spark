@@ -67,7 +67,9 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         )
 
       // Write data - use repartition to create multiple splits
-      data.repartition(2).write
+      data
+        .repartition(2)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
@@ -168,7 +170,9 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         )
 
       // Write partitioned data - use repartition to create multiple splits per partition
-      data.repartition(16).write
+      data
+        .repartition(16)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .partitionBy("partition_col")
@@ -244,7 +248,9 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         )
 
       // Use repartition to create multiple splits
-      data.repartition(4).write
+      data
+        .repartition(4)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)
@@ -346,7 +352,9 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
         )
 
       // Use repartition to create multiple splits
-      complexData.repartition(4).write
+      complexData
+        .repartition(4)
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tempPath)

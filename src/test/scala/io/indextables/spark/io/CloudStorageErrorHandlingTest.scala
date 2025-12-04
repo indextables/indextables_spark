@@ -26,13 +26,13 @@ import io.indextables.spark.TestBase
  * Comprehensive tests for Cloud Storage error handling.
  *
  * Tests cover:
- * - File read/write failure scenarios
- * - Retry logic and backoff behavior
- * - Connection and resource management
- * - Error message clarity
+ *   - File read/write failure scenarios
+ *   - Retry logic and backoff behavior
+ *   - Connection and resource management
+ *   - Error message clarity
  *
- * Note: Tests use local filesystem to simulate cloud storage behavior.
- * Real S3/Azure tests require credentials and are in separate test files.
+ * Note: Tests use local filesystem to simulate cloud storage behavior. Real S3/Azure tests require credentials and are
+ * in separate test files.
  */
 class CloudStorageErrorHandlingTest extends TestBase {
 
@@ -53,7 +53,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
       .save(tablePath)
 
     // Delete a split file to simulate missing file
-    val tableDir = new File(s"$tempDir/test_missing_file")
+    val tableDir   = new File(s"$tempDir/test_missing_file")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     if (splitFiles.nonEmpty) {
@@ -92,7 +92,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
       .save(tablePath)
 
     // Corrupt a split file
-    val tableDir = new File(s"$tempDir/test_corrupted_file")
+    val tableDir   = new File(s"$tempDir/test_corrupted_file")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     if (splitFiles.nonEmpty) {
@@ -127,7 +127,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
       .save(tablePath)
 
     // Create empty split file
-    val tableDir = new File(s"$tempDir/test_empty_file")
+    val tableDir   = new File(s"$tempDir/test_empty_file")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     if (splitFiles.nonEmpty) {
@@ -187,7 +187,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
     readOnlyDir.setWritable(false)
 
     val tablePath = s"file://${readOnlyDir.getAbsolutePath}/table"
-    val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
+    val df        = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
 
     try {
       df.write
@@ -199,9 +199,8 @@ class CloudStorageErrorHandlingTest extends TestBase {
       case e: Exception =>
         logger.info(s"Write to read-only directory failed as expected: ${e.getMessage}")
         assert(e.getMessage != null)
-    } finally {
+    } finally
       readOnlyDir.setWritable(true)
-    }
 
     logger.info("Read-only directory test passed")
   }
@@ -226,8 +225,8 @@ class CloudStorageErrorHandlingTest extends TestBase {
       val logFiles = txLogDir.listFiles().filter(_.getName.endsWith(".json"))
       if (logFiles.nonEmpty) {
         // Append garbage to transaction log file
-        val logFile = logFiles.head
-        val content = Files.readAllBytes(logFile.toPath)
+        val logFile   = logFiles.head
+        val content   = Files.readAllBytes(logFile.toPath)
         val corrupted = content ++ "corrupted".getBytes
         Files.write(logFile.toPath, corrupted)
 
@@ -292,14 +291,14 @@ class CloudStorageErrorHandlingTest extends TestBase {
       .save(tablePath)
 
     // Corrupt file to cause read failure
-    val tableDir = new File(s"$tempDir/test_resource_cleanup")
+    val tableDir   = new File(s"$tempDir/test_resource_cleanup")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     if (splitFiles.nonEmpty) {
       Files.write(splitFiles.head.toPath, "corrupted".getBytes)
 
       // Attempt multiple reads - resources should be cleaned up each time
-      for (i <- 1 to 3) {
+      for (i <- 1 to 3)
         try {
           val result = spark.read
             .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -309,7 +308,6 @@ class CloudStorageErrorHandlingTest extends TestBase {
           case _: Exception =>
             logger.info(s"Read attempt $i failed as expected")
         }
-      }
 
       // If we get here without hanging, resources are being cleaned up
       logger.info("Resource cleanup test passed - no resource leaks detected")
@@ -327,7 +325,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
       .save(tablePath)
 
     // Count temp files before
-    val tempDirFile = new File(System.getProperty("java.io.tmpdir"))
+    val tempDirFile     = new File(System.getProperty("java.io.tmpdir"))
     val tempFilesBefore = tempDirFile.listFiles().filter(_.getName.contains("tantivy")).length
 
     // Second write (append)
@@ -378,7 +376,7 @@ class CloudStorageErrorHandlingTest extends TestBase {
     readOnlyDir.mkdirs()
 
     val tablePath = s"file://${readOnlyDir.getAbsolutePath}/table"
-    val df = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
+    val df        = spark.range(0, 100).selectExpr("id", "CAST(id AS STRING) as text")
 
     // First create the table
     df.write
@@ -403,9 +401,8 @@ class CloudStorageErrorHandlingTest extends TestBase {
         case e: Exception =>
           logger.info(s"Error message for permission denied: ${e.getMessage}")
           assert(e.getMessage != null)
-      } finally {
+      } finally
         txLogDir.setWritable(true)
-      }
     }
 
     logger.info("Permission denied error message test passed")

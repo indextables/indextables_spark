@@ -26,11 +26,11 @@ import org.scalatest.BeforeAndAfterEach
  * Comprehensive tests for Merge Operations correctness.
  *
  * Tests cover:
- * - Data integrity preservation during merges
- * - Target size compliance
- * - Schema preservation after merge
- * - Merge with filters (WHERE clause)
- * - Transaction log updates after merge
+ *   - Data integrity preservation during merges
+ *   - Target size compliance
+ *   - Schema preservation after merge
+ *   - Merge with filters (WHERE clause)
+ *   - Transaction log updates after merge
  */
 class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
@@ -123,7 +123,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .save(tablePath)
 
-    val tableDir = new File(s"$tempDir/test_split_reduction")
+    val tableDir     = new File(s"$tempDir/test_split_reduction")
     val splitsBefore = tableDir.listFiles().filter(_.getName.endsWith(".split")).length
 
     // Execute merge with large target size to consolidate all
@@ -146,11 +146,14 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     val tablePath = s"file://$tempDir/test_target_size"
 
     // Create data
-    val df = spark.range(0, 2000).repartition(40).selectExpr(
-      "id",
-      "CAST(id AS STRING) as text",
-      "REPEAT('x', 100) as padding"
-    )
+    val df = spark
+      .range(0, 2000)
+      .repartition(40)
+      .selectExpr(
+        "id",
+        "CAST(id AS STRING) as text",
+        "REPEAT('x', 100) as padding"
+      )
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -196,7 +199,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     // Verify schema preserved
     val fields = result.schema.fieldNames.toSeq
-    fields should contain allOf("id", "text", "score", "active", "date")
+    fields should contain allOf ("id", "text", "score", "active", "date")
 
     // Verify data types preserved
     val rows = result.filter("id = 1").limit(1).collect()
@@ -215,11 +218,13 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
     val tablePath = s"file://$tempDir/test_merge_where"
 
     // Create partitioned data
-    val df = spark.range(0, 200).selectExpr(
-      "id",
-      "CAST(id AS STRING) as text",
-      "CAST(id % 4 AS STRING) as partition_col"
-    )
+    val df = spark
+      .range(0, 200)
+      .selectExpr(
+        "id",
+        "CAST(id AS STRING) as text",
+        "CAST(id % 4 AS STRING) as partition_col"
+      )
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("partition_col")
@@ -284,7 +289,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Count log entries before merge
-    val txLogDir = new File(s"$tempDir/test_txlog_update/_transaction_log")
+    val txLogDir      = new File(s"$tempDir/test_txlog_update/_transaction_log")
     val entriesBefore = txLogDir.listFiles().filter(_.getName.endsWith(".json")).length
 
     // Execute merge
@@ -344,11 +349,11 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
       .save(tablePath)
 
     // Execute merge on empty table - should not fail
-    try {
+    try
       spark.sql(s"MERGE SPLITS '$tablePath' TARGET SIZE 100M")
-    } catch {
+    catch {
       case _: Exception =>
-        // Empty table merge might fail gracefully - that's OK
+      // Empty table merge might fail gracefully - that's OK
     }
 
     // Verify table still accessible
@@ -433,11 +438,14 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
   test("should maintain aggregation capability after merge") {
     val tablePath = s"file://$tempDir/test_agg_after_merge"
 
-    val df = spark.range(0, 100).repartition(10).selectExpr(
-      "id",
-      "CAST(id AS STRING) as text",
-      "CAST(id AS DOUBLE) as value"
-    )
+    val df = spark
+      .range(0, 100)
+      .repartition(10)
+      .selectExpr(
+        "id",
+        "CAST(id AS STRING) as text",
+        "CAST(id AS DOUBLE) as value"
+      )
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.indexing.fastfields", "value")
@@ -452,17 +460,21 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
-    val agg = result.agg(
-      org.apache.spark.sql.functions.count("*").as("cnt"),
-      org.apache.spark.sql.functions.sum("value").as("total"),
-      org.apache.spark.sql.functions.min("value").as("min_val"),
-      org.apache.spark.sql.functions.max("value").as("max_val")
-    ).limit(1).collect().head
+    val agg = result
+      .agg(
+        org.apache.spark.sql.functions.count("*").as("cnt"),
+        org.apache.spark.sql.functions.sum("value").as("total"),
+        org.apache.spark.sql.functions.min("value").as("min_val"),
+        org.apache.spark.sql.functions.max("value").as("max_val")
+      )
+      .limit(1)
+      .collect()
+      .head
 
-    agg.getLong(0) shouldBe 100 // count
+    agg.getLong(0) shouldBe 100      // count
     agg.getDouble(1) shouldBe 4950.0 // sum of 0..99
-    agg.getDouble(2) shouldBe 0.0 // min
-    agg.getDouble(3) shouldBe 99.0 // max
+    agg.getDouble(2) shouldBe 0.0    // min
+    agg.getDouble(3) shouldBe 99.0   // max
 
     logger.info("Aggregation after merge test passed")
   }

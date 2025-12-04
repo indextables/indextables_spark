@@ -42,11 +42,10 @@ import org.slf4j.LoggerFactory
  *   - DROP INDEXTABLES PARTITIONS FROM my_table WHERE month BETWEEN 1 AND 6
  *
  * This command:
- *   1. Parses and validates the WHERE clause to ensure only partition columns are referenced
- *   2. Finds all splits matching the partition predicates
- *   3. Adds RemoveAction entries to the transaction log for matching splits
- *   4. Does NOT physically delete the split files (use PURGE INDEXTABLE for that)
- *   5. Removed splits become eligible for cleanup after retention period expires
+ *   1. Parses and validates the WHERE clause to ensure only partition columns are referenced 2. Finds all splits
+ *      matching the partition predicates 3. Adds RemoveAction entries to the transaction log for matching splits 4.
+ *      Does NOT physically delete the split files (use PURGE INDEXTABLE for that) 5. Removed splits become eligible for
+ *      cleanup after retention period expires
  *
  * Requirements:
  *   - WHERE clause is mandatory
@@ -122,7 +121,9 @@ case class DropPartitionsCommand(
         )
       }
 
-      logger.info(s"Found ${metadata.partitionColumns.size} partition columns: ${metadata.partitionColumns.mkString(", ")}")
+      logger.info(
+        s"Found ${metadata.partitionColumns.size} partition columns: ${metadata.partitionColumns.mkString(", ")}"
+      )
 
       // Build partition schema
       val partitionSchema = PartitionPredicateUtils.buildPartitionSchema(metadata.partitionColumns)
@@ -152,14 +153,16 @@ case class DropPartitionsCommand(
 
       if (matchingFiles.isEmpty) {
         logger.info(s"No partitions match the specified predicates: ${userPartitionPredicates.mkString(", ")}")
-        return Seq(Row(
-          tablePath.toString,
-          "no_action",
-          0L,
-          0L,
-          0L,
-          s"No partitions match predicates: ${userPartitionPredicates.mkString(", ")}"
-        ))
+        return Seq(
+          Row(
+            tablePath.toString,
+            "no_action",
+            0L,
+            0L,
+            0L,
+            s"No partitions match predicates: ${userPartitionPredicates.mkString(", ")}"
+          )
+        )
       }
 
       // Count unique partitions being dropped
@@ -170,7 +173,7 @@ case class DropPartitionsCommand(
       uniquePartitions.foreach { partitionValues =>
         val filesInPartition = matchingFiles.filter(_.partitionValues == partitionValues)
         val totalSize        = filesInPartition.map(_.size).sum
-        logger.info(s"  Partition $partitionValues: ${filesInPartition.length} splits, ${totalSize} bytes")
+        logger.info(s"  Partition $partitionValues: ${filesInPartition.length} splits, $totalSize bytes")
       }
 
       // Create RemoveActions for all matching files
@@ -188,23 +191,25 @@ case class DropPartitionsCommand(
       }
 
       // Commit the remove actions to transaction log
-      val version = transactionLog.commitRemoveActions(removeActions)
+      val version   = transactionLog.commitRemoveActions(removeActions)
       val totalSize = matchingFiles.map(_.size).sum
 
       logger.info(
         s"Successfully dropped ${uniquePartitions.size} partitions (${matchingFiles.length} splits, $totalSize bytes) in transaction version $version"
       )
 
-      Seq(Row(
-        tablePath.toString,
-        "success",
-        uniquePartitions.size.toLong,
-        matchingFiles.length.toLong,
-        totalSize,
-        s"Dropped ${uniquePartitions.size} partitions containing ${matchingFiles.length} splits. " +
-          s"Files will be eligible for cleanup after retention period expires. " +
-          s"Run PURGE INDEXTABLE to physically delete the files."
-      ))
+      Seq(
+        Row(
+          tablePath.toString,
+          "success",
+          uniquePartitions.size.toLong,
+          matchingFiles.length.toLong,
+          totalSize,
+          s"Dropped ${uniquePartitions.size} partitions containing ${matchingFiles.length} splits. " +
+            s"Files will be eligible for cleanup after retention period expires. " +
+            s"Run PURGE INDEXTABLE to physically delete the files."
+        )
+      )
 
     } finally
       transactionLog.close()
@@ -237,9 +242,7 @@ case class DropPartitionsCommand(
 
 object DropPartitionsCommand {
 
-  /**
-   * Create a DropPartitionsCommand from path or table identifier.
-   */
+  /** Create a DropPartitionsCommand from path or table identifier. */
   def apply(
     path: Option[String],
     tableIdentifier: Option[org.apache.spark.sql.catalyst.TableIdentifier],

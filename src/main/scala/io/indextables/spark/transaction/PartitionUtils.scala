@@ -56,7 +56,7 @@ object PartitionUtils {
         case None =>
           throw new IllegalArgumentException(
             s"Partition column '$partitionCol' not found in schema. " +
-            s"Available columns: ${schema.fieldNames.mkString(", ")}"
+              s"Available columns: ${schema.fieldNames.mkString(", ")}"
           )
       }
 
