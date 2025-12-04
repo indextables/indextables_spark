@@ -134,11 +134,12 @@ class PartitionedDatasetTest extends TestBase {
     assert(fullScanCount == 2400, "Full scan should return all records")
 
     // Test 4: Text search within partition
+    // Use limit().collect().length since StringContains is unsupported for aggregate pushdown
     val textSearchInPartition = df.filter(
       col("load_date") === "2024-01-01" &&
         col("message").contains("error")
     )
-    val textSearchCount = textSearchInPartition.count()
+    val textSearchCount = textSearchInPartition.limit(10000).collect().length
     println(s"Text search in partition returned $textSearchCount records")
   }
 
