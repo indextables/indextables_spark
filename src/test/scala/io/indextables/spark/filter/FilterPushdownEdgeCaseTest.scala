@@ -523,8 +523,9 @@ class FilterPushdownEdgeCaseTest extends TestBase {
       .load(tablePath)
 
     // Combine pushable (value > 150) with non-pushable (LIKE)
+    // Use limit().collect().length instead of count() since StringStartsWith is unsupported
     val filtered = result.filter("value > 150 AND text LIKE 'hello%'")
-    filtered.count() shouldBe 1 // id=2
+    filtered.limit(1000).collect().length shouldBe 1 // id=2
 
     logger.info("Mixed filters test passed")
   }

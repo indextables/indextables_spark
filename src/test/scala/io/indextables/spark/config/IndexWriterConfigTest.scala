@@ -66,13 +66,13 @@ class IndexWriterConfigTest extends TestBase {
 
         // Write with custom configuration
         testData.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode(SaveMode.Overwrite)
           .save(tempPath)
 
         // Read back to verify it worked
         val readData = spark.read
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(tempPath)
 
         readData.count() shouldBe 100
@@ -96,7 +96,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with custom configuration via DataFrame options (highest precedence)
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.heapSize", "150000000") // 150MB
         .option("spark.indextables.indexWriter.threads", "3")          // 3 threads
         .mode(SaveMode.Overwrite)
@@ -104,7 +104,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 100
@@ -128,7 +128,7 @@ class IndexWriterConfigTest extends TestBase {
 
         // DataFrame options should override Spark config
         testData.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.indexWriter.heapSize", "50000000") // 50MB (overrides 200MB)
           .option("spark.indextables.indexWriter.threads", "1")         // 1 thread (overrides 4)
           .mode(SaveMode.Overwrite)
@@ -136,7 +136,7 @@ class IndexWriterConfigTest extends TestBase {
 
         // Read back to verify it worked
         val readData = spark.read
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .load(tempPath)
 
         readData.count() shouldBe 100
@@ -160,13 +160,13 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with default batch settings
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify all documents were written correctly
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 25000
@@ -185,7 +185,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with custom batch size (smaller for testing)
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.batchSize", "100") // Small batch size
         .option("spark.indextables.indexWriter.useBatch", "true")
         .mode(SaveMode.Overwrite)
@@ -193,7 +193,7 @@ class IndexWriterConfigTest extends TestBase {
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 1000
@@ -212,14 +212,14 @@ class IndexWriterConfigTest extends TestBase {
 
       // Write with batch writing disabled
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexWriter.useBatch", "false") // Disable batch writing
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
       // Read back to verify it worked
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 100

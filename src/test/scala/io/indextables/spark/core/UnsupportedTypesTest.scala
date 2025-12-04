@@ -133,14 +133,14 @@ class UnsupportedTypesTest extends TestBase with Matchers {
       // Should succeed without any exceptions
       noException should be thrownBy {
         supportedData.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode("overwrite")
           .save(tempPath)
       }
 
       // Verify we can read back the data
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       readData.count() shouldBe 1

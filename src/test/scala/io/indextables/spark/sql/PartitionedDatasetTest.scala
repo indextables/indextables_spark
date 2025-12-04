@@ -74,7 +74,7 @@ class PartitionedDatasetTest extends TestBase {
 
     // Write partitioned dataset
     timeSeriesData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexWriter.batchSize", "100")
       .option("spark.indextables.indexing.typemap.event_type", "string")
@@ -98,14 +98,14 @@ class PartitionedDatasetTest extends TestBase {
     // Generate and write test data
     val timeSeriesData = generateTimeSeriesData(spark, totalRecords = 2400, daysSpan = 2)
     timeSeriesData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexWriter.batchSize", "50")
       .mode("overwrite")
       .save(testDataPath)
 
     // Read the partitioned dataset
-    val df = spark.read.format("tantivy4spark").load(testDataPath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
 
     // Test 1: Query specific partition (should prune to single partition)
     val singlePartitionQuery = df.filter(
@@ -151,10 +151,9 @@ class PartitionedDatasetTest extends TestBase {
 
     // Write with small batch size to create multiple files per partition
     repartitionedData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexWriter.batchSize", "5")                // Very small batches to force many files
-      .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Very small split sizes
       .mode("overwrite")
       .save(testDataPath)
 
@@ -197,7 +196,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity after merge
-    val df                = spark.read.format("tantivy4spark").load(testDataPath)
+    val df                = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 2400, "Should preserve all records after partition merge")
 
@@ -215,10 +214,9 @@ class PartitionedDatasetTest extends TestBase {
     val repartitionedData = timeSeriesData.repartition(30)
 
     repartitionedData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexWriter.batchSize", "5")                // Small batches
-      .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "10") // Small split sizes
       .mode("overwrite")
       .save(testDataPath)
 
@@ -244,7 +242,7 @@ class PartitionedDatasetTest extends TestBase {
     }
 
     // Verify data integrity
-    val df                = spark.read.format("tantivy4spark").load(testDataPath)
+    val df                = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     val totalRecordsAfter = df.count()
     assert(totalRecordsAfter == 1800, "Should preserve all records after global merge")
 
@@ -259,7 +257,7 @@ class PartitionedDatasetTest extends TestBase {
     val timeSeriesData = generateTimeSeriesData(spark, totalRecords = 2000, daysSpan = 2)
 
     timeSeriesData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexing.typemap.message", "text")
       .option("spark.indextables.indexing.typemap.event_type", "string")
@@ -267,7 +265,7 @@ class PartitionedDatasetTest extends TestBase {
       .save(testDataPath)
 
     // Register as temporary view for SQL queries
-    val df = spark.read.format("tantivy4spark").load(testDataPath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     df.createOrReplaceTempView("partitioned_data")
 
     // Test IndexQuery with partition pruning using SQL
@@ -313,7 +311,7 @@ class PartitionedDatasetTest extends TestBase {
     val initialData = generateTimeSeriesData(spark, totalRecords = 500, daysSpan = 1)
 
     initialData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexing.typemap.message", "text")
       .option("spark.indextables.indexing.typemap.event_type", "text")
@@ -324,7 +322,7 @@ class PartitionedDatasetTest extends TestBase {
     val additionalData = generateTimeSeriesData(spark, totalRecords = 300, daysSpan = 1, startDate = "2024-01-02")
 
     additionalData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .option("spark.indextables.indexing.typemap.message", "text")
       .option("spark.indextables.indexing.typemap.event_type", "text")
@@ -332,7 +330,7 @@ class PartitionedDatasetTest extends TestBase {
       .save(testDataPath)
 
     // Verify combined dataset
-    val df         = spark.read.format("tantivy4spark").load(testDataPath)
+    val df         = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataPath)
     val totalCount = df.count()
     assert(totalCount == 800, "Should have combined records from both writes")
 
@@ -364,7 +362,7 @@ class PartitionedDatasetTest extends TestBase {
     // Test V1 path (tantivy4spark)
     println("Testing V1 path: format('tantivy4spark')")
     testData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .partitionBy("load_date", "load_hour")
       .mode("overwrite")
       .save(testDataV1)
@@ -395,7 +393,7 @@ class PartitionedDatasetTest extends TestBase {
     println("✅ V2 WHERE clause successful")
 
     // Verify both datasets are readable
-    val dfV1 = spark.read.format("tantivy4spark").load(testDataV1)
+    val dfV1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataV1)
     val dfV2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testDataV2)
 
     assert(dfV1.count() == 200, "V1 dataset should have 200 records")

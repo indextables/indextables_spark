@@ -42,6 +42,7 @@ failed_test_names=()
 echo "🚀 Running tests individually..."
 echo "=================================================="
 
+mvn test-compile
 for test_file in $test_files; do
     current_test=$((current_test + 1))
 
@@ -63,7 +64,7 @@ for test_file in $test_files; do
         # Run the specific test
         start_time=$(date +%s)
 
-        if mvn test-compile scalatest:test -DwildcardSuites="$class_name" -q; then
+        if mvn scalatest:test -DwildcardSuites="$class_name" -q; then
             end_time=$(date +%s)
             duration=$((end_time - start_time))
             echo "  ✅ PASSED in ${duration}s"

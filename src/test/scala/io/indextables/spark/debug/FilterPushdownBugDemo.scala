@@ -59,10 +59,10 @@ object FilterPushdownBugDemo {
     val df = spark.createDataFrame(spark.sparkContext.parallelize(testData), schema)
 
     // Save using tantivy4spark format
-    df.write.format("tantivy4spark").mode("overwrite").save(testPath)
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
 
     // Read back the data
-    val readDf = spark.read.format("tantivy4spark").load(testPath)
+    val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
     readDf.createOrReplaceTempView("reviews")
 
     println("Sample data created and saved in tantivy4spark format")

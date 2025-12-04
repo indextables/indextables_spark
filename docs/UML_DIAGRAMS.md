@@ -457,7 +457,7 @@ sequenceDiagram
     participant JNI as TantivyNative
     participant Storage as StorageStrategy
 
-    Client->>DS: df.write.format("tantivy4spark").save(path)
+    Client->>DS: df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
     DS->>Table: newWriteBuilder(writeInfo)
     Table->>WB: create WriteBuilder
     WB->>BatchWrite: build()
@@ -503,7 +503,7 @@ sequenceDiagram
     participant JNI as TantivyNative
     participant Storage as StorageStrategy
 
-    Client->>DS: spark.read.format("tantivy4spark").load(path)
+    Client->>DS: spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     DS->>Table: getTable()
     Table->>TL: getSchema()
     TL-->>Table: schema from transaction log

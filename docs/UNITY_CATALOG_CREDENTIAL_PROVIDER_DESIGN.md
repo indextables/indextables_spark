@@ -297,7 +297,7 @@ spark.conf.set("spark.indextables.unity.cache.ttl.minutes", "30")
 spark.conf.set("spark.indextables.unity.cache.maxSize", "200")
 
 // Use with Tantivy4Spark
-df.write.format("tantivy4spark")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("s3://my-unity-catalog-bucket/path")
 
 // Monitor cache performance (in driver code)

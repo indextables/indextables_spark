@@ -125,7 +125,7 @@ class ComprehensiveFiltersTest extends TestBase {
       // Step 1: Write comprehensive test data
       println("💾 Writing comprehensive test data...")
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 
@@ -134,7 +134,7 @@ class ComprehensiveFiltersTest extends TestBase {
       // Step 2: Read data back and execute comprehensive queries
       println("📖 Reading data back...")
       val readData = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tempPath)
 
       println(s"📊 Read back ${readData.count()} rows")

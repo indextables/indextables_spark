@@ -399,7 +399,7 @@ sequenceDiagram
     participant JNI as JNI Bridge
     participant Tantivy as Native Tantivy
 
-    Client->>DS: spark.read.format("tantivy4spark").load(path)
+    Client->>DS: spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)
     DS->>TL: getSchema() and listFiles()
     TL-->>DS: schema + file list with min/max stats
 

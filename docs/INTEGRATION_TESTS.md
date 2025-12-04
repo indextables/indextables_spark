@@ -101,8 +101,8 @@ Each test uses deterministic data generation with fixed seeds to ensure reproduc
 
 Each test follows this pattern:
 1. **Generate Data**: Create DataFrame with known characteristics
-2. **Write Data**: Use `df.write.format("tantivy4spark").save(path)`  
-3. **Read Data**: Use `spark.read.format("tantivy4spark").load(path)`
+2. **Write Data**: Use `df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)`  
+3. **Read Data**: Use `spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(path)`
 4. **Execute Queries**: Run specific query types on read DataFrame
 5. **Validate Results**: Assert that:
    - Only matching rows are returned (min/max/exact validation)

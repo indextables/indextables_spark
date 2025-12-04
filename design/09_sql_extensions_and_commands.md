@@ -978,11 +978,11 @@ private val relationIndexQueries =
 
 ```scala
 // Query 1 (in Thread 1)
-val df1 = spark.read.format("indextables").load("s3://bucket/table1")
+val df1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/table1")
   .filter($"content" indexquery "spark")
 
 // Query 2 (in Thread 2, concurrent)
-val df2 = spark.read.format("indextables").load("s3://bucket/table2")
+val df2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/table2")
   .filter($"content" indexquery "scala")
 
 // Each query has separate DataSourceV2Relation instance
@@ -1058,7 +1058,7 @@ WHERE tantivy4spark_indexqueryall('apache spark');
 // DataFrame API usage (direct function calls)
 import org.apache.spark.sql.functions._
 
-val df = spark.read.format("indextables").load("s3://bucket/documents")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/documents")
 
 // Using expr() with operator syntax
 df.filter(expr("content indexquery 'machine learning'"))

@@ -105,7 +105,6 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
   - [Field Indexing Configuration](#field-indexing-configuration)
   - [JSON Field Support](#json-field-support-for-nested-data)
-  - [Auto-Sizing Configuration](#auto-sizing-configuration)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
   - [Transaction Log Configuration](#transaction-log-configuration)
@@ -624,7 +623,7 @@ query.status.prettyJson
   metricsCollector.recordBatchMetrics(batchId, recordCount, timestamp)
 
   // Write data
-  batchDF.write.format("indextables").mode("append").save(path)
+  batchDF.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(path)
 }
 ```
 
@@ -841,10 +840,10 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 // BAD: Too many small splits hurt performance
 df.repartition(1000).write...  // Avoid over-partitioning
 
-// GOOD: Let IndexTables optimize or use auto-sizing
-df.write
-  .option("spark.indextables.autoSize.enabled", "true")
-  .option("spark.indextables.autoSize.targetSplitSize", "500M")
+// GOOD: Use appropriate partitioning or MERGE SPLITS to consolidate
+df.coalesce(10).write...  // Fewer, larger splits
+// Or use MERGE SPLITS after multiple writes:
+// MERGE SPLITS 'path' TARGET SIZE 500M
 ```
 
 #### 🚫 **DON'T: Use Default Memory Settings**
@@ -1165,14 +1164,6 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 - ✅ Storage costs matter more than query performance
 
 For comprehensive documentation, usage examples, and technical details, see the **JSON Field Support** section in `CLAUDE.md`.
-
-#### Auto-Sizing Configuration
-
-| Configuration | Default | Description |
-|---------------|---------|-------------|
-| `spark.indextables.autoSize.enabled` | `false` | Enable auto-sizing based on historical data |
-| `spark.indextables.autoSize.targetSplitSize` | - | Target size per split (supports: "100M", "1G", "512K", bytes) |
-| `spark.indextables.autoSize.inputRowCount` | - | Explicit row count for accurate partitioning (required for V2 API) |
 
 #### Merge-On-Write Configuration
 
@@ -2030,7 +2021,7 @@ src/main/scala/
 │   ├── extensions/     # Spark SQL extensions (MERGE SPLITS, etc.)
 │   ├── filters/        # Query filter handling
 │   ├── io/             # I/O utilities and cloud storage support
-│   ├── optimize/       # Write optimization and auto-sizing
+│   ├── optimize/       # Write optimization utilities
 │   ├── prewarm/        # Cache pre-warming management
 │   ├── schema/         # Schema mapping and conversion
 │   ├── search/         # Tantivy search engine wrapper via tantivy4java
@@ -2053,7 +2044,6 @@ src/main/antlr4/        # ANTLR grammar definitions
 
 src/test/scala/         # Comprehensive test suite (296+ tests passing)
 ├── io/indextables/spark/
-│   ├── autosize/       # Auto-sizing feature tests
 │   ├── comprehensive/  # Comprehensive integration tests
 │   ├── config/         # Configuration tests
 │   ├── core/           # Core functionality tests including SQL pushdown
@@ -2165,9 +2155,6 @@ A: Checkpoint compaction reduces transaction log read times by 60% (2.5x speedup
 **Q: What's the difference between V1 and V2 DataSource APIs?**
 A: V2 API (`io.indextables.spark.core.IndexTables4SparkTableProvider`) is recommended for new projects as it properly indexes partition columns. V1 API (`indextables`) is maintained for backward compatibility.
 
-**Q: How do I configure auto-sizing?**
-A: Enable auto-sizing with `spark.indextables.autoSize.enabled=true` and set `spark.indextables.autoSize.targetSplitSize=100M`. V1 API automatically counts DataFrames; V2 API requires explicit row count.
-
 **Q: What's the difference between string and text field types?**
 A: String fields use raw tokenization for exact matching (pushed to data source). Text fields use tokenization for full-text search with IndexQuery operators (best-effort filtering).
 
@@ -2194,7 +2181,7 @@ A: Default retention is 30 days. Files are only deleted when they're older than 
 A: Simply read from Parquet and write to IndexTables4Spark:
 ```scala
 val df = spark.read.parquet("s3://bucket/parquet-data")
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.content", "text")
   .save("s3://bucket/tantivy-data")
 ```

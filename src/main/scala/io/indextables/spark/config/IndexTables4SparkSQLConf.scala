@@ -21,16 +21,6 @@ package io.indextables.spark.config
 object IndexTables4SparkSQLConf {
 
   /////////////////////
-  // Optimized Write
-  /////////////////////
-
-  // Configuration keys - these will be used to read from SparkConf
-  val TANTIVY4SPARK_OPTIMIZE_WRITE_ENABLED                  = "spark.indextables.optimizeWrite.enabled"
-  val TANTIVY4SPARK_OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT = "spark.indextables.optimizeWrite.targetRecordsPerSplit"
-  val TANTIVY4SPARK_OPTIMIZE_WRITE_MAX_SHUFFLE_PARTITIONS   = "spark.indextables.optimizeWrite.maxShufflePartitions"
-  val TANTIVY4SPARK_OPTIMIZE_WRITE_MIN_SHUFFLE_PARTITIONS   = "spark.indextables.optimizeWrite.minShufflePartitions"
-
-  /////////////////////
   // AWS Configuration
   /////////////////////
 
@@ -57,14 +47,6 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_MERGE_TEMP_DIRECTORY_PATH        = "spark.indextables.merge.tempDirectoryPath"
   val TANTIVY4SPARK_INDEX_WRITER_TEMP_DIRECTORY_PATH = "spark.indextables.indexWriter.tempDirectoryPath"
   val TANTIVY4SPARK_CACHE_DIRECTORY_PATH             = "spark.indextables.cache.directoryPath"
-
-  /////////////////////
-  // Auto-Sizing Configuration
-  /////////////////////
-
-  val TANTIVY4SPARK_AUTO_SIZE_ENABLED           = "spark.indextables.autoSize.enabled"
-  val TANTIVY4SPARK_AUTO_SIZE_TARGET_SPLIT_SIZE = "spark.indextables.autoSize.targetSplitSize"
-  val TANTIVY4SPARK_AUTO_SIZE_INPUT_ROW_COUNT   = "spark.indextables.autoSize.inputRowCount"
 
   /////////////////////
   // Index Writer Configuration

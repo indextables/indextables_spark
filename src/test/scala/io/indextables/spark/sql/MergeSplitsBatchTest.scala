@@ -76,7 +76,6 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
-      .option("targetRecordsPerSplit", "1")
       .save(tempTablePath)
 
     // Check we have multiple files
@@ -114,7 +113,6 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
       .mode("append") // Use append for first write
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
-      .option("targetRecordsPerSplit", "1")
       .save(tempTablePath)
 
     val filesBeforeMerge = transactionLog.listFiles()
@@ -155,7 +153,6 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
-      .option("targetRecordsPerSplit", "1")
       .save(tempTablePath)
 
     spark.conf.set("spark.indextables.merge.batchSize", "1")
@@ -184,7 +181,6 @@ class MergeSplitsBatchTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .option("spark.indextables.indexWriter.batchSize", "1")
-      .option("targetRecordsPerSplit", "1")
       .save(tempTablePath)
 
     // Don't set batch size - should use defaultParallelism

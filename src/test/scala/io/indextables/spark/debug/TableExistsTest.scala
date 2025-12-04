@@ -12,7 +12,7 @@ class TableExistsTest extends TestBase {
     // Attempting to read from non-existent table should throw exception, not return empty results
     val exception = intercept[RuntimeException] {
       spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(nonExistentPath)
         .collect() // Trigger the read operation
     }
@@ -40,7 +40,7 @@ class TableExistsTest extends TestBase {
 
       // Write initial data
       initialData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
@@ -53,13 +53,13 @@ class TableExistsTest extends TestBase {
         )
 
       emptyData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
       // Reading from empty table should return 0 rows, not throw exception
       val result = spark.read
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
         .collect()
 

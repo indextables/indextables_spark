@@ -31,8 +31,8 @@ import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
  * Test for S3 split read/write operations using S3Mock.
  *
  * This test demonstrates the actual S3 API usage:
- *   - df.write.format("tantivy4spark").save("s3://bucket/path")
- *   - spark.read.format("tantivy4spark").load("s3://bucket/path")
+ *   - df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
+ *   - spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
  *
  * Uses S3Mock to provide a real S3-compatible server for testing.
  */
@@ -239,7 +239,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
 
     // Write DataFrame to S3 using IndexTables4Spark - pass all 3 credentials as options for executor distribution
     data.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -253,7 +253,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
 
     // Read DataFrame back from S3 - pass same credentials as write for consistency
     val result = spark.read
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -324,7 +324,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
 
     // Write to S3 - pass all 3 credentials as options for executor distribution
     data.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -338,7 +338,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
 
     // Read back and verify - pass same credentials as write for consistency
     val result = spark.read
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.aws.accessKey", ACCESS_KEY)
       .option("spark.indextables.aws.secretKey", SECRET_KEY)
       .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -398,7 +398,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     datasets.foreach {
       case (data, path) =>
         data.write
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.aws.accessKey", ACCESS_KEY)
           .option("spark.indextables.aws.secretKey", SECRET_KEY)
           .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)
@@ -414,7 +414,7 @@ class S3SplitReadWriteTest extends TestBase with BeforeAndAfterAll with BeforeAn
     val totalRecords = datasets.map {
       case (_, path) =>
         val df = spark.read
-          .format("tantivy4spark")
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .option("spark.indextables.aws.accessKey", ACCESS_KEY)
           .option("spark.indextables.aws.secretKey", SECRET_KEY)
           .option("spark.indextables.aws.sessionToken", SESSION_TOKEN)

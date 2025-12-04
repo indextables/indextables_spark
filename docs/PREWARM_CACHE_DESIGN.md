@@ -88,14 +88,14 @@ spark.indextables.cache.prewarm.enabled = true  // Default: enabled
 ```scala
 // Pre-warm is enabled by default - no configuration needed
 val df = spark.read
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://bucket/path")
 
 df.filter($"content" indexquery "machine learning").show()
 
 // Explicitly disable pre-warm if needed
 val dfNoPrewarm = spark.read
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.prewarm.enabled", "false")
   .load("s3://bucket/path")
 ```

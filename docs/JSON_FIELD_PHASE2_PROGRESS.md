@@ -144,7 +144,7 @@ if (shouldUseJson) {
 ### Current Architecture Flow
 
 **Write Path (Schema Creation) - ✅ DONE**:
-1. User calls `df.write.format("indextables").save(...)`
+1. User calls `df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(...)`
 2. `TantivyDirectInterface.createSchemaThreadSafe()` is called
 3. `SparkSchemaToTantivyMapper` detects JSON fields
 4. Schema validates field configurations

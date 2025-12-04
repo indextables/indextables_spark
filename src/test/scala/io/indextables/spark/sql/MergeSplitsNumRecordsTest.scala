@@ -96,7 +96,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch1DF  = spark.createDataFrame(batch1RDD, schema)
 
     batch1DF.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
@@ -109,7 +110,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch2DF  = spark.createDataFrame(batch2RDD, schema)
 
     batch2DF.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -123,7 +125,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch3DF  = spark.createDataFrame(batch3RDD, schema)
 
     batch3DF.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
@@ -137,13 +140,14 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val batch4DF  = spark.createDataFrame(batch4RDD, schema)
 
     batch4DF.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
       .mode("append")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 
     // Read back to verify we have all 8 records
-    val beforeMerge = spark.read.format("tantivy4spark").load(tablePath)
+    val beforeMerge = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val recordCount = beforeMerge.count()
     recordCount shouldBe 8
 
@@ -209,7 +213,7 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     println(s"✅ Created ${addActionsBeforeMerge.length} separate files ready for merging")
 
     // Verify data integrity
-    val dataCheck         = spark.read.format("tantivy4spark").load(tablePath)
+    val dataCheck         = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val actualRecordCount = dataCheck.count()
 
     println(s"Actual record count: $actualRecordCount")
@@ -241,7 +245,8 @@ class MergeSplitsNumRecordsTest extends AnyFlatSpec with Matchers with BeforeAnd
     val testData    = spark.createDataFrame(testDataRDD, schema)
 
     testData.write
-      .format("tantivy4spark")
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
       .save(tablePath)
 

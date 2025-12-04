@@ -647,7 +647,7 @@ class SplitSizeAnalyzer(
 **V1 API (Automatic Count):**
 ```scala
 // V1 automatically counts DataFrame when auto-sizing enabled
-df.write.format("indextables")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.autoSize.enabled", "true")
   .option("spark.indextables.autoSize.targetSplitSize", "100M")
   .save("s3://bucket/path")

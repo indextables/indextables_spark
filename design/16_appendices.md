@@ -481,7 +481,7 @@ WHERE _indexall indexquery 'title:spark OR content:dataframe';
 
 ```scala
 df.write
-  .format("indextables")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append"|"overwrite")
   .partitionBy("col1", "col2", ...)
   .option("key", "value")
@@ -492,7 +492,7 @@ df.write
 
 ```scala
 spark.read
-  .format("indextables")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("key", "value")
   .load("path")
 ```

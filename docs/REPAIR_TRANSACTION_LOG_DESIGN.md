@@ -417,7 +417,7 @@ test("repaired transaction log should truncate long statistics") {
     ).toDF("id", "long_text", "score")
 
     // Write WITHOUT truncation to simulate old table
-    data.write.format("indextables")
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.stats.truncation.enabled", "false")
       .save(tablePath)
 
@@ -440,7 +440,7 @@ test("repaired transaction log should truncate long statistics") {
 
     // Verify data remains readable after replacement
     replaceTransactionLog(tablePath, repairedPath)
-    val df = spark.read.format("indextables").load(tablePath)
+    val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     assert(df.count() === 2)
   }
 }
@@ -452,7 +452,7 @@ test("repair with stats truncation disabled preserves original statistics") {
 
     // Create table with long text
     val data = Seq(("doc1", "x" * 2000)).toDF("id", "text")
-    data.write.format("indextables").save(tablePath)
+    data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(tablePath)
 
     // Repair with truncation disabled
     spark.conf.set("spark.indextables.stats.truncation.enabled", "false")

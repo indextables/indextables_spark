@@ -107,14 +107,14 @@ def invalidateAllCredentialCaches(): Int = {
 ```scala
 // Initial read with session token A
 spark.conf.set("spark.indextables.aws.sessionToken", "session-token-A")
-val df1 = spark.read.format("indextables").load("s3://bucket/data")
+val df1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/data")
 // Cache instance created: key includes session-token-A
 
 // ... time passes, credentials rotate ...
 
 // Read with new session token B  
 spark.conf.set("spark.indextables.aws.sessionToken", "session-token-B")
-val df2 = spark.read.format("indextables").load("s3://bucket/data")
+val df2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/data")
 // New cache instance created: key includes session-token-B
 // Old cache instance with session-token-A still exists but won't be used
 ```

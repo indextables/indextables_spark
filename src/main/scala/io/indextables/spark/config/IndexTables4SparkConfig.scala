@@ -58,26 +58,6 @@ object IndexTables4SparkConfig {
   }
 
   /////////////////////
-  // Optimized Write Configuration
-  /////////////////////
-
-  /**
-   * Enable optimized writes for this table. When enabled, writes will be shuffled to target a specific number of
-   * records per split.
-   */
-  val OPTIMIZE_WRITE: BooleanConfigEntry = BooleanConfigEntry(
-    "tantivy4spark.autoOptimize.optimizeWrite",
-    defaultValue = false
-  )
-
-  /** Target number of records per split file for optimized writes. Default is 1 million records per split. */
-  val OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT: LongConfigEntry = LongConfigEntry(
-    "tantivy4spark.optimizeWrite.targetRecordsPerSplit",
-    defaultValue = 1000000L,
-    validator = _ > 0
-  )
-
-  /////////////////////
   // General Table Configuration
   /////////////////////
 
@@ -95,8 +75,6 @@ object IndexTables4SparkConfig {
 
   /** All configuration entries for easy access. */
   val ALL_CONFIGS: Seq[ConfigEntry[_]] = Seq(
-    OPTIMIZE_WRITE,
-    OPTIMIZE_WRITE_TARGET_RECORDS_PER_SPLIT,
     BLOOM_FILTERS_ENABLED,
     STORAGE_FORCE_STANDARD
   )

@@ -327,14 +327,14 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       // Write data WITHOUT explicit fast field configuration
       // This should trigger auto-fast-field configuration for the first numeric field (score)
       testData.write
-        .format("tantivy4spark")
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(tablePath)
 
       println(s"✅ Auto-fast-field test: Data written to $tablePath without explicit fast field config")
 
       // Read back and verify we can perform aggregations (which proves fast fields were auto-configured)
-      val readData = spark.read.format("tantivy4spark").load(tablePath)
+      val readData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
       // If auto-fast-field worked, this should succeed without errors
       val count = readData.count()

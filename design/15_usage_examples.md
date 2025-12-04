@@ -48,13 +48,13 @@ val data = Seq(
 ).toDF("id", "content", "score")
 
 // Write to IndexTables4Spark (AWS S3)
-data.write.format("indextables")
+data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
   .save("s3://my-bucket/documents")
 
 // Or write to Azure Blob Storage
-data.write.format("indextables")
+data.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score")
   .save("abfss://container@account.dfs.core.windows.net/documents")
@@ -63,7 +63,7 @@ data.write.format("indextables")
 ### 15.2.3 Basic Read Example
 ```scala
 // Read data
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://my-bucket/documents")
 
 // Basic query
@@ -98,7 +98,7 @@ case class LogEntry(
 val logs = spark.read.json("s3://logs-raw/2024-01-01/*.json")
   .as[LogEntry]
 
-logs.write.format("indextables")
+logs.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("date", "hour")
   .option("spark.indextables.indexing.typemap.message", "text")
   .option("spark.indextables.indexing.fastfields", "response_time_ms")
@@ -109,7 +109,7 @@ logs.write.format("indextables")
 
 ### 15.3.3 Query Examples
 ```scala
-val logs = spark.read.format("indextables")
+val logs = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://logs-indexed/app-logs")
 
 // Find all errors in specific time range
@@ -166,7 +166,7 @@ case class Product(
 val products = spark.read.parquet("s3://raw-data/products/*.parquet")
   .as[Product]
 
-products.write.format("indextables")
+products.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("category")
   .option("spark.indextables.indexing.typemap.title", "string")
   .option("spark.indextables.indexing.typemap.description", "text")
@@ -177,7 +177,7 @@ products.write.format("indextables")
 
 ### 15.3.3 Search Queries
 ```scala
-val catalog = spark.read.format("indextables")
+val catalog = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://catalog/products")
 
 // Product search with filters
@@ -213,7 +213,7 @@ catalog.filter($"category" === "Home & Kitchen")
 val updates = spark.read.parquet("s3://raw-data/products/2024-01-02/*.parquet")
   .as[Product]
 
-updates.write.format("indextables")
+updates.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append")
   .partitionBy("category")
   .option("spark.indextables.indexing.typemap.title", "string")
@@ -244,7 +244,7 @@ case class Document(
 val documents = spark.read.parquet("s3://raw-docs/extracted/*.parquet")
   .as[Document]
 
-documents.write.format("indextables")
+documents.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("year", "month")
   .option("spark.indextables.indexing.typemap.title", "string")
   .option("spark.indextables.indexing.typemap.content", "text")
@@ -257,7 +257,7 @@ documents.write.format("indextables")
 
 ### 15.5.3 Search and Retrieval
 ```scala
-val docs = spark.read.format("indextables")
+val docs = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://document-store/archive")
 
 // Full-text search with metadata filters
@@ -310,7 +310,7 @@ val metrics = spark.readStream
   .as[DeviceMetric]
 
 metrics.writeStream
-  .format("indextables")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("device_type", "hour")
   .option("spark.indextables.indexing.typemap.alert_message", "text")
   .option("spark.indextables.indexing.fastfields", "temperature,pressure")
@@ -320,7 +320,7 @@ metrics.writeStream
 
 ### 15.6.3 Monitoring Queries
 ```scala
-val metrics = spark.read.format("indextables")
+val metrics = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .load("s3://metrics-store/devices")
 
 // Temperature anomalies
@@ -346,8 +346,8 @@ metrics.filter($"hour" >= "2024-01-01-00" && $"hour" <= "2024-01-01-23")
 
 ### 15.7.1 Multi-Table Joins with IndexQuery
 ```scala
-val products = spark.read.format("indextables").load("s3://catalog/products")
-val reviews = spark.read.format("indextables").load("s3://catalog/reviews")
+val products = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://catalog/products")
+val reviews = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://catalog/reviews")
 
 // Join with full-text filter on both sides
 products.filter($"description" indexquery "gaming laptop")
@@ -361,7 +361,7 @@ products.filter($"description" indexquery "gaming laptop")
 
 ### 15.7.2 Window Functions with IndexQuery
 ```scala
-val logs = spark.read.format("indextables").load("s3://logs/app-logs")
+val logs = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://logs/app-logs")
 
 // Rank errors by user
 logs.filter($"message" indexquery "error OR exception")
@@ -374,7 +374,7 @@ logs.filter($"message" indexquery "error OR exception")
 
 ### 15.7.3 Complex Aggregations
 ```scala
-val events = spark.read.format("indextables").load("s3://events/user-activity")
+val events = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://events/user-activity")
 
 // Multi-dimensional aggregation with IndexQuery filter
 events.filter($"activity_description" indexquery "checkout AND completed")
@@ -395,12 +395,12 @@ val data = spark.read.parquet("s3://raw-data/staging/*.parquet")
 
 // Write different partitions to different tables based on quality
 data.filter($"quality_score" >= 95)
-  .write.format("indextables")
+  .write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append")
   .save("s3://gold-tier/high-quality")
 
 data.filter($"quality_score" >= 70 && $"quality_score" < 95)
-  .write.format("indextables")
+  .write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("append")
   .save("s3://silver-tier/medium-quality")
 ```
@@ -414,7 +414,7 @@ spark.conf.set("spark.indextables.indexWriter.batchSize", "100000")
 spark.conf.set("spark.indextables.indexWriter.threads", "8")
 spark.conf.set("spark.indextables.s3.maxConcurrency", "16")
 
-largeDataset.write.format("indextables")
+largeDataset.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexWriter.tempDirectoryPath", "/local_disk0/temp")
   .option("spark.indextables.optimizeWrite.enabled", "true")
   .save("s3://bulk-load/large-dataset")
@@ -427,7 +427,7 @@ spark.conf.set("spark.indextables.cache.maxSize", "5000000000")  // 5GB
 spark.conf.set("spark.indextables.cache.prewarm.enabled", "true")
 spark.conf.set("spark.indextables.docBatch.maxSize", "5000")
 
-val df = spark.read.format("indextables")
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.cache.directoryPath", "/fast-nvme/cache")
   .load("s3://query-heavy/dataset")
 ```
@@ -449,7 +449,7 @@ spark.conf.set("spark.indextables.logRetention.duration", "604800000")  // 7 day
 val parquetData = spark.read.parquet("s3://old-data/parquet/*.parquet")
 
 // Write to IndexTables4Spark with partitioning
-parquetData.write.format("indextables")
+parquetData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .partitionBy("date")
   .option("spark.indextables.indexing.typemap.description", "text")
   .option("spark.indextables.autoSize.enabled", "true")
@@ -469,7 +469,7 @@ val esData = spark.read.format("org.elasticsearch.spark.sql")
   .load()
 
 // Write to IndexTables4Spark
-esData.write.format("indextables")
+esData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.indexing.typemap.content", "text")
   .option("spark.indextables.indexing.fastfields", "score,timestamp")
   .save("s3://migrated-data/from-es")
@@ -480,7 +480,7 @@ esData.write.format("indextables")
 ### 15.10.1 Handling Missing Credentials
 ```scala
 try {
-  val df = spark.read.format("indextables").load("s3://bucket/path")
+  val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path")
   df.show()
 } catch {
   case e: IllegalStateException if e.getMessage.contains("AWS credentials") =>
@@ -510,7 +510,7 @@ def writeWithRetry(df: DataFrame, path: String, maxRetries: Int = 3): Unit = {
 
   while (attempt < maxRetries && !success) {
     try {
-      df.write.format("indextables").save(path)
+      df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save(path)
       success = true
     } catch {
       case e: Exception =>

@@ -1082,7 +1082,7 @@ class BatchOptimizationMetricsAccumulator extends org.apache.spark.util.Accumula
  * spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "true")
  *
  * // Execute query
- * val result = spark.read.format("indextables").load("s3://bucket/path").collect()
+ * val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load("s3://bucket/path").collect()
  *
  * // Access metrics using getMetricsDelta (computes delta from baseline captured at scan start)
  * val metrics = BatchOptMetricsRegistry.getMetricsDelta("s3://bucket/path")

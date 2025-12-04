@@ -173,7 +173,6 @@ class V2AdvancedWriteTest extends TestBase {
 
       largeData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.optimizeWrite.targetRecordsPerSplit", "250") // Force multiple splits
         .mode("overwrite")
         .save(tempPath)
 

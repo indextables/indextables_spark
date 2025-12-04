@@ -38,7 +38,7 @@ class V2TableProviderTest extends TestBase {
         (2, "Another Test", "validation", 84.0, false)
       ).toDF("id", "name", "category", "value", "flag")
 
-      testData.write.format("tantivy4spark").save(tempPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
 
       // Test inferSchema method directly
       val tableProvider = new IndexTables4SparkTableProvider()
@@ -71,8 +71,8 @@ class V2TableProviderTest extends TestBase {
         val data1 = Seq((1, "Path1 Data", "test")).toDF("id", "content", "source")
         val data2 = Seq((2, "Path2 Data", "test")).toDF("id", "content", "source")
 
-        data1.write.format("tantivy4spark").save(tempPath1)
-        data2.write.format("tantivy4spark").save(tempPath2)
+        data1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath1)
+        data2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath2)
 
         // Test reading from multiple paths using JSON format
         val pathsJson = s"""["$tempPath1", "$tempPath2"]"""
@@ -113,7 +113,7 @@ class V2TableProviderTest extends TestBase {
 
       // Create a table first
       val testData = Seq((1, "Capability Test")).toDF("id", "name")
-      testData.write.format("tantivy4spark").save(tempPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempPath)
 
       // Get table via V2 API
       val tableProvider = new IndexTables4SparkTableProvider()

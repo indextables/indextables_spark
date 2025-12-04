@@ -565,13 +565,13 @@ class CompressedTransactionLogTest extends AnyFunSuite {
 
     // Write with compression enabled
     val df = spark.range(100).toDF()
-    df.write.format("indextables")
+    df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.transaction.compression.enabled", "true")
       .option("spark.indextables.transaction.compression.codec", "gzip")
       .save(tablePath)
 
     // Read back - should work transparently
-    val loaded = spark.read.format("indextables").load(tablePath)
+    val loaded = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     assert(loaded.count() == 100)
   }
 
@@ -580,18 +580,18 @@ class CompressedTransactionLogTest extends AnyFunSuite {
     val tablePath = "s3://test-bucket/mixed-table"
 
     // Write v1 uncompressed
-    df1.write.format("indextables")
+    df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.transaction.compression.enabled", "false")
       .save(tablePath)
 
     // Append v2 compressed
-    df2.write.format("indextables")
+    df2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.transaction.compression.enabled", "true")
       .mode("append")
       .save(tablePath)
 
     // Read all data
-    val loaded = spark.read.format("indextables").load(tablePath)
+    val loaded = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     assert(loaded.count() == df1.count() + df2.count())
   }
 }

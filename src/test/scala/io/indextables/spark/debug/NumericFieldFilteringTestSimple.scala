@@ -33,10 +33,10 @@ class NumericFieldFilteringTestSimple extends TestBase {
       ).toDF("id", "age", "salary", "score", "active", "name")
 
       // Save the data
-      testData.write.format("tantivy4spark").mode("overwrite").save(testPath)
+      testData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(testPath)
 
       // Read back the data
-      val readDf = spark.read.format("tantivy4spark").load(testPath)
+      val readDf = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath)
       readDf.createOrReplaceTempView("employees")
 
       println(s"Total rows: ${readDf.count()}")

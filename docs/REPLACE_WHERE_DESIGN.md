@@ -74,7 +74,7 @@ def replaceWhere(addActions: Seq[AddAction], predicate: String): Long = {
 ```scala
 // User-facing API
 df.write
-  .format("tantivy4spark")
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .mode("replaceWhere")
   .option("replaceWhere", "year=2023 AND month IN ('11', '12')")
   .save("/path/to/table")
@@ -175,7 +175,7 @@ test("should replace specific partitions with replaceWhere") {
   )
   
   initialData.write
-    .format("tantivy4spark")
+    .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
     .partitionBy("year", "month")
     .save(tablePath)
     
@@ -188,13 +188,13 @@ test("should replace specific partitions with replaceWhere") {
   )
   
   newData.write
-    .format("tantivy4spark")
+    .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
     .mode("replaceWhere")
     .option("replaceWhere", "year=1 AND month=0")
     .save(tablePath)
     
   // Verify only the specified partition was replaced
-  val result = spark.read.format("tantivy4spark").load(tablePath)
+  val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
   val year1Month0Count = result.filter($"year" === "1" && $"month" === "0" && $"data" === "replaced").count()
   val otherPartitionsCount = result.filter(!($"year" === "1" && $"month" === "0")).count()
   
