@@ -2,7 +2,7 @@
 
 ## Overview
 
-✅ **IMPLEMENTATION COMPLETE** - This document outlines the successful implementation of a custom `indexquery` SQL operator in Tantivy4Spark that enables direct Tantivy query syntax in Spark SQL queries. The operator supports filter pushdown to the data source for native execution using tantivy4java's `SplitIndex.parseQuery()` method.
+✅ **IMPLEMENTATION COMPLETE** - This document outlines the successful implementation of a custom `indexquery` SQL operator in IndexTables4Spark that enables direct Tantivy query syntax in Spark SQL queries. The operator supports filter pushdown to the data source for native execution using tantivy4java's `SplitIndex.parseQuery()` method.
 
 ## Test Results
 
@@ -48,7 +48,7 @@ Catalyst AST      IndexQueryExpression   Tantivy Filter    parseQuery() call
 ### Components Successfully Implemented
 
 #### 1. Custom Catalyst Expression ✅ COMPLETE
-**File**: `src/main/scala/com/tantivy4spark/expressions/IndexQueryExpression.scala`
+**File**: `src/main/scala/io/indextables/spark/expressions/IndexQueryExpression.scala`
 
 ✅ `IndexQueryExpression` extends `BinaryExpression` with `Predicate`
 ✅ Proper column name extraction from `AttributeReference` and `UnresolvedAttribute`  
@@ -59,14 +59,14 @@ Catalyst AST      IndexQueryExpression   Tantivy Filter    parseQuery() call
 ✅ Code generation support for non-pushdown scenarios
 
 #### 2. Custom Filter for Pushdown ✅ COMPLETE
-**File**: `src/main/scala/com/tantivy4spark/filters/IndexQueryFilter.scala`
+**File**: `src/main/scala/io/indextables/spark/filters/IndexQueryFilter.scala`
 
 ✅ Simple case class for filter pushdown (doesn't extend sealed `Filter` class)
 ✅ Validation methods `isValid` and `references`
 ✅ Special character and edge case handling for complex query strings
 
 #### 3. Expression Utilities ✅ COMPLETE  
-**File**: `src/main/scala/com/tantivy4spark/util/ExpressionUtils.scala`
+**File**: `src/main/scala/io/indextables/spark/util/ExpressionUtils.scala`
 
 ✅ Bidirectional conversion between expressions and filters
 ✅ Complex expression tree traversal and extraction
@@ -76,8 +76,8 @@ Catalyst AST      IndexQueryExpression   Tantivy Filter    parseQuery() call
 
 #### 4. Filter Pushdown Integration ✅ COMPLETE
 **Updated Files**: 
-- `src/main/scala/com/tantivy4spark/core/FiltersToQueryConverter.scala`
-- `src/main/scala/com/tantivy4spark/core/Tantivy4SparkScanBuilder.scala`
+- `src/main/scala/io/indextables/spark/core/FiltersToQueryConverter.scala`
+- `src/main/scala/io/indextables/spark/core/IndexTables4SparkScanBuilder.scala`
 
 ✅ Added `IndexQueryFilter` support to `convertFilterToQuery`
 ✅ Uses `SplitIndex.parseQuery()` with field names for native execution  
@@ -85,7 +85,7 @@ Catalyst AST      IndexQueryExpression   Tantivy Filter    parseQuery() call
 
 #### 5. Spark Extensions Registration ✅ COMPLETE
 **Files**:
-- `src/main/scala/com/tantivy4spark/extensions/Tantivy4SparkExtensions.scala`
+- `src/main/scala/io/indextables/spark/extensions/IndexTables4SparkExtensions.scala`
 - `src/main/resources/META-INF/services/org.apache.spark.sql.util.SparkSessionExtensions`
 
 ✅ Parser injection for custom SQL syntax support
@@ -123,8 +123,8 @@ Catalyst AST      IndexQueryExpression   Tantivy Filter    parseQuery() call
 
 **Workaround Available**: Users can create IndexQuery expressions programmatically:
 ```scala
-import com.tantivy4spark.expressions.IndexQueryExpression
-import com.tantivy4spark.util.ExpressionUtils
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.util.ExpressionUtils
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -144,7 +144,7 @@ The implementation successfully achieves the original design goals:
 (Programmatic)      IndexQueryExpression    IndexQueryFilter    parseQuery() call
 ```
 
-**Result**: A fully functional custom pushdown filter system with comprehensive testing, ready for production use in Tantivy4Spark applications.
+**Result**: A fully functional custom pushdown filter system with comprehensive testing, ready for production use in IndexTables4Spark applications.
 
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode}
@@ -210,10 +210,10 @@ case class IndexQueryExpression(
 
 Create a custom Spark Filter that can be pushed down to the data source:
 
-**File**: `src/main/scala/com/tantivy4spark/filters/IndexQueryFilter.scala`
+**File**: `src/main/scala/io/indextables/spark/filters/IndexQueryFilter.scala`
 
 ```scala
-package com.tantivy4spark.filters
+package io.indextables.spark.filters
 
 import org.apache.spark.sql.sources.Filter
 
@@ -240,12 +240,12 @@ case class IndexQueryFilter(
 
 ### 3. Enhanced SQL Parser
 
-Extend the existing `Tantivy4SparkSqlParser` to recognize the `indexquery` operator:
+Extend the existing `IndexTables4SparkSqlParser` to recognize the `indexquery` operator:
 
-**File**: `src/main/scala/com/tantivy4spark/sql/Tantivy4SparkSqlParser.scala`
+**File**: `src/main/scala/io/indextables/spark/sql/IndexTables4SparkSqlParser.scala`
 
 ```scala
-package com.tantivy4spark.sql
+package io.indextables.spark.sql
 
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
@@ -253,12 +253,12 @@ import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.catalyst.parser.extensions.SqlExtensions
-import com.tantivy4spark.expressions.IndexQueryExpression
+import io.indextables.spark.expressions.IndexQueryExpression
 
 /**
- * Enhanced SQL parser for Tantivy4Spark with indexquery operator support.
+ * Enhanced SQL parser for IndexTables4Spark with indexquery operator support.
  */
-class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
+class IndexTables4SparkSqlParser(delegate: ParserInterface) extends ParserInterface {
 
   override def parsePlan(sqlText: String): LogicalPlan = {
     val trimmed = sqlText.trim.toUpperCase
@@ -292,7 +292,7 @@ class Tantivy4SparkSqlParser(delegate: ParserInterface) extends ParserInterface 
 
 Update `FiltersToQueryConverter` to handle `IndexQueryFilter`:
 
-**File**: `src/main/scala/com/tantivy4spark/core/FiltersToQueryConverter.scala`
+**File**: `src/main/scala/io/indextables/spark/core/FiltersToQueryConverter.scala`
 
 Add to the `convertFilterToQuery` method:
 
@@ -334,15 +334,15 @@ case indexQuery: IndexQueryFilter =>
 
 ### 5. Enhanced Scan Builder
 
-Update `Tantivy4SparkScanBuilder` to recognize and support `IndexQueryFilter`:
+Update `IndexTables4SparkScanBuilder` to recognize and support `IndexQueryFilter`:
 
-**File**: `src/main/scala/com/tantivy4spark/core/Tantivy4SparkScanBuilder.scala`
+**File**: `src/main/scala/io/indextables/spark/core/IndexTables4SparkScanBuilder.scala`
 
 ```scala
 // Add to the isSupportedFilter method
 private def isSupportedFilter(filter: Filter): Boolean = {
   import org.apache.spark.sql.sources._
-  import com.tantivy4spark.filters.IndexQueryFilter
+  import io.indextables.spark.filters.IndexQueryFilter
   
   filter match {
     // ... existing cases ...
@@ -356,15 +356,15 @@ private def isSupportedFilter(filter: Filter): Boolean = {
 
 Create a utility to convert `IndexQueryExpression` to `IndexQueryFilter` during pushdown:
 
-**File**: `src/main/scala/com/tantivy4spark/util/ExpressionUtils.scala`
+**File**: `src/main/scala/io/indextables/spark/util/ExpressionUtils.scala`
 
 ```scala
-package com.tantivy4spark.util
+package io.indextables.spark.util
 
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.sources.Filter
-import com.tantivy4spark.expressions.IndexQueryExpression
-import com.tantivy4spark.filters.IndexQueryFilter
+import io.indextables.spark.expressions.IndexQueryExpression
+import io.indextables.spark.filters.IndexQueryFilter
 
 object ExpressionUtils {
   
@@ -398,18 +398,18 @@ object ExpressionUtils {
 
 To integrate the custom parser, we need to register it with Spark:
 
-**File**: `src/main/scala/com/tantivy4spark/extensions/Tantivy4SparkExtensions.scala`
+**File**: `src/main/scala/io/indextables/spark/extensions/IndexTables4SparkExtensions.scala`
 
 ```scala
-package com.tantivy4spark.extensions
+package io.indextables.spark.extensions
 
 import org.apache.spark.sql.SparkSessionExtensions
-import com.tantivy4spark.sql.Tantivy4SparkSqlParser
+import io.indextables.spark.sql.IndexTables4SparkSqlParser
 
-class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
+class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
   override def apply(extensions: SparkSessionExtensions): Unit = {
     extensions.injectParser { (session, parser) =>
-      new Tantivy4SparkSqlParser(parser)
+      new IndexTables4SparkSqlParser(parser)
     }
   }
 }
@@ -420,7 +420,7 @@ class Tantivy4SparkExtensions extends (SparkSessionExtensions => Unit) {
 **File**: `src/main/resources/META-INF/services/org.apache.spark.sql.SparkSessionExtensions`
 
 ```
-com.tantivy4spark.extensions.Tantivy4SparkExtensions
+io.indextables.spark.extensions.IndexTables4SparkExtensions
 ```
 
 ### 3. Usage Configuration
@@ -429,8 +429,8 @@ Users would configure their SparkSession to use the extensions:
 
 ```scala
 val spark = SparkSession.builder()
-  .appName("Tantivy4Spark with IndexQuery")
-  .config("spark.sql.extensions", "com.tantivy4spark.extensions.Tantivy4SparkExtensions")
+  .appName("IndexTables4Spark with IndexQuery")
+  .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
   .getOrCreate()
 ```
 
@@ -489,7 +489,7 @@ WHERE title indexquery 'spark sql'
 - Pushdown effectiveness
 - Memory usage with complex queries
 
-**File**: `src/test/scala/com/tantivy4spark/expressions/IndexQueryExpressionTest.scala`
+**File**: `src/test/scala/io/indextables/spark/expressions/IndexQueryExpressionTest.scala`
 
 ```scala
 class IndexQueryExpressionTest extends SparkFunSuite {
@@ -575,14 +575,14 @@ class IndexQueryExpressionTest extends SparkFunSuite {
 
 - [ ] Create `IndexQueryExpression` class
 - [ ] Create `IndexQueryFilter` class  
-- [ ] Enhance `Tantivy4SparkSqlParser` for operator recognition
+- [ ] Enhance `IndexTables4SparkSqlParser` for operator recognition
 - [ ] Update `FiltersToQueryConverter` with IndexQuery support
-- [ ] Update `Tantivy4SparkScanBuilder` filter support
+- [ ] Update `IndexTables4SparkScanBuilder` filter support
 - [ ] Create `ExpressionUtils` for conversion logic
-- [ ] Implement `Tantivy4SparkExtensions` for registration
+- [ ] Implement `IndexTables4SparkExtensions` for registration
 - [ ] Add service registration files
 - [ ] Write comprehensive tests
 - [ ] Update documentation and examples
 - [ ] Performance benchmarking
 
-This design provides a robust foundation for implementing the `indexquery` operator while maintaining compatibility with existing Tantivy4Spark functionality and following Spark's extension patterns.
+This design provides a robust foundation for implementing the `indexquery` operator while maintaining compatibility with existing IndexTables4Spark functionality and following Spark's extension patterns.

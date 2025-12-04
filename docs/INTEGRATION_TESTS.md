@@ -1,10 +1,10 @@
-# Tantivy4Spark Integration Tests
+# IndexTables4Spark Integration Tests
 
-This document describes the comprehensive integration tests for Tantivy4Spark that validate the complete write/read/query cycle.
+This document describes the comprehensive integration tests for IndexTables4Spark that validate the complete write/read/query cycle.
 
 ## Test Structure
 
-### Full Integration Tests (`Tantivy4SparkFullIntegrationTest.scala`)
+### Full Integration Tests (`IndexTables4SparkFullIntegrationTest.scala`)
 
 These tests require the native Tantivy JNI library to be built and available. When the native library is not available, the tests are automatically skipped using ScalaTest's `assume()` function.
 
@@ -114,13 +114,13 @@ Each test follows this pattern:
 
 ### When Native Library is Available:
 ```bash
-mvn test -Dtest=Tantivy4SparkFullIntegrationTest
+mvn test -Dtest=IndexTables4SparkFullIntegrationTest
 ```
 All integration tests will execute and validate query results.
 
 ### When Native Library is Not Available:
 ```bash  
-mvn test -Dtest=Tantivy4SparkFullIntegrationTest
+mvn test -Dtest=IndexTables4SparkFullIntegrationTest
 ```
 Integration tests will be skipped with "CANCELED" status, but compilation and structure are validated.
 
