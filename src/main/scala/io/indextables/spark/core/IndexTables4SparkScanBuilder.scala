@@ -29,7 +29,7 @@ import org.apache.spark.sql.connector.read.{
   SupportsPushDownRequiredColumns,
   SupportsPushDownV2Filters
 }
-import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.sources.{Filter, StringContains, StringEndsWith, StringStartsWith}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -139,13 +139,31 @@ class IndexTables4SparkScanBuilder(
         val hasAggregateInPlan = detectAggregateInQueryPlan()
         if (effectiveUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
           val unsupportedDesc = effectiveUnsupportedFilters.map(_.toString).mkString(", ")
+          // Build specific guidance for string pattern filters
+          val hasStringStartsWith = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
+          val hasStringEndsWith = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
+          val hasStringContains = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringContains])
+          val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
+
+          val stringPatternHint = if (hasStringPatternFilter) {
+            val patternTypes = Seq(
+              if (hasStringStartsWith) "stringStartsWith" else "",
+              if (hasStringEndsWith) "stringEndsWith" else "",
+              if (hasStringContains) "stringContains" else ""
+            ).filter(_.nonEmpty)
+
+            s" To enable string pattern pushdown, set " +
+            s"spark.indextables.filter.stringPattern.pushdown=true (enables all patterns) " +
+            s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
+          } else ""
+
           throw new IllegalStateException(
             s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
             s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
             s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
             s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
-            s"Unsupported: IsNull, JSON field null checks. " +
-            s"StringStartsWith/StringEndsWith/StringContains can be enabled via spark.indextables.filter.<type>.pushdown=true."
+            s"Unsupported: IsNull, JSON field null checks." +
+            stringPatternHint
           )
         }
 

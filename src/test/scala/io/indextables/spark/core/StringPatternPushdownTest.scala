@@ -111,6 +111,9 @@ class StringPatternPushdownTest extends TestBase {
       }
       exception.getMessage should include("Aggregate pushdown blocked")
       exception.getMessage should include("StringStartsWith")
+      // Verify helpful hint is included
+      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
+      exception.getMessage should include("spark.indextables.filter.stringStartsWith.pushdown=true")
     }
   }
 
@@ -232,6 +235,10 @@ class StringPatternPushdownTest extends TestBase {
         df.count()
       }
       exception.getMessage should include("Aggregate pushdown blocked")
+      exception.getMessage should include("StringEndsWith")
+      // Verify helpful hint is included
+      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
+      exception.getMessage should include("spark.indextables.filter.stringEndsWith.pushdown=true")
     }
   }
 
@@ -351,6 +358,10 @@ class StringPatternPushdownTest extends TestBase {
         df.count()
       }
       exception.getMessage should include("Aggregate pushdown blocked")
+      exception.getMessage should include("StringContains")
+      // Verify helpful hint is included
+      exception.getMessage should include("spark.indextables.filter.stringPattern.pushdown=true")
+      exception.getMessage should include("spark.indextables.filter.stringContains.pushdown=true")
     }
   }
 
