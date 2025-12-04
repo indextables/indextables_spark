@@ -144,7 +144,8 @@ class IndexTables4SparkScanBuilder(
             s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
             s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
             s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
-            s"Unsupported: IsNull, StringStartsWith, StringEndsWith, StringContains, JSON field null checks."
+            s"Unsupported: IsNull, JSON field null checks. " +
+            s"StringStartsWith/StringEndsWith/StringContains can be enabled via spark.indextables.filter.<type>.pushdown=true."
           )
         }
 
@@ -561,6 +562,37 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
+  // Configuration helpers for string pattern filter pushdown
+  // Helper to get config value from both options (reader options) and config (session config)
+  private def getConfigValue(key: String): Option[String] = {
+    // First check reader options, then session config
+    Option(options.get(key)).orElse(config.get(key))
+  }
+
+  // Master switch to enable all string pattern pushdowns at once
+  private def isAllStringPatternPushdownEnabled: Boolean =
+    getConfigValue("spark.indextables.filter.stringPattern.pushdown")
+      .map(_.toLowerCase == "true")
+      .getOrElse(false)
+
+  private def isStringContainsPushdownEnabled: Boolean =
+    isAllStringPatternPushdownEnabled ||
+    getConfigValue("spark.indextables.filter.stringContains.pushdown")
+      .map(_.toLowerCase == "true")
+      .getOrElse(false)
+
+  private def isStringStartsWithPushdownEnabled: Boolean =
+    isAllStringPatternPushdownEnabled ||
+    getConfigValue("spark.indextables.filter.stringStartsWith.pushdown")
+      .map(_.toLowerCase == "true")
+      .getOrElse(false)
+
+  private def isStringEndsWithPushdownEnabled: Boolean =
+    isAllStringPatternPushdownEnabled ||
+    getConfigValue("spark.indextables.filter.stringEndsWith.pushdown")
+      .map(_.toLowerCase == "true")
+      .getOrElse(false)
+
   private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
 
@@ -577,9 +609,9 @@ class IndexTables4SparkScanBuilder(
       case And(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Or(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
       case Not(child)          => isSupportedFilter(child) // NOT is supported only if child is supported
-      case _: StringStartsWith => false                    // Tantivy does best-effort, Spark applies final filtering
-      case _: StringEndsWith   => false                    // Tantivy does best-effort, Spark applies final filtering
-      case _: StringContains   => false                    // Tantivy wildcard queries are best-effort, Spark applies final filtering
+      case _: StringStartsWith => isStringStartsWithPushdownEnabled // Enabled via config, Tantivy prefix queries are efficient
+      case _: StringEndsWith   => isStringEndsWithPushdownEnabled   // Enabled via config, less efficient than prefix
+      case _: StringContains   => isStringContainsPushdownEnabled   // Enabled via config, least efficient (full scan)
       case _                   => false
     }
   }
