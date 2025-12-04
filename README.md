@@ -105,6 +105,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
   - [Field Indexing Configuration](#field-indexing-configuration)
   - [JSON Field Support](#json-field-support-for-nested-data)
+  - [String Pattern Filter Pushdown](#string-pattern-filter-pushdown)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
   - [Transaction Log Configuration](#transaction-log-configuration)
@@ -1164,6 +1165,46 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 - ✅ Storage costs matter more than query performance
 
 For comprehensive documentation, usage examples, and technical details, see the **JSON Field Support** section in `CLAUDE.md`.
+
+#### String Pattern Filter Pushdown
+
+String pattern filters (`startsWith`, `endsWith`, `contains`) can be enabled for pushdown to allow aggregate queries (COUNT, SUM, AVG, etc.) to execute efficiently in Tantivy. These are **disabled by default** because pattern matching semantics differ between TEXT and STRING fields.
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.filter.stringPattern.pushdown` | `false` | Master switch - enables all three pattern types |
+| `spark.indextables.filter.stringStartsWith.pushdown` | `false` | Enable prefix matching (most efficient - uses sorted index terms) |
+| `spark.indextables.filter.stringEndsWith.pushdown` | `false` | Enable suffix matching (less efficient - requires term scanning) |
+| `spark.indextables.filter.stringContains.pushdown` | `false` | Enable substring matching (least efficient - cannot leverage index structure) |
+
+**Usage Example:**
+
+```scala
+// Enable all pattern pushdowns with master switch
+val count = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.filter.stringPattern.pushdown", "true")
+  .load("s3://bucket/logs")
+  .filter(col("filename").startsWith("error_"))
+  .count()  // Executes in Tantivy with filter pushdown
+
+// Or enable individually
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.filter.stringStartsWith.pushdown", "true")
+  .load("s3://bucket/logs")
+  .filter(col("name").startsWith("prod_"))
+  .agg(sum("value"))
+
+// Session-level configuration
+spark.conf.set("spark.indextables.filter.stringPattern.pushdown", "true")
+```
+
+**Important Notes:**
+- For **TEXT fields** (tokenized): Patterns match at the token level, not the full string
+- For **STRING fields** (raw tokenizer): Patterns match the complete field value exactly
+- When disabled (default), pattern filters cause aggregate pushdown to fail with a descriptive error message
+- Non-aggregate queries (e.g., `collect()`, `show()`) work regardless of this setting via Spark post-filtering
 
 #### Merge-On-Write Configuration
 

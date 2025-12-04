@@ -84,6 +84,14 @@ spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5,
 
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
+
+// String Pattern Filter Pushdown (all disabled by default)
+// Enable these to allow aggregate pushdown with pattern filters
+// Note: These match individual tokens, not full strings for text fields
+spark.indextables.filter.stringPattern.pushdown: false (master switch - enables all three below)
+spark.indextables.filter.stringStartsWith.pushdown: false (efficient - uses sorted index terms)
+spark.indextables.filter.stringEndsWith.pushdown: false (less efficient - requires term scanning)
+spark.indextables.filter.stringContains.pushdown: false (least efficient - cannot leverage index structure)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)

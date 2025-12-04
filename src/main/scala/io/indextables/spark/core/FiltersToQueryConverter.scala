@@ -848,22 +848,57 @@ object FiltersToQueryConverter {
 
         case StringStartsWith(attribute, value) =>
           queryLog(s"Creating StringStartsWith query: $attribute starts with '$value'")
-          val pattern = value + "*"
-          queryLog(s"StringStartsWith pattern: '$pattern'")
-          val fieldNames = List(attribute).asJava
-          withTemporaryIndex(schema)(index => index.parseQuery(pattern, fieldNames))
+          // For TEXT fields (default tokenizer), use parseQuery which handles prefix at token level.
+          // For STRING fields (raw tokenizer), use regexQuery for exact prefix matching.
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.TEXT) {
+            queryLog(s"StringStartsWith on TEXT field: using parseQuery for '$value*'")
+            val pattern = value + "*"
+            val fieldNames = List(attribute).asJava
+            withTemporaryIndex(schema)(index => index.parseQuery(pattern, fieldNames))
+          } else {
+            // Escape special regex chars and build prefix regex pattern
+            val escapedValue = java.util.regex.Pattern.quote(value)
+            val regexPattern = escapedValue + ".*"
+            queryLog(s"StringStartsWith on STRING field: using regexQuery for '$regexPattern'")
+            Query.regexQuery(schema, attribute, regexPattern)
+          }
 
         case StringEndsWith(attribute, value) =>
           queryLog(s"Creating StringEndsWith query: $attribute ends with '$value'")
-          val pattern = "*" + value
-          queryLog(s"StringEndsWith pattern: '$pattern'")
-          Query.wildcardQuery(schema, attribute, pattern, true)
+          // For TEXT fields (default tokenizer), use parseQuery which handles suffix at token level.
+          // For STRING fields (raw tokenizer), use regexQuery for exact suffix matching.
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.TEXT) {
+            queryLog(s"StringEndsWith on TEXT field: using parseQuery for '*$value'")
+            val pattern = "*" + value
+            val fieldNames = List(attribute).asJava
+            withTemporaryIndex(schema)(index => index.parseQuery(pattern, fieldNames))
+          } else {
+            // Escape special regex chars and build suffix regex pattern
+            val escapedValue = java.util.regex.Pattern.quote(value)
+            val regexPattern = ".*" + escapedValue
+            queryLog(s"StringEndsWith on STRING field: using regexQuery for '$regexPattern'")
+            Query.regexQuery(schema, attribute, regexPattern)
+          }
 
         case StringContains(attribute, value) =>
           queryLog(s"Creating StringContains query: $attribute contains '$value'")
-          val pattern = "*" + value + "*"
-          queryLog(s"StringContains pattern: '$pattern'")
-          Query.wildcardQuery(schema, attribute, pattern, true)
+          // For TEXT fields (default tokenizer), use a plain terms query since
+          // tokenization will handle the matching. For STRING fields (raw tokenizer),
+          // use a regex query with .*value.*.
+          val fieldType = getFieldType(schema, attribute)
+          if (fieldType == FieldType.TEXT) {
+            queryLog(s"StringContains on TEXT field: using phrase query for '$value'")
+            val words = List(value.toString).asJava.asInstanceOf[java.util.List[Object]]
+            Query.phraseQuery(schema, attribute, words)
+          } else {
+            // Escape special regex chars and build contains regex pattern
+            val escapedValue = java.util.regex.Pattern.quote(value)
+            val regexPattern = ".*" + escapedValue + ".*"
+            queryLog(s"StringContains on STRING field: using regexQuery for '$regexPattern'")
+            Query.regexQuery(schema, attribute, regexPattern)
+          }
 
         case indexQuery: IndexQueryFilter =>
           queryLog(s"Creating IndexQuery: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
@@ -1422,13 +1457,58 @@ object FiltersToQueryConverter {
         }
 
       case StringStartsWith(attribute, value) =>
-        None // Will fall back to string parsing for wildcard queries
+        // Use parseQuery with explicit field:pattern format for prefix matching
+        try {
+          val queryString = s"$attribute:$value*"
+          queryLog(s"StringStartsWith: creating parseQuery for '$queryString'")
+          val query = splitSearchEngine.parseQuery(queryString)
+          if (query == null) {
+            queryLog(s"StringStartsWith: parseQuery returned null for '$queryString'")
+            None
+          } else {
+            Some(query)
+          }
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create parseQuery for StringStartsWith: ${e.getMessage}")
+            None
+        }
 
       case StringEndsWith(attribute, value) =>
-        None // Will fall back to string parsing for wildcard queries
+        // Use parseQuery with explicit field:pattern format for suffix matching
+        try {
+          val queryString = s"$attribute:*$value"
+          queryLog(s"StringEndsWith: creating parseQuery for '$queryString'")
+          val query = splitSearchEngine.parseQuery(queryString)
+          if (query == null) {
+            queryLog(s"StringEndsWith: parseQuery returned null for '$queryString'")
+            None
+          } else {
+            Some(query)
+          }
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create parseQuery for StringEndsWith: ${e.getMessage}")
+            None
+        }
 
       case StringContains(attribute, value) =>
-        None // Will fall back to string parsing for wildcard queries
+        // Use parseQuery with explicit field:pattern format for contains matching
+        try {
+          val queryString = s"$attribute:*$value*"
+          queryLog(s"StringContains: creating parseQuery for '$queryString'")
+          val query = splitSearchEngine.parseQuery(queryString)
+          if (query == null) {
+            queryLog(s"StringContains: parseQuery returned null for '$queryString'")
+            None
+          } else {
+            Some(query)
+          }
+        } catch {
+          case e: Exception =>
+            queryLog(s"Failed to create parseQuery for StringContains: ${e.getMessage}")
+            None
+        }
 
       case And(left, right) =>
         // Handle AND by combining both sides with MUST logic
