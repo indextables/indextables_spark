@@ -103,8 +103,8 @@ class IndexTables4SparkScan(
     val metricsEnabled = config.getOrElse("spark.indextables.read.batchOptimization.metrics.enabled", "false").toBoolean
     if (metricsEnabled && metricsAccumulator.isEmpty) {
       try {
-        val acc        = enableMetricsCollection()
-        val tablePath  = transactionLog.getTablePath().toString
+        val acc       = enableMetricsCollection()
+        val tablePath = transactionLog.getTablePath().toString
         io.indextables.spark.storage.BatchOptMetricsRegistry.register(tablePath, acc)
         logger.debug(s"Auto-registered batch optimization metrics for table: $tablePath")
       } catch {
@@ -155,7 +155,15 @@ class IndexTables4SparkScan(
         logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
         pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
-          new IndexTables4SparkInputPartition(addAction, readSchema, fullTableSchema, pushedFilters, index, limit, indexQueryFilters)
+          new IndexTables4SparkInputPartition(
+            addAction,
+            readSchema,
+            fullTableSchema,
+            pushedFilters,
+            index,
+            limit,
+            indexQueryFilters
+          )
         val preferredHosts = partition.preferredLocations()
         if (preferredHosts.nonEmpty) {
           logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
@@ -236,9 +244,7 @@ class IndexTables4SparkScan(
     logger.debug(
       s"DATA SKIPPING DEBUG: applyDataSkipping called with ${addActions.length} files and ${filters.length} filters"
     )
-    filters.foreach { f =>
-      logger.debug(s"DATA SKIPPING DEBUG: Filter: $f")
-    }
+    filters.foreach(f => logger.debug(s"DATA SKIPPING DEBUG: Filter: $f"))
 
     if (filters.isEmpty) {
       logger.debug(s"DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")

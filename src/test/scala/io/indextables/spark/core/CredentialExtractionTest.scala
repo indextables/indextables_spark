@@ -25,9 +25,8 @@ import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
 
 /**
- * Test to verify that credential extraction logic works correctly. This test validates the
- * actual credential values are properly extracted from different sources (Spark session config,
- * Hadoop config, and read options).
+ * Test to verify that credential extraction logic works correctly. This test validates the actual credential values are
+ * properly extracted from different sources (Spark session config, Hadoop config, and read options).
  */
 class CredentialExtractionTest extends TestBase {
 

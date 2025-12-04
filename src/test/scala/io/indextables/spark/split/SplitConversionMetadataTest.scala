@@ -25,11 +25,11 @@ import io.indextables.spark.TestBase
  * Comprehensive tests for Split Conversion and Metadata handling.
  *
  * Tests cover:
- * - Split file format validation
- * - Metadata extraction and verification
- * - Split size tracking
- * - Document count accuracy
- * - Field schema preservation
+ *   - Split file format validation
+ *   - Metadata extraction and verification
+ *   - Split size tracking
+ *   - Document count accuracy
+ *   - Field schema preservation
  */
 class SplitConversionMetadataTest extends TestBase {
 
@@ -48,7 +48,7 @@ class SplitConversionMetadataTest extends TestBase {
       .mode("overwrite")
       .save(tablePath)
 
-    val tableDir = new File(s"$tempDir/test_split_extension")
+    val tableDir   = new File(s"$tempDir/test_split_extension")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     assert(splitFiles.nonEmpty, "Split files should be created")
@@ -69,7 +69,7 @@ class SplitConversionMetadataTest extends TestBase {
       .mode("overwrite")
       .save(tablePath)
 
-    val tableDir = new File(s"$tempDir/test_uuid_naming")
+    val tableDir   = new File(s"$tempDir/test_uuid_naming")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     // Split files have format: part-NNNNN-N-UUID.split
@@ -103,7 +103,7 @@ class SplitConversionMetadataTest extends TestBase {
     result.count() shouldBe 500
 
     // Verify actual split files exist
-    val tableDir = new File(s"$tempDir/test_size_tracking")
+    val tableDir   = new File(s"$tempDir/test_size_tracking")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
     assert(splitFiles.nonEmpty, "Split files should exist")
 
@@ -121,7 +121,7 @@ class SplitConversionMetadataTest extends TestBase {
     val tablePath = s"file://$tempDir/test_doc_count"
 
     val expectedCount = 1234
-    val df = spark.range(0, expectedCount).selectExpr("id", "CAST(id AS STRING) as text")
+    val df            = spark.range(0, expectedCount).selectExpr("id", "CAST(id AS STRING) as text")
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")

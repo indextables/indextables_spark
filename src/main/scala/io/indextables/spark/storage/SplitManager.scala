@@ -525,8 +525,10 @@ case class SplitCacheConfig(
         return Some(config)
 
       case Some(other) =>
-        logger.warn(s"Unknown batch optimization profile: '$other'. " +
-          "Valid profiles: conservative, balanced, aggressive, disabled. Using 'balanced' as default.")
+        logger.warn(
+          s"Unknown batch optimization profile: '$other'. " +
+            "Valid profiles: conservative, balanced, aggressive, disabled. Using 'balanced' as default."
+        )
         var config = BatchOptimizationConfig.balanced()
         config = applyCustomBatchOptParams(config)
         return Some(config)
@@ -586,12 +588,11 @@ case class SplitCacheConfig(
   }
 
   /** Check if any custom batch optimization parameters are specified. */
-  private def hasAnyBatchOptParams: Boolean = {
+  private def hasAnyBatchOptParams: Boolean =
     batchOptMaxRangeSize.isDefined ||
-    batchOptGapTolerance.isDefined ||
-    batchOptMinDocs.isDefined ||
-    batchOptMaxConcurrentPrefetch.isDefined
-  }
+      batchOptGapTolerance.isDefined ||
+      batchOptMinDocs.isDefined ||
+      batchOptMaxConcurrentPrefetch.isDefined
 }
 
 /** Companion object for SplitCacheConfig with auto-detection utilities. */
@@ -877,8 +878,7 @@ case class BatchOptMetrics(
   bytesTransferred: Long = 0,
   bytesWasted: Long = 0,
   totalPrefetchDurationMs: Long = 0,
-  segmentsProcessed: Long = 0
-) {
+  segmentsProcessed: Long = 0) {
 
   /** Check if metrics are empty (no operations recorded). */
   def isEmpty: Boolean = totalOperations == 0
@@ -910,10 +910,9 @@ case class BatchOptMetrics(
    * @return
    *   Consolidation ratio (e.g., 15.0 means 15 requests consolidated into 1)
    */
-  def consolidationRatio: Double = {
+  def consolidationRatio: Double =
     if (consolidatedRequests == 0) 0.0
     else totalRequests.toDouble / consolidatedRequests.toDouble
-  }
 
   /**
    * Calculate cost savings percentage (reduction in S3 requests).
@@ -923,10 +922,9 @@ case class BatchOptMetrics(
    * @return
    *   Cost savings as percentage (0-100)
    */
-  def costSavingsPercent: Double = {
+  def costSavingsPercent: Double =
     if (totalRequests == 0) 0.0
     else ((totalRequests - consolidatedRequests).toDouble / totalRequests.toDouble) * 100.0
-  }
 
   /**
    * Calculate bandwidth efficiency percentage (useful bytes vs. wasted bytes).
@@ -936,10 +934,9 @@ case class BatchOptMetrics(
    * @return
    *   Efficiency percentage (0-100)
    */
-  def efficiencyPercent: Double = {
+  def efficiencyPercent: Double =
     if (bytesTransferred == 0) 0.0
     else ((bytesTransferred - bytesWasted).toDouble / bytesTransferred.toDouble) * 100.0
-  }
 
   /**
    * Calculate average documents per batch operation.
@@ -947,10 +944,9 @@ case class BatchOptMetrics(
    * @return
    *   Average batch size
    */
-  def averageBatchSize: Double = {
+  def averageBatchSize: Double =
     if (totalOperations == 0) 0.0
     else totalDocuments.toDouble / totalOperations.toDouble
-  }
 
   /**
    * Format metrics as human-readable string for logging.
@@ -958,16 +954,15 @@ case class BatchOptMetrics(
    * @return
    *   Multi-line summary string
    */
-  def summary: String = {
+  def summary: String =
     s"""Batch Optimization Metrics:
-       |  Total Operations: ${totalOperations}
-       |  Documents Retrieved: ${totalDocuments} (avg ${averageBatchSize} per batch)
-       |  S3 Requests: ${totalRequests} → ${consolidatedRequests} (${consolidationRatio}x consolidation)
-       |  Cost Savings: ${costSavingsPercent}%%
-       |  Bandwidth Efficiency: ${efficiencyPercent}%%
-       |  Data Transferred: ${bytesTransferred} bytes (${bytesWasted} wasted)
+       |  Total Operations: $totalOperations
+       |  Documents Retrieved: $totalDocuments (avg $averageBatchSize per batch)
+       |  S3 Requests: $totalRequests → $consolidatedRequests (${consolidationRatio}x consolidation)
+       |  Cost Savings: $costSavingsPercent%%
+       |  Bandwidth Efficiency: $efficiencyPercent%%
+       |  Data Transferred: $bytesTransferred bytes ($bytesWasted wasted)
        |""".stripMargin
-  }
 }
 
 object BatchOptMetrics {
@@ -989,7 +984,7 @@ object BatchOptMetrics {
    * @return
    *   Current batch optimization metrics
    */
-  def fromJavaMetrics(): BatchOptMetrics = {
+  def fromJavaMetrics(): BatchOptMetrics =
     try {
       val javaMetrics = SplitCacheManager.getBatchMetrics()
 
@@ -1008,7 +1003,6 @@ object BatchOptMetrics {
         logger.warn(s"Failed to collect batch optimization metrics: ${e.getMessage}")
         BatchOptMetrics.empty
     }
-  }
 }
 
 /**
@@ -1036,7 +1030,8 @@ object BatchOptMetrics {
  * println(s"Cost savings: \${finalMetrics.costSavingsPercent}%")
  * }}}
  */
-class BatchOptimizationMetricsAccumulator extends org.apache.spark.util.AccumulatorV2[BatchOptMetrics, BatchOptMetrics] {
+class BatchOptimizationMetricsAccumulator
+    extends org.apache.spark.util.AccumulatorV2[BatchOptMetrics, BatchOptMetrics] {
 
   private var _metrics: BatchOptMetrics = BatchOptMetrics.empty
 
@@ -1048,22 +1043,19 @@ class BatchOptimizationMetricsAccumulator extends org.apache.spark.util.Accumula
     newAcc
   }
 
-  override def reset(): Unit = {
+  override def reset(): Unit =
     _metrics = BatchOptMetrics.empty
-  }
 
-  override def add(v: BatchOptMetrics): Unit = {
+  override def add(v: BatchOptMetrics): Unit =
     _metrics = _metrics.merge(v)
-  }
 
-  override def merge(other: org.apache.spark.util.AccumulatorV2[BatchOptMetrics, BatchOptMetrics]): Unit = {
+  override def merge(other: org.apache.spark.util.AccumulatorV2[BatchOptMetrics, BatchOptMetrics]): Unit =
     other match {
       case o: BatchOptimizationMetricsAccumulator =>
         _metrics = _metrics.merge(o._metrics)
       case _ =>
-    // Ignore incompatible accumulator types
+      // Ignore incompatible accumulator types
     }
-  }
 
   override def value: BatchOptMetrics = _metrics
 }
@@ -1153,10 +1145,7 @@ object BatchOptMetricsRegistry {
    */
   def getAllMetrics(): Map[String, BatchOptMetrics] = {
     import scala.jdk.CollectionConverters._
-    accumulators
-      .asScala
-      .map { case (path, acc) => (path, acc.value) }
-      .toMap
+    accumulators.asScala.map { case (path, acc) => (path, acc.value) }.toMap
   }
 
   /**
@@ -1210,7 +1199,7 @@ object BatchOptMetricsRegistry {
    * Useful for test suite cleanup or production maintenance.
    */
   def clearAll(): Unit = {
-    val accCount = accumulators.size()
+    val accCount      = accumulators.size()
     val baselineCount = baselines.size()
     accumulators.clear()
     baselines.clear()
@@ -1239,7 +1228,9 @@ object BatchOptMetricsRegistry {
   def captureBaseline(tablePath: String): Unit = {
     val baseline = BatchOptMetrics.fromJavaMetrics()
     baselines.put(tablePath, baseline)
-    logger.debug(s"📊 Captured baseline metrics for $tablePath: ops=${baseline.totalOperations}, docs=${baseline.totalDocuments}")
+    logger.debug(
+      s"📊 Captured baseline metrics for $tablePath: ops=${baseline.totalOperations}, docs=${baseline.totalDocuments}"
+    )
   }
 
   /**
@@ -1248,8 +1239,8 @@ object BatchOptMetricsRegistry {
    * Call this after a query completes to get metrics for just that query (not cumulative). The delta is computed as
    * (current global metrics - baseline captured at scan start).
    *
-   * Note: This method removes the baseline after reading to prevent memory leaks in long-running applications.
-   * If you need to read the delta multiple times, call captureBaseline() again before each query.
+   * Note: This method removes the baseline after reading to prevent memory leaks in long-running applications. If you
+   * need to read the delta multiple times, call captureBaseline() again before each query.
    *
    * @param tablePath
    *   Table path (e.g., "s3://bucket/path")
@@ -1257,12 +1248,14 @@ object BatchOptMetricsRegistry {
    *   Metrics delta since baseline, or current metrics if no baseline exists (with warning)
    */
   def getMetricsDelta(tablePath: String): BatchOptMetrics = {
-    val current  = BatchOptMetrics.fromJavaMetrics()
+    val current = BatchOptMetrics.fromJavaMetrics()
 
     // Remove baseline after reading to prevent memory leak
     val baseline = Option(baselines.remove(tablePath)).getOrElse {
-      logger.warn(s"📊 No baseline captured for $tablePath - returning cumulative metrics. " +
-        "Call captureBaseline() before query execution for accurate per-query metrics.")
+      logger.warn(
+        s"📊 No baseline captured for $tablePath - returning cumulative metrics. " +
+          "Call captureBaseline() before query execution for accurate per-query metrics."
+      )
       BatchOptMetrics.empty
     }
 
@@ -1275,8 +1268,10 @@ object BatchOptMetricsRegistry {
       bytesWasted = current.bytesWasted - baseline.bytesWasted
     )
 
-    logger.debug(s"📊 Metrics delta for $tablePath: ops=${delta.totalOperations}, docs=${delta.totalDocuments}, " +
-      s"requests=${delta.totalRequests}, consolidated=${delta.consolidatedRequests}")
+    logger.debug(
+      s"📊 Metrics delta for $tablePath: ops=${delta.totalOperations}, docs=${delta.totalDocuments}, " +
+        s"requests=${delta.totalRequests}, consolidated=${delta.consolidatedRequests}"
+    )
 
     delta
   }
@@ -1297,14 +1292,10 @@ object BatchOptMetricsRegistry {
    * @param tablePath
    *   Table path to clear baseline for
    */
-  def clearBaseline(tablePath: String): Unit = {
+  def clearBaseline(tablePath: String): Unit =
     baselines.remove(tablePath)
-  }
 
-  /**
-   * Clear all baselines.
-   */
-  def clearAllBaselines(): Unit = {
+  /** Clear all baselines. */
+  def clearAllBaselines(): Unit =
     baselines.clear()
-  }
 }

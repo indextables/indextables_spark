@@ -258,7 +258,8 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
       .save(searchTablePath)
 
     try {
-      val searchData = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(searchTablePath)
+      val searchData =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(searchTablePath)
 
       // Test various IndexQuery operations using SQL
       searchData.createOrReplaceTempView("search_table")
@@ -354,25 +355,37 @@ class S3EndToEndIntegrationTest extends TestBase with BeforeAndAfterAll with Bef
     try {
       // Step 1: Initial write
       val initialData = generateTestDataset(300, "initial")
-      initialData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(multiOpTablePath)
+      initialData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(multiOpTablePath)
 
-      val count1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+      val count1 =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
       assert(count1 == 300, s"Initial write: expected 300, got $count1")
       println(s"📝 Initial write: $count1 records")
 
       // Step 2: Append more data
       val appendData = generateTestDataset(200, "append")
-      appendData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(multiOpTablePath)
+      appendData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("append")
+        .save(multiOpTablePath)
 
-      val count2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+      val count2 =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
       assert(count2 == 500, s"After append: expected 500, got $count2")
       println(s"📝 After append: $count2 records")
 
       // Step 3: Overwrite data
       val overwriteData = generateTestDataset(400, "overwrite")
-      overwriteData.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(multiOpTablePath)
+      overwriteData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .save(multiOpTablePath)
 
-      val count3 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
+      val count3 =
+        spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(multiOpTablePath).count()
       assert(count3 == 400, s"After overwrite: expected 400, got $count3")
       println(s"📝 After overwrite: $count3 records")
 

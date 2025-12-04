@@ -140,9 +140,9 @@ class IndexTables4SparkScanBuilder(
         if (effectiveUnsupportedFilters.nonEmpty && hasAggregateInPlan) {
           val unsupportedDesc = effectiveUnsupportedFilters.map(_.toString).mkString(", ")
           // Build specific guidance for string pattern filters
-          val hasStringStartsWith = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
-          val hasStringEndsWith = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
-          val hasStringContains = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringContains])
+          val hasStringStartsWith    = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringStartsWith])
+          val hasStringEndsWith      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringEndsWith])
+          val hasStringContains      = effectiveUnsupportedFilters.exists(_.isInstanceOf[StringContains])
           val hasStringPatternFilter = hasStringStartsWith || hasStringEndsWith || hasStringContains
 
           val stringPatternHint = if (hasStringPatternFilter) {
@@ -153,17 +153,17 @@ class IndexTables4SparkScanBuilder(
             ).filter(_.nonEmpty)
 
             s" To enable string pattern pushdown, set " +
-            s"spark.indextables.filter.stringPattern.pushdown=true (enables all patterns) " +
-            s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
+              s"spark.indextables.filter.stringPattern.pushdown=true (enables all patterns) " +
+              s"or individually: ${patternTypes.map(t => s"spark.indextables.filter.$t.pushdown=true").mkString(", ")}."
           } else ""
 
           throw new IllegalStateException(
             s"Aggregate pushdown blocked by unsupported filter(s): [$unsupportedDesc]. " +
-            s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
-            s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
-            s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
-            s"Unsupported: IsNull, JSON field null checks." +
-            stringPatternHint
+              s"IndexTables4Spark requires aggregate pushdown for correct COUNT/SUM/AVG/MIN/MAX results. " +
+              s"The filter type(s) used are not fully supported, which prevents aggregate optimization. " +
+              s"Supported filter types: EqualTo, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, In, IsNotNull, And, Or, Not. " +
+              s"Unsupported: IsNull, JSON field null checks." +
+              stringPatternHint
           )
         }
 
@@ -404,7 +404,6 @@ class IndexTables4SparkScanBuilder(
     _pushedFilters = supported
     _unsupportedFilters = unsupported
 
-
     // CRITICAL FIX: Store by relation object (not table path) to survive across multiple optimization passes
     // Spark runs V2ScanRelationPushDown multiple times, creating fresh ScanBuilders each time
     // Only the builders that have Filter nodes get pushFilters() called
@@ -417,7 +416,8 @@ class IndexTables4SparkScanBuilder(
         IndexTables4SparkScanBuilder.storePushedFilters(relation, supported)
         IndexTables4SparkScanBuilder.storeUnsupportedFilters(relation, unsupported)
         logger.debug(
-          s"PUSHFILTERS: Stored ${supported.length} supported, ${unsupported.length} unsupported filters by relation object: ${System.identityHashCode(relation)}"
+          s"PUSHFILTERS: Stored ${supported.length} supported, ${unsupported.length} unsupported filters by relation object: ${System
+              .identityHashCode(relation)}"
         )
       case None =>
         logger.warn(s"PUSHFILTERS: No relation in ThreadLocal, cannot store filters for future ScanBuilder instances")
@@ -582,10 +582,9 @@ class IndexTables4SparkScanBuilder(
 
   // Configuration helpers for string pattern filter pushdown
   // Helper to get config value from both options (reader options) and config (session config)
-  private def getConfigValue(key: String): Option[String] = {
+  private def getConfigValue(key: String): Option[String] =
     // First check reader options, then session config
     Option(options.get(key)).orElse(config.get(key))
-  }
 
   // Master switch to enable all string pattern pushdowns at once
   private def isAllStringPatternPushdownEnabled: Boolean =
@@ -595,21 +594,21 @@ class IndexTables4SparkScanBuilder(
 
   private def isStringContainsPushdownEnabled: Boolean =
     isAllStringPatternPushdownEnabled ||
-    getConfigValue("spark.indextables.filter.stringContains.pushdown")
-      .map(_.toLowerCase == "true")
-      .getOrElse(false)
+      getConfigValue("spark.indextables.filter.stringContains.pushdown")
+        .map(_.toLowerCase == "true")
+        .getOrElse(false)
 
   private def isStringStartsWithPushdownEnabled: Boolean =
     isAllStringPatternPushdownEnabled ||
-    getConfigValue("spark.indextables.filter.stringStartsWith.pushdown")
-      .map(_.toLowerCase == "true")
-      .getOrElse(false)
+      getConfigValue("spark.indextables.filter.stringStartsWith.pushdown")
+        .map(_.toLowerCase == "true")
+        .getOrElse(false)
 
   private def isStringEndsWithPushdownEnabled: Boolean =
     isAllStringPatternPushdownEnabled ||
-    getConfigValue("spark.indextables.filter.stringEndsWith.pushdown")
-      .map(_.toLowerCase == "true")
-      .getOrElse(false)
+      getConfigValue("spark.indextables.filter.stringEndsWith.pushdown")
+        .map(_.toLowerCase == "true")
+        .getOrElse(false)
 
   private def isSupportedFilter(filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
@@ -622,15 +621,15 @@ class IndexTables4SparkScanBuilder(
       case LessThan(attribute, _)           => true // Support range on all fields (both regular and JSON)
       case LessThanOrEqual(attribute, _)    => true // Support range on all fields (both regular and JSON)
       case _: In                            => true
-      case _: IsNull            => false // Tantivy doesn't index nulls, can't filter for null values - Spark must post-filter
+      case _: IsNull => false // Tantivy doesn't index nulls, can't filter for null values - Spark must post-filter
       case IsNotNull(attribute) => !attribute.contains(".") // Supported for regular fields (wildcardQuery handles this)
       case And(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
-      case Or(left, right)     => isSupportedFilter(left) && isSupportedFilter(right)
-      case Not(child)          => isSupportedFilter(child) // NOT is supported only if child is supported
+      case Or(left, right)      => isSupportedFilter(left) && isSupportedFilter(right)
+      case Not(child)           => isSupportedFilter(child) // NOT is supported only if child is supported
       case _: StringStartsWith => isStringStartsWithPushdownEnabled // Enabled via config, Tantivy prefix queries are efficient
-      case _: StringEndsWith   => isStringEndsWithPushdownEnabled   // Enabled via config, less efficient than prefix
-      case _: StringContains   => isStringContainsPushdownEnabled   // Enabled via config, least efficient (full scan)
-      case _                   => false
+      case _: StringEndsWith => isStringEndsWithPushdownEnabled // Enabled via config, less efficient than prefix
+      case _: StringContains => isStringContainsPushdownEnabled // Enabled via config, least efficient (full scan)
+      case _                 => false
     }
   }
 
@@ -681,8 +680,8 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Detect if the current query plan contains an Aggregate operator.
-   * This is used to fail fast when aggregate pushdown is blocked by unsupported filters.
+   * Detect if the current query plan contains an Aggregate operator. This is used to fail fast when aggregate pushdown
+   * is blocked by unsupported filters.
    *
    * We inspect the query execution context to find Aggregate nodes in the logical plan.
    */
@@ -700,7 +699,9 @@ class IndexTables4SparkScanBuilder(
     }
 
     if (schemaLooksLikeAggregate) {
-      logger.debug(s"Detected aggregate in query plan via schema inspection: ${requiredSchema.fieldNames.mkString(", ")}")
+      logger.debug(
+        s"Detected aggregate in query plan via schema inspection: ${requiredSchema.fieldNames.mkString(", ")}"
+      )
       return true
     }
 
@@ -713,7 +714,7 @@ class IndexTables4SparkScanBuilder(
     }
 
     // Try string matching on relation as last resort
-    try {
+    try
       IndexTables4SparkScanBuilder.getCurrentRelation() match {
         case Some(relation) =>
           val planStr = relation.toString.toLowerCase
@@ -726,7 +727,7 @@ class IndexTables4SparkScanBuilder(
         case None =>
           false
       }
-    } catch {
+    catch {
       case _: Exception => false
     }
   }

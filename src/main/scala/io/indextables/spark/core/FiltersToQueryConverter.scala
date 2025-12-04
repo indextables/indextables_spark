@@ -48,8 +48,11 @@ object FiltersToQueryConverter {
 
   // Cache for JsonPredicateTranslator to avoid repeated object creation per filter
   // Key: (sparkSchema hashCode, options hashCode), Value: (jsonMapper, jsonTranslator)
-  private val jsonTranslatorCache: ThreadLocal[scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]] =
-    ThreadLocal.withInitial(() => scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]())
+  private val jsonTranslatorCache
+    : ThreadLocal[scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]] =
+    ThreadLocal.withInitial(() =>
+      scala.collection.mutable.Map[Int, (SparkSchemaToTantivyMapper, JsonPredicateTranslator)]()
+    )
 
   /** Get or create a cached JsonPredicateTranslator for the given schema and options. */
   private def getJsonTranslator(
@@ -57,14 +60,18 @@ object FiltersToQueryConverter {
     options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
   ): JsonPredicateTranslator = {
     val cacheKey = sparkSchema.hashCode() * 31 + options.hashCode()
-    val cache = jsonTranslatorCache.get()
+    val cache    = jsonTranslatorCache.get()
 
-    cache.getOrElseUpdate(cacheKey, {
-      val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
-      val jsonMapper = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
-      val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
-      (jsonMapper, jsonTranslator)
-    })._2
+    cache
+      .getOrElseUpdate(
+        cacheKey, {
+          val tantivyOptions = options.map(opts => new io.indextables.spark.core.IndexTables4SparkOptions(opts))
+          val jsonMapper     = new SparkSchemaToTantivyMapper(tantivyOptions.orNull)
+          val jsonTranslator = new JsonPredicateTranslator(sparkSchema, jsonMapper)
+          (jsonMapper, jsonTranslator)
+        }
+      )
+      ._2
   }
 
   /**
@@ -218,11 +225,10 @@ object FiltersToQueryConverter {
         f(schemaCopy)
       finally
         schemaCopy.close()
-    } finally {
+    } finally
       // CRITICAL: Close the original schema to prevent native memory leak
       // Schema.getSchema() returns a NEW Schema object each time with its own native pointer
       originalSchema.close()
-    }
   }
 
   /** Convert Spark filters to a tantivy4java SplitQuery object using the new API. */
@@ -614,24 +620,22 @@ object FiltersToQueryConverter {
     logger.debug(msg)
 
   /**
-   * Thread-local cache for temporary index directory to avoid repeated directory creation.
-   * Each thread gets its own temp directory that is reused across multiple parseQuery calls.
-   * The directory is cleaned up when the thread terminates or on JVM shutdown.
+   * Thread-local cache for temporary index directory to avoid repeated directory creation. Each thread gets its own
+   * temp directory that is reused across multiple parseQuery calls. The directory is cleaned up when the thread
+   * terminates or on JVM shutdown.
    */
   private val tempIndexDir: ThreadLocal[java.nio.file.Path] = ThreadLocal.withInitial { () =>
     import java.nio.file.Files
     val tempDir = Files.createTempDirectory("tantivy4spark_parsequery_")
 
     // Register cleanup on JVM shutdown
-    Runtime.getRuntime.addShutdownHook(new Thread(() => {
-      cleanupTempDir(tempDir)
-    }))
+    Runtime.getRuntime.addShutdownHook(new Thread(() => cleanupTempDir(tempDir)))
 
     tempDir
   }
 
   /** Clean up a temp directory and all its contents. */
-  private def cleanupTempDir(tempDir: java.nio.file.Path): Unit = {
+  private def cleanupTempDir(tempDir: java.nio.file.Path): Unit =
     try {
       import java.nio.file.{Path, Files}
       import java.nio.file.attribute.BasicFileAttributes
@@ -657,11 +661,10 @@ object FiltersToQueryConverter {
       case e: Exception =>
         logger.warn(s"Failed to clean up temp directory $tempDir: ${e.getMessage}")
     }
-  }
 
   /**
-   * Create a temporary index from schema for parseQuery operations. Uses thread-local cached
-   * temp directory to avoid repeated directory creation overhead.
+   * Create a temporary index from schema for parseQuery operations. Uses thread-local cached temp directory to avoid
+   * repeated directory creation overhead.
    */
   private def withTemporaryIndex[T](schema: Schema)(f: Index => T): T = {
     val tempDir = tempIndexDir.get()
@@ -673,10 +676,9 @@ object FiltersToQueryConverter {
         f(tempIndex)
       finally
         tempIndex.close()
-    } finally {
+    } finally
       // Clean up this specific index subdirectory
       cleanupTempDir(indexDir)
-    }
   }
 
   /** Convert a single Spark Filter to a tantivy4java Query. */
@@ -853,7 +855,7 @@ object FiltersToQueryConverter {
           val fieldType = getFieldType(schema, attribute)
           if (fieldType == FieldType.TEXT) {
             queryLog(s"StringStartsWith on TEXT field: using parseQuery for '$value*'")
-            val pattern = value + "*"
+            val pattern    = value + "*"
             val fieldNames = List(attribute).asJava
             withTemporaryIndex(schema)(index => index.parseQuery(pattern, fieldNames))
           } else {
@@ -871,7 +873,7 @@ object FiltersToQueryConverter {
           val fieldType = getFieldType(schema, attribute)
           if (fieldType == FieldType.TEXT) {
             queryLog(s"StringEndsWith on TEXT field: using parseQuery for '*$value'")
-            val pattern = "*" + value
+            val pattern    = "*" + value
             val fieldNames = List(attribute).asJava
             withTemporaryIndex(schema)(index => index.parseQuery(pattern, fieldNames))
           } else {

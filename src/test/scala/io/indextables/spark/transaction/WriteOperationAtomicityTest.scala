@@ -20,21 +20,21 @@ package io.indextables.spark.transaction
 import java.io.File
 import java.nio.file.Files
 
-import io.indextables.spark.TestBase
-
 import scala.concurrent.{Await, Future}
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
+
+import io.indextables.spark.TestBase
 
 /**
  * Comprehensive tests for Write Operation Atomicity.
  *
  * Tests cover:
- * - Transaction log atomicity (all-or-nothing commits)
- * - File creation atomicity
- * - Rollback behavior on failures
- * - Concurrent write handling
- * - Partial failure recovery
+ *   - Transaction log atomicity (all-or-nothing commits)
+ *   - File creation atomicity
+ *   - Rollback behavior on failures
+ *   - Concurrent write handling
+ *   - Partial failure recovery
  */
 class WriteOperationAtomicityTest extends TestBase {
 
@@ -80,7 +80,7 @@ class WriteOperationAtomicityTest extends TestBase {
       .save(tablePath)
 
     // Get split files referenced in transaction log
-    val tableDir = new File(s"$tempDir/test_txlog_split_consistency")
+    val tableDir   = new File(s"$tempDir/test_txlog_split_consistency")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     // Each split file should be trackable
@@ -142,16 +142,12 @@ class WriteOperationAtomicityTest extends TestBase {
     val tableDir = new File(s"$tempDir/test_no_partial_splits")
 
     // Should have no temp files
-    val tempFiles = tableDir.listFiles().filter(f =>
-      f.getName.contains(".tmp") || f.getName.contains(".partial")
-    )
+    val tempFiles = tableDir.listFiles().filter(f => f.getName.contains(".tmp") || f.getName.contains(".partial"))
     assert(tempFiles.isEmpty, s"No temp/partial files should remain: ${tempFiles.map(_.getName).mkString(", ")}")
 
     // All split files should be valid
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
-    splitFiles.foreach { f =>
-      assert(f.length() > 0, s"Split file ${f.getName} should not be empty")
-    }
+    splitFiles.foreach(f => assert(f.length() > 0, s"Split file ${f.getName} should not be empty"))
 
     logger.info("No partial split files test passed")
   }
@@ -166,7 +162,7 @@ class WriteOperationAtomicityTest extends TestBase {
       .mode("overwrite")
       .save(tablePath)
 
-    val tableDir = new File(s"$tempDir/test_uuid_uniqueness")
+    val tableDir   = new File(s"$tempDir/test_uuid_uniqueness")
     val splitFiles = tableDir.listFiles().filter(_.getName.endsWith(".split"))
 
     // All split file names should be unique
@@ -353,7 +349,8 @@ class WriteOperationAtomicityTest extends TestBase {
 
     // Check transaction log has sequential versions
     val txLogDir = new File(s"$tempDir/test_version_increment/_transaction_log")
-    val logFiles = txLogDir.listFiles()
+    val logFiles = txLogDir
+      .listFiles()
       .filter(_.getName.endsWith(".json"))
       .filterNot(_.getName.contains("checkpoint"))
       .sortBy(_.getName)
@@ -398,7 +395,7 @@ class WriteOperationAtomicityTest extends TestBase {
     }
 
     // Verify checkpoint was created
-    val txLogDir = new File(s"$tempDir/test_checkpoint_atomicity/_transaction_log")
+    val txLogDir        = new File(s"$tempDir/test_checkpoint_atomicity/_transaction_log")
     val checkpointFiles = txLogDir.listFiles().filter(_.getName.contains("checkpoint"))
 
     // Should have at least one checkpoint after 15 writes with interval 10

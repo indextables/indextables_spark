@@ -90,7 +90,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
       beforeMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
       // Step 3: Verify we can read all data before merge
-      val beforeMergeDF      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+      val beforeMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
       val beforeMergeRecords = beforeMergeDF.count()
       beforeMergeRecords shouldBe 150
 
@@ -109,7 +109,7 @@ class MergeSplitsSkippedFilesTest extends TestBase with Matchers {
         afterMergeActions.foreach(action => println(s"  - ${action.path} (${action.size} bytes)"))
 
         // Step 6: Verify data integrity
-        val afterMergeDF      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
+        val afterMergeDF = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(outputPath)
         val afterMergeRecords = afterMergeDF.count()
 
         println(s"Data integrity check: $beforeMergeRecords -> $afterMergeRecords records")

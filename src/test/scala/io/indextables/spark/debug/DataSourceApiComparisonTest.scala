@@ -109,7 +109,10 @@ class DataSourceApiComparisonTest extends TestBase {
       println(s"Results: ${sqlResultsV2.length} rows")
 
       // Test 4: DataFrame with forced V2
-      val dfQueryV2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).filter($"review_text".contains("dog"))
+      val dfQueryV2 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(testPath)
+        .filter($"review_text".contains("dog"))
       analyzePushdown("DataFrame API (.filter) - Forced V2", dfQueryV2.queryExecution)
       val dfResultsV2 = dfQueryV2.collect()
       println(s"Results: ${dfResultsV2.length} rows")
@@ -173,8 +176,8 @@ class DataSourceApiComparisonTest extends TestBase {
       val startDf  = System.currentTimeMillis()
       val dfResult = readDf.filter($"content".contains("dog"))
       // Use limit().collect().length since StringContains is unsupported for pushdown
-      val dfCount  = dfResult.limit(2000).collect().length
-      val endDf    = System.currentTimeMillis()
+      val dfCount = dfResult.limit(2000).collect().length
+      val endDf   = System.currentTimeMillis()
 
       analyzePushdown("DataFrame .contains('dog')", dfResult.queryExecution)
       println(s"DataFrame: Found $dfCount rows in ${endDf - startDf}ms")
@@ -183,8 +186,8 @@ class DataSourceApiComparisonTest extends TestBase {
       val startSql  = System.currentTimeMillis()
       val sqlResult = spark.sql("SELECT * FROM performance_test WHERE content LIKE '%dog%'")
       // Use limit().collect().length since LIKE is unsupported for pushdown
-      val sqlCount  = sqlResult.limit(2000).collect().length
-      val endSql    = System.currentTimeMillis()
+      val sqlCount = sqlResult.limit(2000).collect().length
+      val endSql   = System.currentTimeMillis()
 
       analyzePushdown("SQL LIKE '%dog%'", sqlResult.queryExecution)
       println(s"SQL LIKE: Found $sqlCount rows in ${endSql - startSql}ms")

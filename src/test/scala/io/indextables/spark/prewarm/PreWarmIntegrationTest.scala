@@ -96,7 +96,10 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     val testDataDF = spark.createDataFrame(testData).toDF("id", "content")
 
     // Write test data (this creates splits)
-    testDataDF.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempTablePath)
+    testDataDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tempTablePath)
 
     // Read with default configuration (pre-warm should be enabled by default)
     val df      = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tempTablePath)
@@ -163,7 +166,10 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     val testDataDF = spark.createDataFrame(testData).toDF("id", "content")
 
     // Write test data
-    testDataDF.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempTablePath)
+    testDataDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tempTablePath)
 
     // Read with pre-warm explicitly disabled
     val df = spark.read
@@ -193,7 +199,10 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     val testDataDF = spark.createDataFrame(testData).toDF("id", "content")
 
     // Write test data
-    testDataDF.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempTablePath)
+    testDataDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tempTablePath)
 
     // Read with pre-warm enabled
     val df = spark.read
@@ -224,7 +233,10 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
     val testDataDF = spark.createDataFrame(testData).toDF("id", "content")
 
     // Write test data
-    testDataDF.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(tempTablePath)
+    testDataDF.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tempTablePath)
 
     // Read with pre-warm enabled but with configuration that might cause issues
     val df = spark.read

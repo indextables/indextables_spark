@@ -28,12 +28,9 @@ import io.indextables.spark.RealS3TestBase
  * Validates batch optimization with REAL S3 splits.
  *
  * This test suite validates that:
- *   1. Batch optimization configuration is properly applied
- *   2. Metrics collection works correctly
- *   3. Consolidation ratio meets performance claims (10x+)
- *   4. Cost savings meet performance claims (90%+)
- *   5. Results correctness is maintained with optimization
- *   6. Different profiles work correctly
+ *   1. Batch optimization configuration is properly applied 2. Metrics collection works correctly 3. Consolidation
+ *      ratio meets performance claims (10x+) 4. Cost savings meet performance claims (90%+) 5. Results correctness is
+ *      maintained with optimization 6. Different profiles work correctly
  *
  * Prerequisites:
  *   - AWS credentials in ~/.aws/credentials file
@@ -150,11 +147,12 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     spark.conf.set("spark.indextables.read.batchOptimization.profile", "balanced")
     spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "true")
 
-    val start1  = System.currentTimeMillis()
+    val start1 = System.currentTimeMillis()
     // Use collect() instead of count() to force document retrieval and trigger batch optimization
     // Set limit to avoid default 250 row limit per partition
-    val result1 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
-    val time1   = System.currentTimeMillis() - start1
+    val result1 =
+      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
+    val time1 = System.currentTimeMillis() - start1
 
     result1.length shouldEqual 1000
     info(s"📊 With optimization: ${time1}ms")
@@ -182,9 +180,10 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     // Test 2: Without batch optimization
     spark.conf.set("spark.indextables.read.batchOptimization.enabled", "false")
     spark.conf.set("spark.indextables.read.batchOptimization.metrics.enabled", "false")
-    val start2  = System.currentTimeMillis()
-    val result2 = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
-    val time2   = System.currentTimeMillis() - start2
+    val start2 = System.currentTimeMillis()
+    val result2 =
+      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(10000).collect()
+    val time2 = System.currentTimeMillis() - start2
 
     result2.length shouldEqual 1000
     info(s"📊 Without optimization: ${time2}ms")
@@ -291,12 +290,12 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
           import com.fasterxml.jackson.databind.ObjectMapper
           import scala.jdk.CollectionConverters._
           val mapper = new ObjectMapper()
-          val node = mapper.readTree(docMapping)
+          val node   = mapper.readTree(docMapping)
           if (node.isArray) {
             info("📋 FAST FIELD STATUS from docMappingJson:")
             node.elements().asScala.foreach { field =>
-              val name = Option(field.get("name")).map(_.asText()).getOrElse("?")
-              val fast = Option(field.get("fast")).map(_.asBoolean()).getOrElse(false)
+              val name      = Option(field.get("name")).map(_.asText()).getOrElse("?")
+              val fast      = Option(field.get("fast")).map(_.asBoolean()).getOrElse(false)
               val fieldType = Option(field.get("type")).map(_.asText()).getOrElse("?")
               info(s"   $name: fast=$fast, type=$fieldType")
             }
@@ -315,7 +314,7 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
       ("simple equality", "id = 100", 1),
       ("range filter", "id >= 1000 AND id < 2000", 1000),
       ("modulo filter", "group_id = 42", 50),
-      ("combined filters", "id > 2000 AND group_id < 50", 1499)  // 49 + 29*50 = 1499 (2000 excluded)
+      ("combined filters", "id > 2000 AND group_id < 50", 1499) // 49 + 29*50 = 1499 (2000 excluded)
     )
 
     tests.foreach {
@@ -362,9 +361,10 @@ class BatchOptimizationS3ValidationTest extends RealS3TestBase {
     spark.conf.set("spark.indextables.read.batchOptimization.enabled", "true")
     spark.conf.set("spark.indextables.read.batchOptimization.profile", "aggressive")
 
-    val start  = System.currentTimeMillis()
-    val result = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(20000).collect()
-    val time   = System.currentTimeMillis() - start
+    val start = System.currentTimeMillis()
+    val result =
+      spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(testPath).limit(20000).collect()
+    val time = System.currentTimeMillis() - start
 
     result.length shouldEqual 10000
     info(s"📊 Retrieved 10000 rows in ${time}ms (${time.toDouble / 10000.0}ms per row)")

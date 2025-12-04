@@ -23,11 +23,11 @@ import io.indextables.spark.TestBase
  * Comprehensive tests for Filter Pushdown edge cases.
  *
  * Tests cover:
- * - NULL handling in filters
- * - Unicode and special characters
- * - Boundary values for numeric types
- * - Complex filter combinations
- * - Non-pushable filter fallback
+ *   - NULL handling in filters
+ *   - Unicode and special characters
+ *   - Boundary values for numeric types
+ *   - Complex filter combinations
+ *   - Non-pushable filter fallback
  */
 class FilterPushdownEdgeCaseTest extends TestBase {
 

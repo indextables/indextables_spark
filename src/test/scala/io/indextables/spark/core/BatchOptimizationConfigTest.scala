@@ -17,20 +17,16 @@
 
 package io.indextables.spark.core
 
+import io.indextables.spark.storage.SplitCacheConfig
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-
-import io.indextables.spark.storage.SplitCacheConfig
 
 /**
  * Tests for batch optimization configuration.
  *
  * This test suite validates:
- *   1. Size string parsing (K/M/G formats)
- *   2. IndexTables4SparkOptions batch optimization accessors
- *   3. SplitCacheConfig batch optimization field handling
- *   4. Profile-based configuration
- *   5. Custom parameter overrides
+ *   1. Size string parsing (K/M/G formats) 2. IndexTables4SparkOptions batch optimization accessors 3. SplitCacheConfig
+ *      batch optimization field handling 4. Profile-based configuration 5. Custom parameter overrides
  */
 class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
 
@@ -79,14 +75,18 @@ class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
   // ===== IndexTables4SparkOptions Tests =====
 
   test("batchOptimizationEnabled - parsing") {
-    val enabledOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.enabled" -> "true"
-    ))
+    val enabledOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.enabled" -> "true"
+      )
+    )
     enabledOpts.batchOptimizationEnabled shouldBe Some(true)
 
-    val disabledOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.enabled" -> "false"
-    ))
+    val disabledOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.enabled" -> "false"
+      )
+    )
     disabledOpts.batchOptimizationEnabled shouldBe Some(false)
 
     val missingOpts = IndexTables4SparkOptions(Map.empty[String, String])
@@ -94,73 +94,93 @@ class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("batchOptimizationProfile - parsing and lowercase conversion") {
-    val balancedOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.profile" -> "BALANCED"
-    ))
+    val balancedOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.profile" -> "BALANCED"
+      )
+    )
     balancedOpts.batchOptimizationProfile shouldBe Some("balanced")
 
-    val aggressiveOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.profile" -> "Aggressive"
-    ))
+    val aggressiveOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.profile" -> "Aggressive"
+      )
+    )
     aggressiveOpts.batchOptimizationProfile shouldBe Some("aggressive")
 
-    val conservativeOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.profile" -> "conservative"
-    ))
+    val conservativeOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.profile" -> "conservative"
+      )
+    )
     conservativeOpts.batchOptimizationProfile shouldBe Some("conservative")
   }
 
   test("batchOptMaxRangeSize - parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.maxRangeSize" -> "32M"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.maxRangeSize" -> "32M"
+      )
+    )
     opts.batchOptMaxRangeSize shouldBe Some("32M")
   }
 
   test("batchOptGapTolerance - parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.gapTolerance" -> "2M"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.gapTolerance" -> "2M"
+      )
+    )
     opts.batchOptGapTolerance shouldBe Some("2M")
   }
 
   test("batchOptMinDocs - parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.minDocsForOptimization" -> "100"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.minDocsForOptimization" -> "100"
+      )
+    )
     opts.batchOptMinDocs shouldBe Some(100)
   }
 
   test("batchOptMaxConcurrentPrefetch - parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.batchOptimization.maxConcurrentPrefetch" -> "16"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.batchOptimization.maxConcurrentPrefetch" -> "16"
+      )
+    )
     opts.batchOptMaxConcurrentPrefetch shouldBe Some(16)
   }
 
   test("adaptiveTuningEnabled - parsing") {
-    val enabledOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.adaptiveTuning.enabled" -> "true"
-    ))
+    val enabledOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.adaptiveTuning.enabled" -> "true"
+      )
+    )
     enabledOpts.adaptiveTuningEnabled shouldBe Some(true)
 
-    val disabledOpts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.adaptiveTuning.enabled" -> "false"
-    ))
+    val disabledOpts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.adaptiveTuning.enabled" -> "false"
+      )
+    )
     disabledOpts.adaptiveTuningEnabled shouldBe Some(false)
   }
 
   test("adaptiveTuningMinBatches - parsing") {
-    val opts = IndexTables4SparkOptions(Map(
-      "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment" -> "10"
-    ))
+    val opts = IndexTables4SparkOptions(
+      Map(
+        "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment" -> "10"
+      )
+    )
     opts.adaptiveTuningMinBatches shouldBe Some(10)
   }
 
   // ===== SplitCacheConfig Tests =====
 
   test("SplitCacheConfig - default batch optimization (should use balanced)") {
-    val config = SplitCacheConfig()
+    val config     = SplitCacheConfig()
     val javaConfig = config.toJavaCacheConfig()
 
     // Should successfully create config with defaults
@@ -250,13 +270,13 @@ class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
 
   test("full configuration flow - balanced profile with custom params") {
     val options = Map(
-      "spark.indextables.read.batchOptimization.enabled" -> "true",
-      "spark.indextables.read.batchOptimization.profile" -> "balanced",
-      "spark.indextables.read.batchOptimization.maxRangeSize" -> "32M",
-      "spark.indextables.read.batchOptimization.gapTolerance" -> "1M",
-      "spark.indextables.read.batchOptimization.minDocsForOptimization" -> "75",
-      "spark.indextables.read.batchOptimization.maxConcurrentPrefetch" -> "12",
-      "spark.indextables.read.adaptiveTuning.enabled" -> "true",
+      "spark.indextables.read.batchOptimization.enabled"                 -> "true",
+      "spark.indextables.read.batchOptimization.profile"                 -> "balanced",
+      "spark.indextables.read.batchOptimization.maxRangeSize"            -> "32M",
+      "spark.indextables.read.batchOptimization.gapTolerance"            -> "1M",
+      "spark.indextables.read.batchOptimization.minDocsForOptimization"  -> "75",
+      "spark.indextables.read.batchOptimization.maxConcurrentPrefetch"   -> "12",
+      "spark.indextables.read.adaptiveTuning.enabled"                    -> "true",
       "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment" -> "8"
     )
 
@@ -351,13 +371,13 @@ class BatchOptimizationConfigTest extends AnyFunSuite with Matchers {
     import io.indextables.spark.util.ConfigUtils
 
     val configMap = Map(
-      "spark.indextables.read.batchOptimization.enabled" -> "true",
-      "spark.indextables.read.batchOptimization.profile" -> "aggressive",
-      "spark.indextables.read.batchOptimization.maxRangeSize" -> "32M",
-      "spark.indextables.read.batchOptimization.gapTolerance" -> "2M",
-      "spark.indextables.read.batchOptimization.minDocsForOptimization" -> "25",
-      "spark.indextables.read.batchOptimization.maxConcurrentPrefetch" -> "12",
-      "spark.indextables.read.adaptiveTuning.enabled" -> "true",
+      "spark.indextables.read.batchOptimization.enabled"                 -> "true",
+      "spark.indextables.read.batchOptimization.profile"                 -> "aggressive",
+      "spark.indextables.read.batchOptimization.maxRangeSize"            -> "32M",
+      "spark.indextables.read.batchOptimization.gapTolerance"            -> "2M",
+      "spark.indextables.read.batchOptimization.minDocsForOptimization"  -> "25",
+      "spark.indextables.read.batchOptimization.maxConcurrentPrefetch"   -> "12",
+      "spark.indextables.read.adaptiveTuning.enabled"                    -> "true",
       "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment" -> "10"
     )
 

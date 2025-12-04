@@ -284,9 +284,7 @@ class OptimizedTransactionLog(
     version
   }
 
-  /**
-   * Commits a merge splits operation atomically.
-   */
+  /** Commits a merge splits operation atomically. */
   override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
     val version = getNextVersion()
     val actions = removeActions ++ addActions
@@ -299,9 +297,7 @@ class OptimizedTransactionLog(
     version
   }
 
-  /**
-   * Commits remove actions to mark files as logically deleted.
-   */
+  /** Commits remove actions to mark files as logically deleted. */
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
     if (removeActions.isEmpty) {
       return getLatestVersion()
@@ -686,9 +682,8 @@ class OptimizedTransactionLog(
     enhancedCache.getOrComputeVersionActions(tablePath.toString, version, readVersionDirect(version))
 
   /**
-   * Get checkpoint actions with caching.
-   * This is the key optimization: caches both the last checkpoint info and the checkpoint actions
-   * to avoid repeated reads of _last_checkpoint and checkpoint files.
+   * Get checkpoint actions with caching. This is the key optimization: caches both the last checkpoint info and the
+   * checkpoint actions to avoid repeated reads of _last_checkpoint and checkpoint files.
    */
   private def getCheckpointActionsCached(): Option[Seq[Action]] = {
     // First, get the last checkpoint info (cached)

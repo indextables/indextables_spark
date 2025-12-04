@@ -22,8 +22,8 @@ import java.util.concurrent.atomic.AtomicLong
 import io.indextables.spark.TestBase
 
 /**
- * Tests that verify task metrics (bytesWritten, recordsWritten, bytesRead, recordsRead)
- * are properly reported to Spark UI when reading/writing IndexTables.
+ * Tests that verify task metrics (bytesWritten, recordsWritten, bytesRead, recordsRead) are properly reported to Spark
+ * UI when reading/writing IndexTables.
  */
 class OutputMetricsTest extends TestBase {
 
@@ -32,11 +32,12 @@ class OutputMetricsTest extends TestBase {
 
     // Create test data
     val numRows = 500
-    val df = spark.range(0, numRows)
+    val df = spark
+      .range(0, numRows)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Use atomic counters to capture task metrics
-    val capturedBytesWritten = new AtomicLong(0)
+    val capturedBytesWritten   = new AtomicLong(0)
     val capturedRecordsWritten = new AtomicLong(0)
 
     val listener = new org.apache.spark.scheduler.SparkListener {
@@ -61,7 +62,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesWritten = capturedBytesWritten.get()
+      val bytesWritten   = capturedBytesWritten.get()
       val recordsWritten = capturedRecordsWritten.get()
 
       info(s"Captured output metrics from TaskContext:")
@@ -71,8 +72,7 @@ class OutputMetricsTest extends TestBase {
       // Verify metrics were captured
       assert(bytesWritten > 0, s"bytesWritten should be > 0, got $bytesWritten")
       assert(recordsWritten > 0, s"recordsWritten should be > 0, got $recordsWritten")
-      assert(recordsWritten == numRows,
-        s"recordsWritten should equal $numRows, got $recordsWritten")
+      assert(recordsWritten == numRows, s"recordsWritten should equal $numRows, got $recordsWritten")
 
       info(s"✅ Output metrics correctly reported: $bytesWritten bytes, $recordsWritten records")
 
@@ -82,9 +82,8 @@ class OutputMetricsTest extends TestBase {
         .load(tablePath)
       result.count() shouldBe numRows
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 
   test("should report output metrics for partitioned writes") {
@@ -92,11 +91,12 @@ class OutputMetricsTest extends TestBase {
 
     // Create partitioned test data
     val numRows = 600
-    val df = spark.range(0, numRows)
+    val df = spark
+      .range(0, numRows)
       .selectExpr("id", "CAST(id % 3 AS STRING) as partition_col", "CAST(id AS STRING) as text")
 
     // Use atomic counters to capture task metrics
-    val capturedBytesWritten = new AtomicLong(0)
+    val capturedBytesWritten   = new AtomicLong(0)
     val capturedRecordsWritten = new AtomicLong(0)
 
     val listener = new org.apache.spark.scheduler.SparkListener {
@@ -122,7 +122,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesWritten = capturedBytesWritten.get()
+      val bytesWritten   = capturedBytesWritten.get()
       val recordsWritten = capturedRecordsWritten.get()
 
       info(s"Captured output metrics for partitioned write:")
@@ -135,20 +135,20 @@ class OutputMetricsTest extends TestBase {
 
       info(s"✅ Partitioned write metrics correctly reported: $bytesWritten bytes, $recordsWritten records")
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 
   test("should report zero metrics when no rows written") {
     val tablePath = s"file://$tempDir/output_metrics_empty_test"
 
     // Create empty DataFrame
-    val df = spark.range(0, 0)
+    val df = spark
+      .range(0, 0)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     // Use atomic counters to capture task metrics
-    val capturedBytesWritten = new AtomicLong(0)
+    val capturedBytesWritten   = new AtomicLong(0)
     val capturedRecordsWritten = new AtomicLong(0)
 
     val listener = new org.apache.spark.scheduler.SparkListener {
@@ -173,7 +173,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesWritten = capturedBytesWritten.get()
+      val bytesWritten   = capturedBytesWritten.get()
       val recordsWritten = capturedRecordsWritten.get()
 
       info(s"Captured output metrics for empty write:")
@@ -186,9 +186,8 @@ class OutputMetricsTest extends TestBase {
 
       info(s"✅ Empty write correctly reported zero metrics")
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 
   test("should report input metrics (bytesRead, recordsRead) when reading") {
@@ -196,7 +195,8 @@ class OutputMetricsTest extends TestBase {
 
     // First, write some test data
     val numRows = 500
-    val df = spark.range(0, numRows)
+    val df = spark
+      .range(0, numRows)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
@@ -205,12 +205,12 @@ class OutputMetricsTest extends TestBase {
       .save(tablePath)
 
     // Use atomic counters to capture task metrics during read
-    val capturedBytesRead = new AtomicLong(0)
-    val capturedRecordsRead = new AtomicLong(0)
+    val capturedBytesRead        = new AtomicLong(0)
+    val capturedRecordsRead      = new AtomicLong(0)
     @volatile var captureEnabled = false
 
     val listener = new org.apache.spark.scheduler.SparkListener {
-      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit = {
+      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit =
         if (captureEnabled) {
           val metrics = taskEnd.taskMetrics
           if (metrics != null && metrics.inputMetrics != null) {
@@ -218,7 +218,6 @@ class OutputMetricsTest extends TestBase {
             capturedRecordsRead.addAndGet(metrics.inputMetrics.recordsRead)
           }
         }
-      }
     }
 
     spark.sparkContext.addSparkListener(listener)
@@ -239,7 +238,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesRead = capturedBytesRead.get()
+      val bytesRead   = capturedBytesRead.get()
       val recordsRead = capturedRecordsRead.get()
 
       info(s"Captured input metrics from TaskContext:")
@@ -249,14 +248,12 @@ class OutputMetricsTest extends TestBase {
       // Verify metrics were captured
       assert(bytesRead > 0, s"bytesRead should be > 0, got $bytesRead")
       assert(recordsRead > 0, s"recordsRead should be > 0, got $recordsRead")
-      assert(recordsRead == numRows,
-        s"recordsRead should equal $numRows, got $recordsRead")
+      assert(recordsRead == numRows, s"recordsRead should equal $numRows, got $recordsRead")
 
       info(s"✅ Input metrics correctly reported: $bytesRead bytes, $recordsRead records")
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 
   test("should report input metrics for filtered reads") {
@@ -264,7 +261,8 @@ class OutputMetricsTest extends TestBase {
 
     // First, write some test data
     val numRows = 1000
-    val df = spark.range(0, numRows)
+    val df = spark
+      .range(0, numRows)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
@@ -273,12 +271,12 @@ class OutputMetricsTest extends TestBase {
       .save(tablePath)
 
     // Use atomic counters to capture task metrics during read
-    val capturedBytesRead = new AtomicLong(0)
-    val capturedRecordsRead = new AtomicLong(0)
+    val capturedBytesRead        = new AtomicLong(0)
+    val capturedRecordsRead      = new AtomicLong(0)
     @volatile var captureEnabled = false
 
     val listener = new org.apache.spark.scheduler.SparkListener {
-      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit = {
+      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit =
         if (captureEnabled) {
           val metrics = taskEnd.taskMetrics
           if (metrics != null && metrics.inputMetrics != null) {
@@ -286,7 +284,6 @@ class OutputMetricsTest extends TestBase {
             capturedRecordsRead.addAndGet(metrics.inputMetrics.recordsRead)
           }
         }
-      }
     }
 
     spark.sparkContext.addSparkListener(listener)
@@ -308,7 +305,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesRead = capturedBytesRead.get()
+      val bytesRead   = capturedBytesRead.get()
       val recordsRead = capturedRecordsRead.get()
 
       info(s"Captured input metrics for filtered read:")
@@ -321,14 +318,15 @@ class OutputMetricsTest extends TestBase {
       assert(bytesRead > 0, s"bytesRead should be > 0, got $bytesRead")
       // recordsRead should match actual records returned (filter pushdown)
       assert(recordsRead > 0, s"recordsRead should be > 0, got $recordsRead")
-      assert(recordsRead == result.length,
-        s"recordsRead should equal actual result count ${result.length}, got $recordsRead")
+      assert(
+        recordsRead == result.length,
+        s"recordsRead should equal actual result count ${result.length}, got $recordsRead"
+      )
 
       info(s"✅ Filtered read metrics correctly reported: $bytesRead bytes, $recordsRead records")
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 
   test("should report input metrics for aggregation queries") {
@@ -336,7 +334,8 @@ class OutputMetricsTest extends TestBase {
 
     // First, write some test data
     val numRows = 500
-    val df = spark.range(0, numRows)
+    val df = spark
+      .range(0, numRows)
       .selectExpr("id", "CAST(id AS STRING) as text")
 
     df.write
@@ -345,12 +344,12 @@ class OutputMetricsTest extends TestBase {
       .save(tablePath)
 
     // Use atomic counters to capture task metrics during read
-    val capturedBytesRead = new AtomicLong(0)
-    val capturedRecordsRead = new AtomicLong(0)
+    val capturedBytesRead        = new AtomicLong(0)
+    val capturedRecordsRead      = new AtomicLong(0)
     @volatile var captureEnabled = false
 
     val listener = new org.apache.spark.scheduler.SparkListener {
-      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit = {
+      override def onTaskEnd(taskEnd: org.apache.spark.scheduler.SparkListenerTaskEnd): Unit =
         if (captureEnabled) {
           val metrics = taskEnd.taskMetrics
           if (metrics != null && metrics.inputMetrics != null) {
@@ -358,7 +357,6 @@ class OutputMetricsTest extends TestBase {
             capturedRecordsRead.addAndGet(metrics.inputMetrics.recordsRead)
           }
         }
-      }
     }
 
     spark.sparkContext.addSparkListener(listener)
@@ -379,7 +377,7 @@ class OutputMetricsTest extends TestBase {
       // Wait for listener to process events
       Thread.sleep(1000)
 
-      val bytesRead = capturedBytesRead.get()
+      val bytesRead   = capturedBytesRead.get()
       val recordsRead = capturedRecordsRead.get()
 
       info(s"Captured input metrics for aggregation query:")
@@ -391,8 +389,7 @@ class OutputMetricsTest extends TestBase {
       // But we should still report some metrics
       info(s"✅ Aggregation query metrics reported: $bytesRead bytes, $recordsRead records")
 
-    } finally {
+    } finally
       spark.sparkContext.removeSparkListener(listener)
-    }
   }
 }

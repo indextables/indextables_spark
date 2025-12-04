@@ -18,6 +18,7 @@
 package io.indextables.spark.util
 
 import org.apache.spark.sql.types._
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -25,29 +26,31 @@ import org.scalatest.matchers.should.Matchers
  * Tests for data skipping statistics configuration (Delta Lake compatible).
  *
  * Tests verify:
- * - Default behavior (first 32 eligible columns)
- * - Explicit column list via dataSkippingStatsColumns
- * - Custom numIndexedCols (-1 for all, 0 to disable, positive for limit)
- * - Eligibility filtering (only primitive types with ordering)
+ *   - Default behavior (first 32 eligible columns)
+ *   - Explicit column list via dataSkippingStatsColumns
+ *   - Custom numIndexedCols (-1 for all, 0 to disable, positive for limit)
+ *   - Eligibility filtering (only primitive types with ordering)
  */
 class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
 
   // Test schema with various field types
-  val testSchema: StructType = StructType(Seq(
-    StructField("id", IntegerType, nullable = false),
-    StructField("name", StringType, nullable = true),
-    StructField("score", DoubleType, nullable = true),
-    StructField("created_at", TimestampType, nullable = true),
-    StructField("is_active", BooleanType, nullable = true),
-    StructField("event_date", DateType, nullable = true),
-    StructField("count", LongType, nullable = true),
-    StructField("rating", FloatType, nullable = true),
-    // Non-eligible types
-    StructField("metadata", MapType(StringType, StringType), nullable = true),
-    StructField("tags", ArrayType(StringType), nullable = true),
-    StructField("details", StructType(Seq(StructField("x", IntegerType))), nullable = true),
-    StructField("data", BinaryType, nullable = true)
-  ))
+  val testSchema: StructType = StructType(
+    Seq(
+      StructField("id", IntegerType, nullable = false),
+      StructField("name", StringType, nullable = true),
+      StructField("score", DoubleType, nullable = true),
+      StructField("created_at", TimestampType, nullable = true),
+      StructField("is_active", BooleanType, nullable = true),
+      StructField("event_date", DateType, nullable = true),
+      StructField("count", LongType, nullable = true),
+      StructField("rating", FloatType, nullable = true),
+      // Non-eligible types
+      StructField("metadata", MapType(StringType, StringType), nullable = true),
+      StructField("tags", ArrayType(StringType), nullable = true),
+      StructField("details", StructType(Seq(StructField("x", IntegerType))), nullable = true),
+      StructField("data", BinaryType, nullable = true)
+    )
+  )
 
   // Large schema with 50 eligible columns for testing numIndexedCols
   val largeSchema: StructType = StructType(
@@ -73,7 +76,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should use default numIndexedCols (32) when no config") {
-    val config = Map.empty[String, String]
+    val config   = Map.empty[String, String]
     val eligible = StatisticsCalculator.getStatsEligibleFields(largeSchema, config)
 
     // Should be limited to first 32 columns
@@ -83,7 +86,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should filter out non-eligible types") {
-    val config = Map("spark.indextables.dataSkippingNumIndexedCols" -> "-1")
+    val config   = Map("spark.indextables.dataSkippingNumIndexedCols" -> "-1")
     val eligible = StatisticsCalculator.getStatsEligibleFields(testSchema, config)
 
     // Should only include the 8 eligible types, not the 4 complex types
@@ -98,7 +101,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
 
   test("getStatsEligibleFields should use explicit dataSkippingStatsColumns when set") {
     val config = Map(
-      "spark.indextables.dataSkippingStatsColumns" -> "id,score,event_date",
+      "spark.indextables.dataSkippingStatsColumns"   -> "id,score,event_date",
       "spark.indextables.dataSkippingNumIndexedCols" -> "2" // Should be ignored
     )
     val eligible = StatisticsCalculator.getStatsEligibleFields(testSchema, config)
@@ -110,7 +113,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should handle numIndexedCols = -1 (all columns)") {
-    val config = Map("spark.indextables.dataSkippingNumIndexedCols" -> "-1")
+    val config   = Map("spark.indextables.dataSkippingNumIndexedCols" -> "-1")
     val eligible = StatisticsCalculator.getStatsEligibleFields(largeSchema, config)
 
     // Should include all 50 columns
@@ -118,7 +121,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should handle numIndexedCols = 0 (disabled)") {
-    val config = Map("spark.indextables.dataSkippingNumIndexedCols" -> "0")
+    val config   = Map("spark.indextables.dataSkippingNumIndexedCols" -> "0")
     val eligible = StatisticsCalculator.getStatsEligibleFields(largeSchema, config)
 
     // Should be empty
@@ -126,7 +129,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should handle custom numIndexedCols") {
-    val config = Map("spark.indextables.dataSkippingNumIndexedCols" -> "10")
+    val config   = Map("spark.indextables.dataSkippingNumIndexedCols" -> "10")
     val eligible = StatisticsCalculator.getStatsEligibleFields(largeSchema, config)
 
     // Should be limited to first 10 columns
@@ -149,7 +152,7 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("getStatsEligibleFields should preserve original field indices") {
-    val config = Map("spark.indextables.dataSkippingStatsColumns" -> "score,event_date")
+    val config   = Map("spark.indextables.dataSkippingStatsColumns" -> "score,event_date")
     val eligible = StatisticsCalculator.getStatsEligibleFields(testSchema, config)
 
     // Verify the indices match the original schema positions
@@ -162,14 +165,14 @@ class DataSkippingStatsConfigTest extends AnyFunSuite with Matchers {
 
   test("DatasetStatistics should only track configured columns") {
     val config = Map("spark.indextables.dataSkippingStatsColumns" -> "id,score")
-    val stats = new StatisticsCalculator.DatasetStatistics(testSchema, config)
+    val stats  = new StatisticsCalculator.DatasetStatistics(testSchema, config)
 
     stats.getTrackedColumns shouldBe Set("id", "score")
   }
 
   test("DatasetStatistics should use default of 32 columns when schema is small") {
     val config = Map.empty[String, String]
-    val stats = new StatisticsCalculator.DatasetStatistics(testSchema, config)
+    val stats  = new StatisticsCalculator.DatasetStatistics(testSchema, config)
 
     // All 8 eligible columns should be tracked (less than 32)
     stats.getTrackedColumns.size shouldBe 8

@@ -25,11 +25,11 @@ import io.indextables.spark.TestBase
  * Comprehensive tests for Transaction Log behavior at scale.
  *
  * Tests cover:
- * - Many transaction log entries
- * - Checkpoint creation and recovery
- * - Log compression effectiveness
- * - Cache performance
- * - Log replay performance
+ *   - Many transaction log entries
+ *   - Checkpoint creation and recovery
+ *   - Log compression effectiveness
+ *   - Cache performance
+ *   - Log replay performance
  */
 class TransactionLogScaleTest extends TestBase {
 
@@ -59,7 +59,7 @@ class TransactionLogScaleTest extends TestBase {
     }
 
     // Verify transaction log entries
-    val txLogDir = new File(s"$tempDir/test_many_transactions/_transaction_log")
+    val txLogDir   = new File(s"$tempDir/test_many_transactions/_transaction_log")
     val logEntries = txLogDir.listFiles().filter(_.getName.endsWith(".json")).length
 
     logger.info(s"Created $logEntries transaction log entries")
@@ -101,7 +101,7 @@ class TransactionLogScaleTest extends TestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
-    val count = result.count()
+    val count    = result.count()
     val readTime = System.currentTimeMillis() - startTime
 
     count shouldBe 3000 // 30 * 100
@@ -141,7 +141,7 @@ class TransactionLogScaleTest extends TestBase {
     }
 
     // Verify checkpoint was created
-    val txLogDir = new File(s"$tempDir/test_checkpoint_creation/_transaction_log")
+    val txLogDir        = new File(s"$tempDir/test_checkpoint_creation/_transaction_log")
     val checkpointFiles = txLogDir.listFiles().filter(_.getName.contains("checkpoint"))
 
     logger.info(s"Found ${checkpointFiles.length} checkpoint files")
@@ -187,7 +187,7 @@ class TransactionLogScaleTest extends TestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
-    val count = result.count()
+    val count    = result.count()
     val readTime = System.currentTimeMillis() - startTime
 
     count shouldBe 1000 // 25 * 40
@@ -336,9 +336,8 @@ class TransactionLogScaleTest extends TestBase {
     val baseDF = spark.range(0, 100)
     var wideDF = baseDF.selectExpr("id")
 
-    for (i <- 1 to 20) {
+    for (i <- 1 to 20)
       wideDF = wideDF.withColumn(s"col_$i", org.apache.spark.sql.functions.lit(s"value_$i"))
-    }
 
     wideDF.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -387,7 +386,7 @@ class TransactionLogScaleTest extends TestBase {
     result.count() shouldBe 200 // 20 * 10
 
     // Verify transaction log
-    val txLogDir = new File(s"$tempDir/test_rapid_writes/_transaction_log")
+    val txLogDir   = new File(s"$tempDir/test_rapid_writes/_transaction_log")
     val logEntries = txLogDir.listFiles().filter(_.getName.endsWith(".json")).length
 
     logger.info(s"Rapid writes created $logEntries log entries")
@@ -458,7 +457,8 @@ class TransactionLogScaleTest extends TestBase {
 
     // Verify all versions created
     val txLogDir = new File(s"$tempDir/test_version_history/_transaction_log")
-    val logFiles = txLogDir.listFiles()
+    val logFiles = txLogDir
+      .listFiles()
       .filter(_.getName.endsWith(".json"))
       .filterNot(_.getName.contains("checkpoint"))
       .sortBy(_.getName)

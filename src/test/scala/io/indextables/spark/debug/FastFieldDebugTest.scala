@@ -1,8 +1,9 @@
 package io.indextables.spark.debug
 
-import io.indextables.spark.TestBase
-import io.indextables.spark.transaction.TransactionLogFactory
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.transaction.TransactionLogFactory
+import io.indextables.spark.TestBase
 
 class FastFieldDebugTest extends TestBase {
 
@@ -12,7 +13,9 @@ class FastFieldDebugTest extends TestBase {
       import sparkImplicits._
 
       // Create test data matching the failing test
-      val df = spark.range(0, 100).toDF("id")
+      val df = spark
+        .range(0, 100)
+        .toDF("id")
         .selectExpr("id", "id % 100 as group_id", "id * 2 as value", "concat('item_', id) as name")
 
       println(s"Schema: ${df.schema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
@@ -39,13 +42,13 @@ class FastFieldDebugTest extends TestBase {
             // Parse to show fast fields nicely
             import com.fasterxml.jackson.databind.ObjectMapper
             val mapper = new ObjectMapper()
-            val node = mapper.readTree(docMapping)
+            val node   = mapper.readTree(docMapping)
             if (node.isArray) {
               import scala.jdk.CollectionConverters._
               println("\n=== FAST FIELD STATUS ===")
               node.elements().asScala.foreach { field =>
-                val name = Option(field.get("name")).map(_.asText()).getOrElse("?")
-                val fast = Option(field.get("fast")).map(_.asBoolean()).getOrElse(false)
+                val name      = Option(field.get("name")).map(_.asText()).getOrElse("?")
+                val fast      = Option(field.get("fast")).map(_.asBoolean()).getOrElse(false)
                 val fieldType = Option(field.get("type")).map(_.asText()).getOrElse("?")
                 println(s"  $name: fast=$fast, type=$fieldType")
               }

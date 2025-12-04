@@ -401,16 +401,15 @@ object PreWarmManager {
       case e: Exception =>
         logger.warn(s"Error extracting schema field names: ${e.getMessage}, using None for splitFieldNames")
         None
-    } finally {
+    } finally
       // Close the original schema to prevent native memory leak
       if (originalSchema != null) {
-        try {
+        try
           originalSchema.close()
-        } catch {
+        catch {
           case _: Exception => // Ignore close errors
         }
       }
-    }
   }
 
   /** Generate a hash for the query to uniquely identify warmup futures. */

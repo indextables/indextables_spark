@@ -21,6 +21,7 @@ import scala.collection.mutable
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
+
 import org.slf4j.LoggerFactory
 
 object StatisticsCalculator {
@@ -29,36 +30,45 @@ object StatisticsCalculator {
 
   /** Data types that are eligible for statistics collection (have meaningful min/max ordering). */
   val ELIGIBLE_DATA_TYPES: Set[DataType] = Set(
-    IntegerType, LongType, FloatType, DoubleType,
-    BooleanType, StringType, DateType, TimestampType
+    IntegerType,
+    LongType,
+    FloatType,
+    DoubleType,
+    BooleanType,
+    StringType,
+    DateType,
+    TimestampType
   )
 
   /**
-   * Check if a field is eligible for statistics collection.
-   * Only primitive types with meaningful ordering are eligible.
+   * Check if a field is eligible for statistics collection. Only primitive types with meaningful ordering are eligible.
    */
   def isEligibleForStats(field: StructField): Boolean =
     ELIGIBLE_DATA_TYPES.contains(field.dataType)
 
   /**
-   * Filter schema fields to only include those eligible for statistics collection,
-   * applying the configured column limits.
+   * Filter schema fields to only include those eligible for statistics collection, applying the configured column
+   * limits.
    *
    * Priority:
-   * 1. If dataSkippingStatsColumns is set, use only those columns (intersection with eligible)
-   * 2. Otherwise, take first N eligible columns where N = dataSkippingNumIndexedCols (-1 = all)
+   *   1. If dataSkippingStatsColumns is set, use only those columns (intersection with eligible) 2. Otherwise, take
+   *      first N eligible columns where N = dataSkippingNumIndexedCols (-1 = all)
    *
-   * @param schema The full schema
-   * @param config Configuration map
-   * @return Sequence of (field, originalIndex) tuples for columns to collect stats for
+   * @param schema
+   *   The full schema
+   * @param config
+   *   Configuration map
+   * @return
+   *   Sequence of (field, originalIndex) tuples for columns to collect stats for
    */
   def getStatsEligibleFields(
     schema: StructType,
     config: Map[String, String]
   ): Seq[(StructField, Int)] = {
     // Get all eligible fields with their original indices
-    val eligibleFields = schema.fields.zipWithIndex.filter { case (field, _) =>
-      isEligibleForStats(field)
+    val eligibleFields = schema.fields.zipWithIndex.filter {
+      case (field, _) =>
+        isEligibleForStats(field)
     }
 
     // Check if explicit column list is configured
@@ -67,15 +77,18 @@ object StatisticsCalculator {
     explicitColumns match {
       case Some(columnSet) =>
         // Use explicit column list - filter to only include specified columns that are eligible
-        val filtered = eligibleFields.filter { case (field, _) =>
-          columnSet.contains(field.name)
+        val filtered = eligibleFields.filter {
+          case (field, _) =>
+            columnSet.contains(field.name)
         }
         if (filtered.size < columnSet.size) {
-          val eligibleNames = eligibleFields.map(_._1.name).toSet
+          val eligibleNames  = eligibleFields.map(_._1.name).toSet
           val invalidColumns = columnSet.diff(eligibleNames)
           if (invalidColumns.nonEmpty) {
-            logger.warn(s"dataSkippingStatsColumns contains columns not eligible for stats " +
-              s"(non-existent or unsupported type): ${invalidColumns.mkString(", ")}")
+            logger.warn(
+              s"dataSkippingStatsColumns contains columns not eligible for stats " +
+                s"(non-existent or unsupported type): ${invalidColumns.mkString(", ")}"
+            )
           }
         }
         logger.debug(s"Using explicit dataSkippingStatsColumns: ${filtered.map(_._1.name).mkString(", ")}")
@@ -97,8 +110,10 @@ object StatisticsCalculator {
           // Take first N eligible columns
           val limited = eligibleFields.take(numIndexedCols)
           if (eligibleFields.length > numIndexedCols) {
-            logger.debug(s"Limiting stats collection to first $numIndexedCols of ${eligibleFields.length} " +
-              s"eligible columns: ${limited.map(_._1.name).mkString(", ")}")
+            logger.debug(
+              s"Limiting stats collection to first $numIndexedCols of ${eligibleFields.length} " +
+                s"eligible columns: ${limited.map(_._1.name).mkString(", ")}"
+            )
           }
           limited.toSeq
         }
@@ -162,8 +177,10 @@ object StatisticsCalculator {
   /**
    * Dataset statistics collector that respects column filtering configuration.
    *
-   * @param schema Full schema of the dataset
-   * @param config Configuration map for dataSkippingStatsColumns and dataSkippingNumIndexedCols
+   * @param schema
+   *   Full schema of the dataset
+   * @param config
+   *   Configuration map for dataSkippingStatsColumns and dataSkippingNumIndexedCols
    */
   class DatasetStatistics(schema: StructType, config: Map[String, String] = Map.empty) {
     private val columnStats = mutable.Map[String, ColumnStatistics]()
@@ -172,16 +189,18 @@ object StatisticsCalculator {
     private val statsFields: Seq[(StructField, Int)] = getStatsEligibleFields(schema, config)
 
     // Initialize column statistics only for eligible fields
-    statsFields.foreach { case (field, _) =>
-      columnStats(field.name) = new ColumnStatistics(field.dataType)
+    statsFields.foreach {
+      case (field, _) =>
+        columnStats(field.name) = new ColumnStatistics(field.dataType)
     }
 
     def updateRow(row: InternalRow): Unit =
-      statsFields.foreach { case (field, index) =>
-        if (!row.isNullAt(index)) {
-          val value = extractValue(row, index, field.dataType)
-          columnStats(field.name).update(value, field.dataType)
-        }
+      statsFields.foreach {
+        case (field, index) =>
+          if (!row.isNullAt(index)) {
+            val value = extractValue(row, index, field.dataType)
+            columnStats(field.name).update(value, field.dataType)
+          }
       }
 
     def getMinValues: Map[String, String] =

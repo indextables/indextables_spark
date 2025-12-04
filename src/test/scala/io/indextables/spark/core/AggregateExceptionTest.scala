@@ -8,8 +8,8 @@ import io.indextables.spark.TestBase
 import org.scalatest.Assertion
 
 /**
- * Tests that aggregate queries with unsupported filters fail with a clear exception
- * rather than returning incorrect results.
+ * Tests that aggregate queries with unsupported filters fail with a clear exception rather than returning incorrect
+ * results.
  */
 class AggregateExceptionTest extends TestBase {
 
@@ -21,7 +21,7 @@ class AggregateExceptionTest extends TestBase {
       // Create test data WITH SOME NULL VALUES so Spark actually pushes the IsNull filter
       // Without nulls, Spark optimizes away the filter entirely
       val data = (0 until 100).map { i =>
-        if (i % 10 == 0) (i.toLong, i % 10, null.asInstanceOf[String])  // 10% null values
+        if (i % 10 == 0) (i.toLong, i % 10, null.asInstanceOf[String]) // 10% null values
         else (i.toLong, i % 10, s"item_$i")
       }
       val df = data.toDF("id", "group_id", "name")
@@ -51,7 +51,9 @@ class AggregateExceptionTest extends TestBase {
       import sparkImplicits._
 
       // Create test data
-      val df = spark.range(0, 100).toDF("id")
+      val df = spark
+        .range(0, 100)
+        .toDF("id")
         .selectExpr("id", "id % 10 as group_id", "concat('item_', id) as name")
 
       df.write
@@ -75,7 +77,9 @@ class AggregateExceptionTest extends TestBase {
       import sparkImplicits._
 
       // Create test data
-      val df = spark.range(0, 100).toDF("id")
+      val df = spark
+        .range(0, 100)
+        .toDF("id")
         .selectExpr("id", "id % 10 as group_id", "concat('item_', id) as name")
 
       df.write
@@ -100,7 +104,7 @@ class AggregateExceptionTest extends TestBase {
 
       // Create test data WITH SOME NULL VALUES so Spark actually pushes the IsNull filter
       val data = (0 until 100).map { i =>
-        if (i % 10 == 0) (i.toLong, i % 10, null.asInstanceOf[java.lang.Double])  // 10% null values
+        if (i % 10 == 0) (i.toLong, i % 10, null.asInstanceOf[java.lang.Double]) // 10% null values
         else (i.toLong, i % 10, (i * 2).toDouble.asInstanceOf[java.lang.Double])
       }
       val df = data.toDF("id", "group_id", "value")

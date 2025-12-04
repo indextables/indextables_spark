@@ -470,9 +470,8 @@ class IndexTables4SparkSimpleAggregateReader(
           case e: Exception =>
             logger.warn(s"Could not retrieve field names from split schema: ${e.getMessage}")
             Set.empty[String]
-        } finally {
+        } finally
           splitSchema.close() // Prevent native memory leak
-        }
       }
 
       // Merge IndexQuery filters with pushed filters

@@ -17,10 +17,10 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
 import org.slf4j.LoggerFactory
@@ -152,7 +152,7 @@ object PartitionPredicateUtils {
         // Cast all literals to UTF8String since partition values are stored as strings
         literal.dataType match {
           case StringType => literal
-          case _ =>
+          case _          =>
             // Convert non-string literals to UTF8String for comparison with partition values
             org.apache.spark.sql.catalyst.expressions.Literal(UTF8String.fromString(literal.value.toString), StringType)
         }
