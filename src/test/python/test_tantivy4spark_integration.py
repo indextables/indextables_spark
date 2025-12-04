@@ -93,10 +93,10 @@ class TestTantivy4SparkIntegration:
         df = self.spark.createDataFrame(data, schema)
         
         # Write using Tantivy4Spark format
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
         # Read back the data
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Verify data integrity
         assert read_df.count() == 3
@@ -154,8 +154,8 @@ class TestTantivy4SparkIntegration:
         df = self.spark.createDataFrame(data, schema)
         
         # Write and read
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Verify all columns are present
         expected_columns = {
@@ -184,7 +184,7 @@ class TestTantivy4SparkIntegration:
                 StructField("tags", ArrayType(StringType()), True)
             ])
             array_df = self.spark.createDataFrame(array_data, array_schema)
-            array_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_array")
+            array_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_array")
         
         assert "Array types are not supported by Tantivy4Spark" in str(exc_info.value)
         
@@ -196,7 +196,7 @@ class TestTantivy4SparkIntegration:
                 StructField("metadata", MapType(StringType(), StringType()), True)
             ])
             map_df = self.spark.createDataFrame(map_data, map_schema)
-            map_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_map")
+            map_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_map")
         
         assert "Map types are not supported by Tantivy4Spark" in str(exc_info.value)
 
@@ -220,9 +220,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         df = self.spark.createDataFrame(data, schema)
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Test contains operations
         spark_results = read_df.filter(col("title").contains("Spark")).collect()
@@ -267,9 +267,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         df = self.spark.createDataFrame(data, schema)
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Test greater than
         high_salary = read_df.filter(col("salary") > 80000).collect()
@@ -316,9 +316,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         df = self.spark.createDataFrame(data, schema)
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Test boolean filtering
         active_users = read_df.filter(col("active") == True).collect()
@@ -373,9 +373,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         df = self.spark.createDataFrame(data, schema)
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Test basic aggregations
         total_count = read_df.count()
@@ -433,9 +433,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         df = self.spark.createDataFrame(data, schema)
-        df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Complex query 1: Multiple AND conditions
         complex_filter_1 = read_df.filter(
@@ -506,10 +506,10 @@ class TestTantivy4SparkIntegration:
         df = self.spark.createDataFrame(data, schema)
         
         # Write with partitioning
-        df.write.format("tantivy4spark").mode("overwrite").partitionBy("year", "month").save(self.test_path)
+        df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").partitionBy("year", "month").save(self.test_path)
         
         # Read partitioned data
-        read_df = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_df = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         
         # Test partition pruning
         year_2022 = read_df.filter(col("year") == 2022).collect()
@@ -550,10 +550,10 @@ class TestTantivy4SparkIntegration:
         ])
         
         initial_df = self.spark.createDataFrame(initial_data, initial_schema)
-        initial_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        initial_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
         # Verify initial write
-        read_initial = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_initial = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         assert read_initial.count() == 3
         assert set(read_initial.columns) == {"id", "name", "price"}
         
@@ -575,10 +575,10 @@ class TestTantivy4SparkIntegration:
         evolved_df = self.spark.createDataFrame(evolved_data, evolved_schema)
         
         # Append evolved data (simulating schema evolution)
-        evolved_df.write.format("tantivy4spark").mode("append").save(self.test_path)
+        evolved_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(self.test_path)
         
         # Read evolved dataset
-        read_evolved = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_evolved = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         assert read_evolved.count() == 5
         
         # Verify that new columns are accessible
@@ -595,18 +595,18 @@ class TestTantivy4SparkIntegration:
             StructField("value", StringType(), True)
         ])
         empty_df = self.spark.createDataFrame([], empty_schema)
-        empty_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_empty")
+        empty_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_empty")
         
-        read_empty = self.spark.read.format("tantivy4spark").load(self.test_path + "_empty")
+        read_empty = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path + "_empty")
         assert read_empty.count() == 0
         assert set(read_empty.columns) == {"id", "value"}
         
         # Test single row dataset
         single_data = [(1, "single_value")]
         single_df = self.spark.createDataFrame(single_data, empty_schema)
-        single_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_single")
+        single_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_single")
         
-        read_single = self.spark.read.format("tantivy4spark").load(self.test_path + "_single")
+        read_single = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path + "_single")
         assert read_single.count() == 1
         assert read_single.collect()[0]["value"] == "single_value"
         
@@ -624,9 +624,9 @@ class TestTantivy4SparkIntegration:
         ])
         
         unicode_df = self.spark.createDataFrame(unicode_data, unicode_schema)
-        unicode_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_unicode")
+        unicode_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_unicode")
         
-        read_unicode = self.spark.read.format("tantivy4spark").load(self.test_path + "_unicode")
+        read_unicode = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path + "_unicode")
         assert read_unicode.count() == 3
         
         # Verify Unicode preservation
@@ -664,14 +664,14 @@ class TestTantivy4SparkIntegration:
         # Measure write performance
         import time
         start_time = time.time()
-        large_df.write.format("tantivy4spark").mode("overwrite").save(self.test_path + "_large")
+        large_df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path + "_large")
         write_time = time.time() - start_time
         
         print(f"Write time for 1000 records: {write_time:.2f} seconds")
         
         # Measure read performance
         start_time = time.time()
-        read_large = self.spark.read.format("tantivy4spark").load(self.test_path + "_large")
+        read_large = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path + "_large")
         total_count = read_large.count()
         read_time = time.time() - start_time
         
@@ -706,10 +706,10 @@ class TestTantivy4SparkIntegration:
         ])
         
         df1 = self.spark.createDataFrame(batch1, schema)
-        df1.write.format("tantivy4spark").mode("overwrite").save(self.test_path)
+        df1.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("overwrite").save(self.test_path)
         
         # Verify initial batch
-        read_after_batch1 = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_after_batch1 = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         assert read_after_batch1.count() == 2
         
         # Second batch (append)
@@ -720,10 +720,10 @@ class TestTantivy4SparkIntegration:
         ]
         
         df2 = self.spark.createDataFrame(batch2, schema)
-        df2.write.format("tantivy4spark").mode("append").save(self.test_path)
+        df2.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").mode("append").save(self.test_path)
         
         # Verify combined data
-        read_after_batch2 = self.spark.read.format("tantivy4spark").load(self.test_path)
+        read_after_batch2 = self.spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(self.test_path)
         assert read_after_batch2.count() == 5
         
         # Verify all data is accessible
