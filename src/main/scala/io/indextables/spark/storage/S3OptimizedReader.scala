@@ -29,6 +29,8 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.util.ErrorUtil
 import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider
+import software.amazon.awssdk.http.apache.ApacheHttpClient
+import software.amazon.awssdk.http.apache.{ProxyConfiguration => ApacheProxyConfiguration}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, HeadObjectRequest}
 import software.amazon.awssdk.services.s3.S3Client
@@ -52,9 +54,20 @@ class S3OptimizedReader(path: Path, conf: Configuration) extends StorageStrategy
       Region.US_EAST_1
     }
 
+    // Configure HTTP client to NEVER use proxy, even if system properties are set
+    // This ensures consistent behavior regardless of environment configuration
+    val httpClient = ApacheHttpClient.builder()
+      .proxyConfiguration(
+        ApacheProxyConfiguration.builder()
+          .useSystemPropertyValues(false) // Disable proxy from system properties
+          .build()
+      )
+      .build()
+
     S3Client
       .builder()
       .region(region)
+      .httpClient(httpClient)
       .credentialsProvider(DefaultCredentialsProvider.create())
       .build()
   }

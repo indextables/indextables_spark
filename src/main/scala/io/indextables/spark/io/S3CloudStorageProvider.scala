@@ -34,6 +34,10 @@ import software.amazon.awssdk.auth.credentials.{
 }
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.core.ResponseInputStream
+import software.amazon.awssdk.http.apache.ApacheHttpClient
+import software.amazon.awssdk.http.apache.{ProxyConfiguration => ApacheProxyConfiguration}
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
+import software.amazon.awssdk.http.nio.netty.{ProxyConfiguration => NettyProxyConfiguration}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.{S3AsyncClient, S3Client}
 import software.amazon.awssdk.services.s3.model._
@@ -128,6 +132,17 @@ class S3CloudStorageProvider(
 
   private val s3Client: S3Client = {
     val builder = S3Client.builder()
+
+    // Configure HTTP client to NEVER use proxy, even if system properties are set
+    // This ensures consistent behavior regardless of environment configuration
+    val httpClient = ApacheHttpClient.builder()
+      .proxyConfiguration(
+        ApacheProxyConfiguration.builder()
+          .useSystemPropertyValues(false) // Disable proxy from system properties
+          .build()
+      )
+      .build()
+    builder.httpClient(httpClient)
 
     // Configure region
     config.awsRegion match {
@@ -241,6 +256,17 @@ class S3CloudStorageProvider(
   // Create async S3 client for true async I/O (non-blocking uploads)
   private val s3AsyncClient: S3AsyncClient = {
     val builder = S3AsyncClient.builder()
+
+    // Configure HTTP client to NEVER use proxy, even if system properties are set
+    // For async client, we use NettyNioAsyncHttpClient with proxy disabled
+    val asyncHttpClient = NettyNioAsyncHttpClient.builder()
+      .proxyConfiguration(
+        NettyProxyConfiguration.builder()
+          .useSystemPropertyValues(false) // Disable proxy from system properties
+          .build()
+      )
+      .build()
+    builder.httpClient(asyncHttpClient)
 
     // Configure region (same as sync client)
     config.awsRegion.foreach { region =>
