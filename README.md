@@ -911,6 +911,7 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.indexWriter.heapSize` | `100000000` | Index writer heap size in bytes (100MB default, supports "2G", "500M", "1024K") |
 | `spark.indextables.indexWriter.threads` | `2` | Number of indexing threads (2 threads default) |
 | `spark.indextables.indexWriter.batchSize` | `10000` | Batch size for bulk document indexing (10,000 documents default) |
+| `spark.indextables.indexWriter.maxBatchBufferSize` | `90M` | Maximum batch buffer size before flushing (90MB default, prevents native 100MB limit errors with large documents) |
 | `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
 | `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |

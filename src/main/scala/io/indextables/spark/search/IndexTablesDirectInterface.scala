@@ -478,9 +478,11 @@ class TantivyDirectInterface(
   private val heapSize = getConfigValueSize("spark.indextables.indexWriter.heapSize", 100L * 1024 * 1024) // 100MB default
   private val threadCount = getConfigValueInt("spark.indextables.indexWriter.threads", 2) // 2 threads default
   private val batchSize = getConfigValueInt("spark.indextables.indexWriter.batchSize", 10000) // 10,000 records default
+  // Max batch buffer size: 90MB default (leaves 10MB safety margin under native 100MB limit)
+  private val maxBatchBufferSize = getConfigValueSize("spark.indextables.indexWriter.maxBatchBufferSize", 90L * 1024 * 1024)
   private val useBatch = getConfigValue("spark.indextables.indexWriter.useBatch", "true").toBoolean // Use batch by default
 
-  logger.info(s"Index writer configuration: heapSize=$heapSize bytes, threadCount=$threadCount, batchSize=$batchSize, useBatch=$useBatch")
+  logger.info(s"Index writer configuration: heapSize=$heapSize bytes, threadCount=$threadCount, batchSize=$batchSize, maxBatchBufferSize=$maxBatchBufferSize bytes, useBatch=$useBatch")
 
   // Create appropriate index and schema based on whether this is a restored index or new one
   private val (index, tempIndexDir, needsCleanup, tantivySchema) = restoredIndexPath match {
@@ -582,14 +584,30 @@ class TantivyDirectInterface(
     val batch      = threadLocalBatch.get()
     val count: Int = Option(threadLocalBatchCount.get()).map(_.intValue()).getOrElse(0)
 
-    if (batch != null && (count >= batchSize || forceBatch) && count > 0) {
-      val writer = getOrCreateWriter()
-      writer.addDocumentsBatch(batch)
-      logger.debug(s"Flushed batch with $count documents")
+    if (batch != null && count > 0) {
+      // Check both document count AND buffer size to prevent "Buffer too large: exceeds 100MB limit" errors
+      // The native layer has a hard-coded 100MB limit, so we flush early based on estimated buffer size
+      val estimatedBufferSize = batch.getEstimatedSize()
+      val shouldFlushByCount  = count >= batchSize
+      val shouldFlushBySize   = estimatedBufferSize >= maxBatchBufferSize
 
-      // Reset batch
-      threadLocalBatch.set(new BatchDocumentBuilder())
-      threadLocalBatchCount.set(0)
+      if (forceBatch || shouldFlushByCount || shouldFlushBySize) {
+        val writer = getOrCreateWriter()
+        writer.addDocumentsBatch(batch)
+
+        if (shouldFlushBySize && !shouldFlushByCount) {
+          logger.info(
+            s"Flushed batch early due to buffer size: $count documents, ~${estimatedBufferSize / (1024 * 1024)}MB " +
+              s"(threshold: ${maxBatchBufferSize / (1024 * 1024)}MB)"
+          )
+        } else {
+          logger.debug(s"Flushed batch with $count documents (~${estimatedBufferSize / 1024}KB)")
+        }
+
+        // Reset batch
+        threadLocalBatch.set(new BatchDocumentBuilder())
+        threadLocalBatchCount.set(0)
+      }
     }
   }
 
