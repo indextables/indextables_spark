@@ -37,6 +37,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 // Index Writer
 spark.indextables.indexWriter.heapSize: "100M" (supports "2G", "500M", "1024K")
 spark.indextables.indexWriter.batchSize: 10000
+spark.indextables.indexWriter.maxBatchBufferSize: "90M" (default: 90MB, prevents native 100MB limit errors)
 spark.indextables.indexWriter.threads: 2
 
 // Split Conversion (controls parallelism of tantivy index -> quickwit split conversion)

@@ -225,4 +225,140 @@ class IndexWriterConfigTest extends TestBase {
       readData.count() shouldBe 100
     }
   }
+
+  test("should use default maxBatchBufferSize configuration (90MB)") {
+    withTempPath { tempPath =>
+      // Generate test data with moderate-sized documents
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("Content_"), col("id")).as("content")
+        )
+
+      // Write without explicit maxBatchBufferSize - should use 90MB default
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read back to verify it worked
+      val readData = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      readData.count() shouldBe 100
+    }
+  }
+
+  test("should support custom maxBatchBufferSize configuration") {
+    withTempPath { tempPath =>
+      // Generate test data
+      val testData = spark
+        .range(500)
+        .select(
+          col("id"),
+          concat(lit("Record_"), col("id")).as("content")
+        )
+
+      // Write with a smaller maxBatchBufferSize to force more frequent flushes
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexWriter.maxBatchBufferSize", "1M") // 1MB - very small
+        .option("spark.indextables.indexWriter.batchSize", "10000")       // Large doc count threshold
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read back to verify all documents were written correctly
+      val readData = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      readData.count() shouldBe 500
+    }
+  }
+
+  test("should flush early when buffer size exceeds maxBatchBufferSize with large documents") {
+    withTempPath { tempPath =>
+      // Generate test data with large documents (10KB each)
+      // At 10KB per doc, 100 docs = 1MB, so 500 docs would be ~5MB
+      val largeContent = "X" * 10000 // 10KB string
+
+      val testData = spark
+        .range(500)
+        .select(
+          col("id"),
+          concat(lit(largeContent), col("id")).as("content")
+        )
+
+      // Write with a small maxBatchBufferSize (2MB) but large batchSize (10000)
+      // This should trigger early flushes based on buffer size, not document count
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexWriter.maxBatchBufferSize", "2M")   // 2MB buffer limit
+        .option("spark.indextables.indexWriter.batchSize", "10000")         // Would never trigger by count
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read back to verify all documents were written correctly
+      val readData = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      readData.count() shouldBe 500
+    }
+  }
+
+  test("should handle very large documents that individually approach buffer limit") {
+    withTempPath { tempPath =>
+      // Generate test data with very large documents (500KB each)
+      val veryLargeContent = "Y" * 500000 // 500KB string
+
+      val testData = spark
+        .range(50)
+        .select(
+          col("id"),
+          concat(lit(veryLargeContent), col("id")).as("content")
+        )
+
+      // Write with default maxBatchBufferSize (90MB)
+      // 50 docs * 500KB = 25MB, should work fine
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexWriter.batchSize", "100") // Small batch count
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      // Read back to verify all documents were written correctly
+      val readData = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      readData.count() shouldBe 50
+    }
+  }
+
+  test("should respect maxBatchBufferSize with size string formats") {
+    withTempPath { tempPath =>
+      val testData = spark
+        .range(100)
+        .select(
+          col("id"),
+          concat(lit("Content_"), col("id")).as("content")
+        )
+
+      // Test various size formats: "50M", "50m", "51200K", "51200k"
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexWriter.maxBatchBufferSize", "50M") // 50MB
+        .mode(SaveMode.Overwrite)
+        .save(tempPath)
+
+      val readData = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      readData.count() shouldBe 100
+    }
+  }
 }
