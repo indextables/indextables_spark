@@ -421,11 +421,13 @@ class TransactionLog(
     actions.foreach { action =>
       // Wrap actions in the appropriate delta log format
       val wrappedAction = action match {
-        case protocol: ProtocolAction => Map("protocol" -> protocol)
-        case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction           => Map("add" -> add)
-        case remove: RemoveAction     => Map("remove" -> remove)
-        case skip: SkipAction         => Map("mergeskip" -> skip)
+        case protocol: ProtocolAction     => Map("protocol" -> protocol)
+        case metadata: MetadataAction     => Map("metaData" -> metadata)
+        case add: AddAction               => Map("add" -> add)
+        case remove: RemoveAction         => Map("remove" -> remove)
+        case skip: SkipAction             => Map("mergeskip" -> skip)
+        case addXRef: AddXRefAction       => Map("addXRef" -> addXRef)
+        case removeXRef: RemoveXRefAction => Map("removeXRef" -> removeXRef)
       }
 
       val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
@@ -502,7 +504,9 @@ class TransactionLog(
               activeFiles += add
             case remove: RemoveAction =>
               activeFiles --= activeFiles.filter(_.path == remove.path)
-            case _: SkipAction => // Skip actions are transient
+            case _: SkipAction       => // Skip actions are transient
+            case _: AddXRefAction    => // XRef actions handled separately
+            case _: RemoveXRefAction => // XRef actions handled separately
           }
         }
 
@@ -528,8 +532,9 @@ class TransactionLog(
           activeFiles += add
         case remove: RemoveAction =>
           activeFiles --= activeFiles.filter(_.path == remove.path)
-        case _: SkipAction =>
-        // Skip actions are transient and not included in checkpoints
+        case _: SkipAction       => // Skip actions are transient and not included in checkpoints
+        case _: AddXRefAction    => // XRef actions handled separately
+        case _: RemoveXRefAction => // XRef actions handled separately
       }
     }
 
@@ -894,6 +899,12 @@ class TransactionLog(
             } else if (jsonNode.has("mergeskip")) {
               val skipNode = jsonNode.get("mergeskip")
               JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction])
+            } else if (jsonNode.has("addXRef")) {
+              val addXRefNode = jsonNode.get("addXRef")
+              JsonUtil.mapper.readValue(addXRefNode.toString, classOf[AddXRefAction])
+            } else if (jsonNode.has("removeXRef")) {
+              val removeXRefNode = jsonNode.get("removeXRef")
+              JsonUtil.mapper.readValue(removeXRefNode.toString, classOf[RemoveXRefAction])
             } else {
               throw new IllegalArgumentException(s"Unknown action type in line: $line")
             }
@@ -1120,5 +1131,225 @@ class TransactionLog(
     }
 
     filtered
+  }
+
+  // ============================================================================
+  // XRef (Cross-Reference) Operations
+  // ============================================================================
+
+  /**
+   * Add a cross-reference (XRef) split to the transaction log.
+   *
+   * XRef splits enable fast query routing by consolidating term dictionaries from
+   * multiple source splits into a single lightweight index.
+   *
+   * @param xrefAction
+   *   The XRef action to add
+   * @return
+   *   The new version number
+   */
+  def addXRef(xrefAction: AddXRefAction): Long = {
+    // Check protocol before writing - requires version 3+
+    initializeProtocolIfNeeded()
+    assertTableWritable()
+
+    val version = getNextVersion()
+    writeActions(version, Seq(xrefAction))
+
+    // Invalidate cache since XRef list has changed
+    cache.foreach(_.invalidateAll())
+
+    logger.info(
+      s"Added XRef ${xrefAction.xrefId} with ${xrefAction.sourceSplitCount} source splits " +
+        s"(${xrefAction.totalTerms} terms, ${xrefAction.size} bytes) in version $version"
+    )
+    version
+  }
+
+  /**
+   * Remove a cross-reference (XRef) split from the transaction log.
+   *
+   * @param path
+   *   Path of the XRef to remove
+   * @param reason
+   *   Why the XRef is being removed: "replaced", "source_changed", or "explicit"
+   * @return
+   *   The new version number
+   */
+  def removeXRef(path: String, reason: String): Long = {
+    // Find the XRef to get its ID
+    val existingXRefs = listXRefs()
+    val xrefToRemove = existingXRefs.find(_.path == path)
+
+    val xrefId = xrefToRemove.map(_.xrefId).getOrElse {
+      // Extract ID from path if not found (e.g., "_xrefsplits/abcd/xref-{id}.split")
+      val fileName = path.split("/").last
+      fileName.stripPrefix("xref-").stripSuffix(".split")
+    }
+
+    val removeAction = RemoveXRefAction(
+      path = path,
+      xrefId = xrefId,
+      deletionTimestamp = System.currentTimeMillis(),
+      reason = reason
+    )
+
+    val version = getNextVersion()
+    writeActions(version, Seq(removeAction))
+
+    // Invalidate cache since XRef list has changed
+    cache.foreach(_.invalidateAll())
+
+    logger.info(s"Removed XRef $xrefId (reason: $reason) in version $version")
+    version
+  }
+
+  /**
+   * Atomically replace an XRef (remove old + add new) in a single transaction.
+   *
+   * This is used when rebuilding an XRef with updated source splits.
+   *
+   * @param removeAction
+   *   The XRef to remove
+   * @param addAction
+   *   The new XRef to add
+   * @return
+   *   The new version number
+   */
+  def replaceXRef(removeAction: RemoveXRefAction, addAction: AddXRefAction): Long = {
+    // Check protocol before writing
+    initializeProtocolIfNeeded()
+    assertTableWritable()
+
+    val version = getNextVersion()
+    writeActions(version, Seq(removeAction, addAction))
+
+    // Invalidate cache since XRef list has changed
+    cache.foreach(_.invalidateAll())
+
+    logger.info(
+      s"Replaced XRef ${removeAction.xrefId} with ${addAction.xrefId} " +
+        s"(${addAction.sourceSplitCount} source splits) in version $version"
+    )
+    version
+  }
+
+  /**
+   * List all active (not removed) XRef splits.
+   *
+   * XRef splits are partition-agnostic and can contain source splits from multiple partitions.
+   *
+   * @return
+   *   Sequence of active XRef actions
+   */
+  def listXRefs(): Seq[AddXRefAction] = {
+    val activeXRefs  = ListBuffer[AddXRefAction]()
+    val removedPaths = scala.collection.mutable.Set[String]()
+
+    // Process all versions to build current XRef state
+    val versions = getVersions()
+    for (version <- versions.sorted) {
+      val actions = readVersion(version)
+      actions.foreach {
+        case addXRef: AddXRefAction =>
+          // Remove any existing XRef with same path and add new one
+          activeXRefs --= activeXRefs.filter(_.path == addXRef.path)
+          if (!removedPaths.contains(addXRef.path)) {
+            activeXRefs += addXRef
+          }
+        case removeXRef: RemoveXRefAction =>
+          activeXRefs --= activeXRefs.filter(_.path == removeXRef.path)
+          removedPaths += removeXRef.path
+        case _ => // Ignore other actions
+      }
+    }
+
+    activeXRefs.toSeq
+  }
+
+  /**
+   * List all removed XRef splits (for DESCRIBE TRANSACTION LOG XREFS view).
+   *
+   * @return
+   *   Sequence of removed XRef actions
+   */
+  def listRemovedXRefs(): Seq[RemoveXRefAction] =
+    readAllActions().collect { case removeXRef: RemoveXRefAction => removeXRef }
+
+  /**
+   * Get the XRef that covers a specific split (by filename).
+   *
+   * @param splitPath
+   *   Path of the split to find
+   * @return
+   *   The XRef containing this split, if any
+   */
+  def getXRefForSplit(splitPath: String): Option[AddXRefAction] = {
+    val splitFileName = splitPath.split("/").last
+    listXRefs().find { xref =>
+      xref.sourceSplitPaths.exists(_.split("/").last == splitFileName)
+    }
+  }
+
+  /**
+   * Get all splits NOT covered by any active XRef.
+   *
+   * @return
+   *   Sequence of AddActions for uncovered splits
+   */
+  def getSplitsWithoutXRef(): Seq[AddAction] = {
+    val activeXRefs = listXRefs()
+    val coveredSplitFileNames = activeXRefs
+      .flatMap(_.sourceSplitPaths)
+      .map(_.split("/").last)
+      .toSet
+
+    listFiles().filterNot { addAction =>
+      val fileName = addAction.path.split("/").last
+      coveredSplitFileNames.contains(fileName)
+    }
+  }
+
+  /**
+   * Commit XRef actions along with data split changes in a single atomic transaction.
+   *
+   * This is used when merge-on-write or auto-indexing needs to update both data splits
+   * and XRef splits atomically.
+   *
+   * @param dataRemoveActions
+   *   Data splits to remove
+   * @param dataAddActions
+   *   Data splits to add
+   * @param xrefRemoveActions
+   *   XRefs to remove
+   * @param xrefAddActions
+   *   XRefs to add
+   * @return
+   *   The new version number
+   */
+  def commitWithXRefUpdates(
+    dataRemoveActions: Seq[RemoveAction],
+    dataAddActions: Seq[AddAction],
+    xrefRemoveActions: Seq[RemoveXRefAction],
+    xrefAddActions: Seq[AddXRefAction]
+  ): Long = {
+    val allActions: Seq[Action] = dataRemoveActions ++ dataAddActions ++ xrefRemoveActions ++ xrefAddActions
+
+    if (allActions.isEmpty) {
+      return getLatestVersion()
+    }
+
+    val version = getNextVersion()
+    writeActions(version, allActions)
+
+    // Invalidate cache since file/XRef lists have changed
+    cache.foreach(_.invalidateAll())
+
+    logger.info(
+      s"Committed mixed transaction in version $version: " +
+        s"${dataRemoveActions.size} removes, ${dataAddActions.size} adds, " +
+        s"${xrefRemoveActions.size} XRef removes, ${xrefAddActions.size} XRef adds"
+    )
+    version
   }
 }

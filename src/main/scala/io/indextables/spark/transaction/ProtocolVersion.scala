@@ -23,13 +23,13 @@ package io.indextables.spark.transaction
  * Version History:
  *   - Version 1: Basic transaction log (AddAction, RemoveAction, MetadataAction)
  *   - Version 2: Version 1 + SkipAction, extended AddAction metadata, footer offsets
- *   - Version 3+: Reserved for future table features
+ *   - Version 3: Version 2 + Cross-reference indexing (AddXRefAction, RemoveXRefAction)
  */
 object ProtocolVersion {
 
   // Current versions supported by this release
-  val CURRENT_READER_VERSION = 2
-  val CURRENT_WRITER_VERSION = 2
+  val CURRENT_READER_VERSION = 3
+  val CURRENT_WRITER_VERSION = 3
 
   // Minimum versions we can read/write
   val MIN_READER_VERSION = 1
@@ -37,17 +37,19 @@ object ProtocolVersion {
 
   // Feature support (for version 3+)
   val SUPPORTED_READER_FEATURES: Set[String] = Set(
-    "skippedFiles",     // SkipAction support
-    "extendedMetadata", // Extended AddAction metadata
-    "footerOffsets"     // Footer offset optimization
+    "skippedFiles",          // SkipAction support
+    "extendedMetadata",      // Extended AddAction metadata
+    "footerOffsets",         // Footer offset optimization
+    "crossReferenceIndex"    // XRef split support (AddXRefAction, RemoveXRefAction)
   )
 
   val SUPPORTED_WRITER_FEATURES: Set[String] = Set(
-    "skippedFiles",     // SkipAction support
-    "extendedMetadata", // Extended AddAction metadata
-    "footerOffsets",    // Footer offset optimization
-    "checkpoint",       // Checkpoint support
-    "optimizeWrite"     // Optimized write operations
+    "skippedFiles",          // SkipAction support
+    "extendedMetadata",      // Extended AddAction metadata
+    "footerOffsets",         // Footer offset optimization
+    "checkpoint",            // Checkpoint support
+    "optimizeWrite",         // Optimized write operations
+    "crossReferenceIndex"    // XRef split support (AddXRefAction, RemoveXRefAction)
   )
 
   // Configuration keys

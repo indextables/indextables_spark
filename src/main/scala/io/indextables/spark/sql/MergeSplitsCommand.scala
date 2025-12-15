@@ -38,6 +38,7 @@ import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.storage.SplitManager
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.xref.{XRefConfig, XRefBuildManager}
 import io.indextables.tantivy4java.core.Index
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
@@ -1149,6 +1150,11 @@ class MergeSplitsExecutor(
     logger.info(s"Batch summary: $successfulBatchCount successful, $failedBatchCount failed")
     logger.info(s"Size change: $totalOriginalSize bytes -> $totalMergedSize bytes")
 
+    // Trigger XRef rebuild if enabled and merge was successful
+    if (status == "success" || status == "partial_success") {
+      triggerXRefRebuildIfNeeded()
+    }
+
     Seq(
       Row(
         tablePath.toString,
@@ -1164,6 +1170,75 @@ class MergeSplitsExecutor(
         if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
       )
     )
+  }
+
+  /**
+   * Trigger XRef rebuild if configuration allows it.
+   *
+   * After MERGE SPLITS, some XRefs may reference splits that no longer exist.
+   * This method checks if XRef rebuild is enabled and triggers a rebuild for
+   * XRefs that have become stale due to the merge operation.
+   */
+  private def triggerXRefRebuildIfNeeded(): Unit = {
+    try {
+      val xrefConfig = XRefConfig.fromSparkSession(sparkSession)
+
+      // Only rebuild if rebuildOnSourceChange is enabled
+      if (!xrefConfig.autoIndex.rebuildOnSourceChange) {
+        logger.debug("XRef rebuild on source change is disabled - skipping post-merge XRef rebuild")
+        return
+      }
+
+      // Check if there are any XRefs that need rebuilding
+      val existingXRefs = transactionLog.listXRefs()
+      if (existingXRefs.isEmpty) {
+        logger.debug("No XRefs exist for this table - nothing to rebuild")
+        return
+      }
+
+      // Get current valid splits
+      val currentSplits = transactionLog.listFiles()
+      val currentSplitPaths = currentSplits.map(_.path).toSet
+
+      // Find XRefs with stale references (source splits that no longer exist)
+      val staleXRefs = existingXRefs.filter { xref =>
+        val sourceSplitFileNames = xref.sourceSplitPaths.map(path =>
+          io.indextables.spark.xref.XRefStorageUtils.extractFileName(path)
+        ).toSet
+        val currentSplitFileNames = currentSplitPaths.map(path =>
+          io.indextables.spark.xref.XRefStorageUtils.extractFileName(path)
+        )
+        // XRef is stale if any of its source splits no longer exist
+        sourceSplitFileNames.exists(name => !currentSplitFileNames.contains(name))
+      }
+
+      if (staleXRefs.isEmpty) {
+        logger.debug("No stale XRefs found after merge - no rebuild needed")
+        return
+      }
+
+      logger.info(s"Found ${staleXRefs.size} stale XRefs after merge - triggering rebuild")
+
+      // Use XRefBuildManager to rebuild stale XRefs
+      val buildManager = new XRefBuildManager(tablePath.toString, transactionLog, xrefConfig, sparkSession)
+
+      // Rebuild XRefs for affected partitions (FORCE REBUILD mode to replace stale XRefs)
+      val results = buildManager.buildCrossReferences(
+        whereClause = None,
+        forceRebuild = true,
+        dryRun = false
+      )
+
+      val totalBuilt = results.count(_.action == "built")
+      val totalSplits = results.map(_.sourceSplitsCount).sum
+      val totalDuration = results.map(_.buildDurationMs).sum
+      logger.info(s"XRef rebuild completed: $totalBuilt XRefs rebuilt, $totalSplits splits indexed in ${totalDuration}ms")
+
+    } catch {
+      case e: Exception =>
+        // XRef rebuild failure should not fail the merge operation
+        logger.warn(s"Failed to rebuild XRefs after merge (non-fatal): ${e.getMessage}", e)
+    }
   }
 
   /**

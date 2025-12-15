@@ -573,7 +573,51 @@ spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "48")  // 48 h
 spark.conf.set("spark.indextables.skippedFiles.cooldownDuration", "1")  // 1 hour
 ```
 
-### 10.5.9 Cloud Storage Credential Configuration
+### 10.5.9 Cross-Reference (XRef) Indexing Configuration
+
+Controls XRef indexing for fast query routing on large tables (10-100x faster split identification):
+
+| Configuration Key | Type | Default | Description |
+|------------------|------|---------|-------------|
+| **Auto-Index** | | | |
+| `spark.indextables.xref.autoIndex.enabled` | Boolean | false | Enable automatic XRef building on commit |
+| `spark.indextables.xref.autoIndex.maxSourceSplits` | Int | 1024 | Maximum splits per XRef |
+| `spark.indextables.xref.autoIndex.minSplitsToTrigger` | Int | 10 | Minimum splits to trigger XRef build |
+| `spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger` | Int | 10 | Minimum uncovered splits to trigger |
+| `spark.indextables.xref.autoIndex.minIntervalMs` | Long | 60000 | Minimum interval between auto-index runs |
+| `spark.indextables.xref.autoIndex.rebuildOnSourceChange` | Boolean | true | Rebuild XRef when sources change |
+| **Build Performance** | | | |
+| `spark.indextables.xref.build.includePositions` | Boolean | false | Include positions (slower but enables phrase queries) |
+| `spark.indextables.xref.build.parallelism` | Int | auto | Parallelism for XRef builds |
+| `spark.indextables.xref.build.tempDirectoryPath` | String | auto | Temp directory (falls back to indexWriter.tempDirectoryPath) |
+| `spark.indextables.xref.build.heapSize` | String | auto | Heap size (falls back to indexWriter.heapSize, then 50MB) |
+| **Query-Time** | | | |
+| `spark.indextables.xref.query.enabled` | Boolean | true | Enable XRef pre-scan at query time |
+| `spark.indextables.xref.query.minSplitsForXRef` | Int | 128 | Minimum candidate splits to use XRef |
+| `spark.indextables.xref.query.timeoutMs` | Int | 5000 | XRef query timeout in milliseconds |
+| `spark.indextables.xref.query.fallbackOnError` | Boolean | true | Fallback to full scan on XRef error |
+| **Storage** | | | |
+| `spark.indextables.xref.storage.directory` | String | "_xrefsplits" | XRef storage directory relative to table |
+| `spark.indextables.xref.storage.compressionEnabled` | Boolean | true | Enable XRef split compression |
+
+**Examples**:
+
+```scala
+// Enable XRef auto-indexing with custom settings
+spark.conf.set("spark.indextables.xref.autoIndex.enabled", "true")
+spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "50")
+spark.conf.set("spark.indextables.xref.build.heapSize", "100M")
+spark.conf.set("spark.indextables.xref.build.tempDirectoryPath", "/local_disk0/tmp")
+
+// Disable XRef query routing for debugging
+spark.conf.set("spark.indextables.xref.query.enabled", "false")
+
+// Configure XRef for large tables
+spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "256")
+spark.conf.set("spark.indextables.xref.query.timeoutMs", "10000")
+```
+
+### 10.5.10 Cloud Storage Credential Configuration
 
 #### AWS Credential Configuration
 

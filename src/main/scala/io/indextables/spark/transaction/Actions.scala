@@ -109,6 +109,78 @@ case class SkipAction(
 ) extends Action
 
 /**
+ * Action that records the addition of a cross-reference (XRef) split to the table.
+ *
+ * XRef splits are lightweight indexes that consolidate term dictionaries from multiple
+ * source splits into a single file, enabling fast query routing (10-100x faster split
+ * identification for selective queries).
+ *
+ * XRef splits are partition-agnostic - a single XRef can contain splits from multiple
+ * partitions. They are stored in hash-based subdirectories under _xrefsplits/ to avoid
+ * directory fragmentation.
+ *
+ * @param path
+ *   Relative path to XRef file (e.g., "_xrefsplits/kmpq/xref-{uuid}.split")
+ * @param xrefId
+ *   Unique identifier for this XRef
+ * @param sourceSplitPaths
+ *   Paths of source splits included in this XRef (can span multiple partitions)
+ * @param sourceSplitCount
+ *   Count of source splits for quick access
+ * @param size
+ *   File size in bytes
+ * @param totalTerms
+ *   Total unique terms indexed in this XRef
+ * @param footerStartOffset
+ *   Footer start byte offset for efficient opening
+ * @param footerEndOffset
+ *   Footer end byte offset for efficient opening
+ * @param createdTime
+ *   Build timestamp in milliseconds
+ * @param buildDurationMs
+ *   How long the build took in milliseconds
+ * @param maxSourceSplits
+ *   Configuration value used for this build
+ */
+case class AddXRefAction(
+  path: String,
+  xrefId: String,
+  sourceSplitPaths: Seq[String],
+  sourceSplitCount: Int,
+  size: Long,
+  totalTerms: Long,
+  footerStartOffset: Long,
+  footerEndOffset: Long,
+  createdTime: Long,
+  buildDurationMs: Long,
+  maxSourceSplits: Int
+) extends Action
+
+/**
+ * Action that marks a cross-reference (XRef) split as removed from the table.
+ *
+ * XRef splits are removed when:
+ * - They are replaced by a newer XRef (reason: "replaced")
+ * - Their source splits have changed (reason: "source_changed")
+ * - Explicitly requested by user (reason: "explicit")
+ *
+ * @param path
+ *   Path of XRef file to remove
+ * @param xrefId
+ *   XRef identifier
+ * @param deletionTimestamp
+ *   When the XRef was marked for removal
+ * @param reason
+ *   Why the XRef was removed: "replaced", "source_changed", or "explicit"
+ */
+case class RemoveXRefAction(
+  path: String,
+  xrefId: String,
+  deletionTimestamp: Long,
+  reason: String
+) extends Action
+
+/**
  * Protocol action that defines the minimum reader and writer versions required to access the table. This follows Delta
  * Lake's protocol versioning approach to ensure backwards compatibility.
  *

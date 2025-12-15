@@ -431,8 +431,8 @@ class IndexTables4SparkSimpleAggregateReader(
 
       logger.debug(s"PATH DEBUG: resolvedPath = '$resolvedPath'")
 
-      // Normalize s3a:// to s3:// for tantivy4java compatibility
-      val splitPath = resolvedPath.replace("s3a://", "s3://")
+      // Normalize paths for tantivy4java compatibility (s3a:// -> s3://, abfss:// -> azure://, etc.)
+      val splitPath = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(resolvedPath)
 
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")
       logger.debug(s"PATH DEBUG: final splitPath = '$splitPath'")

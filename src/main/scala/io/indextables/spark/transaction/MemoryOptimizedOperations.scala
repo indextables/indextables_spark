@@ -314,11 +314,13 @@ class MemoryOptimizedOperations(
 
   private def wrapAction(action: Action): Map[String, Any] =
     action match {
-      case protocol: ProtocolAction => Map("protocol" -> protocol)
-      case metadata: MetadataAction => Map("metaData" -> metadata)
-      case add: AddAction           => Map("add" -> add)
-      case remove: RemoveAction     => Map("remove" -> remove)
-      case skip: SkipAction         => Map("mergeskip" -> skip)
+      case protocol: ProtocolAction     => Map("protocol" -> protocol)
+      case metadata: MetadataAction     => Map("metaData" -> metadata)
+      case add: AddAction               => Map("add" -> add)
+      case remove: RemoveAction         => Map("remove" -> remove)
+      case skip: SkipAction             => Map("mergeskip" -> skip)
+      case addXRef: AddXRefAction       => Map("addXRef" -> addXRef)
+      case removeXRef: RemoveXRefAction => Map("removeXRef" -> removeXRef)
     }
 
   private def parseAction(line: String): Action = {
@@ -332,6 +334,10 @@ class MemoryOptimizedOperations(
       JsonUtil.mapper.readValue(jsonNode.get("remove").toString, classOf[RemoveAction])
     } else if (jsonNode.has("mergeskip")) {
       JsonUtil.mapper.readValue(jsonNode.get("mergeskip").toString, classOf[SkipAction])
+    } else if (jsonNode.has("addXRef")) {
+      JsonUtil.mapper.readValue(jsonNode.get("addXRef").toString, classOf[AddXRefAction])
+    } else if (jsonNode.has("removeXRef")) {
+      JsonUtil.mapper.readValue(jsonNode.get("removeXRef").toString, classOf[RemoveXRefAction])
     } else {
       throw new IllegalArgumentException(s"Unknown action type: $line")
     }

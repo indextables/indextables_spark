@@ -36,18 +36,22 @@ import org.slf4j.LoggerFactory
 class DescribeTransactionLogExecutor(
   spark: SparkSession,
   tablePath: String,
-  includeAll: Boolean) {
+  includeAll: Boolean,
+  xrefsOnly: Boolean = false) {
 
   private val logger = LoggerFactory.getLogger(classOf[DescribeTransactionLogExecutor])
   private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
 
   def execute(): Seq[Row] = {
-    logger.info(s"Executing DESCRIBE TRANSACTION LOG for table: $tablePath (includeAll=$includeAll)")
+    logger.info(s"Executing DESCRIBE TRANSACTION LOG for table: $tablePath (includeAll=$includeAll, xrefsOnly=$xrefsOnly)")
 
     val txLog = TransactionLogFactory.create(new Path(tablePath), spark)
 
     try {
-      val rows = if (includeAll) {
+      val rows = if (xrefsOnly) {
+        // Return only XRef actions
+        readXRefsOnly(txLog)
+      } else if (includeAll) {
         // Read all transaction log files from version 0
         readAllVersions(txLog)
       } else {
@@ -59,6 +63,118 @@ class DescribeTransactionLogExecutor(
       rows
     } finally
       txLog.close()
+  }
+
+  /**
+   * Read only XRef actions from the transaction log.
+   * Returns a simplified view showing current XRef state.
+   */
+  private def readXRefsOnly(txLog: TransactionLog): Seq[Row] = {
+    val xrefs = txLog.listXRefs()
+    logger.info(s"Found ${xrefs.size} XRef entries in transaction log")
+
+    xrefs.map { xref =>
+      // Create row with XRef-specific fields mapped to existing output schema
+      Row(
+        // version - use 0 as placeholder since XRefs don't have version tracking
+        0L,
+        // log_file_path
+        "current_state",
+        // action_type
+        "add_xref",
+        // path (common field - use XRef path)
+        xref.path,
+        // partition_values - use source split paths as JSON
+        toJsonString(xref.sourceSplitPaths),
+        // size
+        xref.size,
+        // data_change
+        false,
+        // tags - include XRef metadata as JSON
+        toJsonString(Map(
+          "xrefId" -> xref.xrefId,
+          "sourceSplitCount" -> xref.sourceSplitCount,
+          "totalTerms" -> xref.totalTerms,
+          "maxSourceSplits" -> xref.maxSourceSplits
+        )),
+        // modification_time (AddAction specific) - use created time
+        new java.sql.Timestamp(xref.createdTime),
+        // stats
+        null,
+        // min_values
+        null,
+        // max_values
+        null,
+        // num_records - use source split count
+        xref.sourceSplitCount.toLong,
+        // footer_start_offset
+        xref.footerStartOffset,
+        // footer_end_offset
+        xref.footerEndOffset,
+        // hotcache_start_offset
+        null,
+        // hotcache_length
+        null,
+        // has_footer_offsets
+        true,
+        // time_range_start
+        null,
+        // time_range_end
+        null,
+        // split_tags
+        null,
+        // delete_opstamp
+        null,
+        // num_merge_ops
+        null,
+        // doc_mapping_json
+        null,
+        // uncompressed_size_bytes
+        null,
+        // deletion_timestamp (RemoveAction specific)
+        null,
+        // extended_file_metadata
+        null,
+        // skip_timestamp (SkipAction specific)
+        null,
+        // skip_reason
+        null,
+        // skip_operation
+        null,
+        // skip_retry_after
+        null,
+        // skip_count
+        null,
+        // protocol_min_reader_version (ProtocolAction specific)
+        null,
+        // protocol_min_writer_version
+        null,
+        // protocol_reader_features
+        null,
+        // protocol_writer_features
+        null,
+        // metadata_id (MetadataAction specific)
+        null,
+        // metadata_name
+        null,
+        // metadata_description
+        null,
+        // metadata_format_provider
+        null,
+        // metadata_format_options
+        null,
+        // metadata_schema_string
+        null,
+        // metadata_partition_columns
+        null,
+        // metadata_configuration
+        null,
+        // metadata_created_time
+        null,
+        // is_checkpoint
+        false
+      )
+    }
   }
 
   /** Read all transaction log versions from 0 to current. */

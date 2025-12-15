@@ -28,13 +28,19 @@ import org.slf4j.LoggerFactory
 /**
  * SQL command to describe the contents of an IndexTables4Spark transaction log.
  *
- * Syntax: DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table' DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table'
- * INCLUDE ALL DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table DESCRIBE INDEXTABLES TRANSACTION LOG
- * my_catalog.my_database.my_table INCLUDE ALL
+ * Syntax:
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table'
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table' INCLUDE ALL
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG '/path/to/table' XREFS
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table INCLUDE ALL
+ *   DESCRIBE INDEXTABLES TRANSACTION LOG my_catalog.my_database.my_table XREFS
  *
  * Without INCLUDE ALL: Returns current state from latest checkpoint forward (more efficient)
  *
  * With INCLUDE ALL: Returns complete transaction log history from version 0
+ *
+ * With XREFS: Returns only XRef (cross-reference) actions
  *
  * Returns a DataFrame with all transaction log actions including:
  *   - AddAction: Files added to the table
@@ -42,11 +48,14 @@ import org.slf4j.LoggerFactory
  *   - SkipAction: Files that were skipped during operations
  *   - ProtocolAction: Protocol version changes
  *   - MetadataAction: Schema and configuration changes
+ *   - AddXRefAction: XRef indexes added to the table
+ *   - RemoveXRefAction: XRef indexes removed from the table
  */
 case class DescribeTransactionLogCommand(
   override val child: LogicalPlan,
   tablePath: String,
-  includeAll: Boolean)
+  includeAll: Boolean,
+  xrefsOnly: Boolean = false)
     extends RunnableCommand
     with UnaryNode {
 
@@ -120,12 +129,13 @@ case class DescribeTransactionLogCommand(
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    logger.info(s"Describing transaction log for table: $tablePath (includeAll=$includeAll)")
+    logger.info(s"Describing transaction log for table: $tablePath (includeAll=$includeAll, xrefsOnly=$xrefsOnly)")
 
     val executor = new DescribeTransactionLogExecutor(
       spark = sparkSession,
       tablePath = tablePath,
-      includeAll = includeAll
+      includeAll = includeAll,
+      xrefsOnly = xrefsOnly
     )
 
     executor.execute()

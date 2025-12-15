@@ -114,6 +114,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [Split Cache Configuration](#split-cache-configuration)
   - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
   - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
+  - [Cross-Reference (XRef) Indexing](#cross-reference-xref-indexing-for-faster-query-routing)
 - [File Format](#file-format)
   - [Split Files](#split-files)
   - [Transaction Log](#transaction-log)
@@ -141,6 +142,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
+- 🔗 **Cross-Reference (XRef) Indexing**: Consolidates term dictionaries from multiple splits for 10-100x faster query routing on large tables
 
 ---
 
@@ -2023,6 +2025,95 @@ result.show()
 val metrics = result.collect()(0)
 println(s"Deleted ${metrics.getLong(2)} files, reclaimed ${metrics.getDouble(3)} MB")
 ```
+
+#### Cross-Reference (XRef) Indexing for Faster Query Routing
+
+IndexTables4Spark supports Cross-Reference (XRef) indexing, a feature that consolidates term dictionaries from multiple source splits into lightweight indexes, enabling **10-100x faster query routing** for selective queries on large tables.
+
+**How XRef Works:**
+1. XRef indexes consolidate term dictionaries from multiple source splits
+2. At query time, XRefQueryRouter pre-scans XRef indexes during partition planning
+3. Only splits that may contain matching documents are opened
+4. Result: Dramatically faster query routing for selective queries
+
+**Storage Layout:**
+```
+table_path/
+├── _transaction_log/
+├── _xrefsplits/          # XRef storage directory
+│   ├── abcd/             # Hash-based subdirectory (aaaa to zzzz)
+│   │   └── xref-abc123.split
+│   └── efgh/
+│       └── xref-789xyz.split
+└── partition=value/
+    └── split-001.split
+```
+
+##### SQL Syntax
+
+```sql
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Build XRef indexes for a table
+INDEX CROSSREFERENCES FOR 's3://bucket/path';
+INDEX CROSSREFERENCES FOR my_table;
+
+-- Build for specific partitions only
+INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01';
+INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE region = 'us-east' AND year > '2022';
+
+-- Force rebuild all XRefs (even if already indexed)
+INDEX CROSSREFERENCES FOR 's3://bucket/path' FORCE REBUILD;
+
+-- Preview what would be built without executing
+INDEX CROSSREFERENCES FOR 's3://bucket/path' DRY RUN;
+
+-- Combine options
+INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01' FORCE REBUILD DRY RUN;
+```
+
+##### Configuration Options
+
+```scala
+// Auto-Index Configuration (disabled by default)
+spark.conf.set("spark.indextables.xref.autoIndex.enabled", "false")  // Enable automatic XRef building
+spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "1024")  // Max splits per XRef
+spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "10")  // Min splits to build XRef
+spark.conf.set("spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger", "10")  // Min uncovered splits
+spark.conf.set("spark.indextables.xref.autoIndex.minIntervalMs", "60000")  // 1 minute between auto-index runs
+
+// Query Configuration (enabled by default)
+spark.conf.set("spark.indextables.xref.query.enabled", "true")  // Enable XRef pre-scan at query time
+spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "128")  // Min candidate splits to use XRef
+spark.conf.set("spark.indextables.xref.query.timeoutMs", "5000")  // XRef query timeout
+spark.conf.set("spark.indextables.xref.query.fallbackOnError", "true")  // Fallback to full scan on error
+
+// Build Configuration
+spark.conf.set("spark.indextables.xref.build.includePositions", "false")  // Faster builds without positions
+spark.conf.set("spark.indextables.xref.build.parallelism", "8")  // Build parallelism
+spark.conf.set("spark.indextables.xref.build.tempDirectoryPath", "/local_disk0/tmp")  // Falls back to indexWriter.tempDirectoryPath
+spark.conf.set("spark.indextables.xref.build.heapSize", "100M")  // Falls back to indexWriter.heapSize, then 50MB default
+
+// Storage Configuration
+spark.conf.set("spark.indextables.xref.storage.directory", "_xrefsplits")  // Storage directory
+spark.conf.set("spark.indextables.xref.storage.compressionEnabled", "true")  // Compress XRef splits
+```
+
+##### When to Use XRef
+
+- **Large tables with 128+ splits**: XRef provides significant benefits for large tables
+- **Selective queries**: Queries that match small subsets of data benefit most
+- **Frequent queries on same field patterns**: XRef indexes are built per-field
+- **Tables with stable data**: Low write frequency means XRef indexes stay valid longer
+
+##### Key Features
+
+- **Hash-based storage**: XRefs stored in `_xrefsplits/aaaa/` to `_xrefsplits/zzzz/` directories
+- **Cross-partition support**: XRefs can span multiple partitions for maximum optimization
+- **Query-time routing**: Automatic XRef pre-scan when enabled (default: enabled)
+- **Fallback on error**: Falls back to full scan if XRef query fails (configurable)
+- **Protocol v3**: Transaction log upgraded to support AddXRefAction/RemoveXRefAction
 
 ## File Format
 
