@@ -19,19 +19,24 @@ package io.indextables.spark.core
 
 import scala.jdk.CollectionConverters._
 
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{
   DataType,
+  DateType,
   DoubleType,
   FloatType,
   IntegerType,
   LongType,
   StringType,
   StructField,
-  StructType
+  StructType,
+  TimestampType
 }
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -868,6 +873,57 @@ class IndexTables4SparkGroupByAggregateReader(
             logger.warn(s"GROUP BY EXECUTION: Cannot convert '$keyAsString' to Double: ${e.getMessage}")
             0.0
         }
+      case Some(org.apache.spark.sql.types.DateType) =>
+        // Convert date string to days since epoch (Int)
+        // Handles both "YYYY-MM-DD" and ISO datetime formats like "2024-01-02T00:00:00Z"
+        val epochDate = LocalDate.of(1970, 1, 1)
+        try {
+          val localDate = if (keyAsString.contains("T")) {
+            // ISO datetime format - check if it has timezone indicator
+            if (keyAsString.endsWith("Z") || keyAsString.contains("+") ||
+                (keyAsString.length > 19 && keyAsString.charAt(19) == '-')) {
+              // Instant format: "2024-01-02T00:00:00Z" or with offset
+              java.time.Instant.parse(keyAsString).atZone(java.time.ZoneOffset.UTC).toLocalDate
+            } else {
+              // LocalDateTime format: "2024-01-02T00:00:00"
+              java.time.LocalDateTime.parse(keyAsString).toLocalDate
+            }
+          } else {
+            // Simple date format: "2024-01-02"
+            LocalDate.parse(keyAsString)
+          }
+          ChronoUnit.DAYS.between(epochDate, localDate).toInt
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert '$keyAsString' to DateType: ${e.getMessage}", e)
+        }
+      case Some(org.apache.spark.sql.types.TimestampType) =>
+        // Convert timestamp to microseconds since epoch (Long)
+        // Handles: numeric micros, ISO instant, LocalDateTime, URL-encoded strings
+        try {
+          // First check if it's already a numeric value (microseconds since epoch)
+          if (keyAsString.forall(c => c.isDigit || c == '-')) {
+            keyAsString.toLong
+          } else {
+            // URL-decode if needed (e.g., %3A -> :)
+            val decoded = java.net.URLDecoder.decode(keyAsString, "UTF-8")
+            if (decoded.endsWith("Z") || decoded.contains("+") ||
+                (decoded.length > 19 && decoded.charAt(19) == '-')) {
+              // ISO Instant format
+              val instant = java.time.Instant.parse(decoded)
+              instant.toEpochMilli * 1000L + (instant.getNano / 1000L) % 1000L
+            } else if (decoded.contains("T")) {
+              // LocalDateTime format
+              val localDateTime = java.time.LocalDateTime.parse(decoded)
+              io.indextables.spark.util.TimestampUtils.toMicros(localDateTime)
+            } else {
+              throw new IllegalArgumentException(s"Unrecognized timestamp format: $keyAsString")
+            }
+          }
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert '$keyAsString' to TimestampType: ${e.getMessage}", e)
+        }
       case _ =>
         // Default to string
         UTF8String.fromString(keyAsString)
@@ -956,6 +1012,57 @@ class IndexTables4SparkGroupByAggregateReader(
           case e: NumberFormatException =>
             logger.warn(s"GROUP BY EXECUTION: Cannot convert '$value' to Double: ${e.getMessage}")
             0.0
+        }
+      case DateType =>
+        // Convert date string to days since epoch (Int)
+        // Handles both "YYYY-MM-DD" and ISO datetime formats like "2024-01-02T00:00:00Z"
+        val epochDate = LocalDate.of(1970, 1, 1)
+        try {
+          val localDate = if (value.contains("T")) {
+            // ISO datetime format - check if it has timezone indicator
+            if (value.endsWith("Z") || value.contains("+") ||
+                (value.length > 19 && value.charAt(19) == '-')) {
+              // Instant format: "2024-01-02T00:00:00Z" or with offset
+              java.time.Instant.parse(value).atZone(java.time.ZoneOffset.UTC).toLocalDate
+            } else {
+              // LocalDateTime format: "2024-01-02T00:00:00"
+              java.time.LocalDateTime.parse(value).toLocalDate
+            }
+          } else {
+            // Simple date format: "2024-01-02"
+            LocalDate.parse(value)
+          }
+          ChronoUnit.DAYS.between(epochDate, localDate).toInt
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert '$value' to DateType: ${e.getMessage}", e)
+        }
+      case TimestampType =>
+        // Convert timestamp to microseconds since epoch (Long)
+        // Handles: numeric micros, ISO instant, LocalDateTime, URL-encoded strings
+        try {
+          // First check if it's already a numeric value (microseconds since epoch)
+          if (value.forall(c => c.isDigit || c == '-')) {
+            value.toLong
+          } else {
+            // URL-decode if needed (e.g., %3A -> :)
+            val decoded = java.net.URLDecoder.decode(value, "UTF-8")
+            if (decoded.endsWith("Z") || decoded.contains("+") ||
+                (decoded.length > 19 && decoded.charAt(19) == '-')) {
+              // ISO Instant format
+              val instant = java.time.Instant.parse(decoded)
+              instant.toEpochMilli * 1000L + (instant.getNano / 1000L) % 1000L
+            } else if (decoded.contains("T")) {
+              // LocalDateTime format
+              val localDateTime = java.time.LocalDateTime.parse(decoded)
+              io.indextables.spark.util.TimestampUtils.toMicros(localDateTime)
+            } else {
+              throw new IllegalArgumentException(s"Unrecognized timestamp format: $value")
+            }
+          }
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert '$value' to TimestampType: ${e.getMessage}", e)
         }
       case _ => UTF8String.fromString(value)
     }

@@ -17,11 +17,14 @@
 
 package io.indextables.spark.core
 
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReader, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{DataType, DateType, IntegerType, LongType, StringType, StructField, StructType, TimestampType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
@@ -41,7 +44,8 @@ class TransactionLogCountScan(
   options: CaseInsensitiveStringMap,
   config: Map[String, String],                  // Direct config instead of broadcast
   groupByColumns: Option[Array[String]] = None, // GROUP BY columns (if any)
-  hasAggregations: Boolean = true               // Whether this is COUNT or just DISTINCT (GROUP BY without agg)
+  hasAggregations: Boolean = true,              // Whether this is COUNT or just DISTINCT (GROUP BY without agg)
+  tableSchema: Option[StructType] = None        // Table schema for proper type handling
 ) extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountScan])
@@ -54,7 +58,12 @@ class TransactionLogCountScan(
         // See org.apache.spark.sql.execution.datasources.v2.V2ScanRelationPushDown lines 94-102 (Spark 3.5.3)
         val groupByFields = cols.zipWithIndex.map {
           case (col, idx) =>
-            StructField(s"group_col_$idx", StringType, nullable = true)
+            // Use original field type from table schema (fixes ClassCastException for Date partition columns)
+            val fieldType = tableSchema
+              .flatMap(_.fields.find(_.name == col))
+              .map(_.dataType)
+              .getOrElse(StringType)
+            StructField(s"group_col_$idx", fieldType, nullable = true)
         }
 
         if (hasAggregations) {
@@ -81,7 +90,8 @@ class TransactionLogCountScan(
       options,
       config,
       groupByColumns,
-      hasAggregations
+      hasAggregations,
+      tableSchema
     )
 
   override def description(): String = {
@@ -98,7 +108,8 @@ class TransactionLogCountBatch(
   options: CaseInsensitiveStringMap,
   config: Map[String, String], // Direct config instead of broadcast
   groupByColumns: Option[Array[String]] = None,
-  hasAggregations: Boolean = true)
+  hasAggregations: Boolean = true,
+  tableSchema: Option[StructType] = None)
     extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLogCountBatch])
@@ -108,7 +119,7 @@ class TransactionLogCountBatch(
       case Some(cols) =>
         // GROUP BY: Pre-compute grouped counts on driver
         val groupedCounts = computeGroupByCountFromTransactionLog(cols)
-        Array(TransactionLogGroupByCountPartition(groupedCounts, cols))
+        Array(TransactionLogGroupByCountPartition(groupedCounts, cols, tableSchema))
       case None =>
         // Simple COUNT: Pre-compute total count on driver
         val precomputedCount = computeCountFromTransactionLog(transactionLog, pushedFilters)
@@ -293,7 +304,8 @@ case class TransactionLogCountPartition(
  */
 case class TransactionLogGroupByCountPartition(
   groupedCounts: Seq[(Array[String], Long)],
-  groupByColumns: Array[String])
+  groupByColumns: Array[String],
+  tableSchema: Option[StructType] = None)
     extends InputPartition
 
 /** Reader factory for transaction log count. */
@@ -351,14 +363,88 @@ class TransactionLogGroupByCountPartitionReader(
   override def next(): Boolean =
     if (iterator.hasNext) {
       val (partitionValues, count) = iterator.next()
-      // Convert partition values to UTF8String
-      val utf8PartitionValues = partitionValues.map(v => org.apache.spark.unsafe.types.UTF8String.fromString(v))
+      // Convert partition values to proper types based on schema
+      val convertedValues = partitionValues.zipWithIndex.map { case (value, idx) =>
+        val colName = partition.groupByColumns(idx)
+        val fieldType = partition.tableSchema
+          .flatMap(_.fields.find(_.name == colName))
+          .map(_.dataType)
+          .getOrElse(StringType)
+        convertPartitionValue(value, fieldType)
+      }
       // Create row: partition columns + count
-      currentRow = InternalRow.fromSeq(utf8PartitionValues :+ count)
+      currentRow = InternalRow.fromSeq(convertedValues :+ count)
       true
     } else {
       false
     }
+
+  /** Convert a partition value string to the appropriate Spark internal type */
+  private def convertPartitionValue(value: String, dataType: DataType): Any = {
+    import org.apache.spark.unsafe.types.UTF8String
+
+    dataType match {
+      case StringType =>
+        UTF8String.fromString(value)
+      case IntegerType =>
+        try value.toInt catch { case _: Exception => 0 }
+      case LongType =>
+        try value.toLong catch { case _: Exception => 0L }
+      case DateType =>
+        // Convert date string to days since epoch (Int)
+        // Handles both "YYYY-MM-DD" and ISO datetime formats like "2024-01-02T00:00:00Z"
+        val epochDate = LocalDate.of(1970, 1, 1)
+        try {
+          val localDate = if (value.contains("T")) {
+            // ISO datetime format - check if it has timezone indicator
+            if (value.endsWith("Z") || value.contains("+") ||
+                (value.length > 19 && value.charAt(19) == '-')) {
+              // Instant format: "2024-01-02T00:00:00Z" or with offset
+              java.time.Instant.parse(value).atZone(java.time.ZoneOffset.UTC).toLocalDate
+            } else {
+              // LocalDateTime format: "2024-01-02T00:00:00"
+              java.time.LocalDateTime.parse(value).toLocalDate
+            }
+          } else {
+            // Simple date format: "2024-01-02"
+            LocalDate.parse(value)
+          }
+          ChronoUnit.DAYS.between(epochDate, localDate).toInt
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert partition value '$value' to DateType: ${e.getMessage}", e)
+        }
+      case TimestampType =>
+        // Convert timestamp to microseconds since epoch (Long)
+        // Handles: numeric micros, ISO instant, LocalDateTime, URL-encoded strings
+        try {
+          // First check if it's already a numeric value (microseconds since epoch)
+          if (value.forall(c => c.isDigit || c == '-')) {
+            value.toLong
+          } else {
+            // URL-decode if needed (e.g., %3A -> :)
+            val decoded = java.net.URLDecoder.decode(value, "UTF-8")
+            if (decoded.endsWith("Z") || decoded.contains("+") ||
+                (decoded.length > 19 && decoded.charAt(19) == '-')) {
+              // ISO Instant format
+              val instant = java.time.Instant.parse(decoded)
+              instant.toEpochMilli * 1000L + (instant.getNano / 1000L) % 1000L
+            } else if (decoded.contains("T")) {
+              // LocalDateTime format
+              val localDateTime = java.time.LocalDateTime.parse(decoded)
+              io.indextables.spark.util.TimestampUtils.toMicros(localDateTime)
+            } else {
+              throw new IllegalArgumentException(s"Unrecognized timestamp format: $value")
+            }
+          }
+        } catch {
+          case e: Exception =>
+            throw new IllegalArgumentException(s"Cannot convert partition value '$value' to TimestampType: ${e.getMessage}", e)
+        }
+      case _ =>
+        UTF8String.fromString(value)
+    }
+  }
 
   override def get(): InternalRow = currentRow
 
