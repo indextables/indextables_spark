@@ -96,6 +96,14 @@ spark.indextables.xref.build.heapSize: <auto> (default: falls back to indexWrite
 spark.indextables.xref.storage.directory: "_xrefsplits" (default: "_xrefsplits")
 spark.indextables.xref.storage.compressionEnabled: true (default: true)
 
+// XRef Distributed Execution (both build and search run on executors with locality)
+spark.indextables.xref.build.distributed: true (default: true, always distributed on executors)
+spark.indextables.xref.query.distributed: true (default: true, always distributed on executors)
+
+// XRef Local Cache (optional lazy download of XRef splits to local disk on executors)
+spark.indextables.xref.localCache.enabled: false (default: false, disabled by default)
+spark.indextables.xref.localCache.directory: <auto> (default: falls back to xref.build.tempDirectoryPath, then indexWriter.tempDirectoryPath, then /local_disk0, then system temp)
+
 // Batch Retrieval Optimization (reduces S3 requests by 90-95% for read operations)
 spark.indextables.read.batchOptimization.enabled: true (default: true, transparent optimization)
 spark.indextables.read.batchOptimization.profile: "balanced" (options: conservative, balanced, aggressive, disabled)
@@ -536,6 +544,22 @@ spark.conf.set("spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger", "
 spark.conf.set("spark.indextables.xref.autoIndex.minIntervalMs", "60000")
 ```
 
+**Local Cache for Cloud Storage (Optional):**
+```scala
+// Enable lazy download of XRef splits to local disk on executors
+// Useful for repeated queries on cloud-stored tables to avoid repeated cloud reads
+spark.conf.set("spark.indextables.xref.localCache.enabled", "true")
+
+// Optional: specify cache directory (defaults to temp directory chain)
+spark.conf.set("spark.indextables.xref.localCache.directory", "/local_disk0/xref_cache")
+```
+
+**Distributed Execution Architecture:**
+- XRef builds run on executors where source splits are cached (locality-aware scheduling)
+- XRef searches run on executors where XRef splits are cached
+- Uses existing `BroadcastSplitLocalityManager` infrastructure for cache-aware task scheduling
+- Automatic fallback to driver-side execution for test scenarios
+
 **When to use XRef:**
 - Large tables with 128+ splits
 - Selective queries that match small subsets of data
@@ -548,6 +572,9 @@ spark.conf.set("spark.indextables.xref.autoIndex.minIntervalMs", "60000")
 - **Query-time routing** - Automatic XRef pre-scan when enabled (default: enabled)
 - **Fallback on error** - Falls back to full scan if XRef query fails (configurable)
 - **Protocol v3** - Transaction log upgraded to support AddXRefAction/RemoveXRefAction
+- **Distributed execution** - Both XRef build and search run on executors with data locality
+- **Locality awareness** - Uses BroadcastSplitLocalityManager to schedule tasks on nodes where splits are cached
+- **Local cache (optional)** - Executors can lazily download XRef splits to local disk for repeated queries
 
 ## Azure Multi-Cloud Examples
 
@@ -650,6 +677,8 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **XRef query routing**: Enabled by default, pre-scans XRef indexes during partition planning to skip irrelevant splits
 - **XRef storage**: Hash-based directories (`_xrefsplits/aaaa/` to `_xrefsplits/zzzz/`) to avoid fragmentation
 - **XRef protocol**: Transaction log protocol v3 supports AddXRefAction/RemoveXRefAction (backward compatible)
+- **XRef distributed execution**: Both build and search always run on executors with locality-aware scheduling via BroadcastSplitLocalityManager
+- **XRef local cache**: Optional feature to lazily download XRef splits to local disk on executors (disabled by default, useful for repeated cloud storage queries)
 
 ---
 

@@ -69,12 +69,17 @@ case class XRefRebuildPlan(
  *   XRef configuration
  * @param sparkSession
  *   The Spark session
+ * @param overrideConfigMap
+ *   Optional pre-merged config map with proper precedence (hadoop < spark < write options).
+ *   When provided (e.g., during write operations), this is passed to DistributedXRefBuilder.
+ *   When None, DistributedXRefBuilder will extract configs from hadoop + spark.
  */
 class XRefBuildManager(
   tablePath: String,
   transactionLog: TransactionLog,
   config: XRefConfig,
-  sparkSession: SparkSession
+  sparkSession: SparkSession,
+  overrideConfigMap: Option[Map[String, String]] = None
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[XRefBuildManager])
@@ -324,6 +329,9 @@ class XRefBuildManager(
 
   /**
    * Build a single XRef from a group of splits.
+   *
+   * Uses distributed execution when enabled and beneficial, otherwise falls back
+   * to driver-side execution.
    */
   private def buildSingleXRef(
     splits: Seq[AddAction],
@@ -338,14 +346,16 @@ class XRefBuildManager(
     logger.info(s"Building XRef $xrefId with ${splits.size} source splits")
 
     try {
-      // Build the XRef using distributed execution
-      val buildResult = XRefBuildExecutor.buildXRef(
+      // Always use distributed XRef build for executor locality benefits
+      logger.info(s"Using distributed XRef build for $xrefId (${splits.size} splits)")
+      val buildResult = DistributedXRefBuilder.buildXRefDistributed(
         tablePath = tablePath,
         xrefId = xrefId,
-        xrefOutputPath = xrefFullPath,
+        outputPath = xrefFullPath,
         sourceSplits = splits,
         config = config,
-        sparkSession = sparkSession
+        sparkSession = sparkSession,
+        overrideConfigMap = overrideConfigMap
       )
 
       val buildDuration = System.currentTimeMillis() - startTime
@@ -362,7 +372,8 @@ class XRefBuildManager(
         footerEndOffset = buildResult.footerEndOffset,
         createdTime = System.currentTimeMillis(),
         buildDurationMs = buildDuration,
-        maxSourceSplits = config.autoIndex.maxSourceSplits
+        maxSourceSplits = config.autoIndex.maxSourceSplits,
+        docMappingJson = buildResult.docMappingJson
       )
 
       // Commit to transaction log atomically
@@ -455,14 +466,20 @@ object XRefBuildManager {
 
   /**
    * Create XRefBuildManager for a table path.
+   *
+   * @param tablePath Table path
+   * @param transactionLog Transaction log
+   * @param sparkSession Spark session
+   * @param overrideConfigMap Optional pre-merged config map (hadoop < spark < write options)
    */
   def apply(
     tablePath: String,
     transactionLog: TransactionLog,
-    sparkSession: SparkSession
+    sparkSession: SparkSession,
+    overrideConfigMap: Option[Map[String, String]] = None
   ): XRefBuildManager = {
     val config = XRefConfig.fromSparkSession(sparkSession)
-    new XRefBuildManager(tablePath, transactionLog, config, sparkSession)
+    new XRefBuildManager(tablePath, transactionLog, config, sparkSession, overrideConfigMap)
   }
 
   /**
@@ -480,6 +497,8 @@ object XRefBuildManager {
    *   Preview mode
    * @param sparkSession
    *   Spark session
+   * @param overrideConfigMap
+   *   Optional pre-merged config map (hadoop < spark < write options)
    * @return
    *   Build results
    */
@@ -489,9 +508,10 @@ object XRefBuildManager {
     whereClause: Option[Expression],
     forceRebuild: Boolean,
     dryRun: Boolean,
-    sparkSession: SparkSession
+    sparkSession: SparkSession,
+    overrideConfigMap: Option[Map[String, String]] = None
   ): Seq[XRefBuildResult] = {
-    val manager = apply(tablePath, transactionLog, sparkSession)
+    val manager = apply(tablePath, transactionLog, sparkSession, overrideConfigMap)
     manager.buildCrossReferences(whereClause, forceRebuild, dryRun)
   }
 }

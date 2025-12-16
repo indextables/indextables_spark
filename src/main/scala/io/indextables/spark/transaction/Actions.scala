@@ -153,7 +153,8 @@ case class AddXRefAction(
   footerEndOffset: Long,
   createdTime: Long,
   buildDurationMs: Long,
-  maxSourceSplits: Int
+  maxSourceSplits: Int,
+  @JsonProperty("docMappingJson") docMappingJson: Option[String] = None
 ) extends Action
 
 /**

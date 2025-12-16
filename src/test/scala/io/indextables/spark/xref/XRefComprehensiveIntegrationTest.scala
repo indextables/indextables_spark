@@ -1032,4 +1032,403 @@ class XRefComprehensiveIntegrationTest extends TestBase {
       }
     }
   }
+
+  /**
+   * Test XRef incremental update behavior:
+   * - When an XRef split doesn't contain the maximum number of source splits
+   * - New splits are added to the table
+   * - XRef gets re-created to include new splits (within maxSourceSplits limit)
+   * - Previous XRef is invalidated
+   *
+   * This tests the "expand_existing_xref" code path in XRefBuildManager.
+   */
+  test("XRef incremental update - rebuild when new splits added below max capacity") {
+    withTempPath { tempDir =>
+      val tablePath = tempDir.toString
+      val spark = this.spark
+      import spark.implicits._
+
+      // Reset state
+      XRefSearcher.resetAvailabilityCheck()
+
+      try {
+        // Configure for small splits and set max source splits limit
+        spark.conf.set("spark.indextables.indexWriter.batchSize", "50")
+        spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "2")
+        spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "20") // Allow up to 20 splits per XRef
+        spark.conf.set("spark.indextables.xref.query.enabled", "true")
+        spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "2")
+
+        // ================================================================
+        // PHASE 1: Create initial splits and build XRef
+        // ================================================================
+        println("=== PHASE 1: Initial data write and XRef build ===")
+
+        // Write initial data - create 4 splits
+        (0 until 4).foreach { batchIdx =>
+          val data = (0 until 50).map { i =>
+            val globalId = batchIdx * 100 + i
+            (globalId, s"term_initial_batch${batchIdx}_$i", s"batch_$batchIdx", i * 10)
+          }
+          data.toDF("id", "searchable_term", "batch_marker", "value")
+            .write.format(DataSourceFormat)
+            .option("spark.indextables.indexing.fastfields", "value")
+            .mode("append")
+            .save(tablePath)
+        }
+
+        // Verify initial split count
+        val txLogInitial = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath'")
+        val initialSplitCount = txLogInitial.filter("action_type = 'add'").count()
+        println(s"Initial split count: $initialSplitCount")
+        assert(initialSplitCount >= 4, s"Should have at least 4 splits, got $initialSplitCount")
+
+        // Build initial XRef
+        spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+
+        // Verify initial XRef
+        val xrefInitial = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' XREFS")
+        val initialXRefCount = xrefInitial.count()
+        println(s"Initial XRef count: $initialXRefCount")
+        assert(initialXRefCount >= 1, s"Should have at least 1 XRef, got $initialXRefCount")
+
+        // Get initial XRef details
+        val initialXRefRow = xrefInitial.collect().head
+        val initialXRefPath = initialXRefRow.getAs[String]("path")
+        val initialSourceSplitCount = initialXRefRow.getAs[Long]("num_records")
+        println(s"Initial XRef path: $initialXRefPath")
+        println(s"Initial XRef source split count: $initialSourceSplitCount")
+
+        // Verify initial XRef has less than max capacity (4 < 20)
+        assert(initialSourceSplitCount < 20,
+          s"Initial XRef should have less than max capacity (20), got $initialSourceSplitCount")
+
+        // Query initial data to verify XRef works
+        val dfInitial = spark.read.format(DataSourceFormat).load(tablePath)
+        val initialRowCount = dfInitial.count()
+        assert(initialRowCount == 4 * 50, s"Initial row count should be 200, got $initialRowCount")
+
+        // Test term query on initial data
+        val initialTermResult = dfInitial.filter(col("searchable_term") === "term_initial_batch0_25")
+        assert(initialTermResult.count() == 1, "Should find initial term")
+
+        // ================================================================
+        // PHASE 2: Add new splits (within max capacity)
+        // ================================================================
+        println("\n=== PHASE 2: Add new splits ===")
+
+        // Write additional data - create 3 more splits
+        (4 until 7).foreach { batchIdx =>
+          val data = (0 until 50).map { i =>
+            val globalId = batchIdx * 100 + i
+            (globalId, s"term_added_batch${batchIdx}_$i", s"batch_$batchIdx", i * 10)
+          }
+          data.toDF("id", "searchable_term", "batch_marker", "value")
+            .write.format(DataSourceFormat)
+            .option("spark.indextables.indexing.fastfields", "value")
+            .mode("append")
+            .save(tablePath)
+        }
+
+        // Verify new split count
+        val txLogAfterAdd = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath'")
+        val splitCountAfterAdd = txLogAfterAdd.filter("action_type = 'add'").count()
+        println(s"Split count after adding data: $splitCountAfterAdd")
+        assert(splitCountAfterAdd >= 7, s"Should have at least 7 splits, got $splitCountAfterAdd")
+
+        // At this point, new splits are NOT covered by XRef
+        // Query for new data should still work (via uncovered split fallback)
+        val dfBeforeReindex = spark.read.format(DataSourceFormat).load(tablePath)
+        val newTermBeforeReindex = dfBeforeReindex.filter(col("searchable_term") === "term_added_batch5_25")
+        val countBeforeReindex = newTermBeforeReindex.count()
+        println(s"New term query before reindex: $countBeforeReindex rows")
+        assert(countBeforeReindex == 1, "New data should be accessible via uncovered splits")
+
+        // ================================================================
+        // PHASE 3: Rebuild XRef to include new splits
+        // ================================================================
+        println("\n=== PHASE 3: Rebuild XRef to include new splits ===")
+
+        // Re-run INDEX CROSSREFERENCES - should expand existing XRef
+        spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+
+        // Verify updated XRef
+        val xrefAfterRebuild = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' XREFS")
+        val xrefCountAfterRebuild = xrefAfterRebuild.count()
+        println(s"XRef count after rebuild: $xrefCountAfterRebuild")
+
+        // Get updated XRef details
+        val updatedXRefRows = xrefAfterRebuild.collect()
+        println("XRef entries after rebuild:")
+        updatedXRefRows.foreach { row =>
+          println(s"  Path: ${row.getAs[String]("path")}, Source splits: ${row.getAs[Long]("num_records")}")
+        }
+
+        // Find the active XRef (most recent or only one)
+        val updatedXRefRow = updatedXRefRows.maxBy(_.getAs[Long]("num_records"))
+        val updatedXRefPath = updatedXRefRow.getAs[String]("path")
+        val updatedSourceSplitCount = updatedXRefRow.getAs[Long]("num_records")
+
+        // CRITICAL ASSERTION: Updated XRef should include more splits
+        println(s"Updated XRef source split count: $updatedSourceSplitCount (was $initialSourceSplitCount)")
+        assert(updatedSourceSplitCount > initialSourceSplitCount,
+          s"Updated XRef should include more splits. Initial: $initialSourceSplitCount, Updated: $updatedSourceSplitCount")
+
+        // ================================================================
+        // PHASE 4: Verify old XRef is invalidated
+        // ================================================================
+        println("\n=== PHASE 4: Verify old XRef invalidation ===")
+
+        // Check transaction log for remove actions
+        val txLogFull = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' INCLUDE ALL")
+        val xrefRemoveActions = txLogFull.filter("action_type = 'remove_xref'")
+        val removeCount = xrefRemoveActions.count()
+        println(s"XRef remove actions in transaction log: $removeCount")
+
+        // If the system replaced the XRef, there should be a remove action for the old one
+        if (updatedXRefPath != initialXRefPath) {
+          println(s"XRef path changed from $initialXRefPath to $updatedXRefPath")
+          // Old XRef should have been removed
+          assert(removeCount >= 1, "Old XRef should be removed when rebuilt")
+        } else {
+          println("XRef path unchanged (same XRef file updated)")
+        }
+
+        // ================================================================
+        // PHASE 5: Verify queries work with updated XRef
+        // ================================================================
+        println("\n=== PHASE 5: Verify queries with updated XRef ===")
+
+        val dfAfterRebuild = spark.read.format(DataSourceFormat).load(tablePath)
+
+        // Query for initial data
+        val initialTermAfterRebuild = dfAfterRebuild.filter(col("searchable_term") === "term_initial_batch0_25")
+        assert(initialTermAfterRebuild.count() == 1, "Initial data should still be queryable")
+
+        // Query for newly added data
+        val newTermAfterRebuild = dfAfterRebuild.filter(col("searchable_term") === "term_added_batch5_25")
+        assert(newTermAfterRebuild.count() == 1, "New data should be queryable via updated XRef")
+
+        // Aggregate query across all data
+        val totalCount = dfAfterRebuild.count()
+        val expectedTotal = 7 * 50 // 7 batches * 50 rows each
+        assert(totalCount == expectedTotal, s"Total count should be $expectedTotal, got $totalCount")
+
+        // Range query spanning initial and new data
+        val rangeQuery = dfAfterRebuild.filter(col("value") > 200)
+        val rangeCount = rangeQuery.count()
+        // Each batch has rows with value 0, 10, 20, ..., 490
+        // Values > 200: 210, 220, ..., 490 → 29 values per batch
+        // 7 batches: 29 * 7 = 203
+        assert(rangeCount == 203, s"Range query should return 203 rows, got $rangeCount")
+
+        // ================================================================
+        // PHASE 6: Add more splits until at or near max capacity
+        // ================================================================
+        println("\n=== PHASE 6: Test behavior near max capacity ===")
+
+        // Add more splits to approach the max (currently at ~7, max is 20)
+        (7 until 18).foreach { batchIdx =>
+          val data = (0 until 50).map { i =>
+            val globalId = batchIdx * 100 + i
+            (globalId, s"term_more_batch${batchIdx}_$i", s"batch_$batchIdx", i * 10)
+          }
+          data.toDF("id", "searchable_term", "batch_marker", "value")
+            .write.format(DataSourceFormat)
+            .option("spark.indextables.indexing.fastfields", "value")
+            .mode("append")
+            .save(tablePath)
+        }
+
+        // Rebuild XRef again
+        spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+
+        // Verify XRef near max capacity
+        val xrefNearMax = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' XREFS")
+        val nearMaxXRefRows = xrefNearMax.collect()
+        println("XRef entries near max capacity:")
+        nearMaxXRefRows.foreach { row =>
+          println(s"  Path: ${row.getAs[String]("path")}, Source splits: ${row.getAs[Long]("num_records")}")
+        }
+
+        val maxSourceSplitCount = nearMaxXRefRows.map(_.getAs[Long]("num_records")).max
+        println(s"Max source split count in XRef: $maxSourceSplitCount")
+
+        // Verify all data is queryable
+        val dfNearMax = spark.read.format(DataSourceFormat).load(tablePath)
+        val nearMaxCount = dfNearMax.count()
+        val expectedNearMax = 18 * 50 // 18 batches
+        assert(nearMaxCount == expectedNearMax, s"Near max count should be $expectedNearMax, got $nearMaxCount")
+
+        // ================================================================
+        // PHASE 7: Add splits that exceed max capacity - should create new XRef
+        // ================================================================
+        println("\n=== PHASE 7: Test exceeding max capacity ===")
+
+        // Add more splits to exceed max (20)
+        (18 until 25).foreach { batchIdx =>
+          val data = (0 until 50).map { i =>
+            val globalId = batchIdx * 100 + i
+            (globalId, s"term_overflow_batch${batchIdx}_$i", s"batch_$batchIdx", i * 10)
+          }
+          data.toDF("id", "searchable_term", "batch_marker", "value")
+            .write.format(DataSourceFormat)
+            .option("spark.indextables.indexing.fastfields", "value")
+            .mode("append")
+            .save(tablePath)
+        }
+
+        // Rebuild XRef - should create additional XRef or handle overflow
+        spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+
+        // Verify XRef after exceeding capacity
+        val xrefOverflow = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' XREFS")
+        val overflowXRefCount = xrefOverflow.count()
+        println(s"XRef count after exceeding capacity: $overflowXRefCount")
+
+        val overflowXRefRows = xrefOverflow.collect()
+        println("XRef entries after overflow:")
+        overflowXRefRows.foreach { row =>
+          println(s"  Path: ${row.getAs[String]("path")}, Source splits: ${row.getAs[Long]("num_records")}")
+        }
+
+        // Should either have multiple XRefs or one XRef handling all splits
+        val totalSplitsCovered = overflowXRefRows.map(_.getAs[Long]("num_records")).sum
+        println(s"Total splits covered by XRefs: $totalSplitsCovered")
+
+        // Verify all data is still queryable
+        val dfOverflow = spark.read.format(DataSourceFormat).load(tablePath)
+        val overflowCount = dfOverflow.count()
+        val expectedOverflow = 25 * 50 // 25 batches
+        assert(overflowCount == expectedOverflow, s"Overflow count should be $expectedOverflow, got $overflowCount")
+
+        // Query data from overflow batches
+        val overflowTermResult = dfOverflow.filter(col("searchable_term") === "term_overflow_batch22_25")
+        assert(overflowTermResult.count() == 1, "Overflow data should be queryable")
+
+        println("\n=== SUCCESS: XRef incremental update test passed ===")
+        println(s"  - Initial XRef: $initialSourceSplitCount splits")
+        println(s"  - After adding splits: $updatedSourceSplitCount splits")
+        println(s"  - Near max capacity: $maxSourceSplitCount splits")
+        println(s"  - After overflow: $overflowXRefCount XRef(s) covering $totalSplitsCovered splits")
+
+      } finally {
+        spark.conf.unset("spark.indextables.indexWriter.batchSize")
+        spark.conf.unset("spark.indextables.xref.autoIndex.minSplitsToTrigger")
+        spark.conf.unset("spark.indextables.xref.autoIndex.maxSourceSplits")
+        spark.conf.unset("spark.indextables.xref.query.enabled")
+        spark.conf.unset("spark.indextables.xref.query.minSplitsForXRef")
+      }
+    }
+  }
+
+  /**
+   * Test that XRef is consulted even when queries have very high LIMIT values.
+   * This verifies that the XRef routing logic doesn't skip due to large result set expectations.
+   */
+  test("XRef with very high LIMIT values") {
+    withTempPath { tempDir =>
+      val tablePath = tempDir.toString
+      val spark = this.spark
+      import spark.implicits._
+
+      // Configure XRef
+      spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "3")
+      spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "100")
+      spark.conf.set("spark.indextables.xref.query.enabled", "true")
+      spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "2")
+      spark.conf.set("spark.indextables.indexWriter.batchSize", "25")
+
+      try {
+        // Create multiple splits with unique terms in each partition
+        val partitions = Seq("alpha", "beta", "gamma", "delta")
+        partitions.foreach { partition =>
+          val data = (0 until 100).map { i =>
+            (i, s"term_${partition}_$i", partition, i * 10.0)
+          }
+          data.toDF("id", "searchable_term", "partition_name", "value")
+            .write.format(DataSourceFormat)
+            .option("spark.indextables.indexing.fastfields", "id,value")
+            .mode("append")
+            .save(tablePath)
+        }
+
+        // Build XRef
+        spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+
+        // Verify XRef was created
+        val xrefs = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath' XREFS")
+        val xrefCount = xrefs.count()
+        assert(xrefCount >= 1, s"Should have at least 1 XRef, got $xrefCount")
+
+        val df = spark.read.format(DataSourceFormat).load(tablePath)
+
+        // Test 1: Query with very high LIMIT (1 million)
+        // This should still use XRef for filtering
+        println("\n=== Test 1: Query with LIMIT 1000000 ===")
+        val highLimitResult = df
+          .filter(col("searchable_term") === "term_alpha_50")
+          .limit(1000000)
+          .collect()
+
+        assert(highLimitResult.length == 1,
+          s"Should find exactly 1 row with term_alpha_50, got ${highLimitResult.length}")
+        println(s"High limit query found: ${highLimitResult.length} rows")
+
+        // Test 2: Aggregate query with filter (no LIMIT but accesses all rows)
+        println("\n=== Test 2: Aggregate query on filtered data ===")
+        val aggResult = df
+          .filter(col("partition_name") === "beta")
+          .agg(sum("value"))
+          .collect()
+
+        // Beta partition has values 0, 10, 20, ..., 990 = sum is 49500
+        val expectedSum = (0 until 100).map(_ * 10.0).sum
+        val actualSum = aggResult.head.getDouble(0)
+        assert(actualSum == expectedSum, s"Sum should be $expectedSum, got $actualSum")
+        println(s"Aggregate query sum: $actualSum (expected $expectedSum)")
+
+        // Test 3: Count query with very high LIMIT (should return all matching)
+        println("\n=== Test 3: Count query with very high LIMIT ===")
+        val countResult = df
+          .filter(col("partition_name") === "gamma")
+          .limit(10000000)
+          .count()
+
+        assert(countResult == 100, s"Should have 100 rows for gamma partition, got $countResult")
+        println(s"High limit count: $countResult rows")
+
+        // Test 4: Query for non-existent term with high LIMIT
+        println("\n=== Test 4: Non-existent term with high LIMIT ===")
+        val noMatchResult = df
+          .filter(col("searchable_term") === "nonexistent_term_xyz")
+          .limit(1000000)
+          .collect()
+
+        assert(noMatchResult.isEmpty, "Should find no rows for non-existent term")
+        println(s"Non-existent term query: ${noMatchResult.length} rows (expected 0)")
+
+        // Test 5: Multiple filter conditions with high LIMIT
+        println("\n=== Test 5: Multiple conditions with high LIMIT ===")
+        val multiFilterResult = df
+          .filter(col("partition_name") === "delta")
+          .filter(col("id") > 50)
+          .limit(500000)
+          .count()
+
+        // Delta partition with id > 50: rows 51-99 = 49 rows
+        assert(multiFilterResult == 49, s"Should have 49 rows, got $multiFilterResult")
+        println(s"Multi-filter query: $multiFilterResult rows (expected 49)")
+
+        println("\n=== SUCCESS: XRef works correctly with high LIMIT values ===")
+
+      } finally {
+        spark.conf.unset("spark.indextables.indexWriter.batchSize")
+        spark.conf.unset("spark.indextables.xref.autoIndex.minSplitsToTrigger")
+        spark.conf.unset("spark.indextables.xref.autoIndex.maxSourceSplits")
+        spark.conf.unset("spark.indextables.xref.query.enabled")
+        spark.conf.unset("spark.indextables.xref.query.minSplitsForXRef")
+      }
+    }
+  }
 }

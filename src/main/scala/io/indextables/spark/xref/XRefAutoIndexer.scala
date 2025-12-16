@@ -70,11 +70,15 @@ case class XRefAutoIndexResult(
  *   XRef configuration
  * @param sparkSession
  *   The Spark session
+ * @param overrideConfigMap
+ *   Optional pre-merged config map with proper precedence (hadoop < spark < write options).
+ *   When provided (e.g., during write operations), this is passed to XRefBuildManager.
  */
 class XRefAutoIndexer(
   transactionLog: TransactionLog,
   config: XRefConfig,
-  sparkSession: SparkSession
+  sparkSession: SparkSession,
+  overrideConfigMap: Option[Map[String, String]] = None
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[XRefAutoIndexer])
@@ -175,7 +179,8 @@ class XRefAutoIndexer(
       tablePath = tablePath,
       transactionLog = transactionLog,
       config = config,
-      sparkSession = sparkSession
+      sparkSession = sparkSession,
+      overrideConfigMap = overrideConfigMap
     )
 
     // Build XRefs for uncovered splits
@@ -256,19 +261,33 @@ object XRefAutoIndexer {
 
   /**
    * Create an XRefAutoIndexer for a transaction log.
+   *
+   * @param transactionLog Transaction log for the table
+   * @param sparkSession The Spark session
+   * @param overrideConfigMap Optional pre-merged config map (hadoop < spark < write options)
    */
-  def apply(transactionLog: TransactionLog, sparkSession: SparkSession): XRefAutoIndexer = {
+  def apply(
+    transactionLog: TransactionLog,
+    sparkSession: SparkSession,
+    overrideConfigMap: Option[Map[String, String]] = None
+  ): XRefAutoIndexer = {
     val config = XRefConfig.fromSparkSession(sparkSession)
-    new XRefAutoIndexer(transactionLog, config, sparkSession)
+    new XRefAutoIndexer(transactionLog, config, sparkSession, overrideConfigMap)
   }
 
   /**
    * Create an XRefAutoIndexer with explicit config.
+   *
+   * @param transactionLog Transaction log for the table
+   * @param config XRef configuration
+   * @param sparkSession The Spark session
+   * @param overrideConfigMap Pre-merged config map (hadoop < spark < write options). Pass None if not available.
    */
   def apply(
     transactionLog: TransactionLog,
     config: XRefConfig,
-    sparkSession: SparkSession
+    sparkSession: SparkSession,
+    overrideConfigMap: Option[Map[String, String]]
   ): XRefAutoIndexer =
-    new XRefAutoIndexer(transactionLog, config, sparkSession)
+    new XRefAutoIndexer(transactionLog, config, sparkSession, overrideConfigMap)
 }

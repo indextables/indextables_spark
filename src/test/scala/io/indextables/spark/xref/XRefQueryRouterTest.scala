@@ -83,7 +83,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = Seq(
           createAddAction("/test/split1.split"),
           createAddAction("/test/split2.split"),
@@ -120,7 +120,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = Seq(
           createAddAction("/test/split1.split"),
           createAddAction("/test/split2.split"),
@@ -157,7 +157,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
         // Empty filters - no searchable query
@@ -165,7 +165,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
 
         assert(!result.usedXRef)
         assert(result.candidateSplits.size == 5)
-        assert(result.fallbackReason.contains("No searchable query"))
+        assert(result.fallbackReason.contains("No filters provided"))
       } finally {
         transactionLog.close()
       }
@@ -191,7 +191,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
         // EqualTo filter with string value - searchable
@@ -226,7 +226,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
         // EqualTo filter with string value
@@ -261,7 +261,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
         // StringContains filter
@@ -296,7 +296,7 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
         // Nested And filter
@@ -333,10 +333,10 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
           storage = XRefStorageConfig()
         )
 
-        val router = new XRefQueryRouter(transactionLog, config, spark)
+        val router = new XRefQueryRouter(transactionLog, config, spark, Map.empty[String, String])
         val candidateSplits = (1 to 5).map(i => createAddAction(s"/test/split$i.split"))
 
-        // Only numeric filters - no searchable query
+        // Numeric filters are passed through to XRef search, but no XRefs exist
         val filters = Array[Filter](
           GreaterThan("id", 10),
           LessThan("id", 100)
@@ -344,7 +344,8 @@ class XRefQueryRouterTest extends TestBase with BeforeAndAfterEach {
         val result = router.routeQuery(candidateSplits, filters)
 
         assert(!result.usedXRef)
-        assert(result.fallbackReason.contains("No searchable query"))
+        // Filters are not empty, so router proceeds to check for XRefs and finds none
+        assert(result.fallbackReason.contains("No XRefs available"))
       } finally {
         transactionLog.close()
       }

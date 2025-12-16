@@ -69,11 +69,15 @@ case class XRefRoutingResult(
  *   XRef configuration
  * @param sparkSession
  *   The Spark session
+ * @param mergedConfigMap
+ *   Pre-merged config map with proper precedence: hadoop < spark < read options.
+ *   This is passed to distributed XRef search for cloud credential handling.
  */
 class XRefQueryRouter(
   transactionLog: TransactionLog,
   config: XRefConfig,
-  sparkSession: SparkSession
+  sparkSession: SparkSession,
+  mergedConfigMap: Map[String, String]
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[XRefQueryRouter])
@@ -127,20 +131,27 @@ class XRefQueryRouter(
       )
     }
 
-    // Extract search query from filters
-    val searchQuery = extractSearchQuery(filters, indexQueryFilters)
-    if (searchQuery.isEmpty) {
-      logger.debug(s"No searchable query extracted from filters (filters: ${filters.length}, indexQueryFilters: ${indexQueryFilters.length})")
+    // Combine filters and indexQueryFilters into a single array
+    // IndexQueryFilters need to be converted to Filter type if they aren't already
+    val indexQueryAsFilters: Seq[Filter] = indexQueryFilters.toSeq.collect {
+      case f: Filter => f
+      case iqf: io.indextables.spark.filters.IndexQueryFilter => iqf.asInstanceOf[Filter]
+    }
+    val allFilters: Array[Filter] = (filters.toSeq ++ indexQueryAsFilters).toArray
+
+    // Check if we have any searchable filters
+    if (allFilters.isEmpty) {
+      logger.debug(s"No filters provided for XRef query (filters: ${filters.length}, indexQueryFilters: ${indexQueryFilters.length})")
       return XRefRoutingResult(
         candidateSplits = candidateSplits,
         skippedSplits = 0,
         xrefsQueried = 0,
         xrefQueryTimeMs = System.currentTimeMillis() - startTime,
         usedXRef = false,
-        fallbackReason = Some("No searchable query")
+        fallbackReason = Some("No filters provided")
       )
     }
-    logger.debug(s"Extracted search query: ${searchQuery.get}")
+    logger.debug(s"Using ${allFilters.length} filters for XRef query")
 
     // Get available XRefs from transaction log
     val availableXRefs = transactionLog.listXRefs()
@@ -192,7 +203,7 @@ class XRefQueryRouter(
 
     // Query XRefs to get matching split filenames
     Try {
-      queryXRefsForMatchingSplits(relevantXRefs, searchQuery.get, config.query.timeoutMs)
+      queryXRefsForMatchingSplits(relevantXRefs, allFilters, config.query.timeoutMs)
     } match {
       case Success(matchingSplitFileNames) =>
         // Filter COVERED splits to only those that matched in XRef
@@ -239,79 +250,6 @@ class XRefQueryRouter(
   }
 
   /**
-   * Extract a searchable query string from filters.
-   *
-   * This extracts terms from:
-   *   - IndexQuery filters (highest priority)
-   *   - EqualTo filters on text/string fields
-   *   - StringContains, StringStartsWith filters
-   */
-  private def extractSearchQuery(filters: Array[Filter], indexQueryFilters: Array[Any]): Option[String] = {
-    // First, try to extract from IndexQuery filters
-    if (indexQueryFilters.nonEmpty) {
-      // IndexQuery filters contain the actual query string
-      val queryStrings = indexQueryFilters.flatMap { filter =>
-        extractQueryFromIndexQueryFilter(filter)
-      }
-      if (queryStrings.nonEmpty) {
-        return Some(queryStrings.mkString(" "))
-      }
-    }
-
-    // Fall back to extracting from regular filters
-    val queryTerms = filters.flatMap { filter =>
-      extractQueryTermsFromFilter(filter)
-    }
-
-    if (queryTerms.nonEmpty) {
-      Some(queryTerms.mkString(" "))
-    } else {
-      None
-    }
-  }
-
-  /**
-   * Extract query string from IndexQuery filter.
-   */
-  private def extractQueryFromIndexQueryFilter(filter: Any): Option[String] =
-    // Handle IndexQueryExpression or similar
-    // The actual implementation depends on how IndexQuery is represented
-    filter match {
-      case tuple: (String, String) @unchecked =>
-        // (columnName, queryString) format
-        Some(tuple._2)
-      case _ =>
-        // Try to extract via reflection or string parsing
-        val filterStr = filter.toString
-        if (filterStr.contains("indexquery")) {
-          // Parse query from string representation
-          val queryPattern = """'([^']+)'""".r
-          queryPattern.findFirstMatchIn(filterStr).map(_.group(1))
-        } else {
-          None
-        }
-    }
-
-  /**
-   * Extract query terms from a standard Spark filter.
-   */
-  private def extractQueryTermsFromFilter(filter: Filter): Seq[String] =
-    filter match {
-      case org.apache.spark.sql.sources.EqualTo(_, value) if value.isInstanceOf[String] =>
-        Seq(value.asInstanceOf[String])
-      case org.apache.spark.sql.sources.StringContains(_, value) =>
-        Seq(value)
-      case org.apache.spark.sql.sources.StringStartsWith(_, value) =>
-        Seq(value)
-      case org.apache.spark.sql.sources.And(left, right) =>
-        extractQueryTermsFromFilter(left) ++ extractQueryTermsFromFilter(right)
-      case org.apache.spark.sql.sources.Or(left, right) =>
-        extractQueryTermsFromFilter(left) ++ extractQueryTermsFromFilter(right)
-      case _ =>
-        Seq.empty
-    }
-
-  /**
    * Find XRefs that cover any of the candidate splits.
    *
    * An XRef is relevant if any of its source splits are in the candidate set.
@@ -327,12 +265,15 @@ class XRefQueryRouter(
     }
 
   /**
-   * Query XRefs to find which splits contain documents matching the query.
+   * Query XRefs to find which splits contain documents matching the filters.
+   *
+   * This method uses distributed search when beneficial (multiple XRefs, cluster has executors),
+   * otherwise falls back to driver-side search for simplicity.
    *
    * @param xrefs
    *   XRefs to query
-   * @param query
-   *   Search query string
+   * @param filters
+   *   Spark filters from predicate pushdown
    * @param timeoutMs
    *   Query timeout in milliseconds
    * @return
@@ -340,90 +281,80 @@ class XRefQueryRouter(
    */
   private def queryXRefsForMatchingSplits(
     xrefs: Seq[AddXRefAction],
-    query: String,
+    filters: Array[Filter],
     timeoutMs: Int
   ): Set[String] = {
 
-    logger.debug(s"Querying ${xrefs.size} XRefs for query: $query")
+    logger.debug(s"Querying ${xrefs.size} XRefs with ${filters.length} filters")
 
-    // Query each XRef and collect matching split filenames
-    val matchingSplits = xrefs.flatMap { xref =>
-      try {
-        queryXRef(xref, query, timeoutMs)
-      } catch {
-        case e: Exception =>
-          logger.warn(s"Failed to query XRef ${xref.xrefId}: ${e.getMessage}")
-          if (config.query.fallbackOnError) {
-            // On error, conservatively include all splits covered by this XRef
-            xref.sourceSplitPaths.map(XRefStorageUtils.extractFileName)
-          } else {
-            throw e
-          }
-      }
-    }
-
-    matchingSplits.toSet
+    // Always use distributed XRef search for executor locality benefits
+    logger.info(s"Using distributed XRef search across ${xrefs.size} XRefs")
+    queryXRefsDistributed(xrefs, filters, timeoutMs)
   }
 
   /**
-   * Query a single XRef for matching splits.
+   * Query XRefs using distributed search on executors.
    *
-   * This is the integration point with tantivy4java XRef search.
-   *
-   * @param xref
-   *   The XRef to query
-   * @param query
-   *   Search query string
-   * @param timeoutMs
-   *   Query timeout
-   * @return
-   *   Sequence of split filenames that matched
+   * This distributes XRef searches across the cluster with locality preferences,
+   * ensuring searches run on nodes where XRef splits are cached.
    */
-  private def queryXRef(xref: AddXRefAction, query: String, timeoutMs: Int): Seq[String] = {
-    val xrefFullPath = XRefStorageUtils.getXRefFullPathString(tablePath, xref.xrefId, config.storage.directory)
-
-    logger.debug(s"Querying XRef ${xref.xrefId} at $xrefFullPath")
-
-    // TODO: Integrate with actual tantivy4java XRef search API
-    // The expected API would be something like:
-    //
-    // val searcher = XRefSearcher.open(xrefFullPath, xref.footerStartOffset, xref.footerEndOffset)
-    // try {
-    //   val results = searcher.searchSplits(query, timeoutMs)
-    //   results.map(XRefStorageUtils.extractFileName)
-    // } finally {
-    //   searcher.close()
-    // }
-
-    // Check if XRef API is available
-    if (!XRefSearcher.isAvailable()) {
-      logger.debug("XRef search API not available, conservatively including all source splits")
-      // Conservatively return all source splits
-      return xref.sourceSplitPaths.map(XRefStorageUtils.extractFileName)
+  private def queryXRefsDistributed(
+    xrefs: Seq[AddXRefAction],
+    filters: Array[Filter],
+    timeoutMs: Int
+  ): Set[String] = {
+    // Prepare XRefs with their full paths
+    val xrefsWithPaths = xrefs.map { xref =>
+      val xrefFullPath = XRefStorageUtils.getXRefFullPathString(tablePath, xref.xrefId, config.storage.directory)
+      (xrefFullPath, xref)
     }
 
-    // Use XRefSearcher to query
-    XRefSearcher.searchSplits(xrefFullPath, xref, query, timeoutMs, tablePath, sparkSession)
+    // Execute distributed search with merged config map
+    val resultsByXRef = DistributedXRefSearcher.searchXRefsDistributed(
+      xrefsWithPaths,
+      filters,
+      tablePath,
+      timeoutMs,
+      sparkSession,
+      mergedConfigMap
+    )
+
+    // Flatten results from all XRefs
+    resultsByXRef.values.flatten.toSet
   }
 }
 
 object XRefQueryRouter {
 
   /**
-   * Create XRefQueryRouter for a transaction log.
+   * Create XRefQueryRouter with merged config map.
+   *
+   * @param transactionLog Transaction log for the table
+   * @param mergedConfigMap Pre-merged config map with proper precedence: hadoop < spark < read options
+   * @param sparkSession The Spark session
    */
-  def apply(transactionLog: TransactionLog, sparkSession: SparkSession): XRefQueryRouter = {
+  def apply(
+    transactionLog: TransactionLog,
+    mergedConfigMap: Map[String, String],
+    sparkSession: SparkSession
+  ): XRefQueryRouter = {
     val config = XRefConfig.fromSparkSession(sparkSession)
-    new XRefQueryRouter(transactionLog, config, sparkSession)
+    new XRefQueryRouter(transactionLog, config, sparkSession, mergedConfigMap)
   }
 
   /**
-   * Create XRefQueryRouter with explicit config.
+   * Create XRefQueryRouter with explicit XRef config and merged config map.
+   *
+   * @param transactionLog Transaction log for the table
+   * @param config XRef configuration
+   * @param mergedConfigMap Pre-merged config map with proper precedence: hadoop < spark < read options
+   * @param sparkSession The Spark session
    */
   def apply(
     transactionLog: TransactionLog,
     config: XRefConfig,
+    mergedConfigMap: Map[String, String],
     sparkSession: SparkSession
   ): XRefQueryRouter =
-    new XRefQueryRouter(transactionLog, config, sparkSession)
+    new XRefQueryRouter(transactionLog, config, sparkSession, mergedConfigMap)
 }

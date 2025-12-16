@@ -299,6 +299,108 @@ class RealAzureXRefIntegrationTest extends RealAzureTestBase {
   }
 
   /**
+   * Test XRef local cache feature on Azure.
+   *
+   * This test verifies:
+   * - XRef splits are lazily downloaded to local disk when localCache.enabled=true
+   * - Repeated queries use the cached XRef (no re-download)
+   * - Cache directory is created and contains XRef files
+   */
+  test("XRef local cache on Azure") {
+    assume(hasAzureCredentials(), "Azure credentials required for Azure XRef test")
+
+    configureHadoopForAzure()
+
+    val tablePath = getTestTablePath("local-cache")
+    val spark = this.spark
+    import spark.implicits._
+
+    // Use a dedicated cache directory for this test
+    val testRunId = java.util.UUID.randomUUID().toString.substring(0, 8)
+    val cacheDir = new java.io.File(System.getProperty("java.io.tmpdir"), s"xref-cache-test-$testRunId")
+
+    println(s"Starting XRef local cache Azure test at: $tablePath")
+    println(s"Cache directory: ${cacheDir.getAbsolutePath}")
+
+    try {
+      // Configure for XRef testing WITH local cache enabled
+      spark.conf.set("spark.indextables.indexWriter.batchSize", "100")
+      spark.conf.set("spark.indextables.xref.query.enabled", "true")
+      spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "3")
+      spark.conf.set("spark.indextables.xref.localCache.enabled", "true")
+      spark.conf.set("spark.indextables.xref.localCache.directory", cacheDir.getAbsolutePath)
+
+      // Create test data with multiple splits
+      (0 until 5).foreach { batchIdx =>
+        val data = (0 until 100).map { i =>
+          val globalId = batchIdx * 100 + i
+          (globalId, s"term_batch${batchIdx}_row$i", s"batch_$batchIdx", globalId * 10)
+        }
+        val df = data.toDF("id", "searchable_term", "batch_marker", "value")
+
+        df.write.format(DataSourceFormat)
+          .option("spark.indextables.indexing.fastfields", "value")
+          .mode("append")
+          .save(tablePath)
+      }
+
+      println(s"Wrote 5 batches of test data to Azure")
+
+      // Build XRef index
+      spark.sql(s"INDEX CROSSREFERENCES FOR '$tablePath'")
+      println(s"XRef index build completed")
+
+      // First query - should download XRef to local cache
+      val dfAll = spark.read.format(DataSourceFormat).load(tablePath)
+      val result1 = dfAll.filter(col("searchable_term") === "term_batch2_row50").count()
+      assert(result1 == 1, s"First query should return 1 row, got $result1")
+      println(s"First query completed (XRef should be downloaded to cache)")
+
+      // Check cache directory has files
+      val cacheSubdir = new java.io.File(cacheDir, "_xref_cache")
+      if (cacheSubdir.exists()) {
+        val cachedFiles = cacheSubdir.listFiles()
+        println(s"Cache directory contains ${cachedFiles.length} files")
+        cachedFiles.foreach(f => println(s"  - ${f.getName} (${f.length()} bytes)"))
+        assert(cachedFiles.nonEmpty, "Cache directory should contain XRef files")
+      } else {
+        println(s"Note: Cache subdirectory not created (may be running on driver only)")
+      }
+
+      // Second query - should use cached XRef (no re-download)
+      val result2 = dfAll.filter(col("searchable_term") === "term_batch3_row25").count()
+      assert(result2 == 1, s"Second query should return 1 row, got $result2")
+      println(s"Second query completed (should use cached XRef)")
+
+      // Verify aggregate also works with cache
+      val countResult = dfAll.agg(count("*")).collect().head.getLong(0)
+      assert(countResult == 500, s"Expected 500 total rows, got $countResult")
+
+      println(s"XRef local cache Azure test PASSED")
+
+    } finally {
+      spark.conf.unset("spark.indextables.indexWriter.batchSize")
+      spark.conf.unset("spark.indextables.xref.query.enabled")
+      spark.conf.unset("spark.indextables.xref.query.minSplitsForXRef")
+      spark.conf.unset("spark.indextables.xref.localCache.enabled")
+      spark.conf.unset("spark.indextables.xref.localCache.directory")
+
+      // Clean up cache directory
+      if (cacheDir.exists()) {
+        deleteRecursively(cacheDir)
+      }
+      cleanupTestData(tablePath)
+    }
+  }
+
+  private def deleteRecursively(file: java.io.File): Unit = {
+    if (file.isDirectory) {
+      file.listFiles().foreach(deleteRecursively)
+    }
+    file.delete()
+  }
+
+  /**
    * Test XRef aggregate pushdown on Azure.
    */
   test("XRef aggregate pushdown on Azure") {

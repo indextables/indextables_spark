@@ -106,7 +106,9 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [Field Indexing Configuration](#field-indexing-configuration)
   - [JSON Field Support](#json-field-support-for-nested-data)
   - [String Pattern Filter Pushdown](#string-pattern-filter-pushdown)
+  - [Batch Retrieval Optimization Configuration](#batch-retrieval-optimization-configuration)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
+  - [Purge-On-Write Configuration](#purge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
   - [Transaction Log Configuration](#transaction-log-configuration)
   - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
@@ -916,6 +918,7 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.indexWriter.maxBatchBufferSize` | `90M` | Maximum batch buffer size before flushing (90MB default, prevents native 100MB limit errors with large documents) |
 | `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
+| `spark.indextables.splitConversion.maxParallelism` | auto | Parallelism for tantivy index to quickwit split conversion (default: max(1, availableProcessors/4)) |
 | `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
 | `spark.indextables.merge.batchSize` | `defaultParallelism` | Number of merge groups per batch (defaults to Spark's defaultParallelism) |
 | `spark.indextables.merge.maxConcurrentBatches` | `2` | Maximum number of batches to process concurrently |
@@ -1209,6 +1212,46 @@ spark.conf.set("spark.indextables.filter.stringPattern.pushdown", "true")
 - When disabled (default), pattern filters cause aggregate pushdown to fail with a descriptive error message
 - Non-aggregate queries (e.g., `collect()`, `show()`) work regardless of this setting via Spark post-filtering
 
+#### Batch Retrieval Optimization Configuration
+
+Batch optimization dramatically reduces S3 GET requests (90-95%) and improves read latency (2-3x) for queries returning 50+ documents. Enabled by default with balanced profile.
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.read.batchOptimization.enabled` | `true` | Enable transparent batch optimization |
+| `spark.indextables.read.batchOptimization.profile` | `"balanced"` | Optimization profile: `conservative`, `balanced`, `aggressive`, or `disabled` |
+| `spark.indextables.read.batchOptimization.maxRangeSize` | `"16M"` | Maximum range size for consolidated requests (range: 2MB-32MB) |
+| `spark.indextables.read.batchOptimization.gapTolerance` | `"512K"` | Maximum gap between requests to consolidate (range: 64KB-2MB) |
+| `spark.indextables.read.batchOptimization.minDocsForOptimization` | `50` | Minimum documents to trigger optimization (range: 10-200) |
+| `spark.indextables.read.batchOptimization.maxConcurrentPrefetch` | `8` | Maximum concurrent prefetch requests per batch (range: 2-32) |
+| `spark.indextables.read.adaptiveTuning.enabled` | `true` | Enable automatic parameter adjustment based on performance |
+| `spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment` | `5` | Minimum batches to track before adjusting parameters |
+| `spark.indextables.read.defaultLimit` | `250` | Default result limit per partition when no LIMIT pushed down |
+
+**Profile Options:**
+- **conservative**: Smaller memory footprint, fewer concurrent requests (good for memory-constrained environments)
+- **balanced** (default): Good trade-off between performance and resource usage
+- **aggressive**: Maximum S3 request consolidation (best for cost optimization)
+- **disabled**: Turn off batch optimization completely
+
+**Usage Example:**
+
+```scala
+// Default behavior (automatic, balanced profile)
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/path")
+
+// Aggressive profile for maximum S3 request consolidation
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.read.batchOptimization.profile", "aggressive")
+  .option("spark.indextables.read.batchOptimization.maxConcurrentPrefetch", "16")
+  .load("s3://bucket/path")
+
+// Session-level configuration
+spark.conf.set("spark.indextables.read.batchOptimization.profile", "aggressive")
+spark.conf.set("spark.indextables.read.adaptiveTuning.enabled", "true")
+```
+
 #### Merge-On-Write Configuration
 
 Merge-on-write automatically consolidates small split files during write operations using Spark's shuffle mechanism, improving query performance and reducing storage overhead. When enabled, split bytes are distributed via RDD shuffle and merged on executors before being uploaded to final storage. **No S3 staging needed** - shuffle provides durability.
@@ -1257,6 +1300,55 @@ df.write
 
 **Note**: Merge-on-write uses local disk for staging before uploading merged splits to cloud storage. Ensure executor nodes have sufficient free disk space (as specified by `minDiskSpaceGB`) for optimal performance.
 
+#### Purge-On-Write Configuration
+
+Purge-on-write provides automatic cleanup of orphaned split files and old transaction logs during write operations. This helps maintain table hygiene without manual intervention.
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.purgeOnWrite.enabled` | `false` | Enable automatic purge during writes |
+| `spark.indextables.purgeOnWrite.triggerAfterMerge` | `true` | Run purge after merge-on-write completes |
+| `spark.indextables.purgeOnWrite.triggerAfterWrites` | `0` | Run purge after N writes (0 = disabled) |
+| `spark.indextables.purgeOnWrite.splitRetentionHours` | `168` | Split file retention period (168 = 7 days) |
+| `spark.indextables.purgeOnWrite.txLogRetentionHours` | `720` | Transaction log retention period (720 = 30 days) |
+
+**Usage Example:**
+
+```scala
+// Enable purge after merge-on-write completes
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+  .save("s3://bucket/path")
+
+// Enable purge after every 10 writes (without merge-on-write)
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "10")
+  .option("spark.indextables.purgeOnWrite.splitRetentionHours", "168")
+  .save("s3://bucket/path")
+
+// Complete automatic table hygiene (merge + purge)
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.mergeOnWrite.targetSize", "4G")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "20")
+  .save("s3://bucket/path")
+```
+
+**Key Features:**
+- **Disabled by default**: Must be explicitly enabled
+- **Two trigger modes**: After merge-on-write completes, or after N write operations
+- **Per-session counters**: Transaction counts tracked per table path
+- **Separate retention periods**: Different retention for splits vs transaction logs
+- **Graceful failure handling**: Purge failures don't fail writes
+
 #### S3 Upload Configuration
 
 | Configuration | Default | Description |
@@ -1264,6 +1356,7 @@ df.write
 | `spark.indextables.s3.streamingThreshold` | `104857600` | Files larger than this use streaming upload (100MB default) |
 | `spark.indextables.s3.multipartThreshold` | `104857600` | Threshold for S3 multipart upload (100MB default) |
 | `spark.indextables.s3.maxConcurrency` | `4` | Number of parallel upload threads |
+| `spark.indextables.s3.partSize` | `"64M"` | Part size for S3 multipart uploads (supports: "64M", "128M", bytes) |
 
 
 #### Transaction Log Configuration
@@ -2098,6 +2191,14 @@ spark.conf.set("spark.indextables.xref.build.heapSize", "100M")  // Falls back t
 // Storage Configuration
 spark.conf.set("spark.indextables.xref.storage.directory", "_xrefsplits")  // Storage directory
 spark.conf.set("spark.indextables.xref.storage.compressionEnabled", "true")  // Compress XRef splits
+
+// Distributed Execution (both build and search run on executors with locality)
+spark.conf.set("spark.indextables.xref.build.distributed", "true")  // Always distributed on executors (default)
+spark.conf.set("spark.indextables.xref.query.distributed", "true")  // Always distributed on executors (default)
+
+// Local Cache Configuration (optional lazy download of XRef splits to local disk)
+spark.conf.set("spark.indextables.xref.localCache.enabled", "false")  // Enable local caching (disabled by default)
+spark.conf.set("spark.indextables.xref.localCache.directory", "/local_disk0/xref-cache")  // Falls back to tempDirectoryPath chain
 ```
 
 ##### When to Use XRef

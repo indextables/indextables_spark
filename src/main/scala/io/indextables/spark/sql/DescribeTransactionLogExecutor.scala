@@ -523,6 +523,129 @@ class DescribeTransactionLogExecutor(
           isCheckpoint
         )
 
+      case addXRef: AddXRefAction =>
+        Row(
+          version,
+          logFilePath,
+          "add_xref",
+          // Common fields
+          addXRef.path,
+          toJsonString(addXRef.sourceSplitPaths),
+          addXRef.size,
+          false, // dataChange
+          toJsonString(Map(
+            "xrefId" -> addXRef.xrefId,
+            "sourceSplitCount" -> addXRef.sourceSplitCount,
+            "totalTerms" -> addXRef.totalTerms,
+            "maxSourceSplits" -> addXRef.maxSourceSplits,
+            "buildDurationMs" -> addXRef.buildDurationMs
+          )),
+          // AddAction specific fields - map XRef fields to closest equivalents
+          new Timestamp(addXRef.createdTime),
+          null, // stats
+          null, // min_values
+          null, // max_values
+          addXRef.sourceSplitCount.toLong, // num_records -> sourceSplitCount
+          addXRef.footerStartOffset,
+          addXRef.footerEndOffset,
+          null, // hotcache_start_offset
+          null, // hotcache_length
+          true, // has_footer_offsets
+          null, // time_range_start
+          null, // time_range_end
+          null, // split_tags
+          null, // delete_opstamp
+          null, // num_merge_ops
+          addXRef.docMappingJson.orNull,
+          null, // uncompressed_size_bytes
+          // RemoveAction specific fields
+          null,
+          null,
+          // SkipAction specific fields
+          null,
+          null,
+          null,
+          null,
+          null,
+          // ProtocolAction specific fields
+          null,
+          null,
+          null,
+          null,
+          // MetadataAction specific fields
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          // Checkpoint marker
+          isCheckpoint
+        )
+
+      case removeXRef: RemoveXRefAction =>
+        Row(
+          version,
+          logFilePath,
+          "remove_xref",
+          // Common fields
+          removeXRef.path,
+          null, // partition_values
+          null, // size
+          false, // dataChange
+          toJsonString(Map(
+            "xrefId" -> removeXRef.xrefId,
+            "reason" -> removeXRef.reason
+          )),
+          // AddAction specific fields
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          // RemoveAction specific fields
+          new Timestamp(removeXRef.deletionTimestamp),
+          null, // extended_file_metadata
+          // SkipAction specific fields
+          null,
+          null,
+          null,
+          null,
+          null,
+          // ProtocolAction specific fields
+          null,
+          null,
+          null,
+          null,
+          // MetadataAction specific fields
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          // Checkpoint marker
+          isCheckpoint
+        )
+
       case _ =>
         // Unknown action type - create a row with nulls
         logger.warn(s"Unknown action type: ${action.getClass.getName}")
@@ -531,6 +654,8 @@ class DescribeTransactionLogExecutor(
           logFilePath,
           "unknown",
           // All other fields null
+          null,
+          null,
           null,
           null,
           null,

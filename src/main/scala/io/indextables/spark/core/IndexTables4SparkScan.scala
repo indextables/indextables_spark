@@ -345,7 +345,8 @@ class IndexTables4SparkScan(
     }
 
     try {
-      val router = new XRefQueryRouter(transactionLog, xrefConfig, sparkSession)
+      // Pass the pre-merged config map to XRefQueryRouter for cloud credential handling
+      val router = new XRefQueryRouter(transactionLog, xrefConfig, sparkSession, config)
       val result = router.routeQuery(candidateSplits, filters, indexQueryFilters)
 
       if (result.usedXRef) {

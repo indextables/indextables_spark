@@ -782,7 +782,15 @@ class IndexTables4SparkStandardWrite(
 
       logger.info("📑 XRef auto-indexing enabled - evaluating if indexing should run...")
 
-      val autoIndexer = new XRefAutoIndexer(transactionLog, xrefConfig, spark)
+      // Create merged config map with proper precedence: hadoop < spark < write options
+      // This ensures cloud credentials and other write-time settings are available
+      val optionsFromWrite = serializedOptions
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+      val mergedConfigMap = serializedHadoopConf ++ optionsFromWrite
+
+      logger.debug(s"Passing ${mergedConfigMap.size} config entries to XRef auto-indexer")
+
+      val autoIndexer = new XRefAutoIndexer(transactionLog, xrefConfig, spark, Some(mergedConfigMap))
       val result = autoIndexer.onCommit(newlyAddedSplits)
 
       if (result.triggered) {

@@ -20,8 +20,13 @@ package io.indextables.spark.xref
 import scala.util.{Failure, Success, Try}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.sources.Filter
 
+import io.indextables.spark.core.FiltersToQueryConverter
+import io.indextables.spark.storage.GlobalSplitCacheManager
 import io.indextables.spark.transaction.AddXRefAction
+import io.indextables.spark.util.{ConfigUtils, SplitMetadataFactory}
+import io.indextables.tantivy4java.split.SplitQuery
 import org.slf4j.LoggerFactory
 
 /**
@@ -129,14 +134,14 @@ object XRefSearcher {
     }
 
   /**
-   * Search an XRef for splits containing documents matching the query.
+   * Search an XRef for splits containing documents matching the filters.
    *
    * @param xrefPath
    *   Full path to the XRef split file
    * @param xref
    *   XRef action containing metadata (footer offsets, source splits)
-   * @param query
-   *   Search query string (extracted from filters)
+   * @param filters
+   *   Spark filters from predicate pushdown
    * @param timeoutMs
    *   Query timeout in milliseconds
    * @param tablePath
@@ -149,19 +154,22 @@ object XRefSearcher {
   def searchSplits(
     xrefPath: String,
     xref: AddXRefAction,
-    query: String,
+    filters: Array[Filter],
     timeoutMs: Int,
     tablePath: String,
     sparkSession: SparkSession
   ): Seq[String] = {
 
-    logger.debug(s"Searching XRef ${xref.xrefId} for query: $query")
+    logger.debug(s"Searching XRef ${xref.xrefId} with ${filters.length} filters")
+    filters.foreach(f => logger.trace(s"XRef filter: $f"))
 
     // Check for test override first
     testSearchOverride.foreach { searchFn =>
       val actualSourceSplitFileNames = xref.sourceSplitPaths.map(XRefStorageUtils.extractFileName)
       logger.debug(s"Using test search override for XRef ${xref.xrefId}")
-      val result = searchFn(xref, query, actualSourceSplitFileNames)
+      // For test override, convert filters to simple query string for compatibility
+      val queryStr = filtersToQueryString(filters)
+      val result = searchFn(xref, queryStr, actualSourceSplitFileNames)
       logger.debug(s"Test search override returned ${result.size} matching splits")
       return result
     }
@@ -172,7 +180,7 @@ object XRefSearcher {
     }
 
     Try {
-      executeXRefSearch(xrefPath, xref, query, timeoutMs, tablePath, sparkSession)
+      executeXRefSearch(xrefPath, xref, filters, timeoutMs, tablePath, sparkSession)
     } match {
       case Success(matchingSplits) =>
         logger.debug(s"XRef search returned ${matchingSplits.size} matching splits")
@@ -186,44 +194,54 @@ object XRefSearcher {
   }
 
   /**
+   * Convert filters to a simple query string for test override compatibility.
+   */
+  private def filtersToQueryString(filters: Array[Filter]): String = {
+    import org.apache.spark.sql.sources._
+    filters.flatMap {
+      case EqualTo(attr, value) => Some(s"$attr:$value")
+      case StringContains(attr, value) => Some(s"$attr:*$value*")
+      case StringStartsWith(attr, value) => Some(s"$attr:$value*")
+      case _ => None
+    }.mkString(" ")
+  }
+
+  /**
    * Check if the tantivy4java XRef API classes are available.
    */
   private def checkXRefApiAvailability(): Boolean =
     Try {
       // Check if the XRef-specific classes exist
-      // The actual class names will depend on the tantivy4java API
-      // For now, check for the base tantivy4java classes
-      Class.forName("com.tantivy4java.Index")
-      Class.forName("com.tantivy4java.Searcher")
-
-      // TODO: Check for XRef-specific classes when available
-      // Class.forName("com.tantivy4java.xref.XRefIndex")
-      // Class.forName("com.tantivy4java.xref.XRefSearcher")
-
-      // For now, return false until XRef API is implemented in tantivy4java
-      // This will cause XRefSearcher to conservatively return all source splits
-      false
+      Class.forName("io.indextables.tantivy4java.xref.XRefSplit")
+      true
     } match {
       case Success(available) => available
       case Failure(_)         => false
     }
 
+  /** XRef field name that stores the source split URI */
+  private val XREF_URI_FIELD = "_xref_uri"
+
   /**
-   * Execute the actual XRef search using tantivy4java.
+   * Execute the actual XRef search using GlobalSplitCacheManager.
    *
-   * This is the integration point with the tantivy4java XRef API. When the API becomes available, this method will:
-   *   1. Open the XRef split using footer offset information
-   *   2. Parse the query and search the XRef term dictionary
-   *   3. Return split filenames that contain matching terms
+   * This uses shared infrastructure from ConfigUtils for cache configuration,
+   * while directly using GlobalSplitCacheManager for searcher creation.
+   * XRef splits require a simpler validation path than regular data splits
+   * since they are merged term dictionaries without full docMappingJson.
+   *
+   * XRef splits are regular Quickwit splits that can be searched with SplitSearcher.
+   * Each document in the XRef represents one source split, and the _xref_uri field
+   * contains the source split path.
    *
    * @param xrefPath
    *   Full path to the XRef split
    * @param xref
    *   XRef metadata
-   * @param query
-   *   Search query
+   * @param filters
+   *   Spark filters from predicate pushdown
    * @param timeoutMs
-   *   Timeout
+   *   Timeout (not currently used - tantivy4java doesn't support query timeouts)
    * @param tablePath
    *   Table path
    * @param sparkSession
@@ -234,99 +252,104 @@ object XRefSearcher {
   private def executeXRefSearch(
     xrefPath: String,
     xref: AddXRefAction,
-    query: String,
+    filters: Array[Filter],
     timeoutMs: Int,
     tablePath: String,
     sparkSession: SparkSession
   ): Seq[String] = {
+    import scala.jdk.CollectionConverters._
 
-    // TODO: Implement actual tantivy4java XRef search when API is available
-    //
-    // Expected implementation pattern:
-    //
-    // val fs = FileSystem.get(new Path(xrefPath).toUri, sparkSession.sparkContext.hadoopConfiguration)
-    // val xrefReader = XRefReader.open(fs, new Path(xrefPath), xref.footerStartOffset, xref.footerEndOffset)
-    // try {
-    //   // Parse query into terms
-    //   val terms = parseQueryTerms(query)
-    //
-    //   // Search XRef for each term
-    //   val matchingSplits = terms.flatMap { term =>
-    //     xrefReader.searchTerm(term, timeoutMs)
-    //   }.distinct
-    //
-    //   matchingSplits.map(XRefStorageUtils.extractFileName)
-    // } finally {
-    //   xrefReader.close()
-    // }
+    logger.debug(s"Executing XRef search with ${filters.length} filters on XRef at $xrefPath")
 
-    // Placeholder: Return all source splits until API is implemented
-    logger.debug(s"XRef search not yet implemented, returning all ${xref.sourceSplitPaths.size} source splits")
-    xref.sourceSplitPaths.map(XRefStorageUtils.extractFileName)
+    // Normalize the XRef path for tantivy4java (s3a:// -> s3://, abfss:// -> azure://)
+    val normalizedXRefPath = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(xrefPath)
+
+    // Create SplitCacheConfig using shared ConfigUtils (handles credential propagation)
+    val sparkConf = sparkSession.sparkContext.getConf
+    val splitCacheConfig = ConfigUtils.createSplitCacheConfig(
+      sparkConf.getAll.toMap,
+      Some(tablePath)
+    )
+
+    // Get the global cache manager with properly configured credentials
+    val cacheManager = GlobalSplitCacheManager.getInstance(splitCacheConfig)
+
+    // Create SplitMetadata from XRef action using shared factory
+    // This includes docMappingJson which is required for proper tokenization of query terms
+    val splitMetadata = SplitMetadataFactory.fromXRefAction(xref)
+
+    var splitSearcher: io.indextables.tantivy4java.split.SplitSearcher = null
+    try {
+      // Create searcher using the shared cache manager
+      splitSearcher = cacheManager.createSplitSearcher(normalizedXRefPath, splitMetadata)
+
+      // Convert Spark filters to SplitQuery
+      val splitQuery = FiltersToQueryConverter.convertToSplitQuery(filters, splitSearcher)
+
+      // Transform range queries to match-all for XRef searches
+      // (XRef splits may not have fast fields for range query evaluation)
+      val transformedQuery = transformRangeQueriesToMatchAll(splitQuery)
+
+      logger.debug(s"Converted ${filters.length} filters to SplitQuery: ${transformedQuery.getClass.getSimpleName}")
+
+      // Search the XRef split - each hit is an XRef document representing a source split
+      val searchResult = splitSearcher.search(transformedQuery, xref.sourceSplitPaths.size)
+
+      // Extract _xref_uri from each matching document
+      val matchingUris = new scala.collection.mutable.ArrayBuffer[String]()
+      try {
+        for (hit <- searchResult.getHits.asScala) {
+          val doc = splitSearcher.doc(hit.getDocAddress)
+          try {
+            val uriObj = doc.getFirst(XREF_URI_FIELD)
+            if (uriObj != null) {
+              matchingUris += uriObj.toString
+            }
+          } finally {
+            doc.close()
+          }
+        }
+      } finally {
+        searchResult.close()
+      }
+
+      logger.debug(s"XRef search returned ${matchingUris.size} matching splits out of ${xref.sourceSplitPaths.size}")
+
+      // Convert full URIs to filenames
+      matchingUris.map(XRefStorageUtils.extractFileName).toSeq
+    } finally {
+      if (splitSearcher != null) {
+        splitSearcher.close()
+      }
+    }
   }
 
   /**
-   * Parse a query string into individual search terms.
+   * Transform range queries to match-all queries.
    *
-   * This handles basic query syntax:
-   *   - Simple terms: "word" -> Seq("word")
-   *   - Multiple terms: "word1 word2" -> Seq("word1", "word2")
-   *   - Phrases: "\"exact phrase\"" -> Seq("exact phrase")
+   * XRef splits may not have fast fields (columnar data), so range queries cannot be evaluated.
+   * To ensure conservative results (never miss a split that might contain matching documents),
+   * range queries are transformed to match-all.
    *
-   * @param query
-   *   Query string
-   * @return
-   *   Sequence of terms to search
+   * This transformation is applied after FiltersToQueryConverter processes filters.
+   * The converter may have already filtered out unsupported range queries, but this
+   * provides an additional safety net for XRef-specific query handling.
    */
-  def parseQueryTerms(query: String): Seq[String] = {
-    if (query == null || query.trim.isEmpty) {
-      return Seq.empty
+  private def transformRangeQueriesToMatchAll(query: SplitQuery): SplitQuery = {
+    import io.indextables.tantivy4java.split.{SplitRangeQuery, SplitMatchAllQuery}
+
+    query match {
+      case _: SplitRangeQuery =>
+        // Transform range query to match-all for conservative XRef results
+        logger.debug("Transforming range query to match-all for XRef search")
+        new SplitMatchAllQuery()
+
+      case other =>
+        // Return other query types unchanged
+        // Note: We don't recurse into boolean queries here because
+        // FiltersToQueryConverter should already handle filter decomposition
+        other
     }
-
-    val terms = scala.collection.mutable.ArrayBuffer[String]()
-    var inQuotes = false
-    var currentTerm = new StringBuilder()
-    var i = 0
-
-    while (i < query.length) {
-      val c = query.charAt(i)
-      c match {
-        case '"' =>
-          if (inQuotes) {
-            // End of quoted phrase
-            if (currentTerm.nonEmpty) {
-              terms += currentTerm.toString()
-              currentTerm = new StringBuilder()
-            }
-            inQuotes = false
-          } else {
-            // Start of quoted phrase
-            if (currentTerm.nonEmpty) {
-              terms += currentTerm.toString()
-              currentTerm = new StringBuilder()
-            }
-            inQuotes = true
-          }
-
-        case ' ' | '\t' | '\n' | '\r' =>
-          if (inQuotes) {
-            currentTerm.append(c)
-          } else if (currentTerm.nonEmpty) {
-            terms += currentTerm.toString()
-            currentTerm = new StringBuilder()
-          }
-
-        case _ =>
-          currentTerm.append(c)
-      }
-      i += 1
-    }
-
-    // Add final term
-    if (currentTerm.nonEmpty) {
-      terms += currentTerm.toString()
-    }
-
-    terms.toSeq.filter(_.nonEmpty)
   }
+
 }

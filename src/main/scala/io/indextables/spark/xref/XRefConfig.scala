@@ -56,12 +56,17 @@ case class XRefAutoIndexConfig(
  *   Temporary directory for builds (default: auto-detect, falls back to indexWriter.tempDirectoryPath)
  * @param heapSize
  *   Heap size for XRef builds in bytes (default: auto, falls back to indexWriter.heapSize)
+ * @param distributedBuild
+ *   Whether to use distributed XRef build on executors (default: true)
+ *   When enabled, XRef builds run on executors with locality preferences based on
+ *   which nodes have the source splits cached.
  */
 case class XRefBuildConfig(
   includePositions: Boolean = false,
   parallelism: Option[Int] = None,
   tempDirectoryPath: Option[String] = None,
-  heapSize: Option[Long] = None
+  heapSize: Option[Long] = None,
+  distributedBuild: Boolean = true
 )
 
 /**
@@ -75,12 +80,17 @@ case class XRefBuildConfig(
  *   XRef query timeout in milliseconds (default: 5000)
  * @param fallbackOnError
  *   Whether to fallback to full scan on XRef error (default: true)
+ * @param distributedSearch
+ *   Whether to use distributed XRef search on executors (default: true)
+ *   When enabled, XRef searches run on executors with locality preferences based on
+ *   which nodes have the XRef splits cached.
  */
 case class XRefQueryConfig(
   enabled: Boolean = true,
   minSplitsForXRef: Int = 128,
   timeoutMs: Int = 5000,
-  fallbackOnError: Boolean = true
+  fallbackOnError: Boolean = true,
+  distributedSearch: Boolean = true
 )
 
 /**
@@ -97,13 +107,34 @@ case class XRefStorageConfig(
 )
 
 /**
+ * Configuration for XRef local cache on executors.
+ *
+ * When enabled, executors lazily download XRef splits from cloud storage to local disk
+ * before searching. This improves performance for repeated queries by avoiding repeated
+ * cloud storage reads.
+ *
+ * @param enabled
+ *   Whether local caching is enabled (default: false)
+ *   When disabled, XRef splits are accessed directly from their storage location.
+ * @param directory
+ *   Local cache directory on executors (default: auto-detect)
+ *   Falls back to: xref.build.tempDirectoryPath -> indexWriter.tempDirectoryPath -> /local_disk0 -> system temp
+ *   XRef splits are stored in a "_xref_cache" subdirectory.
+ */
+case class XRefLocalCacheConfig(
+  enabled: Boolean = false,
+  directory: Option[String] = None
+)
+
+/**
  * Complete XRef configuration combining all aspects.
  */
 case class XRefConfig(
   autoIndex: XRefAutoIndexConfig = XRefAutoIndexConfig(),
   build: XRefBuildConfig = XRefBuildConfig(),
   query: XRefQueryConfig = XRefQueryConfig(),
-  storage: XRefStorageConfig = XRefStorageConfig()
+  storage: XRefStorageConfig = XRefStorageConfig(),
+  localCache: XRefLocalCacheConfig = XRefLocalCacheConfig()
 )
 
 object XRefConfig {
@@ -123,16 +154,22 @@ object XRefConfig {
     val BUILD_PARALLELISM       = "spark.indextables.xref.build.parallelism"
     val BUILD_TEMP_DIRECTORY    = "spark.indextables.xref.build.tempDirectoryPath"
     val BUILD_HEAP_SIZE         = "spark.indextables.xref.build.heapSize"
+    val BUILD_DISTRIBUTED       = "spark.indextables.xref.build.distributed"
 
     // Query configuration
     val QUERY_ENABLED           = "spark.indextables.xref.query.enabled"
     val QUERY_MIN_SPLITS        = "spark.indextables.xref.query.minSplitsForXRef"
     val QUERY_TIMEOUT_MS        = "spark.indextables.xref.query.timeoutMs"
     val QUERY_FALLBACK_ON_ERROR = "spark.indextables.xref.query.fallbackOnError"
+    val QUERY_DISTRIBUTED       = "spark.indextables.xref.query.distributed"
 
     // Storage configuration
     val STORAGE_DIRECTORY   = "spark.indextables.xref.storage.directory"
     val STORAGE_COMPRESSION = "spark.indextables.xref.storage.compressionEnabled"
+
+    // Local cache configuration
+    val LOCAL_CACHE_ENABLED   = "spark.indextables.xref.localCache.enabled"
+    val LOCAL_CACHE_DIRECTORY = "spark.indextables.xref.localCache.directory"
   }
 
   /**
@@ -154,17 +191,23 @@ object XRefConfig {
         includePositions = conf.get(Keys.BUILD_INCLUDE_POSITIONS, "false").toBoolean,
         parallelism = Option(conf.get(Keys.BUILD_PARALLELISM, null)).map(_.toInt),
         tempDirectoryPath = Option(conf.get(Keys.BUILD_TEMP_DIRECTORY, null)),
-        heapSize = Option(conf.get(Keys.BUILD_HEAP_SIZE, null)).map(parseSize)
+        heapSize = Option(conf.get(Keys.BUILD_HEAP_SIZE, null)).map(parseSize),
+        distributedBuild = conf.get(Keys.BUILD_DISTRIBUTED, "true").toBoolean
       ),
       query = XRefQueryConfig(
         enabled = conf.get(Keys.QUERY_ENABLED, "true").toBoolean,
         minSplitsForXRef = conf.get(Keys.QUERY_MIN_SPLITS, "128").toInt,
         timeoutMs = conf.get(Keys.QUERY_TIMEOUT_MS, "5000").toInt,
-        fallbackOnError = conf.get(Keys.QUERY_FALLBACK_ON_ERROR, "true").toBoolean
+        fallbackOnError = conf.get(Keys.QUERY_FALLBACK_ON_ERROR, "true").toBoolean,
+        distributedSearch = conf.get(Keys.QUERY_DISTRIBUTED, "true").toBoolean
       ),
       storage = XRefStorageConfig(
         directory = conf.get(Keys.STORAGE_DIRECTORY, "_xrefsplits"),
         compressionEnabled = conf.get(Keys.STORAGE_COMPRESSION, "true").toBoolean
+      ),
+      localCache = XRefLocalCacheConfig(
+        enabled = conf.get(Keys.LOCAL_CACHE_ENABLED, "false").toBoolean,
+        directory = Option(conf.get(Keys.LOCAL_CACHE_DIRECTORY, null))
       )
     )
   }
@@ -186,17 +229,23 @@ object XRefConfig {
         includePositions = options.getBoolean(Keys.BUILD_INCLUDE_POSITIONS, false),
         parallelism = Option(options.get(Keys.BUILD_PARALLELISM)).map(_.toInt),
         tempDirectoryPath = Option(options.get(Keys.BUILD_TEMP_DIRECTORY)),
-        heapSize = Option(options.get(Keys.BUILD_HEAP_SIZE)).map(parseSize)
+        heapSize = Option(options.get(Keys.BUILD_HEAP_SIZE)).map(parseSize),
+        distributedBuild = options.getBoolean(Keys.BUILD_DISTRIBUTED, true)
       ),
       query = XRefQueryConfig(
         enabled = options.getBoolean(Keys.QUERY_ENABLED, true),
         minSplitsForXRef = options.getInt(Keys.QUERY_MIN_SPLITS, 128),
         timeoutMs = options.getInt(Keys.QUERY_TIMEOUT_MS, 5000),
-        fallbackOnError = options.getBoolean(Keys.QUERY_FALLBACK_ON_ERROR, true)
+        fallbackOnError = options.getBoolean(Keys.QUERY_FALLBACK_ON_ERROR, true),
+        distributedSearch = options.getBoolean(Keys.QUERY_DISTRIBUTED, true)
       ),
       storage = XRefStorageConfig(
         directory = options.getOrDefault(Keys.STORAGE_DIRECTORY, "_xrefsplits"),
         compressionEnabled = options.getBoolean(Keys.STORAGE_COMPRESSION, true)
+      ),
+      localCache = XRefLocalCacheConfig(
+        enabled = options.getBoolean(Keys.LOCAL_CACHE_ENABLED, false),
+        directory = Option(options.get(Keys.LOCAL_CACHE_DIRECTORY))
       )
     )
 

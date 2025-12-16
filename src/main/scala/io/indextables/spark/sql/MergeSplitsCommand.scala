@@ -37,7 +37,7 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.storage.SplitManager
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
-import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.util.{CloudConfigExtractor, ConfigNormalization}
 import io.indextables.spark.xref.{XRefConfig, XRefBuildManager}
 import io.indextables.tantivy4java.core.Index
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
@@ -439,163 +439,65 @@ class MergeSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
   /**
-   * Extract AWS configuration from SparkSession for tantivy4java merge operations. Uses same pattern as
-   * TantivySearchEngine for consistency. Returns a serializable wrapper that can be broadcast across executors.
+   * Extract AWS configuration from SparkSession for tantivy4java merge operations.
+   * Uses CloudConfigExtractor for centralized config extraction.
+   * Returns a serializable wrapper that can be broadcast across executors.
    */
-  private def extractAwsConfig(): SerializableAwsConfig =
-    try {
-      val sparkConf  = sparkSession.conf
-      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+  private def extractAwsConfig(): SerializableAwsConfig = {
+    val config = CloudConfigExtractor.extractAwsConfig(sparkSession, overrideOptions)
 
-      // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
-      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
-
-      // Helper function to get config with priority: overrideOptions > mergedConfigs
-      // CASE-INSENSITIVE lookup to handle write options (lowercase) vs expected keys (camelCase)
-      def getConfigWithFallback(sparkKey: String): Option[String] = {
-        // Try exact match first, then case-insensitive match
-        val overrideValue = overrideOptions.flatMap { opts =>
-          opts.get(sparkKey).orElse {
-            // Case-insensitive fallback for write options
-            opts.find { case (k, _) => k.equalsIgnoreCase(sparkKey) }.map(_._2)
-          }
+    // Validate temp directory path if specified
+    config.tempDirectoryPath.foreach { path =>
+      try {
+        val dir = new java.io.File(path)
+        if (!dir.exists()) {
+          logger.warn(s"⚠️ Custom temp directory does not exist: $path - will fall back to system temp directory")
+        } else if (!dir.isDirectory()) {
+          logger.warn(
+            s"⚠️ Custom temp directory path is not a directory: $path - will fall back to system temp directory"
+          )
+        } else if (!dir.canWrite()) {
+          logger.warn(s"⚠️ Custom temp directory is not writable: $path - will fall back to system temp directory")
+        } else {
+          logger.info(s"✅ Custom temp directory validated: $path")
         }
-
-        val result = overrideValue.orElse(mergedConfigs.get(sparkKey))
-
-        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideValue.getOrElse("None")}, merged=${result.getOrElse("None")}")
-        result
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"⚠️ Failed to validate custom temp directory '$path': ${ex.getMessage} - will fall back to system temp directory")
       }
-
-      val accessKey    = getConfigWithFallback("spark.indextables.aws.accessKey")
-      val secretKey    = getConfigWithFallback("spark.indextables.aws.secretKey")
-      val sessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken")
-      val region       = getConfigWithFallback("spark.indextables.aws.region")
-      val endpoint     = getConfigWithFallback("spark.indextables.s3.endpoint")
-      val pathStyleAccess = getConfigWithFallback("spark.indextables.s3.pathStyleAccess")
-        .map(_.toLowerCase == "true")
-        .getOrElse(false)
-
-      // Extract temporary directory configuration for merge operations with fallback chain:
-      // 1. Explicit config, 2. /local_disk0 if available, 3. null (system default)
-      val tempDirectoryPath = getConfigWithFallback("spark.indextables.merge.tempDirectoryPath")
-        .orElse(if (MergeSplitsCommand.isLocalDisk0Available()) Some("/local_disk0/tantivy4spark-temp") else None)
-
-      // Extract custom credential provider class name
-      val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
-
-      // Extract merge operation configuration (default heap size: 1GB)
-      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
-        .map(io.indextables.spark.util.SizeParser.parseSize)
-        .map(java.lang.Long.valueOf)
-        .getOrElse(java.lang.Long.valueOf(1073741824L)) // 1GB default
-      val debugEnabled =
-        getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
-
-      logger.info(s"Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
-      logger.info(
-        s"AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}"
-      )
-      logger.info(s"Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
-      logger.info(s"Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-
-      // Validate temp directory path if specified
-      tempDirectoryPath.foreach { path =>
-        try {
-          val dir = new java.io.File(path)
-          if (!dir.exists()) {
-            logger.warn(s"⚠️ Custom temp directory does not exist: $path - will fall back to system temp directory")
-          } else if (!dir.isDirectory()) {
-            logger.warn(
-              s"⚠️ Custom temp directory path is not a directory: $path - will fall back to system temp directory"
-            )
-          } else if (!dir.canWrite()) {
-            logger.warn(s"⚠️ Custom temp directory is not writable: $path - will fall back to system temp directory")
-          } else {
-            logger.info(s"✅ Custom temp directory validated: $path")
-          }
-        } catch {
-          case ex: Exception =>
-            logger.warn(s"⚠️ Failed to validate custom temp directory '$path': ${ex.getMessage} - will fall back to system temp directory")
-        }
-      }
-
-      // Create SerializableAwsConfig with the extracted credentials and temp directory
-      SerializableAwsConfig(
-        accessKey.getOrElse(""),
-        secretKey.getOrElse(""),
-        sessionToken, // Can be None for permanent credentials
-        region.getOrElse("us-east-1"),
-        endpoint, // Can be None for default AWS endpoint
-        pathStyleAccess,
-        tempDirectoryPath,        // Custom temp directory path for merge operations
-        credentialsProviderClass, // Custom credential provider class name
-        heapSize,                 // Heap size for merge operations
-        debugEnabled              // Debug logging for merge operations
-      )
-    } catch {
-      case ex: Exception =>
-        logger.error("Failed to extract AWS config from Spark session", ex)
-        throw new RuntimeException("Failed to extract AWS config for merge operation", ex)
     }
+
+    logger.info(s"Creating AwsConfig with: region=${config.region}, endpoint=${config.endpoint.getOrElse("None")}, pathStyle=${config.pathStyleAccess}")
+    logger.info(
+      s"AWS credentials: accessKey=${if (config.accessKey.nonEmpty) s"${config.accessKey.take(4)}***" else "None"}, " +
+        s"sessionToken=${config.sessionToken.map(_ => "***").getOrElse("None")}"
+    )
+    logger.info(s"Credentials provider class: ${config.credentialsProviderClass.getOrElse("None")}")
+    logger.info(s"Merge temp directory: ${config.tempDirectoryPath.getOrElse("system default")}")
+
+    config
+  }
 
   /**
-   * Extract Azure configuration from SparkSession for tantivy4java merge operations. Returns a serializable wrapper
-   * that can be broadcast across executors.
+   * Extract Azure configuration from SparkSession for tantivy4java merge operations.
+   * Uses CloudConfigExtractor for centralized config extraction.
+   * Returns a serializable wrapper that can be broadcast across executors.
    */
-  private def extractAzureConfig(): SerializableAzureConfig =
-    try {
-      val sparkConf  = sparkSession.conf
-      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+  private def extractAzureConfig(): SerializableAzureConfig = {
+    val config = CloudConfigExtractor.extractAzureConfig(sparkSession, overrideOptions)
 
-      // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
-      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    logger.info(s"Creating AzureConfig with: accountName=${config.accountName.getOrElse("None")}, endpoint=${config.endpoint.getOrElse("None")}")
+    logger.info(
+      s"Azure credentials: accountKey=${config.accountKey.map(_ => "***").getOrElse("None")}, " +
+        s"connectionString=${config.connectionString.map(_ => "***").getOrElse("None")}, " +
+        s"bearerToken=${config.bearerToken.map(_ => "***").getOrElse("None")}"
+    )
+    logger.info(s"OAuth credentials: tenantId=${config.tenantId.getOrElse("None")}, " +
+      s"clientId=${config.clientId.getOrElse("None")}, " +
+      s"clientSecret=${config.clientSecret.map(_ => "***").getOrElse("None")}")
 
-      // Helper function to get config with priority: overrideOptions > mergedConfigs
-      def getConfigWithFallback(sparkKey: String): Option[String] = {
-        val result = overrideOptions.flatMap(_.get(sparkKey)).orElse(mergedConfigs.get(sparkKey))
-        logger.debug(s"Azure Config fallback for $sparkKey: override=${overrideOptions.flatMap(_.get(sparkKey)).getOrElse("None")}, merged=${result.getOrElse("None")}")
-        result
-      }
-
-      val accountName      = getConfigWithFallback("spark.indextables.azure.accountName")
-      val accountKey       = getConfigWithFallback("spark.indextables.azure.accountKey")
-      val connectionString = getConfigWithFallback("spark.indextables.azure.connectionString")
-      val endpoint         = getConfigWithFallback("spark.indextables.azure.endpoint")
-      val bearerToken      = getConfigWithFallback("spark.indextables.azure.bearerToken")
-      val tenantId         = getConfigWithFallback("spark.indextables.azure.tenantId")
-      val clientId         = getConfigWithFallback("spark.indextables.azure.clientId")
-      val clientSecret     = getConfigWithFallback("spark.indextables.azure.clientSecret")
-
-      logger.info(s"Creating AzureConfig with: accountName=${accountName.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}")
-      logger.info(
-        s"Azure credentials: accountKey=${accountKey.map(_ => "***").getOrElse("None")}, connectionString=${connectionString
-            .map(_ => "***")
-            .getOrElse("None")}, bearerToken=${bearerToken.map(_ => "***").getOrElse("None")}"
-      )
-      logger.info(s"OAuth credentials: tenantId=${tenantId.getOrElse("None")}, clientId=${clientId
-          .getOrElse("None")}, clientSecret=${clientSecret.map(_ => "***").getOrElse("None")}")
-
-      SerializableAzureConfig(
-        accountName,
-        accountKey,
-        connectionString,
-        endpoint,
-        bearerToken,
-        tenantId,
-        clientId,
-        clientSecret
-      )
-    } catch {
-      case ex: Exception =>
-        logger.error("Failed to extract Azure config from Spark session", ex)
-        // Return empty config - Azure is optional
-        SerializableAzureConfig(None, None, None, None, None, None, None, None)
-    }
+    config
+  }
 
   /**
    * Smart string ordering that handles numeric values correctly. Tries numeric comparison first, falls back to string
