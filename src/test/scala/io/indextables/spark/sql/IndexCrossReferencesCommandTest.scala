@@ -152,6 +152,66 @@ class IndexCrossReferencesCommandTest extends TestBase {
     }
   }
 
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with MAX XREF BUILDS") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' MAX XREF BUILDS 5"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.maxXRefBuilds.contains(5))
+    assert(!command.forceRebuild)
+    assert(!command.dryRun)
+  }
+
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with FORCE REBUILD MAX XREF BUILDS DRY RUN") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' FORCE REBUILD MAX XREF BUILDS 10 DRY RUN"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.forceRebuild)
+    assert(command.maxXRefBuilds.contains(10))
+    assert(command.dryRun)
+  }
+
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with WHERE clause and MAX XREF BUILDS") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' WHERE date = '2024-01-01' MAX XREF BUILDS 3"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.wherePredicates.nonEmpty)
+    assert(command.maxXRefBuilds.contains(3))
+    assert(!command.forceRebuild)
+    assert(!command.dryRun)
+  }
+
+  test("SQL parsing: MAX XREF BUILDS case insensitivity") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sqls = Seq(
+      "INDEX CROSSREFERENCES FOR '/path/to/table' max xref builds 5",
+      "INDEX CROSSREFERENCES FOR '/path/to/table' MAX XREF BUILDS 5",
+      "INDEX CROSSREFERENCES FOR '/path/to/table' Max Xref Builds 5"
+    )
+
+    sqls.foreach { sql =>
+      val parsedPlan = parser.parsePlan(sql)
+      assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand], s"Failed for SQL: $sql")
+      val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+      assert(command.maxXRefBuilds.contains(5), s"maxXRefBuilds not parsed correctly for SQL: $sql")
+    }
+  }
+
   test("command execution: DRY RUN should not modify anything") {
     withTempPath { tempDir =>
       val tablePath = tempDir.toString
@@ -176,7 +236,8 @@ class IndexCrossReferencesCommandTest extends TestBase {
           tableIdOption = None,
           wherePredicates = Seq.empty,
           forceRebuild = false,
-          dryRun = true
+          dryRun = true,
+          maxXRefBuilds = None
         )
 
         // Execute command
@@ -225,7 +286,8 @@ class IndexCrossReferencesCommandTest extends TestBase {
           tableIdOption = None,
           wherePredicates = Seq.empty,
           forceRebuild = false,
-          dryRun = false
+          dryRun = false,
+          maxXRefBuilds = None
         )
 
         // Execute command
@@ -252,7 +314,8 @@ class IndexCrossReferencesCommandTest extends TestBase {
       tableIdOption = None,
       wherePredicates = Seq.empty,
       forceRebuild = false,
-      dryRun = true
+      dryRun = true,
+      maxXRefBuilds = None
     )
 
     val output = command.output

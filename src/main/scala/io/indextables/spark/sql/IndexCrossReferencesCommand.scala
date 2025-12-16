@@ -55,6 +55,7 @@ import org.slf4j.LoggerFactory
  * Options:
  *   - WHERE clause: Build XRefs only for matching partitions
  *   - FORCE REBUILD: Rebuild all XRefs even if valid
+ *   - MAX XREF BUILDS n: Limit number of XRefs built per run
  *   - DRY RUN: Preview what would be built without executing
  */
 case class IndexCrossReferencesCommand(
@@ -63,7 +64,8 @@ case class IndexCrossReferencesCommand(
   tableIdOption: Option[TableIdentifier],
   wherePredicates: Seq[String],
   forceRebuild: Boolean,
-  dryRun: Boolean)
+  dryRun: Boolean,
+  maxXRefBuilds: Option[Int] = None)
     extends RunnableCommand
     with UnaryNode {
 
@@ -100,15 +102,21 @@ case class IndexCrossReferencesCommand(
     val normalizedPath = new Path(tablePath).toString
 
     logger.info(s"Starting INDEX CROSSREFERENCES for table: $normalizedPath")
-    logger.info(s"Parameters: forceRebuild=$forceRebuild, dryRun=$dryRun, wherePredicates=$wherePredicates")
+    logger.info(s"Parameters: forceRebuild=$forceRebuild, dryRun=$dryRun, maxXRefBuilds=$maxXRefBuilds, wherePredicates=$wherePredicates")
 
     try {
       // Create transaction log
       val transactionLog = TransactionLogFactory.create(new Path(normalizedPath), sparkSession)
 
       try {
-        // Create XRef build manager
-        val xrefConfig = XRefConfig.fromSparkSession(sparkSession)
+        // Create XRef build manager with optional SQL override for maxXRefsPerRun
+        val baseConfig = XRefConfig.fromSparkSession(sparkSession)
+        val xrefConfig = maxXRefBuilds match {
+          case Some(limit) =>
+            // Override config with SQL-specified limit
+            baseConfig.copy(build = baseConfig.build.copy(maxXRefsPerRun = Some(limit)))
+          case None => baseConfig
+        }
         val buildManager = new XRefBuildManager(
           tablePath = normalizedPath,
           transactionLog = transactionLog,
@@ -252,7 +260,8 @@ object IndexCrossReferencesCommand {
     tableIdOption: Option[TableIdentifier],
     wherePredicates: Seq[String],
     forceRebuild: Boolean,
-    dryRun: Boolean
+    dryRun: Boolean,
+    maxXRefBuilds: Option[Int]
   ): IndexCrossReferencesCommand =
     IndexCrossReferencesCommand(
       child = org.apache.spark.sql.catalyst.plans.logical.OneRowRelation(),
@@ -260,6 +269,7 @@ object IndexCrossReferencesCommand {
       tableIdOption = tableIdOption,
       wherePredicates = wherePredicates,
       forceRebuild = forceRebuild,
-      dryRun = dryRun
+      dryRun = dryRun,
+      maxXRefBuilds = maxXRefBuilds
     )
 }

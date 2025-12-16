@@ -249,6 +249,13 @@ private[xref] class XRefBuildRDD(
         logger.info(s"XRef ${partition.xrefId} built successfully: ${result.totalTerms} terms, ${result.sizeBytes} bytes")
         // Record XRef split access for future locality
         BroadcastSplitLocalityManager.recordSplitAccess(partition.outputPath, hostname)
+
+        // Report output metrics to Spark UI (consistent with normal write operations)
+        // This makes XRef builds visible in Spark UI metrics alongside regular data writes
+        if (org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(result.sizeBytes, result.numDocs)) {
+          logger.debug(s"Reported XRef output metrics: ${result.sizeBytes} bytes, ${result.numDocs} records")
+        }
+
         Iterator(result)
       case Failure(e) =>
         logger.error(s"Failed to build XRef ${partition.xrefId}: ${e.getMessage}", e)

@@ -56,6 +56,7 @@ statement
     | INDEX CROSSREFERENCES FOR (path=STRING | table=qualifiedName)
         (WHERE whereClause=predicateToken)?
         (FORCE REBUILD)?
+        (MAX XREF BUILDS maxXRefBuilds=INTEGER_VALUE)?
         (DRY RUN)?                                              #indexCrossReferences
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
@@ -98,7 +99,7 @@ nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | INDEX | CROSSREFERENCES | FORCE | REBUILD
-    | XREFS
+    | XREFS | XREF | BUILDS
     ;
 
 // Keywords (case-insensitive)
@@ -143,6 +144,8 @@ CROSSREFERENCES: [Cc][Rr][Oo][Ss][Ss][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee][Ss];
 FORCE: [Ff][Oo][Rr][Cc][Ee];
 REBUILD: [Rr][Ee][Bb][Uu][Ii][Ll][Dd];
 XREFS: [Xx][Rr][Ee][Ff][Ss];
+XREF: [Xx][Rr][Ee][Ff];
+BUILDS: [Bb][Uu][Ii][Ll][Dd][Ss];
 
 // Literals
 STRING

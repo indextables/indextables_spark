@@ -87,6 +87,8 @@ spark.indextables.xref.query.fallbackOnError: true (default: true, fallback to f
 
 // XRef Build Configuration
 spark.indextables.xref.build.maxSourceSplits: 1024 (default: 1024, max source splits per XRef)
+spark.indextables.xref.build.maxXRefsPerRun: <unlimited> (default: unlimited, max XRefs to build per INDEX CROSSREFERENCES run)
+spark.indextables.xref.build.batchSize: <auto> (default: defaultParallelism, XRefs per transaction batch - matches MERGE SPLITS granularity)
 spark.indextables.xref.build.includePositions: false (default: false, faster builds)
 spark.indextables.xref.build.parallelism: <auto> (default: auto)
 spark.indextables.xref.build.tempDirectoryPath: <auto> (default: falls back to indexWriter.tempDirectoryPath, then auto-detect)

@@ -64,6 +64,14 @@ case class XRefAutoIndexConfig(
  *   Maximum source splits per XRef (default: 1024).
  *   Applies to all XRef builds including INDEX CROSSREFERENCES SQL command and auto-indexing.
  *   Larger values create fewer, larger XRefs. Smaller values create more, smaller XRefs.
+ * @param maxXRefsPerRun
+ *   Maximum number of XRefs to build in a single INDEX CROSSREFERENCES or auto-index run (default: None = unlimited).
+ *   When set, limits how many XRefs are created per operation, allowing incremental XRef building
+ *   over multiple runs rather than one large operation. Remaining splits will be indexed in subsequent runs.
+ * @param batchSize
+ *   Number of XRefs to build and commit atomically per batch (default: None = 2x defaultParallelism).
+ *   Larger batches reduce transaction overhead but increase risk of partial failures.
+ *   Similar to MERGE SPLITS batch behavior for consistent transaction granularity.
  */
 case class XRefBuildConfig(
   includePositions: Boolean = false,
@@ -71,7 +79,9 @@ case class XRefBuildConfig(
   tempDirectoryPath: Option[String] = None,
   heapSize: Option[Long] = None,
   distributedBuild: Boolean = true,
-  maxSourceSplits: Int = 1024
+  maxSourceSplits: Int = 1024,
+  maxXRefsPerRun: Option[Int] = None,
+  batchSize: Option[Int] = None
 )
 
 /**
@@ -161,6 +171,8 @@ object XRefConfig {
     val BUILD_HEAP_SIZE          = "spark.indextables.xref.build.heapSize"
     val BUILD_DISTRIBUTED        = "spark.indextables.xref.build.distributed"
     val BUILD_MAX_SOURCE_SPLITS  = "spark.indextables.xref.build.maxSourceSplits"
+    val BUILD_MAX_XREFS_PER_RUN  = "spark.indextables.xref.build.maxXRefsPerRun"
+    val BUILD_BATCH_SIZE         = "spark.indextables.xref.build.batchSize"
 
     // Query configuration
     val QUERY_ENABLED           = "spark.indextables.xref.query.enabled"
@@ -203,7 +215,9 @@ object XRefConfig {
         maxSourceSplits = Option(conf.get(Keys.BUILD_MAX_SOURCE_SPLITS, null))
           .orElse(Option(conf.get(Keys.AUTO_INDEX_MAX_SOURCE_SPLITS, null)))
           .map(_.toInt)
-          .getOrElse(1024)
+          .getOrElse(1024),
+        maxXRefsPerRun = Option(conf.get(Keys.BUILD_MAX_XREFS_PER_RUN, null)).map(_.toInt),
+        batchSize = Option(conf.get(Keys.BUILD_BATCH_SIZE, null)).map(_.toInt)
       ),
       query = XRefQueryConfig(
         enabled = conf.get(Keys.QUERY_ENABLED, "true").toBoolean,
@@ -246,7 +260,9 @@ object XRefConfig {
         maxSourceSplits = Option(options.get(Keys.BUILD_MAX_SOURCE_SPLITS))
           .orElse(Option(options.get(Keys.AUTO_INDEX_MAX_SOURCE_SPLITS)))
           .map(_.toInt)
-          .getOrElse(1024)
+          .getOrElse(1024),
+        maxXRefsPerRun = Option(options.get(Keys.BUILD_MAX_XREFS_PER_RUN)).map(_.toInt),
+        batchSize = Option(options.get(Keys.BUILD_BATCH_SIZE)).map(_.toInt)
       ),
       query = XRefQueryConfig(
         enabled = options.getBoolean(Keys.QUERY_ENABLED, true),

@@ -2162,8 +2162,11 @@ INDEX CROSSREFERENCES FOR 's3://bucket/path' FORCE REBUILD;
 -- Preview what would be built without executing
 INDEX CROSSREFERENCES FOR 's3://bucket/path' DRY RUN;
 
+-- Limit number of XRefs built per run (for incremental building)
+INDEX CROSSREFERENCES FOR 's3://bucket/path' MAX XREF BUILDS 5;
+
 -- Combine options
-INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01' FORCE REBUILD DRY RUN;
+INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01' FORCE REBUILD MAX XREF BUILDS 10 DRY RUN;
 ```
 
 ##### Configuration Options
@@ -2183,6 +2186,7 @@ spark.conf.set("spark.indextables.xref.query.fallbackOnError", "true")  // Fallb
 
 // Build Configuration
 spark.conf.set("spark.indextables.xref.build.maxSourceSplits", "1024")  // Max source splits per XRef
+spark.conf.set("spark.indextables.xref.build.maxXRefsPerRun", "10")  // Max XRefs to build per run (unlimited by default)
 spark.conf.set("spark.indextables.xref.build.includePositions", "false")  // Faster builds without positions
 spark.conf.set("spark.indextables.xref.build.parallelism", "8")  // Build parallelism
 spark.conf.set("spark.indextables.xref.build.tempDirectoryPath", "/local_disk0/tmp")  // Falls back to indexWriter.tempDirectoryPath

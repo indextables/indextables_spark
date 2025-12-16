@@ -329,6 +329,16 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val forceRebuild = ctx.FORCE() != null && ctx.REBUILD() != null
       logger.debug(s"FORCE REBUILD flag: $forceRebuild")
 
+      // Extract MAX XREF BUILDS limit
+      val maxXRefBuilds = if (ctx.maxXRefBuilds != null) {
+        val value = ctx.maxXRefBuilds.getText.toInt
+        logger.debug(s"MAX XREF BUILDS: $value")
+        Some(value)
+      } else {
+        logger.debug("No MAX XREF BUILDS limit")
+        None
+      }
+
       // Extract DRY RUN flag
       val dryRun = ctx.DRY() != null && ctx.RUN() != null
       logger.debug(s"DRY RUN flag: $dryRun")
@@ -340,7 +350,8 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         tableIdOption,
         wherePredicates,
         forceRebuild,
-        dryRun
+        dryRun,
+        maxXRefBuilds
       )
       logger.debug(s"Created IndexCrossReferencesCommand: $result")
       result
