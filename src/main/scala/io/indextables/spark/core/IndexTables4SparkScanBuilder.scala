@@ -245,7 +245,8 @@ class IndexTables4SparkScanBuilder(
         options,
         config,
         Some(groupByColumns), // Pass GROUP BY columns for grouped aggregation
-        hasAggregations       // Indicate if this has aggregations or is just DISTINCT
+        hasAggregations,      // Indicate if this has aggregations or is just DISTINCT
+        Some(schema)          // Pass schema for proper type handling (fixes Date partition ClassCastException)
       )
     } else {
       // Regular GROUP BY scan using tantivy aggregations
@@ -378,7 +379,16 @@ class IndexTables4SparkScanBuilder(
 
   /** Create a specialized scan that returns count from transaction log. */
   private def createTransactionLogCountScan(aggregation: Aggregation, effectiveFilters: Array[Filter]): Scan =
-    new TransactionLogCountScan(sparkSession, transactionLog, effectiveFilters, options, config)
+    new TransactionLogCountScan(
+      sparkSession,
+      transactionLog,
+      effectiveFilters,
+      options,
+      config,
+      None,        // No GROUP BY columns for simple COUNT
+      true,        // Has aggregations
+      Some(schema) // Pass schema for proper type handling
+    )
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     import org.apache.spark.sql.sources._
