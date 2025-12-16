@@ -492,7 +492,7 @@ private[xref] object XRefConfigSerializable {
   def fromConfig(config: XRefConfig): XRefConfigSerializable = XRefConfigSerializable(
     autoIndexEnabled = config.autoIndex.enabled,
     autoIndexMinSplitsToTrigger = config.autoIndex.minSplitsToTrigger,
-    autoIndexMaxSourceSplits = config.autoIndex.maxSourceSplits,
+    autoIndexMaxSourceSplits = config.build.maxSourceSplits,
     autoIndexRebuildOnSourceChange = config.autoIndex.rebuildOnSourceChange,
     queryEnabled = config.query.enabled,
     queryMinSplitsForXRef = config.query.minSplitsForXRef,
@@ -670,6 +670,101 @@ object DistributedXRefBuilder {
       splitPath
     } else {
       new Path(tablePath, splitPath).toString
+    }
+  }
+
+  /**
+   * Build multiple XRef splits in parallel across executors.
+   *
+   * This method builds multiple XRefs concurrently by creating a single Spark job
+   * with one partition per XRef. This is much more efficient than building XRefs
+   * sequentially when you have many XRefs to build.
+   *
+   * @param tablePath Table root path
+   * @param xrefSpecs Sequence of (xrefId, outputPath, sourceSplits) tuples
+   * @param config XRef configuration
+   * @param sparkSession Spark session
+   * @param overrideConfigMap Optional pre-merged config map
+   * @return Map of xrefId -> XRefBuildOutput
+   */
+  def buildXRefsDistributedBatch(
+    tablePath: String,
+    xrefSpecs: Seq[(String, String, Seq[AddAction])],
+    config: XRefConfig,
+    sparkSession: SparkSession,
+    overrideConfigMap: Option[Map[String, String]] = None
+  ): Map[String, XRefBuildOutput] = {
+
+    if (xrefSpecs.isEmpty) {
+      return Map.empty
+    }
+
+    val sc = sparkSession.sparkContext
+
+    // Update locality information before scheduling
+    try {
+      BroadcastSplitLocalityManager.updateBroadcastLocality(sc)
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to update broadcast locality before XRef batch build: ${ex.getMessage}")
+    }
+
+    // Use override config map if provided, otherwise extract from hadoop + spark
+    val configMap = overrideConfigMap.getOrElse {
+      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+      ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    }
+
+    // Extract cloud configs
+    val awsConfig = CloudConfigExtractor.extractAwsConfig(sparkSession, overrideConfigMap)
+    val azureConfig = CloudConfigExtractor.extractAzureConfig(sparkSession, overrideConfigMap)
+
+    logger.info(s"Building ${xrefSpecs.size} XRefs in parallel batch")
+
+    // Step 1: Prepare all XRef builds with their footers
+    // For batch builds, we use the transaction log metadata directly (no distributed footer extraction)
+    val xrefBuilds = xrefSpecs.map { case (xrefId, outputPath, sourceSplits) =>
+      val footers = sourceSplits.map { split =>
+        val fullPath = resolveSplitPath(tablePath, split.path)
+        SourceSplitFooter(
+          path = fullPath,
+          splitId = fullPath.split('/').last.replace(".split", ""),
+          footerStartOffset = split.footerStartOffset.getOrElse(0L),
+          footerEndOffset = split.footerEndOffset.getOrElse(0L),
+          numRecords = split.numRecords.getOrElse(0L),
+          hostname = "driver" // Footer extracted on driver from transaction log
+        )
+      }
+
+      // Get preferred hosts based on source split locality
+      val preferredHosts = computePreferredHostsForBuild(footers)
+
+      logger.info(s"XRef $xrefId: ${sourceSplits.size} source splits, preferred hosts: ${preferredHosts.mkString(",")}")
+
+      (xrefId, outputPath, footers, preferredHosts)
+    }
+
+    // Step 2: Build all XRefs in parallel using a single RDD
+    val buildRDD = new XRefBuildRDD(sc, xrefBuilds, tablePath, config, configMap, awsConfig, azureConfig)
+
+    sc.setJobGroup(
+      "tantivy4spark-xref-batch-build",
+      s"XRef batch build: building ${xrefSpecs.size} XRefs in parallel",
+      interruptOnCancel = false
+    )
+
+    try {
+      // Collect results - each partition returns one XRefBuildOutput
+      val results = buildRDD.collect()
+
+      // Map results back to xrefIds
+      xrefSpecs.zip(results).map { case ((xrefId, _, _), output) =>
+        xrefId -> output
+      }.toMap
+    } finally {
+      sc.clearJobGroup()
     }
   }
 

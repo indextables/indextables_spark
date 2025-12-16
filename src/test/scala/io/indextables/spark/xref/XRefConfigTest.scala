@@ -38,6 +38,7 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     config.build.includePositions shouldBe false
     config.build.parallelism shouldBe None
     config.build.tempDirectoryPath shouldBe None
+    config.build.maxSourceSplits shouldBe 1024  // New canonical location
 
     // Query defaults
     config.query.enabled shouldBe true
@@ -70,7 +71,8 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     val options = new CaseInsensitiveStringMap(Map(
       "spark.indextables.xref.build.includePositions" -> "true",
       "spark.indextables.xref.build.parallelism" -> "8",
-      "spark.indextables.xref.build.tempDirectoryPath" -> "/tmp/xref-build"
+      "spark.indextables.xref.build.tempDirectoryPath" -> "/tmp/xref-build",
+      "spark.indextables.xref.build.maxSourceSplits" -> "512"
     ).asJava)
 
     val config = XRefConfig.fromOptions(options)
@@ -78,6 +80,36 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     config.build.includePositions shouldBe true
     config.build.parallelism shouldBe Some(8)
     config.build.tempDirectoryPath shouldBe Some("/tmp/xref-build")
+    config.build.maxSourceSplits shouldBe 512
+  }
+
+  test("fromOptions should use old autoIndex.maxSourceSplits key for backward compatibility") {
+    // When only the old key is provided, build.maxSourceSplits should use it
+    val options = new CaseInsensitiveStringMap(Map(
+      "spark.indextables.xref.autoIndex.maxSourceSplits" -> "768"
+    ).asJava)
+
+    val config = XRefConfig.fromOptions(options)
+
+    // New location should get value from old key
+    config.build.maxSourceSplits shouldBe 768
+    // Old location still works too
+    config.autoIndex.maxSourceSplits shouldBe 768
+  }
+
+  test("fromOptions should prefer new build.maxSourceSplits key over old autoIndex key") {
+    // When both keys are provided, new key takes precedence
+    val options = new CaseInsensitiveStringMap(Map(
+      "spark.indextables.xref.build.maxSourceSplits" -> "2048",
+      "spark.indextables.xref.autoIndex.maxSourceSplits" -> "512"
+    ).asJava)
+
+    val config = XRefConfig.fromOptions(options)
+
+    // New key takes precedence
+    config.build.maxSourceSplits shouldBe 2048
+    // Old location still gets its value
+    config.autoIndex.maxSourceSplits shouldBe 512
   }
 
   test("fromOptions should parse query configuration") {
@@ -136,6 +168,7 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     BUILD_INCLUDE_POSITIONS shouldBe "spark.indextables.xref.build.includePositions"
     BUILD_PARALLELISM shouldBe "spark.indextables.xref.build.parallelism"
     BUILD_TEMP_DIRECTORY shouldBe "spark.indextables.xref.build.tempDirectoryPath"
+    BUILD_MAX_SOURCE_SPLITS shouldBe "spark.indextables.xref.build.maxSourceSplits"
 
     QUERY_ENABLED shouldBe "spark.indextables.xref.query.enabled"
     QUERY_MIN_SPLITS shouldBe "spark.indextables.xref.query.minSplitsForXRef"
@@ -164,12 +197,14 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     val config = XRefBuildConfig(
       includePositions = true,
       parallelism = Some(4),
-      tempDirectoryPath = Some("/custom/temp")
+      tempDirectoryPath = Some("/custom/temp"),
+      maxSourceSplits = 2048
     )
 
     config.includePositions shouldBe true
     config.parallelism shouldBe Some(4)
     config.tempDirectoryPath shouldBe Some("/custom/temp")
+    config.maxSourceSplits shouldBe 2048
   }
 
   test("XRefQueryConfig should have correct case class properties") {

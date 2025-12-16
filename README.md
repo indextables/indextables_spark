@@ -2171,7 +2171,6 @@ INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01' FORCE REB
 ```scala
 // Auto-Index Configuration (disabled by default)
 spark.conf.set("spark.indextables.xref.autoIndex.enabled", "false")  // Enable automatic XRef building
-spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "1024")  // Max splits per XRef
 spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "10")  // Min splits to build XRef
 spark.conf.set("spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger", "10")  // Min uncovered splits
 spark.conf.set("spark.indextables.xref.autoIndex.minIntervalMs", "60000")  // 1 minute between auto-index runs
@@ -2183,6 +2182,7 @@ spark.conf.set("spark.indextables.xref.query.timeoutMs", "5000")  // XRef query 
 spark.conf.set("spark.indextables.xref.query.fallbackOnError", "true")  // Fallback to full scan on error
 
 // Build Configuration
+spark.conf.set("spark.indextables.xref.build.maxSourceSplits", "1024")  // Max source splits per XRef
 spark.conf.set("spark.indextables.xref.build.includePositions", "false")  // Faster builds without positions
 spark.conf.set("spark.indextables.xref.build.parallelism", "8")  // Build parallelism
 spark.conf.set("spark.indextables.xref.build.tempDirectoryPath", "/local_disk0/tmp")  // Falls back to indexWriter.tempDirectoryPath

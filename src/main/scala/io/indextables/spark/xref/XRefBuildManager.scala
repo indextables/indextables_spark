@@ -252,7 +252,7 @@ class XRefBuildManager(
     } else if (uncoveredSplits.nonEmpty) {
       // Uncovered splits: check if we can add them to existing XRef or need new one
       val canExpandExisting = validXRefs.exists { xref =>
-        xref.sourceSplitCount + uncoveredSplits.size <= config.autoIndex.maxSourceSplits
+        xref.sourceSplitCount + uncoveredSplits.size <= config.build.maxSourceSplits
       }
 
       if (canExpandExisting && validXRefs.nonEmpty) {
@@ -293,22 +293,116 @@ class XRefBuildManager(
 
   /**
    * Execute the XRef build based on the rebuild plan.
+   *
+   * When building multiple XRefs, uses parallel batch execution for better performance.
    */
   private def executeBuild(plan: XRefRebuildPlan): Seq[XRefBuildResult] = {
     val startTime = System.currentTimeMillis()
 
     try {
       // Group splits into chunks respecting maxSourceSplits limit
-      val splitGroups = plan.splitsToIndex.grouped(config.autoIndex.maxSourceSplits).toSeq
+      val splitGroups = plan.splitsToIndex.grouped(config.build.maxSourceSplits).toSeq
 
       logger.info(s"Building ${splitGroups.size} XRef(s) for ${plan.splitsToIndex.size} splits")
 
-      val results = splitGroups.zipWithIndex.map { case (splits, groupIndex) =>
-        buildSingleXRef(splits, groupIndex, plan.xrefsToRemove)
+      // Prepare XRef specifications for batch build
+      val xrefSpecs = splitGroups.map { splits =>
+        val xrefId = XRefStorageUtils.generateXRefId()
+        val xrefFullPath = XRefStorageUtils.getXRefFullPathString(tablePath, xrefId, config.storage.directory)
+        (xrefId, xrefFullPath, splits)
+      }
+
+      // Build all XRefs in parallel using batch method
+      logger.info(s"Starting parallel batch build of ${xrefSpecs.size} XRefs")
+      val buildOutputs = DistributedXRefBuilder.buildXRefsDistributedBatch(
+        tablePath = tablePath,
+        xrefSpecs = xrefSpecs,
+        config = config,
+        sparkSession = sparkSession,
+        overrideConfigMap = overrideConfigMap
+      )
+
+      val buildDuration = System.currentTimeMillis() - startTime
+
+      // Convert build outputs to results, collecting actions for atomic commit
+      val (addActions, results) = xrefSpecs.map { case (xrefId, xrefFullPath, splits) =>
+        buildOutputs.get(xrefId) match {
+          case Some(buildOutput) =>
+            val xrefRelativePath = XRefStorageUtils.getXRefRelativePath(xrefId, config.storage.directory)
+
+            // Create the AddXRefAction for transaction log
+            val addXRefAction = AddXRefAction(
+              path = xrefRelativePath,
+              xrefId = xrefId,
+              sourceSplitPaths = splits.map(_.path),
+              sourceSplitCount = splits.size,
+              size = buildOutput.sizeBytes,
+              totalTerms = buildOutput.totalTerms,
+              footerStartOffset = buildOutput.footerStartOffset,
+              footerEndOffset = buildOutput.footerEndOffset,
+              createdTime = System.currentTimeMillis(),
+              buildDurationMs = buildDuration / xrefSpecs.size, // Approximate per-XRef time
+              maxSourceSplits = config.build.maxSourceSplits,
+              docMappingJson = buildOutput.docMappingJson
+            )
+
+            logger.info(s"XRef $xrefId built successfully: ${splits.size} splits, ${buildOutput.totalTerms} terms, ${buildOutput.sizeBytes} bytes")
+
+            val result = XRefBuildResult(
+              tablePath = tablePath,
+              action = "created",
+              xrefPath = Some(xrefRelativePath),
+              sourceSplitsCount = splits.size,
+              totalTerms = buildOutput.totalTerms,
+              xrefSizeBytes = buildOutput.sizeBytes,
+              buildDurationMs = buildDuration / xrefSpecs.size
+            )
+
+            (Some(addXRefAction), result)
+
+          case None =>
+            logger.error(s"No build output returned for XRef $xrefId")
+            val result = XRefBuildResult(
+              tablePath = tablePath,
+              action = "error",
+              xrefPath = None,
+              sourceSplitsCount = splits.size,
+              totalTerms = 0,
+              xrefSizeBytes = 0,
+              buildDurationMs = buildDuration / xrefSpecs.size,
+              errorMessage = Some(s"No build output returned for XRef $xrefId")
+            )
+
+            (None, result)
+        }
+      }.unzip
+
+      // Collect all successful add actions
+      val xrefAddActions = addActions.flatten
+
+      // Only commit if we have successful builds
+      if (xrefAddActions.nonEmpty) {
+        // Create remove actions for old XRefs being replaced
+        val xrefRemoveActions = plan.xrefsToRemove.map(xref => RemoveXRefAction(
+          path = xref.path,
+          xrefId = xref.xrefId,
+          deletionTimestamp = System.currentTimeMillis(),
+          reason = "replaced"
+        ))
+
+        // Commit all XRef changes atomically in a single transaction
+        transactionLog.commitWithXRefUpdates(
+          dataRemoveActions = Seq.empty,
+          dataAddActions = Seq.empty,
+          xrefRemoveActions = xrefRemoveActions,
+          xrefAddActions = xrefAddActions
+        )
+
+        logger.info(s"Committed ${xrefAddActions.size} XRef(s) and ${xrefRemoveActions.size} removal(s) atomically")
       }
 
       val totalDuration = System.currentTimeMillis() - startTime
-      logger.info(s"XRef build completed in ${totalDuration}ms - ${results.count(_.action == "created")} created")
+      logger.info(s"XRef batch build completed in ${totalDuration}ms - ${results.count(_.action == "created")} created")
 
       results
     } catch {

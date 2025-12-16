@@ -60,13 +60,18 @@ case class XRefAutoIndexConfig(
  *   Whether to use distributed XRef build on executors (default: true)
  *   When enabled, XRef builds run on executors with locality preferences based on
  *   which nodes have the source splits cached.
+ * @param maxSourceSplits
+ *   Maximum source splits per XRef (default: 1024).
+ *   Applies to all XRef builds including INDEX CROSSREFERENCES SQL command and auto-indexing.
+ *   Larger values create fewer, larger XRefs. Smaller values create more, smaller XRefs.
  */
 case class XRefBuildConfig(
   includePositions: Boolean = false,
   parallelism: Option[Int] = None,
   tempDirectoryPath: Option[String] = None,
   heapSize: Option[Long] = None,
-  distributedBuild: Boolean = true
+  distributedBuild: Boolean = true,
+  maxSourceSplits: Int = 1024
 )
 
 /**
@@ -150,11 +155,12 @@ object XRefConfig {
     val AUTO_INDEX_REBUILD_ON_CHANGE         = "spark.indextables.xref.autoIndex.rebuildOnSourceChange"
 
     // Build configuration
-    val BUILD_INCLUDE_POSITIONS = "spark.indextables.xref.build.includePositions"
-    val BUILD_PARALLELISM       = "spark.indextables.xref.build.parallelism"
-    val BUILD_TEMP_DIRECTORY    = "spark.indextables.xref.build.tempDirectoryPath"
-    val BUILD_HEAP_SIZE         = "spark.indextables.xref.build.heapSize"
-    val BUILD_DISTRIBUTED       = "spark.indextables.xref.build.distributed"
+    val BUILD_INCLUDE_POSITIONS  = "spark.indextables.xref.build.includePositions"
+    val BUILD_PARALLELISM        = "spark.indextables.xref.build.parallelism"
+    val BUILD_TEMP_DIRECTORY     = "spark.indextables.xref.build.tempDirectoryPath"
+    val BUILD_HEAP_SIZE          = "spark.indextables.xref.build.heapSize"
+    val BUILD_DISTRIBUTED        = "spark.indextables.xref.build.distributed"
+    val BUILD_MAX_SOURCE_SPLITS  = "spark.indextables.xref.build.maxSourceSplits"
 
     // Query configuration
     val QUERY_ENABLED           = "spark.indextables.xref.query.enabled"
@@ -192,7 +198,12 @@ object XRefConfig {
         parallelism = Option(conf.get(Keys.BUILD_PARALLELISM, null)).map(_.toInt),
         tempDirectoryPath = Option(conf.get(Keys.BUILD_TEMP_DIRECTORY, null)),
         heapSize = Option(conf.get(Keys.BUILD_HEAP_SIZE, null)).map(parseSize),
-        distributedBuild = conf.get(Keys.BUILD_DISTRIBUTED, "true").toBoolean
+        distributedBuild = conf.get(Keys.BUILD_DISTRIBUTED, "true").toBoolean,
+        // New location with fallback to old autoIndex location for backward compatibility
+        maxSourceSplits = Option(conf.get(Keys.BUILD_MAX_SOURCE_SPLITS, null))
+          .orElse(Option(conf.get(Keys.AUTO_INDEX_MAX_SOURCE_SPLITS, null)))
+          .map(_.toInt)
+          .getOrElse(1024)
       ),
       query = XRefQueryConfig(
         enabled = conf.get(Keys.QUERY_ENABLED, "true").toBoolean,
@@ -230,7 +241,12 @@ object XRefConfig {
         parallelism = Option(options.get(Keys.BUILD_PARALLELISM)).map(_.toInt),
         tempDirectoryPath = Option(options.get(Keys.BUILD_TEMP_DIRECTORY)),
         heapSize = Option(options.get(Keys.BUILD_HEAP_SIZE)).map(parseSize),
-        distributedBuild = options.getBoolean(Keys.BUILD_DISTRIBUTED, true)
+        distributedBuild = options.getBoolean(Keys.BUILD_DISTRIBUTED, true),
+        // New location with fallback to old autoIndex location for backward compatibility
+        maxSourceSplits = Option(options.get(Keys.BUILD_MAX_SOURCE_SPLITS))
+          .orElse(Option(options.get(Keys.AUTO_INDEX_MAX_SOURCE_SPLITS)))
+          .map(_.toInt)
+          .getOrElse(1024)
       ),
       query = XRefQueryConfig(
         enabled = options.getBoolean(Keys.QUERY_ENABLED, true),

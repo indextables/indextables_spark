@@ -1055,7 +1055,7 @@ class XRefComprehensiveIntegrationTest extends TestBase {
         // Configure for small splits and set max source splits limit
         spark.conf.set("spark.indextables.indexWriter.batchSize", "50")
         spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "2")
-        spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "20") // Allow up to 20 splits per XRef
+        spark.conf.set("spark.indextables.xref.build.maxSourceSplits", "20") // Allow up to 20 splits per XRef
         spark.conf.set("spark.indextables.xref.query.enabled", "true")
         spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "2")
 
@@ -1315,7 +1315,7 @@ class XRefComprehensiveIntegrationTest extends TestBase {
       } finally {
         spark.conf.unset("spark.indextables.indexWriter.batchSize")
         spark.conf.unset("spark.indextables.xref.autoIndex.minSplitsToTrigger")
-        spark.conf.unset("spark.indextables.xref.autoIndex.maxSourceSplits")
+        spark.conf.unset("spark.indextables.xref.build.maxSourceSplits")
         spark.conf.unset("spark.indextables.xref.query.enabled")
         spark.conf.unset("spark.indextables.xref.query.minSplitsForXRef")
       }
@@ -1334,7 +1334,7 @@ class XRefComprehensiveIntegrationTest extends TestBase {
 
       // Configure XRef
       spark.conf.set("spark.indextables.xref.autoIndex.minSplitsToTrigger", "3")
-      spark.conf.set("spark.indextables.xref.autoIndex.maxSourceSplits", "100")
+      spark.conf.set("spark.indextables.xref.build.maxSourceSplits", "100")
       spark.conf.set("spark.indextables.xref.query.enabled", "true")
       spark.conf.set("spark.indextables.xref.query.minSplitsForXRef", "2")
       spark.conf.set("spark.indextables.indexWriter.batchSize", "25")
@@ -1425,7 +1425,7 @@ class XRefComprehensiveIntegrationTest extends TestBase {
       } finally {
         spark.conf.unset("spark.indextables.indexWriter.batchSize")
         spark.conf.unset("spark.indextables.xref.autoIndex.minSplitsToTrigger")
-        spark.conf.unset("spark.indextables.xref.autoIndex.maxSourceSplits")
+        spark.conf.unset("spark.indextables.xref.build.maxSourceSplits")
         spark.conf.unset("spark.indextables.xref.query.enabled")
         spark.conf.unset("spark.indextables.xref.query.minSplitsForXRef")
       }
