@@ -29,6 +29,7 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{AddAction, TransactionLog}
+import io.indextables.spark.xref.{XRefAutoIndexer, XRefConfig}
 import org.slf4j.LoggerFactory
 
 /**
@@ -302,6 +303,9 @@ class IndexTables4SparkStandardWrite(
 
       // POST-COMMIT EVALUATION: Check if purge-on-write should run
       evaluateAndExecutePurgeOnWrite(writeOptions, mergeWasExecuted = mergeExecuted)
+
+      // POST-COMMIT EVALUATION: Check if XRef auto-indexing should run
+      evaluateAndExecuteXRefAutoIndex(addActions)
     } finally
       // Always clear thread-local to prevent memory leaks
       TransactionLog.clearWriteOptions()
@@ -753,6 +757,56 @@ class IndexTables4SparkStandardWrite(
       case e: Exception =>
         // Don't fail the write if purge fails
         logger.warn(s"Failed to execute PURGE ORPHANED SPLITS: ${e.getMessage}", e)
+    }
+
+  /**
+   * Evaluate if XRef auto-indexing should run after transaction commit.
+   *
+   * This is a POST-COMMIT evaluation that:
+   *   1. Checks if XRef auto-indexing is enabled
+   *   2. Checks if enough uncovered splits exist to trigger indexing
+   *   3. Invokes XRefAutoIndexer to build XRef indexes
+   *
+   * @param newlyAddedSplits
+   *   Splits that were just committed
+   */
+  private def evaluateAndExecuteXRefAutoIndex(newlyAddedSplits: Seq[AddAction]): Unit =
+    try {
+      val spark = org.apache.spark.sql.SparkSession.active
+      val xrefConfig = XRefConfig.fromSparkSession(spark)
+
+      if (!xrefConfig.autoIndex.enabled) {
+        logger.debug("XRef auto-indexing is disabled, skipping post-commit evaluation")
+        return
+      }
+
+      logger.info("📑 XRef auto-indexing enabled - evaluating if indexing should run...")
+
+      // Create merged config map with proper precedence: hadoop < spark < write options
+      // This ensures cloud credentials and other write-time settings are available
+      val optionsFromWrite = serializedOptions
+        .filter { case (key, _) => key.startsWith("spark.indextables.") }
+      val mergedConfigMap = serializedHadoopConf ++ optionsFromWrite
+
+      logger.debug(s"Passing ${mergedConfigMap.size} config entries to XRef auto-indexer")
+
+      val autoIndexer = new XRefAutoIndexer(transactionLog, xrefConfig, spark, Some(mergedConfigMap))
+      val result = autoIndexer.onCommit(newlyAddedSplits)
+
+      if (result.triggered) {
+        if (result.error.isDefined) {
+          logger.warn(s"⚠️  XRef auto-indexing failed: ${result.error.get}")
+        } else {
+          logger.info(s"✅ XRef auto-indexing completed: ${result.xrefsBuilt} XRefs built, ${result.splitsIndexed} splits indexed in ${result.durationMs}ms")
+        }
+      } else {
+        logger.info(s"⏭️  XRef auto-indexing skipped: ${result.reason}")
+      }
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the write operation if XRef auto-indexing fails
+        logger.warn(s"Failed to evaluate XRef auto-indexing: ${e.getMessage}", e)
     }
 
 }

@@ -27,6 +27,7 @@ import io.indextables.spark.sql.{
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
   FlushIndexTablesCacheCommand,
+  IndexCrossReferencesCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
   PurgeOrphanedSplitsCommand,
@@ -286,6 +287,70 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     }
   }
 
+  override def visitIndexCrossReferences(ctx: IndexCrossReferencesContext): LogicalPlan = {
+    logger.debug(s"visitIndexCrossReferences called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val (pathOption, tableIdOption) = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        (Some(pathStr), None)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        val tableIdentifier = if (tableId.length == 1) {
+          Some(TableIdentifier(tableId.head))
+        } else if (tableId.length == 2) {
+          Some(TableIdentifier(tableId(1), Some(tableId.head)))
+        } else {
+          throw new IllegalArgumentException(s"Invalid table identifier: ${tableId.mkString(".")}")
+        }
+        (None, tableIdentifier)
+      } else {
+        logger.error("Neither path nor table found")
+        throw new IllegalArgumentException("INDEX CROSSREFERENCES requires either a path or table identifier")
+      }
+
+      // Extract WHERE clause
+      val wherePredicates = if (ctx.whereClause != null) {
+        val originalText = extractRawText(ctx.whereClause)
+        logger.debug(s"Found WHERE clause: $originalText")
+        Seq(originalText)
+      } else {
+        logger.debug("No WHERE clause")
+        Seq.empty
+      }
+
+      // Extract FORCE REBUILD flag
+      val forceRebuild = ctx.FORCE() != null && ctx.REBUILD() != null
+      logger.debug(s"FORCE REBUILD flag: $forceRebuild")
+
+      // Extract DRY RUN flag
+      val dryRun = ctx.DRY() != null && ctx.RUN() != null
+      logger.debug(s"DRY RUN flag: $dryRun")
+
+      // Create command
+      logger.debug(s"Creating IndexCrossReferencesCommand with pathOption=$pathOption, tableIdOption=$tableIdOption")
+      val result = IndexCrossReferencesCommand.apply(
+        pathOption,
+        tableIdOption,
+        wherePredicates,
+        forceRebuild,
+        dryRun
+      )
+      logger.debug(s"Created IndexCrossReferencesCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitIndexCrossReferences: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
   override def visitFlushIndexTablesCache(ctx: FlushIndexTablesCacheContext): LogicalPlan =
     FlushIndexTablesCacheCommand()
 
@@ -366,12 +431,17 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       val includeAll = ctx.INCLUDE() != null && ctx.ALL() != null
       logger.debug(s"INCLUDE ALL flag: $includeAll")
 
+      // Extract XREFS flag
+      val xrefsOnly = ctx.XREFS() != null
+      logger.debug(s"XREFS only flag: $xrefsOnly")
+
       // Create command (use OneRowRelation as child - standard pattern for commands that don't have logical plan children)
-      logger.debug(s"Creating DescribeTransactionLogCommand with tablePath=$tablePath, includeAll=$includeAll")
+      logger.debug(s"Creating DescribeTransactionLogCommand with tablePath=$tablePath, includeAll=$includeAll, xrefsOnly=$xrefsOnly")
       val result = DescribeTransactionLogCommand(
         child = org.apache.spark.sql.catalyst.plans.logical.OneRowRelation(),
         tablePath = tablePath,
-        includeAll = includeAll
+        includeAll = includeAll,
+        xrefsOnly = xrefsOnly
       )
       logger.debug(s"Created DescribeTransactionLogCommand: $result")
       result

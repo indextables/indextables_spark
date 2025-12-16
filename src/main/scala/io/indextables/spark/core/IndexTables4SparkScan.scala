@@ -35,7 +35,7 @@ import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
 import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
 import io.indextables.spark.util.TimestampUtils
-// Removed unused imports
+import io.indextables.spark.xref.{XRefConfig, XRefQueryRouter}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScan(
@@ -114,8 +114,12 @@ class IndexTables4SparkScan(
     }
 
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
-    val filteredActions = applyDataSkipping(addActions, pushedFilters)
-    logger.debug(s"PLAN PARTITIONS: After data skipping: ${filteredActions.length} splits remaining (started with ${addActions.length})")
+    val dataSkippedActions = applyDataSkipping(addActions, pushedFilters)
+    logger.debug(s"PLAN PARTITIONS: After data skipping: ${dataSkippedActions.length} splits remaining (started with ${addActions.length})")
+
+    // Apply XRef query routing to further filter splits
+    val filteredActions = applyXRefQueryRouting(dataSkippedActions, pushedFilters)
+    logger.debug(s"PLAN PARTITIONS: After XRef routing: ${filteredActions.length} splits remaining")
 
     // Check if pre-warm is enabled
     val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
@@ -311,6 +315,53 @@ class IndexTables4SparkScan(
     }
 
     finalActions
+  }
+
+  /**
+   * Apply XRef query routing to filter candidate splits based on cross-reference indexes.
+   *
+   * XRef indexes provide a fast way to identify which splits may contain documents matching a query without opening each
+   * split. This can provide 10-100x speedup for selective queries on large tables.
+   *
+   * @param candidateSplits
+   *   Splits after partition pruning and data skipping
+   * @param filters
+   *   Pushed down filters
+   * @return
+   *   Filtered splits that may contain matching documents
+   */
+  private def applyXRefQueryRouting(candidateSplits: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] = {
+    val xrefConfig = XRefConfig.fromSparkSession(sparkSession)
+
+    // Quick check if XRef query is disabled or not enough splits
+    if (!xrefConfig.query.enabled) {
+      logger.debug("XRef query routing disabled by configuration")
+      return candidateSplits
+    }
+
+    if (candidateSplits.size < xrefConfig.query.minSplitsForXRef) {
+      logger.debug(s"Not enough splits for XRef routing (${candidateSplits.size} < ${xrefConfig.query.minSplitsForXRef})")
+      return candidateSplits
+    }
+
+    try {
+      // Pass the pre-merged config map to XRefQueryRouter for cloud credential handling
+      val router = new XRefQueryRouter(transactionLog, xrefConfig, sparkSession, config)
+      val result = router.routeQuery(candidateSplits, filters, indexQueryFilters)
+
+      if (result.usedXRef) {
+        logger.info(s"XRef routing: ${result.skippedSplits} splits skipped via XRef pre-scan " +
+          s"(${result.xrefsQueried} XRefs queried in ${result.xrefQueryTimeMs}ms)")
+      } else {
+        logger.debug(s"XRef routing not used: ${result.fallbackReason.getOrElse("unknown reason")}")
+      }
+
+      result.candidateSplits
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"XRef query routing failed, falling back to full scan: ${ex.getMessage}", ex)
+        candidateSplits
+    }
   }
 
   // TODO: Fix options flow from read operations to scan for proper field type detection

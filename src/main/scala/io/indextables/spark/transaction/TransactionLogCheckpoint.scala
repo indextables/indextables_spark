@@ -125,11 +125,13 @@ class TransactionLogCheckpoint(
       val content = new StringBuilder()
       allActions.foreach { action =>
         val wrappedAction = action match {
-          case protocol: ProtocolAction => Map("protocol" -> protocol)
-          case metadata: MetadataAction => Map("metaData" -> metadata)
-          case add: AddAction           => Map("add" -> add)
-          case remove: RemoveAction     => Map("remove" -> remove)
-          case skip: SkipAction         => Map("mergeskip" -> skip)
+          case protocol: ProtocolAction     => Map("protocol" -> protocol)
+          case metadata: MetadataAction     => Map("metaData" -> metadata)
+          case add: AddAction               => Map("add" -> add)
+          case remove: RemoveAction         => Map("remove" -> remove)
+          case skip: SkipAction             => Map("mergeskip" -> skip)
+          case addXRef: AddXRefAction       => Map("addXRef" -> addXRef)
+          case removeXRef: RemoveXRefAction => Map("removeXRef" -> removeXRef)
         }
 
         val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)

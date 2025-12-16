@@ -24,6 +24,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{AddAction, TransactionLog}
+import io.indextables.spark.xref.{XRefAutoIndexer, XRefConfig}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkBatchWrite(
