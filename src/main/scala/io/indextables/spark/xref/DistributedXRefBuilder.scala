@@ -692,6 +692,7 @@ object DistributedXRefBuilder {
    * @param config XRef configuration
    * @param sparkSession Spark session
    * @param overrideConfigMap Optional pre-merged config map
+   * @param batchInfo Optional (batchNum, totalBatches) for Spark UI job labeling
    * @return Map of xrefId -> XRefBuildOutput
    */
   def buildXRefsDistributedBatch(
@@ -699,7 +700,8 @@ object DistributedXRefBuilder {
     xrefSpecs: Seq[(String, String, Seq[AddAction])],
     config: XRefConfig,
     sparkSession: SparkSession,
-    overrideConfigMap: Option[Map[String, String]] = None
+    overrideConfigMap: Option[Map[String, String]] = None,
+    batchInfo: Option[(Int, Int)] = None
   ): Map[String, XRefBuildOutput] = {
 
     if (xrefSpecs.isEmpty) {
@@ -756,11 +758,22 @@ object DistributedXRefBuilder {
     // Step 2: Build all XRefs in parallel using a single RDD
     val buildRDD = new XRefBuildRDD(sc, xrefBuilds, tablePath, config, configMap, awsConfig, azureConfig)
 
-    sc.setJobGroup(
-      "tantivy4spark-xref-batch-build",
-      s"XRef batch build: building ${xrefSpecs.size} XRefs in parallel",
-      interruptOnCancel = false
-    )
+    // Set job group with batch labeling (like MERGE SPLITS) for Spark UI visibility
+    val (jobGroup, jobDescription) = batchInfo match {
+      case Some((batchNum, totalBatches)) =>
+        val totalSplits = xrefSpecs.map(_._3.size).sum
+        (
+          s"tantivy4spark-xref-batch-$batchNum",
+          s"INDEX CROSSREFERENCES Batch $batchNum/$totalBatches: ${xrefSpecs.size} XRefs from $totalSplits source splits"
+        )
+      case None =>
+        (
+          "tantivy4spark-xref-batch-build",
+          s"XRef batch build: building ${xrefSpecs.size} XRefs in parallel"
+        )
+    }
+
+    sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
 
     try {
       // Collect results - each partition returns one XRefBuildOutput

@@ -345,13 +345,14 @@ class XRefBuildManager(
 
         logger.info(s"Starting transaction batch $batchNum/${xrefBatches.size}: ${batch.size} XRefs")
 
-        // Build all XRefs in this batch in parallel
+        // Build all XRefs in this batch in parallel (with batch labeling for Spark UI)
         val buildOutputs = DistributedXRefBuilder.buildXRefsDistributedBatch(
           tablePath = tablePath,
           xrefSpecs = batch,
           config = config,
           sparkSession = sparkSession,
-          overrideConfigMap = overrideConfigMap
+          overrideConfigMap = overrideConfigMap,
+          batchInfo = Some((batchNum, xrefBatches.size))
         )
 
         val batchBuildDuration = System.currentTimeMillis() - batchStartTime
