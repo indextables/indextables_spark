@@ -164,11 +164,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.25.7: XRef (Cross-Reference) indexing API support -->
+        <!-- Version 0.25.8: XRef (Cross-Reference) indexing API support -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.25.7</version>
+            <version>0.25.8</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
