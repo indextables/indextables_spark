@@ -40,6 +40,8 @@ import org.slf4j.LoggerFactory
  * {{{
  *   INDEX CROSSREFERENCES FOR '/path/to/table'
  *   INDEX CROSSREFERENCES FOR '/path/to/table' WHERE date = '2024-01-01'
+ *   INDEX CROSSREFERENCES FOR '/path/to/table' FILTER TYPE FUSE8
+ *   INDEX CROSSREFERENCES FOR '/path/to/table' FILTER TYPE FUSE16
  *   INDEX CROSSREFERENCES FOR '/path/to/table' FORCE REBUILD
  *   INDEX CROSSREFERENCES FOR '/path/to/table' DRY RUN
  *   INDEX CROSSREFERENCES FOR my_table FORCE REBUILD DRY RUN
@@ -54,6 +56,9 @@ import org.slf4j.LoggerFactory
  *
  * Options:
  *   - WHERE clause: Build XRefs only for matching partitions
+ *   - FILTER TYPE: Select Binary Fuse filter type (FUSE8 or FUSE16)
+ *     - FUSE8 (default): ~0.39% false positive rate, ~1.24 bytes/key
+ *     - FUSE16: ~0.0015% false positive rate, ~2.24 bytes/key (260x fewer false positives)
  *   - FORCE REBUILD: Rebuild all XRefs even if valid
  *   - MAX XREF BUILDS n: Limit number of XRefs built per run
  *   - DRY RUN: Preview what would be built without executing
@@ -63,6 +68,7 @@ case class IndexCrossReferencesCommand(
   pathOption: Option[String],
   tableIdOption: Option[TableIdentifier],
   wherePredicates: Seq[String],
+  filterType: Option[String],
   forceRebuild: Boolean,
   dryRun: Boolean,
   maxXRefBuilds: Option[Int] = None)
@@ -102,21 +108,31 @@ case class IndexCrossReferencesCommand(
     val normalizedPath = new Path(tablePath).toString
 
     logger.info(s"Starting INDEX CROSSREFERENCES for table: $normalizedPath")
-    logger.info(s"Parameters: forceRebuild=$forceRebuild, dryRun=$dryRun, maxXRefBuilds=$maxXRefBuilds, wherePredicates=$wherePredicates")
+    logger.info(s"Parameters: forceRebuild=$forceRebuild, dryRun=$dryRun, maxXRefBuilds=$maxXRefBuilds, filterType=$filterType, wherePredicates=$wherePredicates")
 
     try {
       // Create transaction log
       val transactionLog = TransactionLogFactory.create(new Path(normalizedPath), sparkSession)
 
       try {
-        // Create XRef build manager with optional SQL override for maxXRefsPerRun
+        // Create XRef build manager with optional SQL overrides
+        import io.indextables.spark.xref.XRefFilterType
         val baseConfig = XRefConfig.fromSparkSession(sparkSession)
-        val xrefConfig = maxXRefBuilds match {
-          case Some(limit) =>
-            // Override config with SQL-specified limit
-            baseConfig.copy(build = baseConfig.build.copy(maxXRefsPerRun = Some(limit)))
-          case None => baseConfig
+
+        // Apply SQL-specified overrides
+        var buildConfig = baseConfig.build
+
+        // Override maxXRefsPerRun if specified in SQL
+        maxXRefBuilds.foreach { limit =>
+          buildConfig = buildConfig.copy(maxXRefsPerRun = Some(limit))
         }
+
+        // Override filterType if specified in SQL (FUSE8 or FUSE16)
+        filterType.foreach { ft =>
+          buildConfig = buildConfig.copy(filterType = XRefFilterType.fromString(ft))
+        }
+
+        val xrefConfig = baseConfig.copy(build = buildConfig)
         val buildManager = new XRefBuildManager(
           tablePath = normalizedPath,
           transactionLog = transactionLog,
@@ -259,6 +275,7 @@ object IndexCrossReferencesCommand {
     pathOption: Option[String],
     tableIdOption: Option[TableIdentifier],
     wherePredicates: Seq[String],
+    filterType: Option[String],
     forceRebuild: Boolean,
     dryRun: Boolean,
     maxXRefBuilds: Option[Int]
@@ -268,6 +285,7 @@ object IndexCrossReferencesCommand {
       pathOption = pathOption,
       tableIdOption = tableIdOption,
       wherePredicates = wherePredicates,
+      filterType = filterType,
       forceRebuild = forceRebuild,
       dryRun = dryRun,
       maxXRefBuilds = maxXRefBuilds

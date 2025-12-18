@@ -286,13 +286,19 @@ private[xref] class XRefBuildRDD(
       // Normalize paths for tantivy4java
       val normalizedOutputPath = io.indextables.spark.util.ProtocolNormalizer.normalizeAllProtocols(outputPath)
 
-      // Build XRefBuildConfig
+      // Build XRefBuildConfig (FuseXRef - Binary Fuse Filter implementation)
+      // Note: FuseXRef doesn't support includePositions - positions are not stored in Fuse filters
+      val filterType = config.build.filterType match {
+        case XRefFilterType.Fuse8  => TantivyXRefBuildConfig.FilterType.FUSE8
+        case XRefFilterType.Fuse16 => TantivyXRefBuildConfig.FilterType.FUSE16
+      }
+
       val configBuilder = TantivyXRefBuildConfig.builder()
         .xrefId(xrefId)
         .indexUid(UUID.randomUUID().toString)
-        .includePositions(config.build.includePositions)
         .tempDirectoryPath(tempDir.getAbsolutePath)
         .heapSize(heapSize)
+        .filterType(filterType)
 
       // Add source splits
       sourceSplits.foreach { footer =>
@@ -445,6 +451,9 @@ private[xref] class XRefBuildRDD(
 
 /**
  * Serializable wrapper for XRefConfig.
+ *
+ * Note: FuseXRef (Binary Fuse Filter) implementation doesn't support includePositions
+ * as positions are not stored in Fuse filters.
  */
 private[xref] case class XRefConfigSerializable(
   autoIndexEnabled: Boolean,
@@ -456,10 +465,10 @@ private[xref] case class XRefConfigSerializable(
   queryTimeoutMs: Int,
   queryFallbackOnError: Boolean,
   queryDistributedSearch: Boolean,
-  buildIncludePositions: Boolean,
   buildTempDirectoryPath: Option[String],
   buildHeapSize: Option[Long],
   buildDistributedBuild: Boolean,
+  buildFilterType: String, // Serialized as string for Spark serialization
   storageDirectory: String,
   localCacheEnabled: Boolean,
   localCacheDirectory: Option[String]
@@ -480,10 +489,10 @@ private[xref] case class XRefConfigSerializable(
       distributedSearch = queryDistributedSearch
     ),
     build = XRefBuildConfig(
-      includePositions = buildIncludePositions,
       tempDirectoryPath = buildTempDirectoryPath,
       heapSize = buildHeapSize,
-      distributedBuild = buildDistributedBuild
+      distributedBuild = buildDistributedBuild,
+      filterType = XRefFilterType.fromString(buildFilterType)
     ),
     storage = XRefStorageConfig(
       directory = storageDirectory
@@ -506,10 +515,10 @@ private[xref] object XRefConfigSerializable {
     queryTimeoutMs = config.query.timeoutMs,
     queryFallbackOnError = config.query.fallbackOnError,
     queryDistributedSearch = config.query.distributedSearch,
-    buildIncludePositions = config.build.includePositions,
     buildTempDirectoryPath = config.build.tempDirectoryPath,
     buildHeapSize = config.build.heapSize,
     buildDistributedBuild = config.build.distributedBuild,
+    buildFilterType = config.build.filterType.value,
     storageDirectory = config.storage.directory,
     localCacheEnabled = config.localCache.enabled,
     localCacheDirectory = config.localCache.directory

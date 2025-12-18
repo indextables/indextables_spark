@@ -34,8 +34,7 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     config.autoIndex.minSplitsToTrigger shouldBe 10
     config.autoIndex.rebuildOnSourceChange shouldBe true
 
-    // Build defaults
-    config.build.includePositions shouldBe false
+    // Build defaults (note: includePositions removed in FuseXRef migration)
     config.build.parallelism shouldBe None
     config.build.tempDirectoryPath shouldBe None
     config.build.maxSourceSplits shouldBe 1024  // New canonical location
@@ -69,7 +68,6 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
 
   test("fromOptions should parse build configuration") {
     val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.xref.build.includePositions" -> "true",
       "spark.indextables.xref.build.parallelism" -> "8",
       "spark.indextables.xref.build.tempDirectoryPath" -> "/tmp/xref-build",
       "spark.indextables.xref.build.maxSourceSplits" -> "512"
@@ -77,7 +75,7 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
 
     val config = XRefConfig.fromOptions(options)
 
-    config.build.includePositions shouldBe true
+    // Note: includePositions was removed in FuseXRef migration
     config.build.parallelism shouldBe Some(8)
     config.build.tempDirectoryPath shouldBe Some("/tmp/xref-build")
     config.build.maxSourceSplits shouldBe 512
@@ -165,7 +163,7 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
     AUTO_INDEX_MIN_SPLITS shouldBe "spark.indextables.xref.autoIndex.minSplitsToTrigger"
     AUTO_INDEX_REBUILD_ON_CHANGE shouldBe "spark.indextables.xref.autoIndex.rebuildOnSourceChange"
 
-    BUILD_INCLUDE_POSITIONS shouldBe "spark.indextables.xref.build.includePositions"
+    // Note: BUILD_INCLUDE_POSITIONS was removed in FuseXRef migration
     BUILD_PARALLELISM shouldBe "spark.indextables.xref.build.parallelism"
     BUILD_TEMP_DIRECTORY shouldBe "spark.indextables.xref.build.tempDirectoryPath"
     BUILD_MAX_SOURCE_SPLITS shouldBe "spark.indextables.xref.build.maxSourceSplits"
@@ -194,14 +192,13 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("XRefBuildConfig should have correct case class properties") {
+    // Note: includePositions was removed in FuseXRef migration
     val config = XRefBuildConfig(
-      includePositions = true,
       parallelism = Some(4),
       tempDirectoryPath = Some("/custom/temp"),
       maxSourceSplits = 2048
     )
 
-    config.includePositions shouldBe true
     config.parallelism shouldBe Some(4)
     config.tempDirectoryPath shouldBe Some("/custom/temp")
     config.maxSourceSplits shouldBe 2048
@@ -232,15 +229,16 @@ class XRefConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("XRefConfig should compose all sub-configs correctly") {
+    // Note: includePositions was removed in FuseXRef migration
     val config = XRefConfig(
       autoIndex = XRefAutoIndexConfig(enabled = false),
-      build = XRefBuildConfig(includePositions = true),
+      build = XRefBuildConfig(distributedBuild = true),
       query = XRefQueryConfig(minSplitsForXRef = 64),
       storage = XRefStorageConfig(directory = "_custom")
     )
 
     config.autoIndex.enabled shouldBe false
-    config.build.includePositions shouldBe true
+    config.build.distributedBuild shouldBe true
     config.query.minSplitsForXRef shouldBe 64
     config.storage.directory shouldBe "_custom"
 

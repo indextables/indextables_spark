@@ -21,6 +21,55 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /**
+ * Filter type for XRef Binary Fuse filters.
+ *
+ * Controls the trade-off between filter size and false positive rate (FPR).
+ */
+sealed trait XRefFilterType {
+  def value: String
+  def falsePositiveRate: Double
+  def bytesPerKey: Double
+}
+
+object XRefFilterType {
+  /**
+   * 8-bit fingerprints (~1.24 bytes per key).
+   * - False positive rate: ~0.39% (1/256)
+   * - Best for: Most use cases, good balance of size and accuracy
+   */
+  case object Fuse8 extends XRefFilterType {
+    val value = "fuse8"
+    val falsePositiveRate = 1.0 / 256   // ~0.39%
+    val bytesPerKey = 1.24
+  }
+
+  /**
+   * 16-bit fingerprints (~2.24 bytes per key).
+   * - False positive rate: ~0.0015% (1/65536)
+   * - Best for: When minimizing false positives is critical
+   */
+  case object Fuse16 extends XRefFilterType {
+    val value = "fuse16"
+    val falsePositiveRate = 1.0 / 65536 // ~0.0015%
+    val bytesPerKey = 2.24
+  }
+
+  /**
+   * Parse filter type from string (case-insensitive).
+   */
+  def fromString(s: String): XRefFilterType = s.toLowerCase match {
+    case "fuse8"  => Fuse8
+    case "fuse16" => Fuse16
+    case other    => throw new IllegalArgumentException(s"Unknown filter type: $other. Valid values: fuse8, fuse16")
+  }
+
+  /**
+   * Default filter type (Fuse8).
+   */
+  val Default: XRefFilterType = Fuse8
+}
+
+/**
  * Configuration for XRef auto-indexing during transaction commits.
  *
  * @param enabled
@@ -48,8 +97,9 @@ case class XRefAutoIndexConfig(
 /**
  * Configuration for XRef build operations.
  *
- * @param includePositions
- *   Whether to include term positions in XRef (default: false for faster builds)
+ * Note: FuseXRef (Binary Fuse Filter) implementation does NOT support includePositions.
+ * Positions are not stored in Fuse filters. This parameter was removed in the FuseXRef migration.
+ *
  * @param parallelism
  *   Parallelism for XRef builds (default: auto)
  * @param tempDirectoryPath
@@ -72,16 +122,20 @@ case class XRefAutoIndexConfig(
  *   Number of XRefs to build and commit atomically per batch (default: None = 2x defaultParallelism).
  *   Larger batches reduce transaction overhead but increase risk of partial failures.
  *   Similar to MERGE SPLITS batch behavior for consistent transaction granularity.
+ * @param filterType
+ *   Filter type for Binary Fuse filters (default: Fuse8).
+ *   - Fuse8: ~0.39% FPR, ~1.24 bytes/key (good balance)
+ *   - Fuse16: ~0.0015% FPR, ~2.24 bytes/key (260x fewer false positives)
  */
 case class XRefBuildConfig(
-  includePositions: Boolean = false,
   parallelism: Option[Int] = None,
   tempDirectoryPath: Option[String] = None,
   heapSize: Option[Long] = None,
   distributedBuild: Boolean = true,
   maxSourceSplits: Int = 1024,
   maxXRefsPerRun: Option[Int] = None,
-  batchSize: Option[Int] = None
+  batchSize: Option[Int] = None,
+  filterType: XRefFilterType = XRefFilterType.Default
 )
 
 /**
@@ -165,7 +219,7 @@ object XRefConfig {
     val AUTO_INDEX_REBUILD_ON_CHANGE         = "spark.indextables.xref.autoIndex.rebuildOnSourceChange"
 
     // Build configuration
-    val BUILD_INCLUDE_POSITIONS  = "spark.indextables.xref.build.includePositions"
+    // Note: BUILD_INCLUDE_POSITIONS was removed - FuseXRef doesn't support positions
     val BUILD_PARALLELISM        = "spark.indextables.xref.build.parallelism"
     val BUILD_TEMP_DIRECTORY     = "spark.indextables.xref.build.tempDirectoryPath"
     val BUILD_HEAP_SIZE          = "spark.indextables.xref.build.heapSize"
@@ -173,6 +227,7 @@ object XRefConfig {
     val BUILD_MAX_SOURCE_SPLITS  = "spark.indextables.xref.build.maxSourceSplits"
     val BUILD_MAX_XREFS_PER_RUN  = "spark.indextables.xref.build.maxXRefsPerRun"
     val BUILD_BATCH_SIZE         = "spark.indextables.xref.build.batchSize"
+    val BUILD_FILTER_TYPE        = "spark.indextables.xref.build.filterType"
 
     // Query configuration
     val QUERY_ENABLED           = "spark.indextables.xref.query.enabled"
@@ -206,7 +261,6 @@ object XRefConfig {
         rebuildOnSourceChange = conf.get(Keys.AUTO_INDEX_REBUILD_ON_CHANGE, "true").toBoolean
       ),
       build = XRefBuildConfig(
-        includePositions = conf.get(Keys.BUILD_INCLUDE_POSITIONS, "false").toBoolean,
         parallelism = Option(conf.get(Keys.BUILD_PARALLELISM, null)).map(_.toInt),
         tempDirectoryPath = Option(conf.get(Keys.BUILD_TEMP_DIRECTORY, null)),
         heapSize = Option(conf.get(Keys.BUILD_HEAP_SIZE, null)).map(parseSize),
@@ -217,7 +271,10 @@ object XRefConfig {
           .map(_.toInt)
           .getOrElse(1024),
         maxXRefsPerRun = Option(conf.get(Keys.BUILD_MAX_XREFS_PER_RUN, null)).map(_.toInt),
-        batchSize = Option(conf.get(Keys.BUILD_BATCH_SIZE, null)).map(_.toInt)
+        batchSize = Option(conf.get(Keys.BUILD_BATCH_SIZE, null)).map(_.toInt),
+        filterType = Option(conf.get(Keys.BUILD_FILTER_TYPE, null))
+          .map(XRefFilterType.fromString)
+          .getOrElse(XRefFilterType.Default)
       ),
       query = XRefQueryConfig(
         enabled = conf.get(Keys.QUERY_ENABLED, "true").toBoolean,
@@ -251,7 +308,6 @@ object XRefConfig {
         rebuildOnSourceChange = options.getBoolean(Keys.AUTO_INDEX_REBUILD_ON_CHANGE, true)
       ),
       build = XRefBuildConfig(
-        includePositions = options.getBoolean(Keys.BUILD_INCLUDE_POSITIONS, false),
         parallelism = Option(options.get(Keys.BUILD_PARALLELISM)).map(_.toInt),
         tempDirectoryPath = Option(options.get(Keys.BUILD_TEMP_DIRECTORY)),
         heapSize = Option(options.get(Keys.BUILD_HEAP_SIZE)).map(parseSize),
@@ -262,7 +318,10 @@ object XRefConfig {
           .map(_.toInt)
           .getOrElse(1024),
         maxXRefsPerRun = Option(options.get(Keys.BUILD_MAX_XREFS_PER_RUN)).map(_.toInt),
-        batchSize = Option(options.get(Keys.BUILD_BATCH_SIZE)).map(_.toInt)
+        batchSize = Option(options.get(Keys.BUILD_BATCH_SIZE)).map(_.toInt),
+        filterType = Option(options.get(Keys.BUILD_FILTER_TYPE))
+          .map(XRefFilterType.fromString)
+          .getOrElse(XRefFilterType.Default)
       ),
       query = XRefQueryConfig(
         enabled = options.getBoolean(Keys.QUERY_ENABLED, true),

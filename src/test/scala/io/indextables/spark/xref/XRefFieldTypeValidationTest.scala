@@ -541,28 +541,22 @@ class XRefFieldTypeValidationTest extends TestBase {
 
       XRefSearcher.resetAvailabilityCheck()
 
-      // Note: java.sql.Date represents a day-only value (no time component)
-      // Day equality is semantically a range query (any time within that day)
-      // XRef cannot efficiently filter day-only dates, so it falls back to returning all splits
-      // This is correct conservative behavior - the actual split search will filter properly
+      // Positive case: date1 (2024-01-01) is only in partition_a, should match 1 split
       val filtersDate1: Array[Filter] = Array(EqualTo("date_field", date1))
       val resultsDate1 = XRefSearcher.searchSplits(
         xrefFullPath, xref, filtersDate1, 5000, tablePath, spark
       )
-      println(s"DATE day-only date=2024-01-01: ${resultsDate1.size}/${xref.sourceSplitPaths.size} splits (conservative fallback)")
-      // Day-only dates skip XRef filtering, return all splits (conservative)
-      assert(resultsDate1.size == xref.sourceSplitPaths.size,
-        s"Day-only dates should return all splits (conservative), got ${resultsDate1.size}")
+      println(s"DATE positive date=2024-01-01: ${resultsDate1.size}/${xref.sourceSplitPaths.size} splits")
+      assert(resultsDate1.size == 1, s"Expected 1 split for date1, got ${resultsDate1.size}")
 
-      // Negative case also returns all splits (conservative fallback for day-only dates)
+      // Negative case: future date doesn't exist, should match 0 splits
       val futureDate = Date.valueOf("2099-12-31")
       val filtersFuture: Array[Filter] = Array(EqualTo("date_field", futureDate))
       val resultsFuture = XRefSearcher.searchSplits(
         xrefFullPath, xref, filtersFuture, 5000, tablePath, spark
       )
-      println(s"DATE day-only date=2099-12-31: ${resultsFuture.size}/${xref.sourceSplitPaths.size} splits (conservative fallback)")
-      assert(resultsFuture.size == xref.sourceSplitPaths.size,
-        s"Day-only dates should return all splits (conservative), got ${resultsFuture.size}")
+      println(s"DATE negative date=2099-12-31: ${resultsFuture.size}/${xref.sourceSplitPaths.size} splits")
+      assert(resultsFuture.isEmpty, s"Expected 0 splits for future date, got ${resultsFuture.size}")
 
       spark.conf.unset("spark.indextables.indexWriter.batchSize")
       spark.conf.unset("spark.indextables.xref.autoIndex.minSplitsToTrigger")

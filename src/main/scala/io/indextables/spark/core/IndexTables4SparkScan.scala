@@ -446,6 +446,54 @@ class IndexTables4SparkScan(
     }
   }
 
+  /**
+   * Get field types from the transaction log's docMappingJson.
+   * Used to detect TEXT fields and skip data skipping for them.
+   */
+  private lazy val fieldTypesFromSchema: Map[String, String] = {
+    try {
+      val existingFiles = transactionLog.listFiles()
+      val existingDocMapping = existingFiles
+        .flatMap(_.docMappingJson)
+        .headOption
+
+      if (existingDocMapping.isDefined) {
+        import com.fasterxml.jackson.databind.JsonNode
+        import io.indextables.spark.util.JsonUtil
+        import scala.jdk.CollectionConverters._
+
+        val mappingJson = existingDocMapping.get
+        val docMapping = JsonUtil.mapper.readTree(mappingJson)
+
+        if (docMapping.isArray) {
+          docMapping.asScala.flatMap { fieldNode =>
+            val fieldName = Option(fieldNode.get("name")).map(_.asText())
+            val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
+            fieldName.map(name => name -> fieldType)
+          }.toMap
+        } else {
+          Map.empty[String, String]
+        }
+      } else {
+        Map.empty[String, String]
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug(s"Failed to read field types from schema: ${e.getMessage}")
+        Map.empty[String, String]
+    }
+  }
+
+  /**
+   * Check if a field is a TEXT field (tokenized).
+   * TEXT fields should not use min/max data skipping because the stored values are
+   * full phrases like "alpha beta gamma document..." and comparing a single token
+   * like "alpha" against the min/max range is incorrect.
+   */
+  private def isTextField(fieldName: String): Boolean = {
+    fieldTypesFromSchema.get(fieldName).exists(_.toLowerCase == "text")
+  }
+
   private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
     import java.time.LocalDate
@@ -454,6 +502,11 @@ class IndexTables4SparkScan(
       case (Some(minVals), Some(maxVals)) =>
         filter match {
           case EqualTo(attribute, value) =>
+            // Skip data skipping for TEXT fields - min/max comparison doesn't work for tokenized content
+            if (isTextField(attribute)) {
+              logger.debug(s"DATA SKIPPING: Skipping data skipping for TEXT field '$attribute' - tokenized content")
+              return false  // Don't skip the file
+            }
             val minVal = minVals.get(attribute)
             val maxVal = maxVals.get(attribute)
             logger.debug(s"DATA SKIPPING EqualTo: attribute=$attribute, value=$value, minVal=$minVal, maxVal=$maxVal")

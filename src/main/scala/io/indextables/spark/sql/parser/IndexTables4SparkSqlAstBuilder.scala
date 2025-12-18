@@ -325,6 +325,16 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         Seq.empty
       }
 
+      // Extract FILTER TYPE option (FUSE8 or FUSE16)
+      val filterType = if (ctx.filterType != null) {
+        val ft = ctx.filterType.getText.toLowerCase
+        logger.debug(s"FILTER TYPE: $ft")
+        Some(ft)
+      } else {
+        logger.debug("No FILTER TYPE specified, will use default (fuse8)")
+        None
+      }
+
       // Extract FORCE REBUILD flag
       val forceRebuild = ctx.FORCE() != null && ctx.REBUILD() != null
       logger.debug(s"FORCE REBUILD flag: $forceRebuild")
@@ -344,11 +354,12 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
       logger.debug(s"DRY RUN flag: $dryRun")
 
       // Create command
-      logger.debug(s"Creating IndexCrossReferencesCommand with pathOption=$pathOption, tableIdOption=$tableIdOption")
+      logger.debug(s"Creating IndexCrossReferencesCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, filterType=$filterType")
       val result = IndexCrossReferencesCommand.apply(
         pathOption,
         tableIdOption,
         wherePredicates,
+        filterType,
         forceRebuild,
         dryRun,
         maxXRefBuilds

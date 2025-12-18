@@ -668,24 +668,48 @@ class IndexTables4SparkScanBuilder(
       return true
     }
 
-    // Check the field type configuration for top-level fields
-    val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
-    val fieldType    = config.get(fieldTypeKey)
+    // First, try to get field type from actual schema (docMappingJson in transaction log)
+    val actualFieldTypes = getActualFieldTypesFromSchema()
+    val actualFieldType = actualFieldTypes.get(attribute)
 
-    fieldType match {
-      case Some("string") =>
-        logger.debug(s"Field '$attribute' configured as 'string' - supporting exact matching")
-        true
-      case Some("text") =>
-        logger.debug(s"Field '$attribute' configured as 'text' - deferring exact matching to Spark")
-        false
-      case Some(other) =>
-        logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
-        true
-      case None =>
-        // No explicit configuration - assume string type (new default)
-        logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
-        true
+    if (actualFieldType.isDefined) {
+      val fieldType = actualFieldType.get.toLowerCase
+      // Tantivy field types: "text" for tokenized, "str" for string/raw
+      fieldType match {
+        case "text" =>
+          // TEXT fields support pushdown - FiltersToQueryConverter handles them properly
+          // with phrase queries for token matching (e.g., text_content:"alpha")
+          logger.debug(s"Field '$attribute' is TEXT type (from schema) - supporting pushdown with phrase query")
+          true
+        case "str" | "string" =>
+          logger.debug(s"Field '$attribute' is STRING type (from schema) - supporting exact matching")
+          true
+        case other =>
+          logger.debug(s"Field '$attribute' has type '$other' (from schema) - supporting exact matching")
+          true
+      }
+    } else {
+      // Fall back to configuration-based check
+      val fieldTypeKey = s"spark.indextables.indexing.typemap.$attribute"
+      val fieldType    = config.get(fieldTypeKey)
+
+      fieldType match {
+        case Some("string") =>
+          logger.debug(s"Field '$attribute' configured as 'string' - supporting exact matching")
+          true
+        case Some("text") =>
+          // TEXT fields support pushdown - FiltersToQueryConverter handles them properly
+          // with phrase queries for token matching (e.g., text_content:"alpha")
+          logger.debug(s"Field '$attribute' configured as 'text' - supporting pushdown with phrase query")
+          true
+        case Some(other) =>
+          logger.debug(s"Field '$attribute' configured as '$other' - supporting exact matching")
+          true
+        case None =>
+          // No explicit configuration - assume string type (new default)
+          logger.debug(s"Field '$attribute' has no type configuration - assuming 'string', supporting exact matching")
+          true
+      }
     }
   }
 
@@ -1033,6 +1057,43 @@ class IndexTables4SparkScanBuilder(
         } else {
           Set.empty[String]
         }
+    }
+
+  /**
+   * Get field type mapping from the actual table schema (docMappingJson in transaction log).
+   * Returns a map of field name -> field type (e.g., "text", "str", "i64", etc.)
+   */
+  private def getActualFieldTypesFromSchema(): Map[String, String] =
+    try {
+      val existingFiles = transactionLog.listFiles()
+      val existingDocMapping = existingFiles
+        .flatMap(_.docMappingJson)
+        .headOption
+
+      if (existingDocMapping.isDefined) {
+        import com.fasterxml.jackson.databind.JsonNode
+        import io.indextables.spark.util.JsonUtil
+        import scala.jdk.CollectionConverters._
+
+        val mappingJson = existingDocMapping.get
+        val docMapping = JsonUtil.mapper.readTree(mappingJson)
+
+        if (docMapping.isArray) {
+          docMapping.asScala.flatMap { fieldNode =>
+            val fieldName = Option(fieldNode.get("name")).map(_.asText())
+            val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
+            fieldName.map(name => name -> fieldType)
+          }.toMap
+        } else {
+          Map.empty[String, String]
+        }
+      } else {
+        Map.empty[String, String]
+      }
+    } catch {
+      case e: Exception =>
+        logger.debug(s"Failed to read field types from schema: ${e.getMessage}")
+        Map.empty[String, String]
     }
 
   private def validateFilterFieldsAreFast(filter: org.apache.spark.sql.sources.Filter): Boolean = {

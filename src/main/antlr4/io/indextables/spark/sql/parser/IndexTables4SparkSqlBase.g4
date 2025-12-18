@@ -55,6 +55,7 @@ statement
         WHERE whereClause=predicateToken                        #dropPartitions
     | INDEX CROSSREFERENCES FOR (path=STRING | table=qualifiedName)
         (WHERE whereClause=predicateToken)?
+        (FILTER TYPE filterType=(FUSE8 | FUSE16))?
         (FORCE REBUILD)?
         (MAX XREF BUILDS maxXRefBuilds=INTEGER_VALUE)?
         (DRY RUN)?                                              #indexCrossReferences
@@ -99,7 +100,7 @@ nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | INDEX | CROSSREFERENCES | FORCE | REBUILD
-    | XREFS | XREF | BUILDS
+    | XREFS | XREF | BUILDS | FILTER | TYPE | FUSE8 | FUSE16
     ;
 
 // Keywords (case-insensitive)
@@ -146,6 +147,10 @@ REBUILD: [Rr][Ee][Bb][Uu][Ii][Ll][Dd];
 XREFS: [Xx][Rr][Ee][Ff][Ss];
 XREF: [Xx][Rr][Ee][Ff];
 BUILDS: [Bb][Uu][Ii][Ll][Dd][Ss];
+FILTER: [Ff][Ii][Ll][Tt][Ee][Rr];
+TYPE: [Tt][Yy][Pp][Ee];
+FUSE8: [Ff][Uu][Ss][Ee]'8';
+FUSE16: [Ff][Uu][Ss][Ee]'16';
 
 // Literals
 STRING

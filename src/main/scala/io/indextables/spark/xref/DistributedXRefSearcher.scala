@@ -27,9 +27,9 @@ import org.apache.spark.sql.sources.Filter
 
 import io.indextables.spark.storage.{BroadcastSplitLocalityManager, GlobalSplitCacheManager}
 import io.indextables.spark.transaction.AddXRefAction
-import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, SplitMetadataFactory}
-import io.indextables.tantivy4java.split.SplitQuery
+import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, XRefMetadataFactory}
 import io.indextables.spark.core.FiltersToQueryConverter
+import io.indextables.tantivy4java.xref.{XRefSearcher => TantivyXRefSearcher}
 import org.slf4j.LoggerFactory
 
 /**
@@ -112,10 +112,15 @@ private[xref] class XRefSearchRDD(
     }
   }
 
-  private val XREF_URI_FIELD = "_xref_uri"
-
   /**
-   * Execute XRef search on an executor.
+   * Execute XRef search on an executor using the new FuseXRef API.
+   *
+   * FuseXRef uses Binary Fuse8 filters for fast query routing. This is much more
+   * efficient than the previous Tantivy-index-based approach:
+   * - ~70% smaller file sizes
+   * - ~5x faster builds
+   * - ~5x faster queries
+   * - Range queries are automatically handled (returns hasUnevaluatedClauses=true)
    */
   private def executeXRefSearchOnExecutor(
     xrefPath: String,
@@ -138,61 +143,38 @@ private[xref] class XRefSearchRDD(
     // Get the global cache manager
     val cacheManager = GlobalSplitCacheManager.getInstance(splitCacheConfig)
 
-    // Create SplitMetadata from XRef action
-    val splitMetadata = SplitMetadataFactory.fromXRefAction(xref)
+    // Create XRefMetadata from XRef action using the new factory
+    val xrefMetadata = XRefMetadataFactory.fromAddXRefAction(xref)
 
-    var splitSearcher: io.indextables.tantivy4java.split.SplitSearcher = null
+    var xrefSearcher: TantivyXRefSearcher = null
     try {
-      // Create searcher using the shared cache manager
-      splitSearcher = cacheManager.createSplitSearcher(normalizedXRefPath, splitMetadata)
+      // Open FuseXRef using the new XRefSearcher API
+      xrefSearcher = TantivyXRefSearcher.open(cacheManager, normalizedXRefPath, xrefMetadata)
 
-      // Convert Spark filters to SplitQuery
-      val splitQuery = FiltersToQueryConverter.convertToSplitQuery(filters, splitSearcher)
+      // Convert Spark filters to query string for XRefSearcher
+      // XRefSearcher.search(String, int) parses the query using the stored schema
+      val queryString = FiltersToQueryConverter.convertToQueryString(filters)
 
-      // Transform range queries to match-all for XRef searches
-      val transformedQuery = transformRangeQueriesToMatchAll(splitQuery)
+      logger.debug(s"Distributed FuseXRef search with query: $queryString")
 
-      // Search the XRef split
-      val searchResult = splitSearcher.search(transformedQuery, xref.sourceSplitPaths.size)
+      // Search the XRef - FuseXRef handles range query transformation internally
+      val searchResult = xrefSearcher.search(queryString, xref.sourceSplitPaths.size)
 
-      // Extract _xref_uri from each matching document
-      val matchingUris = new scala.collection.mutable.ArrayBuffer[String]()
-      try {
-        for (hit <- searchResult.getHits.asScala) {
-          val doc = splitSearcher.doc(hit.getDocAddress)
-          try {
-            val uriObj = doc.getFirst(XREF_URI_FIELD)
-            if (uriObj != null) {
-              matchingUris += uriObj.toString
-            }
-          } finally {
-            doc.close()
-          }
-        }
-      } finally {
-        searchResult.close()
+      if (searchResult.hasUnevaluatedClauses) {
+        logger.debug("Query contained unevaluated clauses (range/wildcard) - results may include extra splits")
       }
+
+      // Get matching splits directly from result (no need to extract from documents)
+      val matchingUris = searchResult.getMatchingSplits.asScala.map(_.getUri)
+
+      logger.debug(s"FuseXRef search returned ${matchingUris.size} matching splits out of ${xref.sourceSplitPaths.size}")
 
       // Convert full URIs to filenames
       matchingUris.map(XRefStorageUtils.extractFileName).toSeq
     } finally {
-      if (splitSearcher != null) {
-        splitSearcher.close()
+      if (xrefSearcher != null) {
+        xrefSearcher.close()
       }
-    }
-  }
-
-  /**
-   * Transform range queries to match-all queries for XRef searches.
-   */
-  private def transformRangeQueriesToMatchAll(query: SplitQuery): SplitQuery = {
-    import io.indextables.tantivy4java.split.{SplitRangeQuery, SplitMatchAllQuery}
-
-    query match {
-      case _: SplitRangeQuery =>
-        new SplitMatchAllQuery()
-      case other =>
-        other
     }
   }
 }

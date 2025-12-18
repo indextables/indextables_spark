@@ -212,6 +212,65 @@ class IndexCrossReferencesCommandTest extends TestBase {
     }
   }
 
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with FILTER TYPE FUSE8") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' FILTER TYPE FUSE8"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.filterType.contains("fuse8"))
+    assert(!command.forceRebuild)
+    assert(!command.dryRun)
+  }
+
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with FILTER TYPE FUSE16") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' FILTER TYPE FUSE16"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.filterType.contains("fuse16"))
+  }
+
+  test("SQL parsing: INDEX CROSSREFERENCES FOR with all options including FILTER TYPE") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sql = "INDEX CROSSREFERENCES FOR '/path/to/table' WHERE date = '2024-01-01' FILTER TYPE FUSE16 FORCE REBUILD MAX XREF BUILDS 10 DRY RUN"
+    val parsedPlan = parser.parsePlan(sql)
+
+    assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand])
+    val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+    assert(command.pathOption.contains("/path/to/table"))
+    assert(command.wherePredicates.nonEmpty)
+    assert(command.filterType.contains("fuse16"))
+    assert(command.forceRebuild)
+    assert(command.maxXRefBuilds.contains(10))
+    assert(command.dryRun)
+  }
+
+  test("SQL parsing: FILTER TYPE case insensitivity") {
+    val parser = new IndexTables4SparkSqlParser(spark.sessionState.sqlParser)
+
+    val sqls = Seq(
+      ("INDEX CROSSREFERENCES FOR '/path/to/table' filter type fuse8", "fuse8"),
+      ("INDEX CROSSREFERENCES FOR '/path/to/table' FILTER TYPE FUSE16", "fuse16"),
+      ("INDEX CROSSREFERENCES FOR '/path/to/table' Filter Type Fuse8", "fuse8")
+    )
+
+    sqls.foreach { case (sql, expectedType) =>
+      val parsedPlan = parser.parsePlan(sql)
+      assert(parsedPlan.isInstanceOf[IndexCrossReferencesCommand], s"Failed for SQL: $sql")
+      val command = parsedPlan.asInstanceOf[IndexCrossReferencesCommand]
+      assert(command.filterType.contains(expectedType), s"filterType not parsed correctly for SQL: $sql")
+    }
+  }
+
   test("command execution: DRY RUN should not modify anything") {
     withTempPath { tempDir =>
       val tablePath = tempDir.toString
@@ -235,6 +294,7 @@ class IndexCrossReferencesCommandTest extends TestBase {
           pathOption = Some(tablePath),
           tableIdOption = None,
           wherePredicates = Seq.empty,
+          filterType = None,
           forceRebuild = false,
           dryRun = true,
           maxXRefBuilds = None
@@ -285,6 +345,7 @@ class IndexCrossReferencesCommandTest extends TestBase {
           pathOption = Some(tablePath),
           tableIdOption = None,
           wherePredicates = Seq.empty,
+          filterType = None,
           forceRebuild = false,
           dryRun = false,
           maxXRefBuilds = None
@@ -313,6 +374,7 @@ class IndexCrossReferencesCommandTest extends TestBase {
       pathOption = Some("/test/path"),
       tableIdOption = None,
       wherePredicates = Seq.empty,
+      filterType = None,
       forceRebuild = false,
       dryRun = true,
       maxXRefBuilds = None

@@ -387,11 +387,14 @@ object FiltersToQueryConverter {
             val micros = ts.getTime * 1000L // millis to micros
             queryLog(s"XRef TIMESTAMP: Converting to micros: $ts -> $micros")
             Some(new SplitTermQuery(attribute, micros.toString))
-          case _: java.sql.Date =>
-            // Day equality is semantically a range query (any time within that day)
-            // XRef cannot efficiently filter day-only dates, return None for conservative fallback
-            queryLog(s"XRef DATE: Skipping day-only date equality (requires range)")
-            None
+          case date: java.sql.Date =>
+            // Dates are stored as DATE fields with NANOSECONDS since epoch at UTC midnight
+            // java.sql.Date.getTime() returns local timezone, but tantivy stores UTC
+            val localDate = date.toLocalDate
+            val utcMidnight = localDate.atStartOfDay.toEpochSecond(java.time.ZoneOffset.UTC)
+            val nanos = utcMidnight * 1000000000L
+            queryLog(s"XRef DATE: Converting to nanos: $date -> $nanos")
+            Some(new SplitTermQuery(attribute, nanos.toString))
           case _ =>
             // For non-date values, use schema-based type detection
             val fieldType = getFieldType(schema, attribute)
@@ -405,9 +408,18 @@ object FiltersToQueryConverter {
         val hasDateOnly = values.exists(_.isInstanceOf[java.sql.Date])
 
         if (hasDateOnly) {
-          // Day-only dates require range queries, skip XRef filtering for conservative fallback
-          queryLog(s"XRef DATE IN: Skipping due to day-only date values")
-          None
+          // Dates are stored as DATE fields with NANOSECONDS since epoch at UTC midnight
+          val boolQuery = new SplitBooleanQuery()
+          values.foreach {
+            case date: java.sql.Date =>
+              val localDate = date.toLocalDate
+              val utcMidnight = localDate.atStartOfDay.toEpochSecond(java.time.ZoneOffset.UTC)
+              val nanos = utcMidnight * 1000000000L
+              boolQuery.addShould(new SplitTermQuery(attribute, nanos.toString))
+            case other =>
+              boolQuery.addShould(new SplitTermQuery(attribute, other.toString))
+          }
+          Some(boolQuery)
         } else if (hasTimestamp) {
           // All values are timestamps - convert to microseconds
           // (Timestamps stored as INTEGER fields with microseconds, see IndexTablesDirectInterface)
@@ -1204,6 +1216,132 @@ object FiltersToQueryConverter {
     }
 
     isValid
+  }
+
+  /**
+   * Convert Spark filters to a query string suitable for XRefSearcher.
+   *
+   * This converts filters to Quickwit query syntax that XRefSearcher.search(String, int) can parse.
+   * Returns "*" (match-all) if no filters are provided or no filters can be converted.
+   *
+   * @param filters
+   *   Spark filters from predicate pushdown
+   * @return
+   *   Query string in Quickwit syntax
+   */
+  def convertToQueryString(filters: Array[Filter]): String = {
+    if (filters.isEmpty) {
+      return "*" // Match-all query
+    }
+
+    val queryParts = filters.flatMap(filterToQueryStringPart)
+
+    if (queryParts.isEmpty) {
+      "*" // Match-all if no filters could be converted
+    } else if (queryParts.length == 1) {
+      queryParts.head
+    } else {
+      // Combine with AND
+      queryParts.mkString(" AND ")
+    }
+  }
+
+  /**
+   * Convert a single filter to a query string part.
+   */
+  private def filterToQueryStringPart(filter: Filter): Option[String] = {
+    import org.apache.spark.sql.sources._
+
+    filter match {
+      case EqualTo(attribute, value) =>
+        // Handle date/timestamp values specially for XRef queries
+        value match {
+          case ts: java.sql.Timestamp =>
+            // Timestamps are stored as INTEGER fields with MICROSECONDS since epoch
+            val micros = ts.getTime * 1000L // millis to micros
+            Some(s"$attribute:$micros")
+          case date: java.sql.Date =>
+            // Dates are stored as DATE fields with NANOSECONDS since epoch at UTC midnight
+            // java.sql.Date.getTime() returns local timezone, but tantivy stores UTC
+            // Convert: date -> LocalDate -> midnight UTC -> nanoseconds
+            val localDate = date.toLocalDate
+            val utcMidnight = localDate.atStartOfDay.toEpochSecond(java.time.ZoneOffset.UTC)
+            val nanos = utcMidnight * 1000000000L
+            Some(s"$attribute:$nanos")
+          case _ =>
+            val query = s"$attribute:${escapeQueryValue(value.toString)}"
+            Some(query)
+        }
+
+      case In(attribute, values) if values.nonEmpty =>
+        val valueParts = values.map(v => escapeQueryValue(v.toString))
+        Some(s"$attribute:(${valueParts.mkString(" OR ")})")
+
+      case StringStartsWith(attribute, value) =>
+        Some(s"$attribute:$value*")
+
+      case StringContains(attribute, value) =>
+        Some(s"$attribute:*$value*")
+
+      case StringEndsWith(attribute, value) =>
+        Some(s"$attribute:*$value")
+
+      case And(left, right) =>
+        val leftPart = filterToQueryStringPart(left)
+        val rightPart = filterToQueryStringPart(right)
+        (leftPart, rightPart) match {
+          case (Some(l), Some(r)) => Some(s"($l AND $r)")
+          case (Some(l), None) => Some(l)
+          case (None, Some(r)) => Some(r)
+          case _ => None
+        }
+
+      case Or(left, right) =>
+        val leftPart = filterToQueryStringPart(left)
+        val rightPart = filterToQueryStringPart(right)
+        (leftPart, rightPart) match {
+          case (Some(l), Some(r)) => Some(s"($l OR $r)")
+          case (Some(l), None) => Some(l)
+          case (None, Some(r)) => Some(r)
+          case _ => None
+        }
+
+      case Not(child) =>
+        filterToQueryStringPart(child).map(c => s"NOT ($c)")
+
+      case IsNotNull(_) =>
+        Some("*") // Match-all for IS NOT NULL
+
+      case indexQuery: IndexQueryFilter =>
+        Some(s"${indexQuery.columnName}:${indexQuery.queryString}")
+
+      case indexQueryAll: IndexQueryAllFilter =>
+        Some(indexQueryAll.queryString)
+
+      // Range queries cannot be efficiently evaluated by FuseXRef filters
+      // Return None so they are not included in the query (conservative approach)
+      case GreaterThan(_, _) | GreaterThanOrEqual(_, _) | LessThan(_, _) | LessThanOrEqual(_, _) =>
+        queryLog(s"Range filter $filter cannot be evaluated by FuseXRef, skipping")
+        None
+
+      case _ =>
+        queryLog(s"Unsupported filter for query string conversion: $filter")
+        None
+    }
+  }
+
+  /**
+   * Escape special characters in query values.
+   */
+  private def escapeQueryValue(value: String): String = {
+    // Escape special Lucene/Tantivy query characters
+    val specialChars = Set('+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', '\\', '/')
+    if (value.exists(specialChars.contains) || value.contains(" ")) {
+      // Quote the entire value if it contains special chars or spaces
+      "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+    } else {
+      value
+    }
   }
 
   /** Convert a mixed filter (Spark Filter or custom filter) to a Query object. */

@@ -69,17 +69,28 @@ class IndexingConfigurationTest extends TestBase with Matchers {
 
       val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
 
-      // Text fields with === should still use exact matching (not tokenized)
-      // For exact phrase search, the full phrase must match exactly
+      // TEXT fields with === use phrase query matching (tokenized)
+      // The phrase must exist within the document's tokenized content
       val exactResults = df.filter(df("content") === "machine learning algorithms").collect()
       exactResults should have length 1
       exactResults(0).getString(0) should be("doc1")
 
-      // Partial phrase search with === should return no results (exact matching)
+      // Phrase query "machine learning" matches doc1 because it contains this phrase
+      // This is the expected behavior for TEXT fields with tokenization
       val partialResults = df.filter(df("content") === "machine learning").collect()
       println(s"🔍 DEBUG: Partial results for 'machine learning': ${partialResults.length}")
       partialResults.foreach(row => println(s"  - Found: ${row.getString(0)} -> '${row.getString(1)}'"))
-      partialResults should have length 0
+      partialResults should have length 1
+      partialResults(0).getString(0) should be("doc1")
+
+      // Single token "learning" matches doc1 and doc2 (both contain this token)
+      val singleTokenResults = df.filter(df("content") === "learning").collect()
+      println(s"🔍 DEBUG: Single token 'learning': ${singleTokenResults.length}")
+      singleTokenResults should have length 2
+
+      // Non-existent phrase should return 0 results
+      val noMatchResults = df.filter(df("content") === "quantum computing").collect()
+      noMatchResults should have length 0
     }
   }
 

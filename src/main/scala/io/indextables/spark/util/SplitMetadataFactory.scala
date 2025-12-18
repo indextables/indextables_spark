@@ -17,11 +17,9 @@
 
 package io.indextables.spark.util
 
-import java.net.URI
-
 import scala.jdk.CollectionConverters._
 
-import io.indextables.spark.transaction.{AddAction, AddXRefAction}
+import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -132,42 +130,4 @@ object SplitMetadataFactory {
     tablePath: String
   ): Seq[QuickwitSplit.SplitMetadata] =
     addActions.map(action => fromAddAction(action, tablePath))
-
-  /**
-   * Creates SplitMetadata from an AddXRefAction.
-   *
-   * XRef splits are regular Quickwit splits that can be searched with SplitSearcher.
-   * The main difference is that XRef documents contain _xref_uri field pointing to source splits.
-   *
-   * @param xrefAction
-   *   The transaction log XRef add action
-   * @return
-   *   QuickwitSplit.SplitMetadata instance
-   */
-  def fromXRefAction(xrefAction: AddXRefAction): QuickwitSplit.SplitMetadata = {
-
-    logger.debug(s"Creating SplitMetadata for XRef ${xrefAction.xrefId}")
-
-    new QuickwitSplit.SplitMetadata(
-      xrefAction.xrefId,                                 // splitId
-      "tantivy4spark-xref-index",                        // indexUid
-      0L,                                                // partitionId
-      "tantivy4spark-xref-source",                       // sourceId
-      "tantivy4spark-xref-node",                         // nodeId
-      xrefAction.sourceSplitCount.toLong,                // numDocs (one doc per source split)
-      xrefAction.size,                                   // uncompressedSizeBytes
-      null,                                              // timeRangeStart
-      null,                                              // timeRangeEnd
-      xrefAction.createdTime / 1000,                     // createTimestamp
-      "Mature",                                          // maturity
-      java.util.Collections.emptySet[String](),          // tags
-      xrefAction.footerStartOffset,                      // footerStartOffset
-      xrefAction.footerEndOffset,                        // footerEndOffset
-      0L,                                                // deleteOpstamp
-      0,                                                 // numMergeOps
-      "xref-doc-mapping-uid",                            // docMappingUid
-      xrefAction.docMappingJson.orNull,                  // docMappingJson
-      java.util.Collections.emptyList[String]()          // skippedSplits
-    )
-  }
 }
