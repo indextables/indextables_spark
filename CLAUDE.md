@@ -23,7 +23,6 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Drop partitions**: SQL-based partition removal with WHERE clause validation (`DROP INDEXTABLES PARTITIONS`)
 - **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
-- **Cross-reference indexing**: XRef indexes for 10-100x faster query routing on large tables
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
@@ -71,38 +70,6 @@ spark.indextables.purgeOnWrite.triggerAfterMerge: true (default: true, run purge
 spark.indextables.purgeOnWrite.triggerAfterWrites: 0 (default: 0 = disabled, run purge after N writes)
 spark.indextables.purgeOnWrite.splitRetentionHours: 168 (default: 168 = 7 days)
 spark.indextables.purgeOnWrite.txLogRetentionHours: 720 (default: 720 = 30 days)
-
-// Cross-Reference (XRef) Indexing (10-100x faster query routing for selective queries)
-// Auto-Index Configuration (disabled by default)
-spark.indextables.xref.autoIndex.enabled: false (default: false)
-spark.indextables.xref.autoIndex.maxSourceSplits: 1024 (default: 1024, max splits per XRef)
-spark.indextables.xref.autoIndex.minSplitsToTrigger: 10 (default: 10, min splits to build XRef)
-spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger: 10 (default: 10, min uncovered splits)
-spark.indextables.xref.autoIndex.minIntervalMs: 60000 (default: 60000 = 1 minute between auto-index runs)
-
-// XRef Query Configuration (enabled by default)
-spark.indextables.xref.query.enabled: true (default: true, enable XRef pre-scan at query time)
-spark.indextables.xref.query.minSplitsForXRef: 128 (default: 128, min candidate splits to use XRef)
-spark.indextables.xref.query.timeoutMs: 5000 (default: 5000ms)
-spark.indextables.xref.query.fallbackOnError: true (default: true, fallback to full scan on error)
-
-// XRef Build Configuration
-spark.indextables.xref.build.includePositions: false (default: false, faster builds)
-spark.indextables.xref.build.parallelism: <auto> (default: auto)
-spark.indextables.xref.build.tempDirectoryPath: <auto> (default: falls back to indexWriter.tempDirectoryPath, then auto-detect)
-spark.indextables.xref.build.heapSize: <auto> (default: falls back to indexWriter.heapSize, then 50MB)
-
-// XRef Storage Configuration
-spark.indextables.xref.storage.directory: "_xrefsplits" (default: "_xrefsplits")
-spark.indextables.xref.storage.compressionEnabled: true (default: true)
-
-// XRef Distributed Execution (both build and search run on executors with locality)
-spark.indextables.xref.build.distributed: true (default: true, always distributed on executors)
-spark.indextables.xref.query.distributed: true (default: true, always distributed on executors)
-
-// XRef Local Cache (optional lazy download of XRef splits to local disk on executors)
-spark.indextables.xref.localCache.enabled: false (default: false, disabled by default)
-spark.indextables.xref.localCache.directory: <auto> (default: falls back to xref.build.tempDirectoryPath, then indexWriter.tempDirectoryPath, then /local_disk0, then system temp)
 
 // Batch Retrieval Optimization (reduces S3 requests by 90-95% for read operations)
 spark.indextables.read.batchOptimization.enabled: true (default: true, transparent optimization)
@@ -494,88 +461,6 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("s3://bucket/path")
 ```
 
-### Index Cross-References (XRef)
-```sql
--- Register extensions (same as above)
-spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
-
--- Build XRef indexes for a table (consolidates term dictionaries for faster query routing)
-INDEX CROSSREFERENCES FOR 's3://bucket/path';
-INDEX CROSSREFERENCES FOR my_table;
-
--- Build for specific partitions only
-INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01';
-INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE region = 'us-east' AND year > '2022';
-
--- Force rebuild all XRefs (even if already indexed)
-INDEX CROSSREFERENCES FOR 's3://bucket/path' FORCE REBUILD;
-
--- Preview what would be built without executing
-INDEX CROSSREFERENCES FOR 's3://bucket/path' DRY RUN;
-
--- Combine options
-INDEX CROSSREFERENCES FOR 's3://bucket/path' WHERE date = '2024-01-01' FORCE REBUILD DRY RUN;
-```
-
-**How XRef Works:**
-1. XRef indexes consolidate term dictionaries from multiple source splits
-2. At query time, XRefQueryRouter pre-scans XRef indexes during partition planning
-3. Only splits that may contain matching documents are opened
-4. Result: 10-100x faster query routing for selective queries on large tables
-
-**Storage Layout:**
-```
-table_path/
-├── _transaction_log/
-├── _xrefsplits/          # XRef storage directory
-│   ├── abcd/             # Hash-based subdirectory (aaaa to zzzz)
-│   │   └── xref-abc123.split
-│   └── efgh/
-│       └── xref-789xyz.split
-└── partition=value/
-    └── split-001.split
-```
-
-**Auto-Indexing (Optional):**
-```scala
-// Enable automatic XRef building after commits
-spark.conf.set("spark.indextables.xref.autoIndex.enabled", "true")
-spark.conf.set("spark.indextables.xref.autoIndex.minUncoveredSplitsToTrigger", "10")
-spark.conf.set("spark.indextables.xref.autoIndex.minIntervalMs", "60000")
-```
-
-**Local Cache for Cloud Storage (Optional):**
-```scala
-// Enable lazy download of XRef splits to local disk on executors
-// Useful for repeated queries on cloud-stored tables to avoid repeated cloud reads
-spark.conf.set("spark.indextables.xref.localCache.enabled", "true")
-
-// Optional: specify cache directory (defaults to temp directory chain)
-spark.conf.set("spark.indextables.xref.localCache.directory", "/local_disk0/xref_cache")
-```
-
-**Distributed Execution Architecture:**
-- XRef builds run on executors where source splits are cached (locality-aware scheduling)
-- XRef searches run on executors where XRef splits are cached
-- Uses existing `BroadcastSplitLocalityManager` infrastructure for cache-aware task scheduling
-- Automatic fallback to driver-side execution for test scenarios
-
-**When to use XRef:**
-- Large tables with 128+ splits
-- Selective queries that match small subsets of data
-- Frequent queries on the same field patterns
-- Tables with stable data (low write frequency)
-
-**Key features:**
-- **Hash-based storage** - XRefs stored in `_xrefsplits/aaaa/` to `_xrefsplits/zzzz/` directories
-- **Cross-partition support** - XRefs can span multiple partitions for maximum optimization
-- **Query-time routing** - Automatic XRef pre-scan when enabled (default: enabled)
-- **Fallback on error** - Falls back to full scan if XRef query fails (configurable)
-- **Protocol v3** - Transaction log upgraded to support AddXRefAction/RemoveXRefAction
-- **Distributed execution** - Both XRef build and search run on executors with data locality
-- **Locality awareness** - Uses BroadcastSplitLocalityManager to schedule tasks on nodes where splits are cached
-- **Local cache (optional)** - Executors can lazily download XRef splits to local disk for repeated queries
-
 ## Azure Multi-Cloud Examples
 
 ### Basic Azure Write/Read
@@ -637,7 +522,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Storage**: S3OptimizedReader for S3, StandardFileReader for local/HDFS
 
 ## Test Status
-- ✅ **440+ tests passing**: Complete coverage for all major features
+- ✅ **350+ tests passing**: Complete coverage for all major features
 - ⚠️  **Merge-on-write**: Tests need updating for new post-commit design
   - Previous shuffle-based implementation removed
   - New design: post-commit evaluation with MERGE SPLITS invocation
@@ -650,14 +535,6 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - ✅ **PURGE INDEXTABLE**: 40/40 tests passing (integration, parsing, error handling, transaction log cleanup)
 - ✅ **Purge-on-write**: 8/8 tests passing (local/Hadoop integration)
   - Real S3/Azure purge-on-write tests available but require credentials
-- ✅ **XRef indexing**: 89/89 tests passing
-  - XRefStorageUtilsTest: 19 tests
-  - XRefConfigTest: 12 tests
-  - XRefQueryRouterTest: 10 tests
-  - XRefSearcherTest: 15 tests
-  - XRefAutoIndexerTest: 8 tests
-  - XRefActionTest: 13 tests
-  - IndexCrossReferencesCommandTest: 12 tests
 
 ## Important Notes
 - **DataSource API**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations
@@ -672,13 +549,6 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Purge-on-write**: Automatic cleanup of orphaned splits and old transaction logs during write operations
 - **Purge-on-write triggers**: Can run after merge-on-write or after N writes per table (per-session counters)
 - **Purge-on-write safety**: Disabled by default, respects minimum retention periods, propagates credentials, graceful failure handling
-- **XRef indexing**: Cross-reference indexes for 10-100x faster query routing on large tables (128+ splits)
-- **XRef auto-indexing**: Disabled by default, can be enabled for automatic XRef building after commits
-- **XRef query routing**: Enabled by default, pre-scans XRef indexes during partition planning to skip irrelevant splits
-- **XRef storage**: Hash-based directories (`_xrefsplits/aaaa/` to `_xrefsplits/zzzz/`) to avoid fragmentation
-- **XRef protocol**: Transaction log protocol v3 supports AddXRefAction/RemoveXRefAction (backward compatible)
-- **XRef distributed execution**: Both build and search always run on executors with locality-aware scheduling via BroadcastSplitLocalityManager
-- **XRef local cache**: Optional feature to lazily download XRef splits to local disk on executors (disabled by default, useful for repeated cloud storage queries)
 
 ---
 

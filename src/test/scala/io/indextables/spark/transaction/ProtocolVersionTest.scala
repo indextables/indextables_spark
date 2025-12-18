@@ -27,7 +27,7 @@ import io.indextables.spark.TestBase
 
 class ProtocolVersionTest extends TestBase {
 
-  test("new table should have protocol version 3/3") {
+  test("new table should have protocol version 2/2") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
       val txLog     = TransactionLogFactory.create(tablePath, spark)
@@ -37,8 +37,8 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 3
-        protocol.minWriterVersion shouldBe 3
+        protocol.minReaderVersion shouldBe 2
+        protocol.minWriterVersion shouldBe 2
       } finally
         txLog.close()
     }
@@ -61,8 +61,8 @@ class ProtocolVersionTest extends TestBase {
 
         val protocolAction = actions.collectFirst { case p: ProtocolAction => p }
         protocolAction shouldBe defined
-        protocolAction.get.minReaderVersion shouldBe 3
-        protocolAction.get.minWriterVersion shouldBe 3
+        protocolAction.get.minReaderVersion shouldBe 2
+        protocolAction.get.minWriterVersion shouldBe 2
       } finally
         txLog.close()
     }
@@ -189,22 +189,22 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val initialProtocol = txLog.getProtocol()
-        initialProtocol.minReaderVersion shouldBe 3
-        initialProtocol.minWriterVersion shouldBe 3
+        initialProtocol.minReaderVersion shouldBe 2
+        initialProtocol.minWriterVersion shouldBe 2
 
         // Try to downgrade (should not work)
         txLog.upgradeProtocol(1, 1)
 
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 3 // Should not downgrade
-        protocol.minWriterVersion shouldBe 3
+        protocol.minReaderVersion shouldBe 2 // Should not downgrade
+        protocol.minWriterVersion shouldBe 2
 
         // Upgrade to higher version
-        txLog.upgradeProtocol(4, 4)
+        txLog.upgradeProtocol(3, 3)
 
         val upgradedProtocol = txLog.getProtocol()
-        upgradedProtocol.minReaderVersion shouldBe 4 // Should upgrade
-        upgradedProtocol.minWriterVersion shouldBe 4
+        upgradedProtocol.minReaderVersion shouldBe 3 // Should upgrade
+        upgradedProtocol.minWriterVersion shouldBe 3
       } finally
         txLog.close()
     }
@@ -294,8 +294,8 @@ class ProtocolVersionTest extends TestBase {
 
         // Protocol should still be readable
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 3
-        protocol.minWriterVersion shouldBe 3
+        protocol.minReaderVersion shouldBe 2
+        protocol.minWriterVersion shouldBe 2
       } finally
         txLog.close()
     }
@@ -324,19 +324,17 @@ class ProtocolVersionTest extends TestBase {
 
     ProtocolVersion.isReaderVersionSupported(1) shouldBe true
     ProtocolVersion.isReaderVersionSupported(2) shouldBe true
-    ProtocolVersion.isReaderVersionSupported(3) shouldBe true
     ProtocolVersion.isReaderVersionSupported(999) shouldBe false
 
     ProtocolVersion.isWriterVersionSupported(1) shouldBe true
     ProtocolVersion.isWriterVersionSupported(2) shouldBe true
-    ProtocolVersion.isWriterVersionSupported(3) shouldBe true
     ProtocolVersion.isWriterVersionSupported(999) shouldBe false
   }
 
-  test("default protocol should be version 3/3") {
+  test("default protocol should be version 2/2") {
     val protocol = ProtocolVersion.defaultProtocol()
-    protocol.minReaderVersion shouldBe 3
-    protocol.minWriterVersion shouldBe 3
+    protocol.minReaderVersion shouldBe 2
+    protocol.minWriterVersion shouldBe 2
     protocol.readerFeatures shouldBe empty
     protocol.writerFeatures shouldBe empty
   }
@@ -364,16 +362,16 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val initialProtocol = txLog.getProtocol()
-        initialProtocol.minReaderVersion shouldBe 3
-        initialProtocol.minWriterVersion shouldBe 3
+        initialProtocol.minReaderVersion shouldBe 2
+        initialProtocol.minWriterVersion shouldBe 2
 
         // Try to upgrade with auto-upgrade disabled
-        txLog.upgradeProtocol(4, 4)
+        txLog.upgradeProtocol(3, 3)
 
         // Protocol should remain unchanged
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 3
-        protocol.minWriterVersion shouldBe 3
+        protocol.minReaderVersion shouldBe 2
+        protocol.minWriterVersion shouldBe 2
       } finally
         txLog.close()
     }

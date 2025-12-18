@@ -27,7 +27,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProvider, CloudStorageProviderFactory}
 import io.indextables.spark.transaction._
-import io.indextables.spark.xref.XRefStorageUtils
 import org.slf4j.LoggerFactory
 
 /**
@@ -172,92 +171,10 @@ class PurgeOrphanedSplitsExecutor(
     }
 
     // Step 7: Delete or preview orphaned splits
-    val deletionResult = if (dryRun) {
+    if (dryRun) {
       previewDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
     } else {
       executeDeletion(filesToDelete, eligibleCount, orphanedCount, transactionLogsDeleted)
-    }
-
-    // Step 8: Cleanup stale XRef entries (XRefs whose source splits have been purged)
-    cleanupStaleXRefEntries(deletionResult, dryRun)
-  }
-
-  /**
-   * Clean up stale XRef entries from the transaction log.
-   *
-   * After purging orphaned splits, some XRefs may reference source splits that no longer exist.
-   * This method identifies such stale XRefs and removes them from the transaction log.
-   *
-   * @param purgeResult The result of the purge operation
-   * @param dryRun Whether this is a dry run (no actual changes)
-   * @return Updated purge result with XRef cleanup info
-   */
-  private def cleanupStaleXRefEntries(purgeResult: PurgeResult, dryRun: Boolean): PurgeResult = {
-    try {
-      val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-      val txLog = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
-
-      try {
-        // Get current valid splits
-        val currentSplits = txLog.listFiles()
-        val currentSplitFileNames = currentSplits.map(s => XRefStorageUtils.extractFileName(s.path)).toSet
-
-        // Get current XRefs
-        val currentXRefs = txLog.listXRefs()
-
-        if (currentXRefs.isEmpty) {
-          logger.debug("No XRefs exist for this table - nothing to clean up")
-          return purgeResult
-        }
-
-        // Find stale XRefs (XRefs that reference source splits that no longer exist)
-        val staleXRefs = currentXRefs.filter { xref =>
-          val sourceFileNames = xref.sourceSplitPaths.map(XRefStorageUtils.extractFileName).toSet
-          // XRef is stale if ANY of its source splits no longer exist
-          sourceFileNames.exists(name => !currentSplitFileNames.contains(name))
-        }
-
-        if (staleXRefs.isEmpty) {
-          logger.debug("No stale XRefs found - nothing to clean up")
-          return purgeResult
-        }
-
-        if (dryRun) {
-          logger.info(s"DRY RUN: Would remove ${staleXRefs.size} stale XRef entries from transaction log")
-          staleXRefs.foreach { xref =>
-            logger.info(s"  Would remove XRef: ${xref.xrefId} (references ${xref.sourceSplitCount} source splits)")
-          }
-          purgeResult.copy(
-            message = purgeResult.message.map(_ + s" Would remove ${staleXRefs.size} stale XRef entries.")
-              .orElse(Some(s"Would remove ${staleXRefs.size} stale XRef entries."))
-          )
-        } else {
-          logger.info(s"Removing ${staleXRefs.size} stale XRef entries from transaction log")
-
-          // Remove each stale XRef from the transaction log
-          staleXRefs.foreach { xref =>
-            try {
-              txLog.removeXRef(xref.path, s"Source splits purged by PURGE INDEXTABLE command")
-              logger.info(s"Removed stale XRef: ${xref.xrefId}")
-            } catch {
-              case e: Exception =>
-                logger.warn(s"Failed to remove stale XRef ${xref.xrefId}: ${e.getMessage}")
-            }
-          }
-
-          purgeResult.copy(
-            message = purgeResult.message.map(_ + s" Removed ${staleXRefs.size} stale XRef entries.")
-              .orElse(Some(s"Removed ${staleXRefs.size} stale XRef entries."))
-          )
-        }
-      } finally {
-        txLog.close()
-      }
-    } catch {
-      case e: Exception =>
-        // XRef cleanup failure should not fail the entire purge operation
-        logger.warn(s"Failed to clean up stale XRef entries (non-fatal): ${e.getMessage}", e)
-        purgeResult
     }
   }
 
@@ -506,8 +423,8 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * List all .split and .crc files from the table directory, including XRef splits.
-   * Uses distributed listing across executors (Iceberg pattern).
+   * List all .split and .crc files from the table directory. Uses distributed listing across executors (Iceberg
+   * pattern).
    */
   private def listAllSplitFiles(basePath: String): Dataset[FileInfo] = {
     import spark.implicits._
@@ -526,7 +443,6 @@ class PurgeOrphanedSplitsExecutor(
 
     try {
       // List files recursively (exclude _transaction_log directory)
-      // Include both data splits and XRef splits (_xrefsplits directory)
       val files = provider
         .listFiles(basePath, recursive = true)
         .filter { fileInfo =>
@@ -548,18 +464,15 @@ class PurgeOrphanedSplitsExecutor(
           )
         }
 
-      // Count XRef files separately for logging
-      val xrefFileCount = files.count(_.path.contains("_xrefsplits"))
-      val dataFileCount = files.size - xrefFileCount
-      logger.info(s"Listed ${files.size} split/crc files from filesystem ($dataFileCount data splits, $xrefFileCount XRef splits)")
+      logger.info(s"Listed ${files.size} split/crc files from filesystem")
       spark.createDataset(files)
     } finally
       provider.close()
   }
 
   /**
-   * Get all valid split files from the transaction log. Includes files from current state,
-   * XRef files, and their corresponding .crc files.
+   * Get all valid split files from the transaction log. Includes files from current state and their corresponding .crc
+   * files.
    */
   private def getValidSplitFilesFromTransactionLog(
     addActions: Seq[AddAction]
@@ -576,40 +489,8 @@ class PurgeOrphanedSplitsExecutor(
       addFile.path.split('/').last
     }
 
-    // Also get XRef files from transaction log
-    val xrefFiles = getXRefFilesFromTransactionLog()
-
-    val allFiles = addedFiles ++ xrefFiles
-    logger.info(s"Found ${addedFiles.size} active data splits and ${xrefFiles.size} active XRef splits in transaction log")
-    spark.createDataset(allFiles)
-  }
-
-  /**
-   * Get all valid XRef files from the transaction log.
-   * XRef files are stored under _xrefsplits/ and referenced by AddXRefAction entries.
-   */
-  private def getXRefFilesFromTransactionLog(): Seq[String] = {
-    try {
-      val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-      val txLog = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
-
-      try {
-        val xrefActions = txLog.listXRefs()
-        val xrefFileNames = xrefActions.map { xref =>
-          // XRef path is stored relative to table, e.g., "_xrefsplits/abcd/xref-123.split"
-          // Extract just the filename for comparison
-          xref.path.split('/').last
-        }
-        logger.debug(s"Found ${xrefFileNames.size} XRef files in transaction log")
-        xrefFileNames
-      } finally {
-        txLog.close()
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to get XRef files from transaction log: ${e.getMessage}")
-        Seq.empty
-    }
+    logger.info(s"Found ${addedFiles.size} active files (split + crc) in transaction log")
+    spark.createDataset(addedFiles)
   }
 
   /**
