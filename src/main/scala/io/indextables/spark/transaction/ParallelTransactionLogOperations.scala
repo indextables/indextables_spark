@@ -343,12 +343,6 @@ class ParallelTransactionLogOperations(
           } else if (jsonNode.has("mergeskip")) {
             val skipNode = jsonNode.get("mergeskip")
             Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
-          } else if (jsonNode.has("addXRef")) {
-            val addXRefNode = jsonNode.get("addXRef")
-            Some(JsonUtil.mapper.readValue(addXRefNode.toString, classOf[AddXRefAction]))
-          } else if (jsonNode.has("removeXRef")) {
-            val removeXRefNode = jsonNode.get("removeXRef")
-            Some(JsonUtil.mapper.readValue(removeXRefNode.toString, classOf[RemoveXRefAction]))
           } else {
             None
           }
@@ -361,13 +355,11 @@ class ParallelTransactionLogOperations(
     val content = new StringBuilder()
     actions.foreach { action =>
       val wrappedAction = action match {
-        case protocol: ProtocolAction     => Map("protocol" -> protocol)
-        case metadata: MetadataAction     => Map("metaData" -> metadata)
-        case add: AddAction               => Map("add" -> add)
-        case remove: RemoveAction         => Map("remove" -> remove)
-        case skip: SkipAction             => Map("mergeskip" -> skip)
-        case addXRef: AddXRefAction       => Map("addXRef" -> addXRef)
-        case removeXRef: RemoveXRefAction => Map("removeXRef" -> removeXRef)
+        case protocol: ProtocolAction => Map("protocol" -> protocol)
+        case metadata: MetadataAction => Map("metaData" -> metadata)
+        case add: AddAction           => Map("add" -> add)
+        case remove: RemoveAction     => Map("remove" -> remove)
+        case skip: SkipAction         => Map("mergeskip" -> skip)
       }
       content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
     }

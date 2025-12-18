@@ -53,18 +53,13 @@ statement
         (DRY RUN)?                                              #purgeIndexTable
     | DROP indexTablesKeyword PARTITIONS FROM (path=STRING | table=qualifiedName)
         WHERE whereClause=predicateToken                        #dropPartitions
-    | INDEX CROSSREFERENCES FOR (path=STRING | table=qualifiedName)
-        (WHERE whereClause=predicateToken)?
-        (FORCE REBUILD)?
-        (DRY RUN)?                                              #indexCrossReferences
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
     | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
     | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
-        (INCLUDE ALL)?
-        XREFS?                                                  #describeTransactionLog
+        (INCLUDE ALL)?                                          #describeTransactionLog
     | .*?                                                       #passThrough
     ;
 
@@ -97,8 +92,7 @@ quotedIdentifier
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
-    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | INDEX | CROSSREFERENCES | FORCE | REBUILD
-    | XREFS
+    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM
     ;
 
 // Keywords (case-insensitive)
@@ -138,11 +132,6 @@ ALL: [Aa][Ll][Ll];
 DROP: [Dd][Rr][Oo][Pp];
 PARTITIONS: [Pp][Aa][Rr][Tt][Ii][Tt][Ii][Oo][Nn][Ss];
 FROM: [Ff][Rr][Oo][Mm];
-INDEX: [Ii][Nn][Dd][Ee][Xx];
-CROSSREFERENCES: [Cc][Rr][Oo][Ss][Ss][Rr][Ee][Ff][Ee][Rr][Ee][Nn][Cc][Ee][Ss];
-FORCE: [Ff][Oo][Rr][Cc][Ee];
-REBUILD: [Rr][Ee][Bb][Uu][Ii][Ll][Dd];
-XREFS: [Xx][Rr][Ee][Ff][Ss];
 
 // Literals
 STRING
