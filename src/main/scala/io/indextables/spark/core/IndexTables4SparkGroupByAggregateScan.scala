@@ -25,13 +25,15 @@ import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{
   DataType,
+  DateType,
   DoubleType,
   FloatType,
   IntegerType,
   LongType,
   StringType,
   StructField,
-  StructType
+  StructType,
+  TimestampType
 }
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
@@ -868,9 +870,96 @@ class IndexTables4SparkGroupByAggregateReader(
             logger.warn(s"GROUP BY EXECUTION: Cannot convert '$keyAsString' to Double: ${e.getMessage}")
             0.0
         }
+      case Some(org.apache.spark.sql.types.DateType) =>
+        // Convert date string to days since epoch (Int) as Spark expects
+        convertDateStringToDays(keyAsString)
+      case Some(org.apache.spark.sql.types.TimestampType) =>
+        // Convert timestamp to microseconds since epoch (Long) as Spark expects
+        convertTimestampStringToMicros(keyAsString)
       case _ =>
         // Default to string
         UTF8String.fromString(keyAsString)
+    }
+  }
+
+  /**
+   * Convert a date string to days since epoch (Int) as Spark expects for DateType.
+   * Handles multiple formats:
+   * - YYYY-MM-DD format (e.g., "2024-01-15")
+   * - ISO datetime format (e.g., "2024-01-02T00:00:00Z") - extracts date part
+   * - LocalDateTime format (e.g., "2024-01-02T00:00:00") - extracts date part
+   */
+  private def convertDateStringToDays(dateStr: String): Int = {
+    import java.time.{LocalDate, LocalDateTime}
+    import java.time.format.DateTimeFormatter
+
+    try {
+      // Use format detection to avoid expensive exception-based control flow
+      val localDate = if (dateStr.contains("T")) {
+        // ISO datetime format - extract date part
+        if (dateStr.endsWith("Z")) {
+          LocalDate.parse(dateStr.substring(0, 10))
+        } else {
+          LocalDate.parse(dateStr.substring(0, 10))
+        }
+      } else {
+        // Simple date format YYYY-MM-DD
+        LocalDate.parse(dateStr)
+      }
+      localDate.toEpochDay.toInt
+    } catch {
+      case e: Exception =>
+        throw new IllegalArgumentException(
+          s"Cannot convert date string '$dateStr' to days since epoch: ${e.getMessage}",
+          e
+        )
+    }
+  }
+
+  /**
+   * Convert a timestamp string to microseconds since epoch (Long) as Spark expects for TimestampType.
+   * Handles multiple formats:
+   * - Numeric microseconds (already in correct format from tantivy)
+   * - ISO instant format (e.g., "2024-01-01T10:00:00Z")
+   * - URL-encoded strings (e.g., "2024-01-01T15%3A00%3A00Z") - partition paths encode colons
+   * - LocalDateTime format (e.g., "2024-01-01T10:00:00")
+   */
+  private def convertTimestampStringToMicros(tsStr: String): Long = {
+    import java.time.{Instant, LocalDateTime, ZoneOffset}
+
+    try {
+      // Check if already numeric (microseconds from tantivy)
+      if (tsStr.forall(c => c.isDigit || c == '-')) {
+        return tsStr.toLong
+      }
+
+      // Check for URL-encoded strings (partition paths encode colons as %3A)
+      val decodedStr = if (tsStr.contains("%")) {
+        java.net.URLDecoder.decode(tsStr, "UTF-8")
+      } else {
+        tsStr
+      }
+
+      // Parse based on format
+      val instant = if (decodedStr.endsWith("Z")) {
+        // ISO instant format
+        Instant.parse(decodedStr)
+      } else if (decodedStr.contains("T")) {
+        // LocalDateTime format - assume UTC
+        LocalDateTime.parse(decodedStr).toInstant(ZoneOffset.UTC)
+      } else {
+        throw new IllegalArgumentException(s"Unrecognized timestamp format: $tsStr")
+      }
+
+      // Convert to microseconds
+      instant.getEpochSecond * 1000000L + instant.getNano / 1000L
+    } catch {
+      case e: IllegalArgumentException => throw e
+      case e: Exception =>
+        throw new IllegalArgumentException(
+          s"Cannot convert timestamp string '$tsStr' to microseconds since epoch: ${e.getMessage}",
+          e
+        )
     }
   }
 
@@ -957,6 +1046,12 @@ class IndexTables4SparkGroupByAggregateReader(
             logger.warn(s"GROUP BY EXECUTION: Cannot convert '$value' to Double: ${e.getMessage}")
             0.0
         }
+      case DateType =>
+        // Convert date string to days since epoch (Int) as Spark expects
+        convertDateStringToDays(value)
+      case TimestampType =>
+        // Convert timestamp to microseconds since epoch (Long) as Spark expects
+        convertTimestampStringToMicros(value)
       case _ => UTF8String.fromString(value)
     }
   }
