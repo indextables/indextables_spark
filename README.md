@@ -106,6 +106,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [Field Indexing Configuration](#field-indexing-configuration)
   - [JSON Field Support](#json-field-support-for-nested-data)
   - [String Pattern Filter Pushdown](#string-pattern-filter-pushdown)
+  - [Prescan Filtering](#prescan-filtering)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
   - [Transaction Log Configuration](#transaction-log-configuration)
@@ -141,6 +142,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
+- 🔬 **Prescan Filtering**: Driver-side FST term dictionary checks eliminate splits that cannot match filters before scan execution (10-100x faster than full search for selective queries)
 
 ---
 
@@ -1206,6 +1208,61 @@ spark.conf.set("spark.indextables.filter.stringPattern.pushdown", "true")
 - For **STRING fields** (raw tokenizer): Patterns match the complete field value exactly
 - When disabled (default), pattern filters cause aggregate pushdown to fail with a descriptive error message
 - Non-aggregate queries (e.g., `collect()`, `show()`) work regardless of this setting via Spark post-filtering
+
+#### Prescan Filtering
+
+Prescan filtering is a driver-side optimization that checks FST (Finite State Transducer) term dictionaries to eliminate splits that cannot possibly match query filters before scan execution. This provides 10-100x faster query performance for highly selective queries because it only downloads term dictionaries, not posting lists.
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.read.prescan.enabled` | `false` | Enable prescan filtering (can also use SQL command) |
+| `spark.indextables.read.prescan.minSplitThreshold` | Auto | Minimum splits to trigger prescan (default: 2 × defaultParallelism) |
+| `spark.indextables.read.prescan.maxConcurrency` | Auto | Maximum parallel prescan threads (default: 4 × physical CPUs) |
+| `spark.indextables.read.prescan.timeoutMs` | `30000` | Timeout per split in milliseconds |
+
+**SQL Commands:**
+
+```sql
+-- Enable prescan filtering for the current session
+ENABLE INDEXTABLES PRESCAN FILTERING
+
+-- Enable for specific table only
+ENABLE INDEXTABLES PRESCAN FILTERING FOR 's3://bucket/table'
+
+-- Disable prescan filtering
+DISABLE INDEXTABLES PRESCAN FILTERING
+
+-- Pre-warm prescan caches (loads FST data before queries)
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table'
+
+-- Pre-warm with partition filter
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table' WHERE date = '2024-01-01'
+```
+
+**Configuration Example:**
+
+```scala
+// Enable via read option
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.read.prescan.enabled", "true")
+  .load("s3://bucket/logs")
+
+// Session-level configuration
+spark.conf.set("spark.indextables.read.prescan.enabled", "true")
+```
+
+**Key Characteristics:**
+- **Session-scoped**: ENABLE/DISABLE commands affect current SparkSession only
+- **Conservative**: Never produces false negatives - may include extra splits but never excludes valid ones
+- **Minimum threshold**: Only triggers when splits ≥ minSplitThreshold to avoid overhead on small tables
+- **Applies to all scans**: Regular queries, COUNT, SUM, AVG, GROUP BY aggregates
+
+**When to Use:**
+- Large tables with 100+ splits
+- Highly selective filters matching few splits
+- Repeated queries with similar patterns (benefit from cache)
+- Queries where min/max data skipping is insufficient
 
 #### Merge-On-Write Configuration
 

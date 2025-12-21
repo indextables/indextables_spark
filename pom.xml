@@ -163,12 +163,12 @@
         </dependency>
 
 
-        <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.25.5: Batch optimization metrics fix (prefetch path extraction) -->
+        <!-- Tantivy4Java - Java bindings for Tantivy search engine (experimental with prescan API) -->
+        <!-- Version 0.25.13: Adds prescan API for FST-based split filtering -->
         <dependency>
             <groupId>io.indextables</groupId>
-            <artifactId>tantivy4java</artifactId>
-            <version>0.25.6</version>
+            <artifactId>tantivy4javaexperimental</artifactId>
+            <version>0.25.13</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
@@ -521,7 +521,7 @@
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>io.indextables:tantivy4java</include>
+                                    <include>io.indextables:tantivy4javaexperimental</include>
                                     <include>software.amazon.awssdk:*</include>
                                     <!-- <include>com.fasterxml.jackson.core:*</include>
                                     <include>com.fasterxml.jackson.module:*</include> -->

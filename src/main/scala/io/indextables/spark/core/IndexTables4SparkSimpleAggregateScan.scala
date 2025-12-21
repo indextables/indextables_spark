@@ -223,8 +223,16 @@ class IndexTables4SparkSimpleAggregateBatch(
       config,
       indexQueryFilters
     )
-    val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
-    logger.debug(s"SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
+    val dataSkippedSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
+    logger.debug(s"SIMPLE AGGREGATE BATCH: After data skipping: ${dataSkippedSplits.length} splits")
+
+    // Apply prescan filtering if enabled
+    val (filteredSplits, prescanMetrics) = helperScan.applyPrescanFiltering(dataSkippedSplits)
+    prescanMetrics.foreach { m =>
+      val tablePath = transactionLog.getTablePath().toString
+      io.indextables.spark.prescan.PrescanMetricsRegistry.getOrCreate(tablePath).add(m)
+      logger.info(s"SIMPLE AGGREGATE BATCH: ${m.summary}")
+    }
 
     // Create one partition per filtered split for distributed aggregation processing
     filteredSplits.map { split =>

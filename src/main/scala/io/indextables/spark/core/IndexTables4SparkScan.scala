@@ -32,9 +32,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.prewarm.PreWarmManager
-import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+import io.indextables.spark.prescan.{PrescanConfig, PrescanFilteringService, PrescanMetricsData, PrescanMetricsRegistry}
+import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitCacheConfig, SplitLocationRegistry}
 import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
-import io.indextables.spark.util.TimestampUtils
+import io.indextables.spark.util.{ConfigUtils, TimestampUtils}
 // Removed unused imports
 import org.slf4j.LoggerFactory
 
@@ -114,8 +115,15 @@ class IndexTables4SparkScan(
     }
 
     // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
-    val filteredActions = applyDataSkipping(addActions, pushedFilters)
-    logger.debug(s"PLAN PARTITIONS: After data skipping: ${filteredActions.length} splits remaining (started with ${addActions.length})")
+    val dataSkippedActions = applyDataSkipping(addActions, pushedFilters)
+    logger.debug(s"PLAN PARTITIONS: After data skipping: ${dataSkippedActions.length} splits remaining (started with ${addActions.length})")
+
+    // Apply prescan filtering if enabled (runs on driver, checks FST term dictionaries)
+    val (filteredActions, prescanMetrics) = applyPrescanFiltering(dataSkippedActions)
+    prescanMetrics.foreach { m =>
+      PrescanMetricsRegistry.getOrCreate(tablePath).add(m)
+      logger.info(m.summary)
+    }
 
     // Check if pre-warm is enabled
     val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
@@ -311,6 +319,44 @@ class IndexTables4SparkScan(
     }
 
     finalActions
+  }
+
+  /**
+   * Apply prescan filtering to eliminate splits that cannot match query filters.
+   *
+   * Prescan filtering runs on the driver and uses tantivy4java's FST term dictionary
+   * to determine if each split could possibly have matching documents. This is 10-100x
+   * faster than a full search because it only downloads term dictionaries, not posting lists.
+   *
+   * @param addActions Splits after data skipping
+   * @return Tuple of (filtered splits, optional metrics)
+   */
+  def applyPrescanFiltering(addActions: Seq[AddAction]): (Seq[AddAction], Option[PrescanMetricsData]) = {
+    val tablePath = transactionLog.getTablePath().toString
+    val prescanConfig = PrescanConfig.resolve(sparkSession, options, tablePath)
+
+    if (!prescanConfig.enabled) {
+      logger.debug("Prescan filtering disabled")
+      return (addActions, None)
+    }
+
+    // Build cache config from Spark configuration
+    val cacheConfig = ConfigUtils.createSplitCacheConfig(config, Some(tablePath))
+
+    // Apply prescan filtering using the IDENTICAL query conversion path as regular scans
+    val result = PrescanFilteringService.applyPrescanFiltering(
+      addActions,
+      pushedFilters,
+      indexQueryFilters,
+      prescanConfig,
+      cacheConfig,
+      sparkSession,
+      fullTableSchema,
+      Some(options),
+      tablePath
+    )
+
+    (result.filteredActions, Some(result.metrics))
   }
 
   // TODO: Fix options flow from read operations to scan for proper field type detection
@@ -605,24 +651,50 @@ class IndexTables4SparkScan(
           }
 
           // Helper function to parse date string or integer to days since epoch
-          def parseDateOrInt(value: String): Int =
-            if (value.contains("-")) {
+          def parseDateOrInt(value: String): Option[Int] =
+            if (value.isEmpty) {
+              None // Handle empty statistics gracefully
+            } else if (value.contains("-")) {
               // Date string format (e.g., "2023-02-15")
               val date      = LocalDate.parse(value)
               val epochDate = LocalDate.of(1970, 1, 1)
-              java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt
+              Some(java.time.temporal.ChronoUnit.DAYS.between(epochDate, date).toInt)
             } else {
-              value.toInt
+              Some(value.toInt)
             }
 
           val minDays = parseDateOrInt(minValue)
           val maxDays = parseDateOrInt(maxValue)
-          // logger.debug(s"DATE CONVERSION RESULT: filterDaysSinceEpoch=$filterDaysSinceEpoch, minDays=$minDays, maxDays=$maxDays")
-          (
-            filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
-            minDays.asInstanceOf[Comparable[Any]],
-            maxDays.asInstanceOf[Comparable[Any]]
-          )
+
+          // Follow same pattern as convertNumericValues: return proper value if exists,
+          // empty string if not. Caller ignores unused values (e.g., GreaterThan only uses max).
+          (minDays, maxDays) match {
+            case (Some(min), Some(max)) =>
+              (
+                filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
+                Integer.valueOf(min).asInstanceOf[Comparable[Any]],
+                Integer.valueOf(max).asInstanceOf[Comparable[Any]]
+              )
+            case (Some(min), None) =>
+              (
+                filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
+                Integer.valueOf(min).asInstanceOf[Comparable[Any]],
+                "".asInstanceOf[Comparable[Any]]
+              )
+            case (None, Some(max)) =>
+              (
+                filterDaysSinceEpoch.asInstanceOf[Comparable[Any]],
+                "".asInstanceOf[Comparable[Any]],
+                Integer.valueOf(max).asInstanceOf[Comparable[Any]]
+              )
+            case (None, None) =>
+              // Both empty - fall back to string comparison
+              (
+                filterValue.toString.asInstanceOf[Comparable[Any]],
+                "".asInstanceOf[Comparable[Any]],
+                "".asInstanceOf[Comparable[Any]]
+              )
+          }
         } catch {
           case ex: Exception =>
             logger.warn(

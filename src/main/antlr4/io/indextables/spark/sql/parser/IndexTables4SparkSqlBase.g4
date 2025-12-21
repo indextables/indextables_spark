@@ -60,6 +60,14 @@ statement
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
     | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
         (INCLUDE ALL)?                                          #describeTransactionLog
+    | ENABLE indexTablesKeyword PRESCAN FILTERING
+        (FOR (path=STRING | table=qualifiedName))?              #enablePrescanFiltering
+    | DISABLE indexTablesKeyword PRESCAN FILTERING
+        (FOR (path=STRING | table=qualifiedName))?              #disablePrescanFiltering
+    | PREWARM indexTablesKeyword PRESCAN FILTERS
+        FOR (path=STRING | table=qualifiedName)
+        (ON FIELDS '(' fieldList ')')?
+        (WHERE whereClause=predicateToken)?                     #prewarmPrescanFilters
     | .*?                                                       #passThrough
     ;
 
@@ -73,6 +81,10 @@ alphanumericValue
 
 predicateToken
     : .*?
+    ;
+
+fieldList
+    : identifier (',' identifier)*
     ;
 
 qualifiedName
@@ -93,6 +105,7 @@ nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM
+    | ENABLE | DISABLE | PRESCAN | FILTERING | FILTERS | PREWARM | FIELDS | ON
     ;
 
 // Keywords (case-insensitive)
@@ -132,6 +145,14 @@ ALL: [Aa][Ll][Ll];
 DROP: [Dd][Rr][Oo][Pp];
 PARTITIONS: [Pp][Aa][Rr][Tt][Ii][Tt][Ii][Oo][Nn][Ss];
 FROM: [Ff][Rr][Oo][Mm];
+ENABLE: [Ee][Nn][Aa][Bb][Ll][Ee];
+DISABLE: [Dd][Ii][Ss][Aa][Bb][Ll][Ee];
+PRESCAN: [Pp][Rr][Ee][Ss][Cc][Aa][Nn];
+FILTERING: [Ff][Ii][Ll][Tt][Ee][Rr][Ii][Nn][Gg];
+FILTERS: [Ff][Ii][Ll][Tt][Ee][Rr][Ss];
+PREWARM: [Pp][Rr][Ee][Ww][Aa][Rr][Mm];
+FIELDS: [Ff][Ii][Ee][Ll][Dd][Ss];
+ON: [Oo][Nn];
 
 // Literals
 STRING

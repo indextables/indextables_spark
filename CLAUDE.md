@@ -29,6 +29,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests for read operations, 2-3x faster (enabled by default)
+- **Prescan filtering**: Driver-side FST term dictionary checks to eliminate splits before scan (`ENABLE/DISABLE INDEXTABLES PRESCAN FILTERING`)
 
 ## Key Configuration Settings
 
@@ -93,6 +94,12 @@ spark.indextables.filter.stringPattern.pushdown: false (master switch - enables 
 spark.indextables.filter.stringStartsWith.pushdown: false (efficient - uses sorted index terms)
 spark.indextables.filter.stringEndsWith.pushdown: false (less efficient - requires term scanning)
 spark.indextables.filter.stringContains.pushdown: false (least efficient - cannot leverage index structure)
+
+// Prescan Filtering (driver-side FST term dictionary checks to eliminate splits)
+spark.indextables.read.prescan.enabled: false (default: false, enable via config or SQL command)
+spark.indextables.read.prescan.minSplitThreshold: <auto> (default: 2 × defaultParallelism, min splits to trigger prescan)
+spark.indextables.read.prescan.maxConcurrency: <auto> (default: 4 × availableProcessors, max parallel prescan threads)
+spark.indextables.read.prescan.timeoutMs: 30000 (default: 30000, timeout per split in milliseconds)
 ```
 
 ### Working Directories (auto-detects `/local_disk0` when available)
@@ -408,6 +415,61 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if WHERE clause references non-partition columns
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
+
+### Prescan Filtering
+Driver-side filtering that uses FST (Finite State Transducer) term dictionaries to eliminate splits that cannot match query filters. 10-100x faster than full search because it only downloads term dictionaries, not posting lists.
+
+```sql
+-- Enable prescan filtering globally for session
+ENABLE INDEXTABLES PRESCAN FILTERING
+
+-- Enable for specific table
+ENABLE INDEXTABLES PRESCAN FILTERING FOR 's3://bucket/table'
+ENABLE INDEXTABLES PRESCAN FILTERING FOR my_catalog.my_table
+
+-- Disable prescan filtering
+DISABLE INDEXTABLES PRESCAN FILTERING
+DISABLE INDEXTABLES PRESCAN FILTERING FOR 's3://bucket/table'
+
+-- Pre-warm prescan caches (all fields)
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table'
+
+-- Pre-warm specific fields
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table' ON FIELDS(title, author, date)
+
+-- Pre-warm with partition filter
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table' WHERE date = '2024-01-01'
+
+-- Combined
+PREWARM INDEXTABLES PRESCAN FILTERS FOR 's3://bucket/table'
+  ON FIELDS(title, content)
+  WHERE region = 'us-east'
+```
+
+**Enable via configuration:**
+```scala
+// Session-level
+spark.conf.set("spark.indextables.read.prescan.enabled", "true")
+
+// Read option
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.read.prescan.enabled", "true")
+  .load("s3://bucket/table")
+```
+
+**Key characteristics:**
+- **Session-scoped**: ENABLE/DISABLE affects current SparkSession only
+- **Conservative**: Never produces false negatives (may include extra splits, never excludes valid ones)
+- **Minimum threshold**: Only triggers prescan when splits ≥ 2 × defaultParallelism
+- **Parallel execution**: Configurable concurrency (default: 4 × physical CPUs)
+- **Applies to all scans**: Regular queries, COUNT, SUM, AVG, GROUP BY aggregates
+- **Metrics tracking**: Exposed via PrescanMetricsRegistry for monitoring
+
+**When to use:**
+- Large tables with many splits (100+)
+- Highly selective filters that match few splits
+- Repeated queries with similar filter patterns (benefit from cache)
+- Queries where data skipping is insufficient
 
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala

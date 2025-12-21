@@ -267,8 +267,16 @@ class IndexTables4SparkGroupByAggregateBatch(
       config,
       indexQueryFilters
     )
-    val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
-    logger.debug(s"GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
+    val dataSkippedSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
+    logger.debug(s"GROUP BY BATCH: After data skipping: ${dataSkippedSplits.length} splits")
+
+    // Apply prescan filtering if enabled
+    val (filteredSplits, prescanMetrics) = helperScan.applyPrescanFiltering(dataSkippedSplits)
+    prescanMetrics.foreach { m =>
+      val tablePath = transactionLog.getTablePath().toString
+      io.indextables.spark.prescan.PrescanMetricsRegistry.getOrCreate(tablePath).add(m)
+      logger.info(s"GROUP BY BATCH: ${m.summary}")
+    }
 
     // Create one partition per filtered split for distributed GROUP BY processing
     filteredSplits.map { split =>
@@ -876,6 +884,15 @@ class IndexTables4SparkGroupByAggregateReader(
       case Some(org.apache.spark.sql.types.TimestampType) =>
         // Convert timestamp to microseconds since epoch (Long) as Spark expects
         convertTimestampStringToMicros(keyAsString)
+      case Some(org.apache.spark.sql.types.BooleanType) =>
+        // Convert boolean string to Boolean value
+        keyAsString.toLowerCase match {
+          case "true" | "1" => true
+          case "false" | "0" => false
+          case _ =>
+            logger.warn(s"GROUP BY EXECUTION: Cannot convert '$keyAsString' to Boolean, defaulting to false")
+            false
+        }
       case _ =>
         // Default to string
         UTF8String.fromString(keyAsString)
@@ -1052,6 +1069,15 @@ class IndexTables4SparkGroupByAggregateReader(
       case TimestampType =>
         // Convert timestamp to microseconds since epoch (Long) as Spark expects
         convertTimestampStringToMicros(value)
+      case BooleanType =>
+        // Convert boolean string to Boolean value
+        value.toLowerCase match {
+          case "true" | "1" => true
+          case "false" | "0" => false
+          case _ =>
+            logger.warn(s"GROUP BY EXECUTION: Cannot convert '$value' to Boolean, defaulting to false")
+            false
+        }
       case _ => UTF8String.fromString(value)
     }
   }

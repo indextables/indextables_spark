@@ -25,10 +25,13 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
   DescribeTransactionLogCommand,
+  DisablePrescanFilteringCommand,
   DropPartitionsCommand,
+  EnablePrescanFilteringCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
+  PrewarmPrescanFiltersCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand
 }
@@ -378,6 +381,134 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     } catch {
       case e: Exception =>
         logger.error(s"Exception in visitDescribeTransactionLog: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitEnablePrescanFiltering(ctx: EnablePrescanFilteringContext): LogicalPlan = {
+    logger.debug(s"visitEnablePrescanFiltering called with context: $ctx")
+
+    try {
+      // Extract table path or identifier if provided (optional for global enable)
+      val (pathOption, tableIdOption) = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        (Some(pathStr), None)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        val tableIdentifier = if (tableId.length == 1) {
+          Some(TableIdentifier(tableId.head))
+        } else if (tableId.length == 2) {
+          Some(TableIdentifier(tableId(1), Some(tableId.head)))
+        } else {
+          throw new IllegalArgumentException(s"Invalid table identifier: ${tableId.mkString(".")}")
+        }
+        (None, tableIdentifier)
+      } else {
+        logger.debug("No path or table specified - global session enable")
+        (None, None)
+      }
+
+      val result = EnablePrescanFilteringCommand(pathOption, tableIdOption)
+      logger.debug(s"Created EnablePrescanFilteringCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitEnablePrescanFiltering: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitDisablePrescanFiltering(ctx: DisablePrescanFilteringContext): LogicalPlan = {
+    logger.debug(s"visitDisablePrescanFiltering called with context: $ctx")
+
+    try {
+      // Extract table path or identifier if provided (optional for global disable)
+      val (pathOption, tableIdOption) = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        (Some(pathStr), None)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        val tableIdentifier = if (tableId.length == 1) {
+          Some(TableIdentifier(tableId.head))
+        } else if (tableId.length == 2) {
+          Some(TableIdentifier(tableId(1), Some(tableId.head)))
+        } else {
+          throw new IllegalArgumentException(s"Invalid table identifier: ${tableId.mkString(".")}")
+        }
+        (None, tableIdentifier)
+      } else {
+        logger.debug("No path or table specified - global session disable")
+        (None, None)
+      }
+
+      val result = DisablePrescanFilteringCommand(pathOption, tableIdOption)
+      logger.debug(s"Created DisablePrescanFilteringCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitDisablePrescanFiltering: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
+  override def visitPrewarmPrescanFilters(ctx: PrewarmPrescanFiltersContext): LogicalPlan = {
+    logger.debug(s"visitPrewarmPrescanFilters called with context: $ctx")
+
+    try {
+      // Extract table path or identifier (required for prewarm)
+      val (pathOption, tableIdOption) = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        (Some(pathStr), None)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        val tableIdentifier = if (tableId.length == 1) {
+          Some(TableIdentifier(tableId.head))
+        } else if (tableId.length == 2) {
+          Some(TableIdentifier(tableId(1), Some(tableId.head)))
+        } else {
+          throw new IllegalArgumentException(s"Invalid table identifier: ${tableId.mkString(".")}")
+        }
+        (None, tableIdentifier)
+      } else {
+        throw new IllegalArgumentException("PREWARM INDEXTABLES PRESCAN FILTERS requires a path or table identifier")
+      }
+
+      // Extract field list if provided (ON FIELDS(...))
+      val fields: Seq[String] = if (ctx.fieldList() != null) {
+        ctx.fieldList().identifier().asScala.map(_.getText).toSeq
+      } else {
+        Seq.empty // Empty means all indexed fields
+      }
+      logger.debug(s"Fields to prewarm: ${if (fields.isEmpty) "all" else fields.mkString(", ")}")
+
+      // Extract WHERE clause predicates if provided
+      val wherePredicates: Seq[String] = if (ctx.whereClause != null) {
+        val originalText = extractRawText(ctx.whereClause)
+        logger.debug(s"Found WHERE clause: $originalText")
+        Seq(originalText)
+      } else {
+        logger.debug("No WHERE clause - prewarm all partitions")
+        Seq.empty
+      }
+
+      val result = PrewarmPrescanFiltersCommand(pathOption, tableIdOption, fields, wherePredicates)
+      logger.debug(s"Created PrewarmPrescanFiltersCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitPrewarmPrescanFilters: ${e.getMessage}", e)
         throw e
     }
   }
