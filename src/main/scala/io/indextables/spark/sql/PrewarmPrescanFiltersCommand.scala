@@ -202,10 +202,12 @@ case class PrewarmPrescanFiltersCommand(
     val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
 
     // Build SplitInfo objects with their paths for error reporting
+    // Use footerEndOffset as the fileSize (not action.size which may be incorrect from merge)
     val splitInfosWithPath = splits.flatMap { action =>
       for {
         footerStart <- action.footerStartOffset
-      } yield (action.path, new SplitInfo(action.path, footerStart, action.size))
+        footerEnd <- action.footerEndOffset
+      } yield (action.path, new SplitInfo(action.path, footerStart, footerEnd))
     }
 
     // Determine concurrency based on available processors
