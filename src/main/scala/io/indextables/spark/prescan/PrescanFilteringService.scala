@@ -149,7 +149,7 @@ object PrescanFilteringService {
                      firstAction.path.startsWith("file:")
     val rawSplitPath = if (isAbsolute) firstAction.path else new Path(tablePath, firstAction.path).toString
     // Normalize cloud paths for tantivy4java compatibility:
-    // s3a:// -> s3://, abfss:// -> azure://
+    // s3a:// -> s3://, abfss:// -> azure://, etc.
     val fullSplitPath = ProtocolNormalizer.normalizeAllProtocols(rawSplitPath)
 
     val splitQuery: SplitQuery = try {
@@ -266,7 +266,7 @@ object PrescanFilteringService {
       val fullPath = if (isAbsolute) action.path else new Path(tablePath, action.path).toString
 
       // Normalize cloud paths for tantivy4java compatibility:
-      // s3a:// -> s3://, abfss:// -> azure://
+      // s3a:// -> s3://, abfss:// -> azure://, etc.
       val normalizedPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
 
       // Use size as fileSize (footerEndOffset is the end of footer, which is typically file end)
@@ -334,9 +334,9 @@ object PrescanFilteringService {
         val couldHave = result.couldHaveResults()
         val error = getPrescanError(result)
 
-        // Log errors at debug level for troubleshooting
+        // Log errors at warn level for troubleshooting
         if (error.isDefined) {
-          logger.debug(s"Prescan returned non-SUCCESS for ${action.path}: status=${Try(result.getStatus).getOrElse("N/A")}, " +
+          logger.warn(s"Prescan returned non-SUCCESS for ${action.path}: status=${Try(result.getStatus).getOrElse("N/A")}, " +
             s"error=${error.getOrElse("none")}")
         }
 

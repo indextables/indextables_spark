@@ -140,9 +140,7 @@ class RealAzurePrescanIntegrationTest extends RealAzureTestBase {
     println(s"✅ Query returned ${result.length} rows (expected: 10)")
     result.length shouldBe 10
 
-    // Verify prescan actually ran without errors
-    // Note: Data skipping may eliminate splits before prescan runs, so we don't
-    // require prescan to eliminate additional splits - just that it runs correctly
+    // Verify prescan was invoked and worked correctly on Azure
     val metrics = PrescanMetricsRegistry.getMetrics(tablePath)
     metrics shouldBe defined
     val m = metrics.get
@@ -150,10 +148,10 @@ class RealAzurePrescanIntegrationTest extends RealAzureTestBase {
 
     // Prescan should have been invoked (at least 1 split considered)
     m.splitsBeforePrescan should be >= 1L
+    // After should be <= before (prescan may eliminate splits)
+    m.splitsAfterPrescan should be <= m.splitsBeforePrescan
     // No errors during prescan
     m.errors shouldBe 0L
-    // After should be <= before (no splits should be added)
-    m.splitsAfterPrescan should be <= m.splitsBeforePrescan
 
     println("✅ Prescan equality filter test passed on Azure")
   }
@@ -224,7 +222,7 @@ class RealAzurePrescanIntegrationTest extends RealAzureTestBase {
     println(s"✅ COUNT for active = $cnt (expected: 10)")
     cnt shouldBe 10
 
-    // Verify prescan actually ran without errors
+    // Verify prescan was invoked and worked correctly on Azure
     val metrics = PrescanMetricsRegistry.getMetrics(tablePath)
     metrics shouldBe defined
     val m = metrics.get
@@ -232,10 +230,10 @@ class RealAzurePrescanIntegrationTest extends RealAzureTestBase {
 
     // Prescan should have been invoked (at least 1 split considered)
     m.splitsBeforePrescan should be >= 1L
+    // After should be <= before (prescan may eliminate splits)
+    m.splitsAfterPrescan should be <= m.splitsBeforePrescan
     // No errors during prescan
     m.errors shouldBe 0L
-    // After should be <= before (no splits should be added)
-    m.splitsAfterPrescan should be <= m.splitsBeforePrescan
 
     println("✅ Prescan aggregate test passed on Azure")
   }
