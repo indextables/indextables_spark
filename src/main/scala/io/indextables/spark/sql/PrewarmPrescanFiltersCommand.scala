@@ -17,12 +17,7 @@
 
 package io.indextables.spark.sql
 
-import java.util.{Collections => JCollections}
-import java.util.concurrent.{Executors, TimeUnit}
-
 import scala.collection.JavaConverters._
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
@@ -35,8 +30,8 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, TransactionLogFactory}
-import io.indextables.spark.util.ConfigUtils
-import io.indextables.tantivy4java.split.{SplitInfo, SplitMatchAllQuery}
+import io.indextables.spark.util.{ConfigUtils, JsonUtil}
+import io.indextables.tantivy4java.split.{SplitBooleanQuery, SplitInfo, SplitQuery, SplitTermQuery}
 
 import org.slf4j.LoggerFactory
 
@@ -150,8 +145,21 @@ case class PrewarmPrescanFiltersCommand(
           throw new IllegalStateException("Splits missing docMappingJson - table may not support prescan")
         }
 
+        // Determine which fields to prewarm
+        val fieldsToWarm = if (fields.nonEmpty) {
+          fields
+        } else {
+          // Parse docMappingJson to get all field names
+          extractFieldNamesFromDocMapping(docMappingJson)
+        }
+
+        logger.info(s"Prewarming ${fieldsToWarm.length} fields: ${fieldsToWarm.mkString(", ")}")
+
+        // Build a query that touches each field to load its FST data
+        val prewarmQuery = buildPrewarmQuery(fieldsToWarm)
+
         // Prewarm the splits
-        val result = prewarmSplits(prescannableSplits, docMappingJson, cacheConfig)
+        val result = prewarmSplits(prescannableSplits, docMappingJson, prewarmQuery, cacheConfig)
 
         val timeMs = System.currentTimeMillis() - startTime
 
@@ -186,76 +194,114 @@ case class PrewarmPrescanFiltersCommand(
   }
 
   /**
+   * Extract field names from docMappingJson.
+   * The docMappingJson is a JSON array of field definitions with "name" properties.
+   */
+  private def extractFieldNamesFromDocMapping(docMappingJson: String): Seq[String] = {
+    try {
+      val mapping = JsonUtil.mapper.readTree(docMappingJson)
+
+      if (mapping.isArray) {
+        // docMappingJson is an array of field definitions
+        mapping.elements().asScala.flatMap { field =>
+          Option(field.get("name")).map(_.asText())
+        }.toSeq
+      } else if (mapping.has("fields")) {
+        // Alternative format with "fields" object
+        val fields = mapping.get("fields")
+        fields.fieldNames().asScala.toSeq
+      } else {
+        logger.warn(s"Unrecognized docMappingJson format, cannot extract field names")
+        Seq.empty
+      }
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Failed to parse docMappingJson for field extraction: ${ex.getMessage}")
+        Seq.empty
+    }
+  }
+
+  /**
+   * Build a prescan query that touches each field to load its FST data.
+   * Uses term queries with a dummy value that will trigger FST lookups.
+   */
+  private def buildPrewarmQuery(fieldsToWarm: Seq[String]): SplitQuery = {
+    if (fieldsToWarm.isEmpty) {
+      // Fallback: use a simple term query on a common field
+      new SplitTermQuery("_", "_prewarm_")
+    } else if (fieldsToWarm.length == 1) {
+      // Single field - just use a term query
+      new SplitTermQuery(fieldsToWarm.head, "_prewarm_")
+    } else {
+      // Multiple fields - combine with OR (SHOULD) to touch all FSTs
+      val boolQuery = new SplitBooleanQuery()
+      fieldsToWarm.foreach { fieldName =>
+        val termQuery = new SplitTermQuery(fieldName, "_prewarm_")
+        boolQuery.addShould(termQuery)
+      }
+      boolQuery
+    }
+  }
+
+  /**
    * Prewarm splits by loading their footer data into the cache.
    *
    * @param splits Splits to prewarm
    * @param docMappingJson Document mapping JSON for the table
+   * @param prewarmQuery Query that touches each field to load FST data
    * @param cacheConfig Cache configuration
    * @return PrewarmResult with statistics
    */
   private def prewarmSplits(
     splits: Seq[AddAction],
     docMappingJson: String,
+    prewarmQuery: SplitQuery,
     cacheConfig: SplitCacheConfig
   ): PrewarmResult = {
     // Get the global cache manager
     val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
 
-    // Build SplitInfo objects with their paths for error reporting
+    // Build SplitInfo objects
     // Use footerEndOffset as the fileSize (not action.size which may be incorrect from merge)
-    val splitInfosWithPath = splits.flatMap { action =>
+    val splitInfos = splits.flatMap { action =>
       for {
         footerStart <- action.footerStartOffset
         footerEnd <- action.footerEndOffset
-      } yield (action.path, new SplitInfo(action.path, footerStart, footerEnd))
+      } yield new SplitInfo(action.path, footerStart, footerEnd)
     }
 
-    // Determine concurrency based on available processors
-    val concurrency = Math.min(Runtime.getRuntime.availableProcessors() * 4, splitInfosWithPath.length)
-    val executor = Executors.newFixedThreadPool(Math.max(1, concurrency))
+    if (splitInfos.isEmpty) {
+      return PrewarmResult(processed = 0, cached = 0, errors = 0)
+    }
 
-    var cached = 0
-    var errors = 0
-
+    // Make a single call to prescanSplits with all splits
+    // Parallelism is handled internally by tantivy4java/Rust
     try {
-      implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
+      val splitList = splitInfos.asJava
+      val results = cacheManager.prescanSplits(splitList, docMappingJson, prewarmQuery)
 
-      // Prewarm in parallel using a simple MatchAll query to load the FST data
-      val futures = splitInfosWithPath.map { case (path, splitInfo) =>
-        Future {
-          try {
-            // Use prescanSplits with MatchAll query to load the footer/FST data
-            val splitList = JCollections.singletonList(splitInfo)
-            cacheManager.prescanSplits(splitList, docMappingJson, new SplitMatchAllQuery())
-            true
-          } catch {
-            case ex: Exception =>
-              logger.warn(s"Failed to prewarm split $path: ${ex.getMessage}")
-              false
-          }
-        }
-      }
+      // Count successes and errors from the results
+      val cached = results.asScala.count(r => r.couldHaveResults() || !hasError(r))
+      val errors = results.asScala.count(r => hasError(r))
 
-      // Wait for all futures with a reasonable timeout
-      val timeoutMs = 300000L // 5 minutes max
-      val results = Await.result(Future.sequence(futures), timeoutMs.milliseconds)
-
-      cached = results.count(_ == true)
-      errors = results.count(_ == false)
-
-    } finally {
-      executor.shutdown()
-      try {
-        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow()
-        }
-      } catch {
-        case _: InterruptedException =>
-          executor.shutdownNow()
-      }
+      PrewarmResult(processed = splitInfos.length, cached = cached, errors = errors)
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Failed to prewarm splits: ${ex.getMessage}", ex)
+        PrewarmResult(processed = splitInfos.length, cached = 0, errors = splitInfos.length)
     }
+  }
 
-    PrewarmResult(processed = splitInfosWithPath.length, cached = cached, errors = errors)
+  /**
+   * Check if a prescan result has an error.
+   */
+  private def hasError(result: io.indextables.tantivy4java.split.PrescanResult): Boolean = {
+    try {
+      val status = result.getStatus
+      status.toString != "SUCCESS"
+    } catch {
+      case _: Exception => false
+    }
   }
 
   /**

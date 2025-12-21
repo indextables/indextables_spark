@@ -17,11 +17,7 @@
 
 package io.indextables.spark.prescan
 
-import java.util.concurrent.{Executors, ExecutorService, TimeUnit}
-import java.util.{Collections => JCollections}
-
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
+import scala.collection.JavaConverters._
 import scala.util.Try
 
 import org.apache.hadoop.fs.Path
@@ -192,60 +188,43 @@ object PrescanFilteringService {
       ))
     }
 
-    // Execute prescan in parallel
-    val executor = Executors.newFixedThreadPool(config.maxConcurrency)
+    // Execute prescan with a single call - parallelism is handled by tantivy4java/Rust
+    val prescanResults = prescanAllSplits(
+      cacheManager,
+      prescannableSplits.map { case (action, infoOpt) => (action, infoOpt.get) },
+      docMappingJson,
+      splitQuery
+    )
 
-    try {
-      val prescanResults = prescanInParallel(
-        cacheManager,
-        prescannableSplits.map { case (action, infoOpt) => (action, infoOpt.get) },
-        docMappingJson,
-        splitQuery,
-        config.timeoutMs,
-        executor
-      )
+    // Combine results: matching prescanned splits + unprescannable splits (kept conservatively)
+    val matchingSplits = prescanResults.filter(_.couldHaveResults).map(_.action)
+    val unprescannableActions = unprescannableSplits.map(_._1)
+    val allMatchingSplits = matchingSplits ++ unprescannableActions
 
-      // Combine results: matching prescanned splits + unprescannable splits (kept conservatively)
-      val matchingSplits = prescanResults.filter(_.couldHaveResults).map(_.action)
-      val unprescannableActions = unprescannableSplits.map(_._1)
-      val allMatchingSplits = matchingSplits ++ unprescannableActions
+    val splitsAfterPrescan = allMatchingSplits.length
+    val prescanTimeMs = System.currentTimeMillis() - startTime
 
-      val splitsAfterPrescan = allMatchingSplits.length
-      val prescanTimeMs = System.currentTimeMillis() - startTime
+    val eliminatedCount = splitsBeforePrescan - splitsAfterPrescan
+    val eliminationPct = if (splitsBeforePrescan > 0)
+      (eliminatedCount.toDouble / splitsBeforePrescan * 100).toInt else 0
+    val errorCount = prescanResults.count(_.error.isDefined)
 
-      val eliminatedCount = splitsBeforePrescan - splitsAfterPrescan
-      val eliminationPct = if (splitsBeforePrescan > 0)
-        (eliminatedCount.toDouble / splitsBeforePrescan * 100).toInt else 0
-      val errorCount = prescanResults.count(_.error.isDefined)
+    // Always log prescan results at WARN level for visibility
+    logger.warn(s"PRESCAN: SUCCESS | " +
+      s"splits_considered=$splitsBeforePrescan, splits_eliminated=$eliminatedCount, " +
+      s"splits_remaining=$splitsAfterPrescan ($eliminationPct% reduction), " +
+      s"time_ms=$prescanTimeMs, errors=$errorCount")
 
-      // Always log prescan results at WARN level for visibility
-      logger.warn(s"PRESCAN: SUCCESS | " +
-        s"splits_considered=$splitsBeforePrescan, splits_eliminated=$eliminatedCount, " +
-        s"splits_remaining=$splitsAfterPrescan ($eliminationPct% reduction), " +
-        s"time_ms=$prescanTimeMs, errors=$errorCount")
+    val metrics = PrescanMetricsData(
+      splitsBeforePrescan = splitsBeforePrescan,
+      splitsAfterPrescan = splitsAfterPrescan,
+      prescanTimeMs = prescanTimeMs,
+      cacheHits = prescanResults.count(_.cacheHit),
+      cacheMisses = prescanResults.count(!_.cacheHit),
+      errors = prescanResults.count(_.error.isDefined)
+    )
 
-      val metrics = PrescanMetricsData(
-        splitsBeforePrescan = splitsBeforePrescan,
-        splitsAfterPrescan = splitsAfterPrescan,
-        prescanTimeMs = prescanTimeMs,
-        cacheHits = prescanResults.count(_.cacheHit),
-        cacheMisses = prescanResults.count(!_.cacheHit),
-        errors = prescanResults.count(_.error.isDefined)
-      )
-
-      PrescanResult(allMatchingSplits, metrics)
-
-    } finally {
-      executor.shutdown()
-      try {
-        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow()
-        }
-      } catch {
-        case _: InterruptedException =>
-          executor.shutdownNow()
-      }
-    }
+    PrescanResult(allMatchingSplits, metrics)
   }
 
   /**
@@ -287,84 +266,65 @@ object PrescanFilteringService {
   }
 
   /**
-   * Execute prescan checks in parallel using a fixed thread pool.
+   * Execute prescan for all splits with a single call.
+   * Parallelism is handled internally by tantivy4java/Rust.
    */
-  private def prescanInParallel(
+  private def prescanAllSplits(
     cacheManager: SplitCacheManager,
     splitInfos: Seq[(AddAction, SplitInfo)],
     docMappingJson: String,
-    query: SplitQuery,
-    timeoutMs: Long,
-    executor: ExecutorService
+    query: SplitQuery
   ): Seq[PrescanSplitResult] = {
 
-    implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
+    if (splitInfos.isEmpty) {
+      return Seq.empty
+    }
 
-    val futures = splitInfos.map { case (action, splitInfo) =>
-      Future {
-        prescanSingleSplit(cacheManager, action, splitInfo, docMappingJson, query)
+    try {
+      // Make a single call with all splits - Rust handles parallelism
+      val allSplitInfos = splitInfos.map(_._2).asJava
+      val prescanResults = cacheManager.prescanSplits(allSplitInfos, docMappingJson, query)
+
+      // Map results back to corresponding AddActions
+      val resultsList = prescanResults.asScala.toSeq
+
+      if (resultsList.length != splitInfos.length) {
+        logger.warn(s"Prescan returned ${resultsList.length} results for ${splitInfos.length} splits, " +
+          "returning conservative results for missing splits")
       }
-    }
 
-    // Wait for all futures with a reasonable total timeout
-    // Total timeout scales with number of splits but has a reasonable cap
-    val totalTimeout = Math.min(timeoutMs * splitInfos.length, 300000L) // Max 5 minutes
+      splitInfos.zipWithIndex.map { case ((action, _), idx) =>
+        if (idx < resultsList.length) {
+          val result = resultsList(idx)
+          val couldHave = result.couldHaveResults()
+          val error = getPrescanError(result)
 
-    try {
-      Await.result(Future.sequence(futures), totalTimeout.milliseconds)
-    } catch {
-      case _: java.util.concurrent.TimeoutException =>
-        logger.warn(s"Prescan timed out after ${totalTimeout}ms, returning conservative results")
-        // Return conservative results for remaining splits
-        splitInfos.map { case (action, _) =>
+          // Log errors at warn level for troubleshooting
+          if (error.isDefined) {
+            logger.warn(s"Prescan returned non-SUCCESS for ${action.path}: " +
+              s"status=${Try(result.getStatus).getOrElse("N/A")}, error=${error.getOrElse("none")}")
+          }
+
+          PrescanSplitResult(
+            action,
+            couldHaveResults = couldHave,
+            cacheHit = isCacheHit(result),
+            error = error
+          )
+        } else {
+          // Missing result - keep split conservatively
           PrescanSplitResult(action, couldHaveResults = true, cacheHit = false,
-            error = Some("Prescan timed out"))
+            error = Some("Missing prescan result"))
         }
-    }
-  }
-
-  /**
-   * Prescan a single split and return the result.
-   */
-  private def prescanSingleSplit(
-    cacheManager: SplitCacheManager,
-    action: AddAction,
-    splitInfo: SplitInfo,
-    docMappingJson: String,
-    query: SplitQuery
-  ): PrescanSplitResult = {
-    try {
-      val splitList = JCollections.singletonList(splitInfo)
-      val prescanResults = cacheManager.prescanSplits(splitList, docMappingJson, query)
-
-      if (prescanResults.isEmpty) {
-        // Empty results = error, keep split conservatively
-        PrescanSplitResult(action, couldHaveResults = true, cacheHit = false,
-          error = Some("Empty prescan result"))
-      } else {
-        val result = prescanResults.get(0)
-        val couldHave = result.couldHaveResults()
-        val error = getPrescanError(result)
-
-        // Log errors at warn level for troubleshooting
-        if (error.isDefined) {
-          logger.warn(s"Prescan returned non-SUCCESS for ${action.path}: status=${Try(result.getStatus).getOrElse("N/A")}, " +
-            s"error=${error.getOrElse("none")}")
-        }
-
-        PrescanSplitResult(
-          action,
-          couldHaveResults = couldHave,
-          cacheHit = isCacheHit(result),
-          error = error
-        )
       }
     } catch {
       case e: Exception =>
-        // On error, conservatively keep the split
-        logger.warn(s"Prescan error for ${action.path}: ${e.getMessage}")
-        PrescanSplitResult(action, couldHaveResults = true, cacheHit = false,
-          error = Some(e.getMessage))
+        // On error, conservatively keep all splits
+        logger.warn(s"Prescan error: ${e.getMessage}")
+        splitInfos.map { case (action, _) =>
+          PrescanSplitResult(action, couldHaveResults = true, cacheHit = false,
+            error = Some(e.getMessage))
+        }
     }
   }
 
