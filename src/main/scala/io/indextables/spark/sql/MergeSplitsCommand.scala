@@ -1746,7 +1746,8 @@ object MergeSplitsExecutor {
         logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
 
-    MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
+    // Use footerEndOffset as the actual file size (not uncompressedSizeBytes which is the uncompressed data size)
+    MergedSplitInfo(mergedPath, serializedMetadata.getFooterEndOffset, serializedMetadata)
   }
 }
 

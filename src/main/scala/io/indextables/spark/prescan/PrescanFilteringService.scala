@@ -256,21 +256,33 @@ object PrescanFilteringService {
    * @param tablePath Base table path for resolving relative split paths
    */
   private def buildSplitInfo(action: AddAction, tablePath: String): Option[SplitInfo] = {
-    for {
-      footerStart <- action.footerStartOffset
-    } yield {
-      // Resolve full split path: if the action path is relative, join with table path
-      val isAbsolute = action.path.startsWith("/") ||
-                       action.path.contains("://") ||
-                       action.path.startsWith("file:")
-      val fullPath = if (isAbsolute) action.path else new Path(tablePath, action.path).toString
+    // Require both footerStartOffset and footerEndOffset
+    (action.footerStartOffset, action.footerEndOffset) match {
+      case (Some(footerStart), Some(footerEnd)) =>
+        // Resolve full split path: if the action path is relative, join with table path
+        val isAbsolute = action.path.startsWith("/") ||
+                         action.path.contains("://") ||
+                         action.path.startsWith("file:")
+        val fullPath = if (isAbsolute) action.path else new Path(tablePath, action.path).toString
 
-      // Normalize cloud paths for tantivy4java compatibility:
-      // s3a:// -> s3://, abfss:// -> azure://, etc.
-      val normalizedPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
+        // Normalize cloud paths for tantivy4java compatibility:
+        // s3a:// -> s3://, abfss:// -> azure://, etc.
+        val normalizedPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
 
-      // Use size as fileSize (footerEndOffset is the end of footer, which is typically file end)
-      new SplitInfo(normalizedPath, footerStart, action.size)
+        // Validate that footerEndOffset > footerStartOffset
+        if (footerEnd <= footerStart) {
+          logger.warn(s"Skipping prescan for ${action.path}: invalid footer offsets " +
+            s"(footerEndOffset=$footerEnd must be > footerStartOffset=$footerStart)")
+          None
+        } else {
+          // Use footerEndOffset as fileSize (it marks the end of the split file)
+          Some(new SplitInfo(normalizedPath, footerStart, footerEnd))
+        }
+
+      case _ =>
+        // Missing footer offsets - skip this split for prescan
+        logger.debug(s"Skipping prescan for ${action.path}: missing footer offsets")
+        None
     }
   }
 
