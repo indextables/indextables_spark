@@ -243,8 +243,12 @@ case class PrewarmPrescanFiltersCommand(
     }
   }
 
+  // Maximum number of splits to process in a single batch
+  private val PREWARM_BATCH_SIZE = 1000
+
   /**
    * Prewarm splits by loading their footer data into the cache.
+   * Processes splits in batches of up to 1000 to provide progress visibility.
    *
    * @param splits Splits to prewarm
    * @param docMappingJson Document mapping JSON for the table
@@ -274,22 +278,55 @@ case class PrewarmPrescanFiltersCommand(
       return PrewarmResult(processed = 0, cached = 0, errors = 0)
     }
 
-    // Make a single call to prescanSplits with all splits
-    // Parallelism is handled internally by tantivy4java/Rust
-    try {
-      val splitList = splitInfos.asJava
-      val results = cacheManager.prescanSplits(splitList, docMappingJson, prewarmQuery)
+    val totalSplits = splitInfos.length
+    val batches = splitInfos.grouped(PREWARM_BATCH_SIZE).toSeq
+    val totalBatches = batches.length
 
-      // Count successes and errors from the results
-      val cached = results.asScala.count(r => r.couldHaveResults() || !hasError(r))
-      val errors = results.asScala.count(r => hasError(r))
+    logger.warn(s"PREWARM: Starting prewarm of $totalSplits splits in $totalBatches batches (batch size: $PREWARM_BATCH_SIZE)")
 
-      PrewarmResult(processed = splitInfos.length, cached = cached, errors = errors)
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Failed to prewarm splits: ${ex.getMessage}", ex)
-        PrewarmResult(processed = splitInfos.length, cached = 0, errors = splitInfos.length)
+    var totalCached = 0
+    var totalErrors = 0
+    val overallStartTime = System.currentTimeMillis()
+
+    // Process each batch serially
+    batches.zipWithIndex.foreach { case (batch, batchIdx) =>
+      val batchNum = batchIdx + 1
+      val batchStartTime = System.currentTimeMillis()
+
+      try {
+        val splitList = batch.asJava
+        val results = cacheManager.prescanSplits(splitList, docMappingJson, prewarmQuery)
+
+        // Count successes and errors from the results
+        val batchCached = results.asScala.count(r => r.couldHaveResults() || !hasError(r))
+        val batchErrors = results.asScala.count(r => hasError(r))
+
+        totalCached += batchCached
+        totalErrors += batchErrors
+
+        val batchTimeMs = System.currentTimeMillis() - batchStartTime
+        val splitsProcessedSoFar = Math.min(batchNum * PREWARM_BATCH_SIZE, totalSplits)
+        val overallTimeMs = System.currentTimeMillis() - overallStartTime
+        val splitsPerSecond = if (overallTimeMs > 0) (splitsProcessedSoFar * 1000.0 / overallTimeMs).toInt else 0
+
+        logger.warn(s"PREWARM: Batch $batchNum/$totalBatches complete | " +
+          s"batch_splits=${batch.length}, batch_time_ms=$batchTimeMs, batch_errors=$batchErrors | " +
+          s"total_progress=$splitsProcessedSoFar/$totalSplits, total_time_ms=$overallTimeMs, " +
+          s"throughput=${splitsPerSecond} splits/sec")
+
+      } catch {
+        case ex: Exception =>
+          val batchTimeMs = System.currentTimeMillis() - batchStartTime
+          totalErrors += batch.length
+          logger.error(s"PREWARM: Batch $batchNum/$totalBatches FAILED after ${batchTimeMs}ms: ${ex.getMessage}")
+      }
     }
+
+    val totalTimeMs = System.currentTimeMillis() - overallStartTime
+    logger.warn(s"PREWARM: Complete | total_splits=$totalSplits, cached=$totalCached, " +
+      s"errors=$totalErrors, total_time_ms=$totalTimeMs")
+
+    PrewarmResult(processed = totalSplits, cached = totalCached, errors = totalErrors)
   }
 
   /**
