@@ -112,6 +112,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
   - [AWS Configuration](#aws-configuration)
   - [Split Cache Configuration](#split-cache-configuration)
+  - [L2 Disk Cache (Persistent NVMe Caching)](#l2-disk-cache-persistent-nvme-caching)
   - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
   - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
 - [File Format](#file-format)
@@ -141,6 +142,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
+- 💾 **L2 Disk Cache**: Persistent NVMe caching layer reduces S3/Azure latency from 50-200ms to 1-5ms with LZ4/ZSTD compression and LRU eviction
 
 ---
 
@@ -1588,6 +1590,126 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.cache.maxSize", "1000000000") // 1GB cache for this operation
   .option("spark.indextables.cache.directoryPath", "/nvme/cache") // High-performance cache
   .save("s3://bucket/path")
+```
+
+#### L2 Disk Cache (Persistent NVMe Caching)
+
+The L2 Disk Cache provides a persistent caching layer between the in-memory L1 cache and remote storage (S3/Azure). This dramatically reduces latency and cloud egress costs for repeated searches, even across JVM restarts.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Search Request                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   L1 In-Memory Cache                         │
+│                    (JVM heap, fast)                          │
+└─────────────────────────────────────────────────────────────┘
+                              │ miss
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   L2 Disk Cache                              │
+│               (fast NVMe, persistent)                        │
+│         LZ4/ZSTD compressed, LRU eviction                    │
+└─────────────────────────────────────────────────────────────┘
+                              │ miss
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Remote Storage                             │
+│                    (S3 / Azure)                              │
+│               High latency, egress costs                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+##### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.cache.disk.enabled` | `false` | Enable L2 disk cache |
+| `spark.indextables.cache.disk.path` | *required* | Directory for cache files (NVMe SSD recommended) |
+| `spark.indextables.cache.disk.maxSize` | `0` (auto) | Max cache size; 0 = auto (2/3 available disk). Supports `G`, `M`, `K` suffixes |
+| `spark.indextables.cache.disk.compression` | `lz4` | Compression algorithm: `lz4`, `zstd`, or `none` |
+| `spark.indextables.cache.disk.minCompressSize` | `4K` | Skip compression below this threshold |
+| `spark.indextables.cache.disk.manifestSyncInterval` | `30` | How often to persist manifest to disk (seconds) |
+
+##### Basic Usage
+
+```scala
+// Session-level configuration (recommended)
+spark.conf.set("spark.indextables.cache.disk.enabled", "true")
+spark.conf.set("spark.indextables.cache.disk.path", "/mnt/nvme/tantivy_cache")
+spark.conf.set("spark.indextables.cache.disk.compression", "lz4")
+spark.conf.set("spark.indextables.cache.disk.maxSize", "100G")
+
+// Read data - disk cache is used automatically
+val df = spark.read
+  .format("io.indextables.provider.IndexTablesProvider")
+  .load("s3://bucket/path")
+
+// First query: cache miss → S3 download → populate disk cache
+df.filter($"status" === "active").show()
+
+// Subsequent queries: cache HIT (fast, no S3 calls)
+df.filter($"status" === "pending").show()
+
+// After JVM restart with same disk cache path:
+// First query hits disk cache → no S3 download needed
+```
+
+##### Per-DataFrame Configuration
+
+```scala
+// Configure per read operation
+val df = spark.read
+  .format("io.indextables.provider.IndexTablesProvider")
+  .option("spark.indextables.cache.disk.enabled", "true")
+  .option("spark.indextables.cache.disk.path", "/local_disk0/cache")
+  .option("spark.indextables.cache.disk.compression", "zstd")  // Max compression
+  .option("spark.indextables.cache.disk.maxSize", "50G")
+  .load("s3://bucket/path")
+```
+
+##### Compression Algorithms
+
+| Algorithm | Speed | Ratio | Use Case |
+|-----------|-------|-------|----------|
+| `lz4` | ~400 MB/s | 50-70% | Default, best balance of speed and compression |
+| `zstd` | ~150 MB/s | 60-80% | Cold data, maximum compression |
+| `none` | N/A | 0% | Pre-compressed data, CPU-limited environments |
+
+##### Performance Characteristics
+
+| Storage Layer | Typical Latency | Notes |
+|---------------|-----------------|-------|
+| L1 In-Memory | <1ms | JVM heap, limited size |
+| L2 Disk Cache (NVMe) | 1-5ms | Local I/O + decompression |
+| S3 / Azure | 50-200ms | Network RTT + transfer |
+
+##### Best Practices
+
+1. **Use NVMe SSD** for disk cache path - spinning disks negate the benefit
+2. **Size appropriately** - Cache your working set; 2x your typical query patterns
+3. **Use LZ4 compression** - Almost always beneficial on modern CPUs
+4. **Separate from temp** - Don't use `/tmp` which may be cleared on reboot
+5. **Auto-detection** - On Databricks/EMR with `/local_disk0`, consider using it for disk cache
+
+##### Databricks Example
+
+```scala
+// Databricks with /local_disk0 NVMe storage
+spark.conf.set("spark.indextables.cache.disk.enabled", "true")
+spark.conf.set("spark.indextables.cache.disk.path", "/local_disk0/tantivy_disk_cache")
+spark.conf.set("spark.indextables.cache.disk.maxSize", "200G")
+spark.conf.set("spark.indextables.cache.disk.compression", "lz4")
+
+// All reads will now use persistent disk caching
+val df = spark.read
+  .format("io.indextables.provider.IndexTablesProvider")
+  .load("s3://bucket/large-dataset")
+
+// Repeated queries hit local NVMe instead of S3
+df.filter($"date" >= "2024-01-01").count()
 ```
 
 #### IndexQuery and IndexQueryAll Operators
