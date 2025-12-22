@@ -29,6 +29,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests for read operations, 2-3x faster (enabled by default)
+- **L2 Disk Cache**: Persistent NVMe caching across JVM restarts, 10-50x faster repeated queries (auto-enabled on Databricks/EMR)
 
 ## Key Configuration Settings
 
@@ -82,6 +83,14 @@ spark.indextables.read.batchOptimization.maxConcurrentPrefetch: 8 (default: 8, p
 // Adaptive Tuning (automatic parameter optimization based on performance metrics)
 spark.indextables.read.adaptiveTuning.enabled: true (default: true, auto-adjust parameters)
 spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5, minimum batches to track)
+
+// L2 Disk Cache (persistent NVMe caching across JVM restarts)
+spark.indextables.cache.disk.enabled: true (default: auto-enabled on /local_disk0)
+spark.indextables.cache.disk.path: "/local_disk0/tantivy4spark_slicecache" (auto-detected)
+spark.indextables.cache.disk.maxSize: "100G" (default: auto = 2/3 available disk)
+spark.indextables.cache.disk.compression: "lz4" (options: lz4, zstd, none)
+spark.indextables.cache.disk.minCompressSize: "4K" (default: 4096 bytes)
+spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)

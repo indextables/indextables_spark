@@ -134,6 +134,32 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def adaptiveTuningMinBatches: Option[Int] =
     Option(options.get("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment")).map(_.toInt)
 
+  // ===== L2 Disk Cache Configuration =====
+
+  /** Whether to enable L2 disk cache. Default: auto-enabled if /local_disk0 detected. */
+  def diskCacheEnabled: Option[Boolean] =
+    Option(options.get("spark.indextables.cache.disk.enabled")).map(_.toBoolean)
+
+  /** Path for disk cache. Default: /local_disk0/tantivy4spark_slicecache if available. */
+  def diskCachePath: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.path"))
+
+  /** Maximum disk cache size. Supports "100G", "500M" formats. Default: auto (2/3 disk). */
+  def diskCacheMaxSize: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.maxSize"))
+
+  /** Compression algorithm: "lz4" (default), "zstd", "none". */
+  def diskCacheCompression: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.compression"))
+
+  /** Minimum size to compress. Supports "4K", "8K" formats. Default: 4096 bytes. */
+  def diskCacheMinCompressSize: Option[String] =
+    Option(options.get("spark.indextables.cache.disk.minCompressSize"))
+
+  /** Seconds between manifest sync to disk. Default: 30. */
+  def diskCacheManifestSyncInterval: Option[Int] =
+    Option(options.get("spark.indextables.cache.disk.manifestSyncInterval")).map(_.toInt)
+
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
     val fieldTypeMapping   = getFieldTypeMapping
@@ -201,4 +227,12 @@ object IndexTables4SparkOptions {
   // Adaptive tuning configuration keys
   val ADAPTIVE_TUNING_ENABLED     = "spark.indextables.read.adaptiveTuning.enabled"
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
+
+  // L2 Disk Cache configuration keys
+  val DISK_CACHE_ENABLED               = "spark.indextables.cache.disk.enabled"
+  val DISK_CACHE_PATH                  = "spark.indextables.cache.disk.path"
+  val DISK_CACHE_MAX_SIZE              = "spark.indextables.cache.disk.maxSize"
+  val DISK_CACHE_COMPRESSION           = "spark.indextables.cache.disk.compression"
+  val DISK_CACHE_MIN_COMPRESS_SIZE     = "spark.indextables.cache.disk.minCompressSize"
+  val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
 }
