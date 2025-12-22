@@ -29,7 +29,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests for read operations, 2-3x faster (enabled by default)
-- **L2 Disk Cache**: Persistent NVMe caching across JVM restarts, 10-50x faster repeated queries (auto-enabled on Databricks/EMR)
+- **L2 Disk Cache**: Persistent NVMe caching across JVM restarts, 10-50x faster repeated queries (opt-in, use `DESCRIBE INDEXTABLES DISK CACHE` to monitor)
 
 ## Key Configuration Settings
 
@@ -85,9 +85,9 @@ spark.indextables.read.adaptiveTuning.enabled: true (default: true, auto-adjust 
 spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5, minimum batches to track)
 
 // L2 Disk Cache (persistent NVMe caching across JVM restarts)
-spark.indextables.cache.disk.enabled: true (default: auto-enabled on /local_disk0)
-spark.indextables.cache.disk.path: "/local_disk0/tantivy4spark_slicecache" (auto-detected)
-spark.indextables.cache.disk.maxSize: "100G" (default: auto = 2/3 available disk)
+spark.indextables.cache.disk.enabled: false (default: false, must be explicitly enabled)
+spark.indextables.cache.disk.path: "/local_disk0/tantivy4spark_slicecache" (required when enabled)
+spark.indextables.cache.disk.maxSize: "100G" (default: 0 = auto, 2/3 available disk)
 spark.indextables.cache.disk.compression: "lz4" (options: lz4, zstd, none)
 spark.indextables.cache.disk.minCompressSize: "4K" (default: 4096 bytes)
 spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
@@ -417,6 +417,28 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if WHERE clause references non-partition columns
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
+
+### Describe Disk Cache
+```sql
+-- View disk cache statistics across all executors
+DESCRIBE INDEXTABLES DISK CACHE;
+DESCRIBE TANTIVY4SPARK DISK CACHE;  -- alternate syntax
+
+-- Example output:
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |executor_id|enabled|total_bytes|   max_bytes|usage_percent|splits_cached|components_cached|
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |driver     |  false|       NULL|        NULL|         NULL|         NULL|             NULL|
+-- |executor-0 |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-1 |   true| 4831838208|107374182400|          4.5|          118|              826|
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+```
+
+**Key points:**
+- Each executor maintains its own independent disk cache
+- Aggregates statistics from driver and all executors
+- Returns NULL values for disabled caches
+- Use to monitor cache utilization and tune `maxSize` setting
 
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala

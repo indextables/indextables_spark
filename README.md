@@ -1712,6 +1712,26 @@ val df = spark.read
 df.filter($"date" >= "2024-01-01").count()
 ```
 
+##### Monitoring Disk Cache
+
+Use the `DESCRIBE INDEXTABLES DISK CACHE` SQL command to view cache statistics across all executors:
+
+```sql
+-- View disk cache stats across driver and all executors
+DESCRIBE INDEXTABLES DISK CACHE;
+
+-- Example output:
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |executor_id|enabled|total_bytes|   max_bytes|usage_percent|splits_cached|components_cached|
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |driver     |  false|       NULL|        NULL|         NULL|         NULL|             NULL|
+-- |executor-0 |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-1 |   true| 4831838208|107374182400|          4.5|          118|              826|
+-- +-----------+-------+-----------+------------+-------------+-------------+-----------------+
+```
+
+Each executor maintains its own independent disk cache. This command aggregates statistics from all active executors in the cluster.
+
 #### IndexQuery and IndexQueryAll Operators
 
 IndexTables4Spark supports powerful query operators for native Tantivy query syntax with full filter pushdown:
