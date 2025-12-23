@@ -68,17 +68,8 @@ class IndexTables4SparkSimpleAggregateScan(
   override def toBatch: Batch = {
     logger.debug(s"SIMPLE AGGREGATE SCAN: toBatch() called, creating batch")
 
-    // Update broadcast locality information before partition planning
-    // This helps ensure preferred locations are accurate for aggregate operations
-    try {
-      val sparkContext = sparkSession.sparkContext
-      logger.info("Updating broadcast locality before simple aggregate partition planning")
-      io.indextables.spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      logger.info("Broadcast locality update completed for simple aggregate scan")
-    } catch {
-      case ex: Exception =>
-        logger.warn("Failed to update broadcast locality information for simple aggregate", ex)
-    }
+    // Note: Split locality is now managed by DriverSplitLocalityManager
+    // Assignment happens during partition planning in the batch
 
     new IndexTables4SparkSimpleAggregateBatch(
       sparkSession,
@@ -207,6 +198,11 @@ class IndexTables4SparkSimpleAggregateBatch(
   override def planInputPartitions(): Array[InputPartition] = {
     logger.debug(s"SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
 
+    // Get available hosts for driver-based locality assignment
+    val sparkContext = sparkSession.sparkContext
+    val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
+    logger.debug(s"SIMPLE AGGREGATE BATCH: Available hosts: ${availableHosts.mkString(", ")}")
+
     // Get all splits from transaction log
     val allSplits = transactionLog.listFiles()
     logger.debug(s"SIMPLE AGGREGATE BATCH: Found ${allSplits.length} total splits")
@@ -226,8 +222,14 @@ class IndexTables4SparkSimpleAggregateBatch(
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.debug(s"SIMPLE AGGREGATE BATCH: After data skipping: ${filteredSplits.length} splits")
 
+    // Batch-assign all splits for this query using per-query load balancing
+    val splitPaths = filteredSplits.map(_.path)
+    val assignments = io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    logger.debug(s"SIMPLE AGGREGATE BATCH: Assigned ${assignments.size} splits to hosts")
+
     // Create one partition per filtered split for distributed aggregation processing
     filteredSplits.map { split =>
+      val preferredHost = assignments.get(split.path)
       new IndexTables4SparkSimpleAggregatePartition(
         split,
         schema,
@@ -235,7 +237,8 @@ class IndexTables4SparkSimpleAggregateBatch(
         config,
         aggregation,
         transactionLog.getTablePath(),
-        indexQueryFilters
+        indexQueryFilters,
+        preferredHost
       )
     }.toArray
   }
@@ -261,7 +264,8 @@ class IndexTables4SparkSimpleAggregatePartition(
   val config: Map[String, String], // Direct config instead of broadcast
   val aggregation: Aggregation,
   val tablePath: org.apache.hadoop.fs.Path,
-  val indexQueryFilters: Array[Any] = Array.empty)
+  val indexQueryFilters: Array[Any] = Array.empty,
+  val preferredHost: Option[String] = None)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkSimpleAggregatePartition])
@@ -274,32 +278,12 @@ class IndexTables4SparkSimpleAggregatePartition(
   logger.debug(s"SIMPLE AGGREGATE PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
-   * Provide preferred locations for this aggregate partition based on split cache locality. Uses the same
-   * broadcast-based locality information as regular scan partitions.
+   * Provide preferred locations for this aggregate partition based on driver-side split assignment.
+   * The preferredHost is computed during partition planning using per-query load balancing
+   * while maintaining sticky assignments for cache locality.
    */
-  override def preferredLocations(): Array[String] = {
-    import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
-
-    logger.info(s"🎯 [SIMPLE-AGG] preferredLocations() called for split: ${split.path}")
-
-    val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(split.path)
-    if (preferredHosts.nonEmpty) {
-      logger.info(s"🎯 [SIMPLE-AGG] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
-      preferredHosts
-    } else {
-      logger.info(s"🎯 [SIMPLE-AGG] No broadcast hosts found, trying legacy registry")
-      // Fallback to legacy registry for compatibility
-      val legacyHosts = SplitLocationRegistry.getPreferredHosts(split.path)
-      if (legacyHosts.nonEmpty) {
-        logger.info(s"🎯 [SIMPLE-AGG] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
-        legacyHosts
-      } else {
-        logger.info(s"🎯 [SIMPLE-AGG] No preferred hosts found - letting Spark decide")
-        // No cache history available, let Spark decide
-        Array.empty[String]
-      }
-    }
-  }
+  override def preferredLocations(): Array[String] =
+    preferredHost.toArray
 }
 
 /** Reader factory for simple aggregation partitions. */
@@ -358,8 +342,15 @@ class IndexTables4SparkSimpleAggregateReader(
   override def get(): org.apache.spark.sql.catalyst.InternalRow =
     aggregateResults.next()
 
-  override def close(): Unit =
+  override def close(): Unit = {
     logger.debug(s"SIMPLE AGGREGATE READER: Closing simple aggregate reader")
+
+    // Report bytesRead to Spark UI
+    val bytesRead = partition.split.size
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for ${partition.split.path}: $bytesRead bytes")
+    }
+  }
 
   /** Initialize the simple aggregation by executing aggregation via tantivy4java. */
   private def initialize(): Unit = {

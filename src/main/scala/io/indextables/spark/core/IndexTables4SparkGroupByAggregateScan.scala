@@ -74,17 +74,8 @@ class IndexTables4SparkGroupByAggregateScan(
   }
 
   override def toBatch: Batch = {
-    // Update broadcast locality information before partition planning
-    // This helps ensure preferred locations are accurate for GROUP BY operations
-    try {
-      val sparkContext = sparkSession.sparkContext
-      logger.info("Updating broadcast locality before GROUP BY aggregate partition planning")
-      io.indextables.spark.storage.BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      logger.info("Broadcast locality update completed for GROUP BY aggregate scan")
-    } catch {
-      case ex: Exception =>
-        logger.warn("Failed to update broadcast locality information for GROUP BY aggregate", ex)
-    }
+    // Note: Split locality is now managed by DriverSplitLocalityManager
+    // Assignment happens during partition planning in the batch
 
     new IndexTables4SparkGroupByAggregateBatch(
       sparkSession,
@@ -251,6 +242,11 @@ class IndexTables4SparkGroupByAggregateBatch(
   override def planInputPartitions(): Array[InputPartition] = {
     logger.debug(s"GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
+    // Get available hosts for driver-based locality assignment
+    val sparkContext = sparkSession.sparkContext
+    val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
+    logger.debug(s"GROUP BY BATCH: Available hosts: ${availableHosts.mkString(", ")}")
+
     // Get all splits from transaction log
     val allSplits = transactionLog.listFiles()
     logger.debug(s"GROUP BY BATCH: Found ${allSplits.length} total splits")
@@ -270,8 +266,14 @@ class IndexTables4SparkGroupByAggregateBatch(
     val filteredSplits = helperScan.applyDataSkipping(allSplits, pushedFilters)
     logger.debug(s"GROUP BY BATCH: After data skipping: ${filteredSplits.length} splits")
 
+    // Batch-assign all splits for this query using per-query load balancing
+    val splitPaths = filteredSplits.map(_.path)
+    val assignments = io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    logger.debug(s"GROUP BY BATCH: Assigned ${assignments.size} splits to hosts")
+
     // Create one partition per filtered split for distributed GROUP BY processing
     filteredSplits.map { split =>
+      val preferredHost = assignments.get(split.path)
       new IndexTables4SparkGroupByAggregatePartition(
         split,
         pushedFilters,
@@ -280,7 +282,8 @@ class IndexTables4SparkGroupByAggregateBatch(
         groupByColumns,
         transactionLog.getTablePath(),
         schema,
-        indexQueryFilters
+        indexQueryFilters,
+        preferredHost
       )
     }.toArray
   }
@@ -309,7 +312,8 @@ class IndexTables4SparkGroupByAggregatePartition(
   val groupByColumns: Array[String],
   val tablePath: org.apache.hadoop.fs.Path,
   val schema: StructType,
-  val indexQueryFilters: Array[Any] = Array.empty)
+  val indexQueryFilters: Array[Any] = Array.empty,
+  val preferredHost: Option[String] = None)
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregatePartition])
@@ -323,32 +327,12 @@ class IndexTables4SparkGroupByAggregatePartition(
   logger.debug(s"GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
-   * Provide preferred locations for this GROUP BY aggregate partition based on split cache locality. Uses the same
-   * broadcast-based locality information as regular scan partitions.
+   * Provide preferred locations for this GROUP BY aggregate partition based on driver-side split assignment.
+   * The preferredHost is computed during partition planning using per-query load balancing
+   * while maintaining sticky assignments for cache locality.
    */
-  override def preferredLocations(): Array[String] = {
-    import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
-
-    logger.info(s"🎯 [GROUP-BY-AGG] preferredLocations() called for split: ${split.path}")
-
-    val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(split.path)
-    if (preferredHosts.nonEmpty) {
-      logger.info(s"🎯 [GROUP-BY-AGG] Using broadcast preferred hosts: ${preferredHosts.mkString(", ")}")
-      preferredHosts
-    } else {
-      logger.info(s"🎯 [GROUP-BY-AGG] No broadcast hosts found, trying legacy registry")
-      // Fallback to legacy registry for compatibility
-      val legacyHosts = SplitLocationRegistry.getPreferredHosts(split.path)
-      if (legacyHosts.nonEmpty) {
-        logger.info(s"🎯 [GROUP-BY-AGG] Using legacy preferred hosts: ${legacyHosts.mkString(", ")}")
-        legacyHosts
-      } else {
-        logger.info(s"🎯 [GROUP-BY-AGG] No preferred hosts found - letting Spark decide")
-        // No cache history available, let Spark decide
-        Array.empty[String]
-      }
-    }
-  }
+  override def preferredLocations(): Array[String] =
+    preferredHost.toArray
 }
 
 /** Reader factory for GROUP BY aggregation partitions. */
@@ -420,8 +404,15 @@ class IndexTables4SparkGroupByAggregateReader(
   override def get(): org.apache.spark.sql.catalyst.InternalRow =
     groupByResults.next()
 
-  override def close(): Unit =
+  override def close(): Unit = {
     logger.debug(s"GROUP BY READER: Closing GROUP BY reader")
+
+    // Report bytesRead to Spark UI
+    val bytesRead = partition.split.size
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for ${partition.split.path}: $bytesRead bytes")
+    }
+  }
 
   /** Initialize the GROUP BY aggregation by executing terms aggregation via tantivy4java. */
   private def initialize(): Unit = {

@@ -112,6 +112,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
   - [AWS Configuration](#aws-configuration)
   - [Split Cache Configuration](#split-cache-configuration)
+  - [L2 Disk Cache (Persistent NVMe Caching)](#l2-disk-cache-persistent-nvme-caching)
   - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
   - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
 - [File Format](#file-format)
@@ -141,6 +142,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
+- 💾 **L2 Disk Cache**: Persistent NVMe caching layer reduces S3/Azure latency from 50-200ms to 1-5ms with LZ4/ZSTD compression and LRU eviction (auto-enabled on Databricks/EMR)
 
 ---
 
@@ -1589,6 +1591,160 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
   .option("spark.indextables.cache.directoryPath", "/nvme/cache") // High-performance cache
   .save("s3://bucket/path")
 ```
+
+#### L2 Disk Cache (Persistent NVMe Caching)
+
+The L2 Disk Cache provides a persistent caching layer between the in-memory L1 cache and remote storage (S3/Azure). This dramatically reduces latency and cloud egress costs for repeated searches, even across JVM restarts.
+
+**Auto-Detection**: On Databricks and EMR clusters with `/local_disk0` NVMe storage, disk caching is **automatically enabled** with no configuration required. Set `spark.indextables.cache.disk.enabled=false` to explicitly disable.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Search Request                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   L1 In-Memory Cache                         │
+│                    (JVM heap, fast)                          │
+└─────────────────────────────────────────────────────────────┘
+                              │ miss
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   L2 Disk Cache                              │
+│               (fast NVMe, persistent)                        │
+│         LZ4/ZSTD compressed, LRU eviction                    │
+└─────────────────────────────────────────────────────────────┘
+                              │ miss
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Remote Storage                             │
+│                    (S3 / Azure)                              │
+│               High latency, egress costs                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+##### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `spark.indextables.cache.disk.enabled` | auto | Auto-enabled when `/local_disk0` detected (Databricks/EMR). Set `false` to disable. |
+| `spark.indextables.cache.disk.path` | auto | Auto-detected: `/local_disk0/tantivy4spark_slicecache` when available. Override for custom location. |
+| `spark.indextables.cache.disk.maxSize` | `0` (auto) | Max cache size; 0 = auto (2/3 available disk). Supports `G`, `M`, `K` suffixes |
+| `spark.indextables.cache.disk.compression` | `lz4` | Compression algorithm: `lz4`, `zstd`, or `none` |
+| `spark.indextables.cache.disk.minCompressSize` | `4K` | Skip compression below this threshold |
+| `spark.indextables.cache.disk.manifestSyncInterval` | `30` | How often to persist manifest to disk (seconds) |
+
+##### Basic Usage (Automatic on Databricks/EMR)
+
+```scala
+// On Databricks/EMR with /local_disk0: NO CONFIGURATION NEEDED!
+// Disk cache is automatically enabled with optimal settings.
+
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/path")
+
+// First query: cache miss → S3 download → populate disk cache
+df.filter($"status" === "active").show()
+
+// Subsequent queries: cache HIT (fast, no S3 calls)
+df.filter($"status" === "pending").show()
+
+// After JVM restart: First query hits disk cache → no S3 download needed
+```
+
+##### Manual Configuration (Non-Databricks Environments)
+
+```scala
+// For custom NVMe paths or explicit configuration
+spark.conf.set("spark.indextables.cache.disk.enabled", "true")
+spark.conf.set("spark.indextables.cache.disk.path", "/mnt/nvme/tantivy_cache")
+spark.conf.set("spark.indextables.cache.disk.compression", "lz4")
+spark.conf.set("spark.indextables.cache.disk.maxSize", "100G")
+
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/path")
+```
+
+##### Per-DataFrame Configuration
+
+```scala
+// Configure per read operation (overrides auto-detection)
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.cache.disk.enabled", "true")
+  .option("spark.indextables.cache.disk.path", "/custom/nvme/cache")
+  .option("spark.indextables.cache.disk.compression", "zstd")  // Max compression
+  .option("spark.indextables.cache.disk.maxSize", "50G")
+  .load("s3://bucket/path")
+```
+
+##### Compression Algorithms
+
+| Algorithm | Speed | Ratio | Use Case |
+|-----------|-------|-------|----------|
+| `lz4` | ~400 MB/s | 50-70% | Default, best balance of speed and compression |
+| `zstd` | ~150 MB/s | 60-80% | Cold data, maximum compression |
+| `none` | N/A | 0% | Pre-compressed data, CPU-limited environments |
+
+##### Performance Characteristics
+
+| Storage Layer | Typical Latency | Notes |
+|---------------|-----------------|-------|
+| L1 In-Memory | <1ms | JVM heap, limited size |
+| L2 Disk Cache (NVMe) | 1-5ms | Local I/O + decompression |
+| S3 / Azure | 50-200ms | Network RTT + transfer |
+
+##### Best Practices
+
+1. **Auto-detection is default** - On Databricks/EMR with `/local_disk0`, disk cache is automatically enabled
+2. **Use NVMe SSD** for disk cache path - spinning disks negate the benefit
+3. **Size appropriately** - Cache your working set; default is 2/3 available disk
+4. **Use LZ4 compression** - Almost always beneficial on modern CPUs (default)
+5. **Separate from temp** - Don't use `/tmp` which may be cleared on reboot
+6. **To disable** - Set `spark.indextables.cache.disk.enabled=false` if auto-detection is not desired
+
+##### Databricks Example
+
+```scala
+// Databricks with /local_disk0 NVMe storage - AUTOMATIC, no configuration needed!
+// Disk cache is auto-enabled at /local_disk0/tantivy4spark_slicecache
+
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/large-dataset")
+
+// Repeated queries hit local NVMe instead of S3
+df.filter($"date" >= "2024-01-01").count()
+
+// Optional: Customize max size if default (2/3 disk) is not appropriate
+// spark.conf.set("spark.indextables.cache.disk.maxSize", "200G")
+
+// To disable auto-detection:
+// spark.conf.set("spark.indextables.cache.disk.enabled", "false")
+```
+
+##### Monitoring Disk Cache
+
+Use the `DESCRIBE INDEXTABLES DISK CACHE` SQL command to view cache statistics across all executors:
+
+```sql
+-- View disk cache stats across driver and all executors
+DESCRIBE INDEXTABLES DISK CACHE;
+
+-- Example output (auto-enabled on Databricks/EMR):
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |executor_id|host                |enabled|total_bytes|   max_bytes|usage_percent|splits_cached|components_cached|
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |driver     |10.0.0.1:44444      |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-0 |10.0.0.2:33333      |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-1 |10.0.0.3:33333      |   true| 4831838208|107374182400|          4.5|          118|              826|
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+```
+
+Each executor maintains its own independent disk cache. This command aggregates statistics from all active executors in the cluster. The `host` column shows the IP:port to identify which executor reported each row.
 
 #### IndexQuery and IndexQueryAll Operators
 

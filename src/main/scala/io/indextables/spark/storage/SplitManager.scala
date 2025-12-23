@@ -338,7 +338,15 @@ case class SplitCacheConfig(
   batchOptMaxConcurrentPrefetch: Option[Int] = None,
   // Adaptive tuning configuration
   adaptiveTuningEnabled: Option[Boolean] = None,
-  adaptiveTuningMinBatches: Option[Int] = None) {
+  adaptiveTuningMinBatches: Option[Int] = None,
+  // L2 Disk Cache configuration (persistent NVMe caching)
+  diskCacheEnabled: Option[Boolean] = None,           // Master switch (auto-enabled on /local_disk0)
+  diskCachePath: Option[String] = None,               // Cache directory path
+  diskCacheMaxSize: Option[Long] = None,              // Max size in bytes (0 = auto: 2/3 available disk)
+  diskCacheCompression: Option[String] = None,        // "lz4" (default), "zstd", "none"
+  diskCacheMinCompressSize: Option[Long] = None,      // Skip compression below threshold (default: 4096)
+  diskCacheManifestSyncInterval: Option[Int] = None   // Seconds between manifest writes (default: 30)
+) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
 
@@ -484,6 +492,12 @@ case class SplitCacheConfig(
       config = config.withBatchOptimization(batchOptConfig)
     }
 
+    // Configure L2 Disk Cache (tiered caching)
+    createTieredCacheConfig().foreach { tieredConfig =>
+      logger.info(s"L2 Disk cache configured")
+      config = config.withTieredCache(tieredConfig)
+    }
+
     logger.debug(s"Final tantivy4java CacheConfig: $config")
     config
   }
@@ -593,6 +607,72 @@ case class SplitCacheConfig(
       batchOptGapTolerance.isDefined ||
       batchOptMinDocs.isDefined ||
       batchOptMaxConcurrentPrefetch.isDefined
+
+  /**
+   * Create TieredCacheConfig for L2 disk caching.
+   * Returns None if disk cache is explicitly disabled or no suitable path is available.
+   */
+  private def createTieredCacheConfig(): Option[SplitCacheManager.TieredCacheConfig] = {
+    // Determine effective path (explicit config or auto-detected)
+    val effectivePath = diskCachePath.orElse(SplitCacheConfig.getDefaultDiskCachePath())
+
+    // Disabled if:
+    // 1. Explicitly disabled via config
+    // 2. No path available (explicit or auto-detected)
+    if (diskCacheEnabled.contains(false)) {
+      logger.debug("L2 Disk cache explicitly disabled")
+      return None
+    }
+
+    effectivePath match {
+      case None =>
+        logger.debug("No suitable disk cache path available - L2 disk cache disabled")
+        None
+
+      case Some(path) =>
+        var tieredConfig = new SplitCacheManager.TieredCacheConfig()
+          .withDiskCachePath(path)
+
+        // Apply max size (0 = auto: 2/3 available disk)
+        diskCacheMaxSize.foreach { size =>
+          logger.debug(s"L2 Disk cache max size: $size bytes")
+          tieredConfig = tieredConfig.withMaxDiskSize(size)
+        }
+
+        // Apply compression algorithm
+        diskCacheCompression.map(_.toLowerCase) match {
+          case Some("lz4") =>
+            logger.debug("L2 Disk cache compression: LZ4")
+            tieredConfig = tieredConfig.withCompression(SplitCacheManager.CompressionAlgorithm.LZ4)
+          case Some("zstd") =>
+            logger.debug("L2 Disk cache compression: ZSTD")
+            tieredConfig = tieredConfig.withCompression(SplitCacheManager.CompressionAlgorithm.ZSTD)
+          case Some("none") =>
+            logger.debug("L2 Disk cache compression: disabled")
+            tieredConfig = tieredConfig.withoutCompression()
+          case Some(other) =>
+            logger.warn(s"Unknown disk cache compression: '$other'. Valid options: lz4, zstd, none. Using LZ4.")
+            tieredConfig = tieredConfig.withCompression(SplitCacheManager.CompressionAlgorithm.LZ4)
+          case None =>
+            // Default: LZ4 (best balance of speed and compression)
+        }
+
+        // Apply min compress size (convert Long to Int for API compatibility)
+        diskCacheMinCompressSize.foreach { size =>
+          logger.debug(s"L2 Disk cache min compress size: $size bytes")
+          tieredConfig = tieredConfig.withMinCompressSize(size.toInt)
+        }
+
+        // Apply manifest sync interval
+        diskCacheManifestSyncInterval.foreach { interval =>
+          logger.debug(s"L2 Disk cache manifest sync interval: $interval seconds")
+          tieredConfig = tieredConfig.withManifestSyncInterval(interval)
+        }
+
+        logger.info(s"L2 Disk cache enabled at: $path")
+        Some(tieredConfig)
+    }
+  }
 }
 
 /** Companion object for SplitCacheConfig with auto-detection utilities. */
@@ -634,58 +714,28 @@ object SplitCacheConfig {
    * 16777216, "1G" -> 1073741824
    */
   def parseSizeString(sizeStr: String): Long = SizeParser.parseSize(sizeStr)
+
+  /**
+   * Auto-detect the optimal L2 disk cache path.
+   * Defaults to /local_disk0/tantivy4spark_slicecache if it exists and is writable (Databricks/EMR NVMe),
+   * otherwise returns None (disk cache disabled - spinning disks negate the benefit).
+   *
+   * Note: This is separate from getDefaultCachePath() which is for L1 in-memory cache directory.
+   */
+  def getDefaultDiskCachePath(): Option[String] = {
+    val localDisk0 = new java.io.File("/local_disk0")
+    if (localDisk0.exists() && localDisk0.isDirectory && localDisk0.canWrite()) {
+      logger.info("Auto-detected /local_disk0 for L2 disk cache - using high-performance NVMe storage")
+      Some("/local_disk0/tantivy4spark_slicecache")
+    } else {
+      logger.debug("/local_disk0 not available - L2 disk cache disabled (spinning disks negate benefit)")
+      None
+    }
+  }
 }
 
-/**
- * Registry for tracking which hosts have cached which splits. This enables Spark to use preferredLocations for better
- * data locality.
- */
-object SplitLocationRegistry {
-  private val logger = LoggerFactory.getLogger(getClass)
-
-  // Map from splitPath to Set of hostnames that have cached it
-  @volatile private var splitLocations: Map[String, Set[String]] = Map.empty
-  private val lock                                               = new Object
-
-  /** Record that a split has been accessed/cached on a particular host. */
-  def recordSplitAccess(splitPath: String, hostname: String): Unit =
-    lock.synchronized {
-      val currentHosts = splitLocations.getOrElse(splitPath, Set.empty)
-      val updatedHosts = currentHosts + hostname
-      splitLocations = splitLocations + (splitPath -> updatedHosts)
-      logger.debug(s"Recorded split access: $splitPath on host $hostname (total hosts: ${updatedHosts.size})")
-    }
-
-  /** Get the list of hosts that have likely cached this split. */
-  def getPreferredHosts(splitPath: String): Array[String] =
-    splitLocations.getOrElse(splitPath, Set.empty).toArray
-
-  /** Clear location tracking for a specific split (e.g., when it's no longer relevant). */
-  def clearSplitLocations(splitPath: String): Unit =
-    lock.synchronized {
-      splitLocations = splitLocations - splitPath
-      logger.debug(s"Cleared location tracking for split: $splitPath")
-    }
-
-  /** Get current hostname for this JVM. */
-  def getCurrentHostname: String =
-    try
-      java.net.InetAddress.getLocalHost.getHostName
-    catch {
-      case ex: Exception =>
-        logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
-        "unknown"
-    }
-
-  /** Clear all split location tracking information. Returns the number of entries that were cleared. */
-  def clearAllLocations(): SplitLocationFlushResult =
-    lock.synchronized {
-      val clearedCount = splitLocations.size
-      splitLocations = Map.empty
-      logger.info(s"Cleared all split location tracking ($clearedCount entries)")
-      SplitLocationFlushResult(clearedCount)
-    }
-}
+// Note: SplitLocationRegistry has been removed in favor of DriverSplitLocalityManager
+// which provides per-query load balancing with sticky assignments on the driver side.
 
 /**
  * Global manager for split cache instances - thin wrapper around tantivy4java's SplitCacheManager.
@@ -842,11 +892,81 @@ object GlobalSplitCacheManager {
       }
     }
   }
+
+  /**
+   * Get L2 disk cache statistics across all cache managers.
+   * Returns the stats from the first cache manager that has disk cache enabled.
+   */
+  def getDiskCacheStats(): Option[DiskCacheStats] = {
+    import scala.jdk.CollectionConverters._
+    SplitCacheManager.getAllInstances().asScala.values.flatMap { manager =>
+      try {
+        Option(manager.getDiskCacheStats()).map(DiskCacheStats.fromJavaStats)
+      } catch {
+        case e: Exception =>
+          logger.debug(s"Error getting disk cache stats: ${e.getMessage}")
+          None
+      }
+    }.headOption
+  }
+
+  /**
+   * Check if L2 disk cache is enabled for any cache manager.
+   */
+  def isDiskCacheEnabled(): Boolean = {
+    import scala.jdk.CollectionConverters._
+    SplitCacheManager.getAllInstances().asScala.values.exists { manager =>
+      try
+        manager.isDiskCacheEnabled()
+      catch {
+        case e: Exception =>
+          logger.debug(s"Error checking disk cache enabled: ${e.getMessage}")
+          false
+      }
+    }
+  }
 }
 
 // Result classes for cache flush operations
 case class SplitCacheFlushResult(flushedManagers: Int)
-case class SplitLocationFlushResult(clearedEntries: Int)
+
+/**
+ * L2 Disk cache statistics from tantivy4java native layer.
+ *
+ * Provides visibility into disk cache usage and content.
+ */
+case class DiskCacheStats(
+  totalBytes: Long,
+  maxBytes: Long,
+  usagePercent: Double,
+  splitCount: Long,
+  componentCount: Long
+) {
+
+  /** Format statistics as human-readable summary string. */
+  def summary: String =
+    s"""L2 Disk Cache Statistics:
+       |  Usage: ${f"$usagePercent%.1f"}% ($totalBytes / $maxBytes bytes)
+       |  Splits cached: $splitCount
+       |  Components cached: $componentCount
+       |""".stripMargin
+}
+
+object DiskCacheStats {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /**
+   * Create DiskCacheStats from tantivy4java's DiskCacheStats.
+   */
+  def fromJavaStats(stats: SplitCacheManager.DiskCacheStats): DiskCacheStats =
+    DiskCacheStats(
+      totalBytes = stats.getTotalBytes(),
+      maxBytes = stats.getMaxBytes(),
+      usagePercent = stats.getUsagePercent(),
+      splitCount = stats.getSplitCount(),
+      componentCount = stats.getComponentCount()
+    )
+}
 
 /**
  * Batch optimization metrics collected from tantivy4java native layer.

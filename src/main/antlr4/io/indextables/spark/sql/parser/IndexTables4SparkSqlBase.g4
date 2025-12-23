@@ -60,6 +60,7 @@ statement
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
     | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
         (INCLUDE ALL)?                                          #describeTransactionLog
+    | DESCRIBE indexTablesKeyword DISK CACHE                    #describeDiskCache
     | .*?                                                       #passThrough
     ;
 
@@ -92,7 +93,7 @@ quotedIdentifier
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
-    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM
+    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK
     ;
 
 // Keywords (case-insensitive)
@@ -132,6 +133,7 @@ ALL: [Aa][Ll][Ll];
 DROP: [Dd][Rr][Oo][Pp];
 PARTITIONS: [Pp][Aa][Rr][Tt][Ii][Tt][Ii][Oo][Nn][Ss];
 FROM: [Ff][Rr][Oo][Mm];
+DISK: [Dd][Ii][Ss][Kk];
 
 // Literals
 STRING

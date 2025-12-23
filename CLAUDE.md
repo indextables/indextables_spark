@@ -29,6 +29,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **JSON field support**: Native Struct/Array/Map fields with filter pushdown and configurable indexing modes (114/114 tests passing)
 - **Statistics truncation**: Automatic optimization for long text fields (enabled by default)
 - **Batch retrieval optimization**: 90-95% reduction in S3 GET requests for read operations, 2-3x faster (enabled by default)
+- **L2 Disk Cache**: Persistent NVMe caching across JVM restarts, 10-50x faster repeated queries (auto-enabled on Databricks/EMR when `/local_disk0` detected, use `DESCRIBE INDEXTABLES DISK CACHE` to monitor)
 
 ## Key Configuration Settings
 
@@ -82,6 +83,15 @@ spark.indextables.read.batchOptimization.maxConcurrentPrefetch: 8 (default: 8, p
 // Adaptive Tuning (automatic parameter optimization based on performance metrics)
 spark.indextables.read.adaptiveTuning.enabled: true (default: true, auto-adjust parameters)
 spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment: 5 (default: 5, minimum batches to track)
+
+// L2 Disk Cache (persistent NVMe caching across JVM restarts)
+// Auto-enabled when /local_disk0 is detected (Databricks/EMR NVMe storage)
+spark.indextables.cache.disk.enabled: <auto> (default: auto-enabled when /local_disk0 detected, set to "false" to disable)
+spark.indextables.cache.disk.path: <auto> (default: "/local_disk0/tantivy4spark_slicecache" when auto-detected)
+spark.indextables.cache.disk.maxSize: "100G" (default: 0 = auto, 2/3 available disk)
+spark.indextables.cache.disk.compression: "lz4" (options: lz4, zstd, none)
+spark.indextables.cache.disk.minCompressSize: "4K" (default: 4096 bytes)
+spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
@@ -409,6 +419,31 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
 
+### Describe Disk Cache
+```sql
+-- View disk cache statistics across all executors
+DESCRIBE INDEXTABLES DISK CACHE;
+DESCRIBE TANTIVY4SPARK DISK CACHE;  -- alternate syntax
+
+-- Example output (disk cache auto-enabled on Databricks/EMR):
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |executor_id|host                |enabled|total_bytes|   max_bytes|usage_percent|splits_cached|components_cached|
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+-- |driver     |10.0.0.1:44444      |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-0 |10.0.0.2:33333      |   true| 5242880000|107374182400|          4.9|          125|              875|
+-- |executor-1 |10.0.0.3:33333      |   true| 4831838208|107374182400|          4.5|          118|              826|
+-- +-----------+--------------------+-------+-----------+------------+-------------+-------------+-----------------+
+```
+
+**Key points:**
+- **Auto-enabled on Databricks/EMR**: Disk cache is automatically enabled when `/local_disk0` is detected
+- Each executor maintains its own independent disk cache
+- Aggregates statistics from driver and all executors
+- `host` column shows IP:port to identify which executor reported each row
+- Returns NULL values when cache is disabled (no `/local_disk0` and not explicitly configured)
+- Use to monitor cache utilization and tune `maxSize` setting
+- To disable auto-detection, set `spark.indextables.cache.disk.enabled=false`
+
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala
 // Enable automatic purge after every 10 writes
@@ -549,6 +584,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Purge-on-write**: Automatic cleanup of orphaned splits and old transaction logs during write operations
 - **Purge-on-write triggers**: Can run after merge-on-write or after N writes per table (per-session counters)
 - **Purge-on-write safety**: Disabled by default, respects minimum retention periods, propagates credentials, graceful failure handling
+- **L2 Disk Cache**: Auto-enabled on Databricks/EMR when `/local_disk0` detected; disabled on spinning disk systems (no benefit). Use `spark.indextables.cache.disk.enabled=false` to explicitly disable.
 
 ---
 

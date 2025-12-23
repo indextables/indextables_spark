@@ -22,12 +22,14 @@ import java.nio.file.{Files, Paths}
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.hadoop.fs.Path
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.sources.EqualTo
-import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
 
-import io.indextables.spark.storage.BroadcastSplitLocalityManager
-import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.storage.DriverSplitLocalityManager
+import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import org.apache.commons.io.FileUtils
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
@@ -65,37 +67,83 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
   override def beforeEach(): Unit = {
     // Clear any previous pre-warm state
     PreWarmManager.clearAll()
-    BroadcastSplitLocalityManager.clearAll()
+    DriverSplitLocalityManager.clear()
   }
 
   override def afterEach(): Unit = {
     PreWarmManager.clearAll()
-    BroadcastSplitLocalityManager.clearAll()
+    DriverSplitLocalityManager.clear()
   }
 
-  test("Pre-warm explicitly disabled should skip cache warming") {
-    val schema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("content", StringType, nullable = false)
+  // Schema for test tables
+  private val testSchema = StructType(
+    Seq(
+      StructField("id", LongType, nullable = false),
+      StructField("content", StringType, nullable = false)
+    )
+  )
+
+  /**
+   * Create a real indextables table and return its AddActions with full paths.
+   * This ensures tests use real split files with proper metadata.
+   */
+  private def createRealTableAndGetAddActions(tableName: String, numRows: Int = 100): (String, Seq[AddAction]) = {
+    val tablePath = new File(tempDir, tableName).getAbsolutePath
+
+    // Create test data
+    val data = spark
+      .range(numRows)
+      .select(
+        col("id"),
+        concat(lit("content-"), col("id")).as("content")
       )
+
+    // Write as indextables
+    data.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tablePath)
+
+    // Get AddActions from transaction log
+    val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark)
+    val addActions = transactionLog.listFiles()
+
+    // Validate that AddActions have required metadata
+    addActions.foreach { action =>
+      require(action.hasFooterOffsets, s"AddAction ${action.path} missing hasFooterOffsets")
+      require(action.footerStartOffset.isDefined, s"AddAction ${action.path} missing footerStartOffset")
+      require(action.docMappingJson.isDefined, s"AddAction ${action.path} missing docMappingJson")
+    }
+
+    // Convert relative paths to full paths for PreWarmManager
+    val actionsWithFullPaths = addActions.map { action =>
+      val fullPath = new Path(tablePath, action.path).toString
+      action.copy(path = fullPath)
+    }
+
+    (tablePath, actionsWithFullPaths)
+  }
+
+  // Helper to create fake AddActions for tests that don't need real files
+  // (e.g., tests that only check orchestration with pre-warm disabled)
+  private def createFakeAddAction(path: String, size: Long): AddAction =
+    AddAction(
+      path = path,
+      partitionValues = Map.empty,
+      size = size,
+      modificationTime = System.currentTimeMillis(),
+      dataChange = true,
+      footerStartOffset = Some(100L),
+      footerEndOffset = Some(size),
+      hasFooterOffsets = true,
+      docMappingJson = Some("""{"field_mappings":[{"name":"content","type":"text"}],"mode":"lenient"}""")
     )
 
+  test("Pre-warm explicitly disabled should skip cache warming") {
+    // When pre-warm is disabled, we can use fake AddActions since files won't be opened
     val addActions = Seq(
-      AddAction(
-        path = "test-split-1.split",
-        partitionValues = Map.empty,
-        size = 1000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      ),
-      AddAction(
-        path = "test-split-2.split",
-        partitionValues = Map.empty,
-        size = 2000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      )
+      createFakeAddAction("test-split-1.split", 1000),
+      createFakeAddAction("test-split-2.split", 2000)
     )
 
     val filters: Array[Any] = Array(EqualTo("content", "test"))
@@ -108,7 +156,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     val result = PreWarmManager.executePreWarm(
       spark.sparkContext,
       addActions,
-      schema,
+      testSchema,
       filters,
       broadcastConfig.value,
       isPreWarmEnabled = false
@@ -119,32 +167,12 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     result.warmupAssignments shouldBe Map.empty
   }
 
-  test("Pre-warm enabled with no preferred hosts should skip task distribution") {
-    val schema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      )
-    )
+  test("Pre-warm enabled should assign hosts and warm real splits") {
+    // Create a real table with splits
+    val (tablePath, addActions) = createRealTableAndGetAddActions("prewarm_test_1")
+    addActions.length should be > 0
 
-    val addActions = Seq(
-      AddAction(
-        path = "test-split-1.split",
-        partitionValues = Map.empty,
-        size = 1000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      ),
-      AddAction(
-        path = "test-split-2.split",
-        partitionValues = Map.empty,
-        size = 2000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      )
-    )
-
-    val filters: Array[Any] = Array(EqualTo("content", "test"))
+    val filters: Array[Any] = Array(EqualTo("content", "content-1"))
     val broadcastConfig = spark.sparkContext.broadcast(
       Map(
         "spark.indextables.cache.prewarm.enabled" -> "true",
@@ -152,52 +180,27 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
       )
     )
 
-    // No splits have preferred hosts (no locality information)
+    // With DriverSplitLocalityManager, hosts are automatically assigned during executePreWarm
     val result = PreWarmManager.executePreWarm(
       spark.sparkContext,
       addActions,
-      schema,
+      testSchema,
       filters,
       broadcastConfig.value,
       isPreWarmEnabled = true
     )
 
     result.warmupInitiated shouldBe true
-    result.totalWarmupsCreated shouldBe 0 // No preferred hosts = no tasks created
-    result.warmupAssignments shouldBe Map.empty
+    // With real splits, warmups should be created and executed successfully
+    result.totalWarmupsCreated should be >= 1
   }
 
-  test("Pre-warm enabled with preferred hosts should create warmup tasks") {
-    val schema = StructType(
-      Seq(
-        StructField("id", IntegerType, nullable = false),
-        StructField("content", StringType, nullable = false)
-      )
-    )
+  test("Pre-warm enabled with real splits should create warmup tasks") {
+    // Create a real table with splits
+    val (tablePath, addActions) = createRealTableAndGetAddActions("prewarm_test_2", numRows = 200)
+    addActions.length should be > 0
 
-    val addActions = Seq(
-      AddAction(
-        path = "test-split-1.split",
-        partitionValues = Map.empty,
-        size = 1000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      ),
-      AddAction(
-        path = "test-split-2.split",
-        partitionValues = Map.empty,
-        size = 2000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      )
-    )
-
-    // Record some split locality to create preferred hosts
-    BroadcastSplitLocalityManager.recordSplitAccess("test-split-1.split", "host1")
-    BroadcastSplitLocalityManager.recordSplitAccess("test-split-2.split", "host2")
-    BroadcastSplitLocalityManager.updateBroadcastLocality(spark.sparkContext)
-
-    val filters: Array[Any] = Array(EqualTo("content", "test"))
+    val filters: Array[Any] = Array(EqualTo("content", "content-50"))
     val broadcastConfig = spark.sparkContext.broadcast(
       Map(
         "spark.indextables.cache.prewarm.enabled" -> "true",
@@ -208,15 +211,15 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     val result = PreWarmManager.executePreWarm(
       spark.sparkContext,
       addActions,
-      schema,
+      testSchema,
       filters,
       broadcastConfig.value,
       isPreWarmEnabled = true
     )
 
     result.warmupInitiated shouldBe true
-    result.totalWarmupsCreated shouldBe >=(1) // Should create at least one task
-    result.warmupAssignments.size should be >= 1
+    // Verify warmups were actually created for real splits
+    result.totalWarmupsCreated should be >= 1
   }
 
   test("joinWarmupFuture should handle missing futures gracefully") {
@@ -240,27 +243,11 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
   }
 
   test("clearAll should reset all pre-warm state") {
-    val schema = StructType(
-      Seq(
-        StructField("content", StringType, nullable = false)
-      )
-    )
+    // Create a real table with splits
+    val (tablePath, addActions) = createRealTableAndGetAddActions("prewarm_test_clearall")
+    addActions.length should be > 0
 
-    val addActions = Seq(
-      AddAction(
-        path = "test-split.split",
-        partitionValues = Map.empty,
-        size = 1000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      )
-    )
-
-    // Setup some locality and execute pre-warm
-    BroadcastSplitLocalityManager.recordSplitAccess("test-split.split", "host1")
-    BroadcastSplitLocalityManager.updateBroadcastLocality(spark.sparkContext)
-
-    val filters: Array[Any] = Array(EqualTo("content", "test"))
+    val filters: Array[Any] = Array(EqualTo("content", "content-1"))
     val broadcastConfig = spark.sparkContext.broadcast(
       Map(
         "spark.indextables.cache.prewarm.enabled" -> "true"
@@ -270,7 +257,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     val result = PreWarmManager.executePreWarm(
       spark.sparkContext,
       addActions,
-      schema,
+      testSchema,
       filters,
       broadcastConfig.value,
       isPreWarmEnabled = true
@@ -288,41 +275,22 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
   }
 
   test("getPreWarmStats should return statistics for executed pre-warms") {
-    val schema = StructType(
-      Seq(
-        StructField("content", StringType, nullable = false)
-      )
-    )
+    // Create a real table with splits
+    val (tablePath, addActions) = createRealTableAndGetAddActions("prewarm_test_stats", numRows = 100)
+    addActions.length should be > 0
 
-    val addActions = Seq(
-      AddAction(
-        path = "test-split-1.split",
-        partitionValues = Map.empty,
-        size = 1000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      ),
-      AddAction(
-        path = "test-split-2.split",
-        partitionValues = Map.empty,
-        size = 2000,
-        modificationTime = System.currentTimeMillis(),
-        dataChange = true
-      )
-    )
-
-    val filters: Array[Any] = Array(EqualTo("content", "test"))
+    val filters: Array[Any] = Array(EqualTo("content", "content-1"))
     val broadcastConfig = spark.sparkContext.broadcast(
       Map(
         "spark.indextables.cache.prewarm.enabled" -> "true"
       )
     )
 
-    // Execute pre-warm (even with no preferred hosts, stats should be recorded)
+    // Execute pre-warm with real splits
     val result = PreWarmManager.executePreWarm(
       spark.sparkContext,
       addActions,
-      schema,
+      testSchema,
       filters,
       broadcastConfig.value,
       isPreWarmEnabled = true
@@ -333,14 +301,14 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
     // Generate same query hash to retrieve stats
     val queryHash = java.util.UUID
       .nameUUIDFromBytes(
-        Array(EqualTo("content", "test")).map(_.toString).mkString("|").getBytes
+        filters.map(_.toString).mkString("|").getBytes
       )
       .toString
       .take(8)
 
     val stats = PreWarmManager.getPreWarmStats(queryHash)
     stats should not be None
-    stats.get.totalSplits shouldBe 2
+    stats.get.totalSplits shouldBe addActions.length
     stats.get.preWarmTimeMs should be >= 0L
   }
 }

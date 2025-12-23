@@ -36,10 +36,8 @@ import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
 import io.indextables.spark.storage.{
-  BroadcastSplitLocalityManager,
   GlobalSplitCacheManager,
-  SplitCacheConfig,
-  SplitLocationRegistry
+  SplitCacheConfig
 }
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
 import io.indextables.spark.util.StatisticsCalculator
@@ -116,29 +114,17 @@ class IndexTables4SparkInputPartition(
   val filters: Array[Filter],
   val partitionId: Int,
   val limit: Option[Int] = None,
-  val indexQueryFilters: Array[Any] = Array.empty)
+  val indexQueryFilters: Array[Any] = Array.empty,
+  val preferredHost: Option[String] = None)
     extends InputPartition {
 
   /**
-   * Provide preferred locations for this partition based on split cache locality. Spark will try to schedule tasks on
-   * these hosts to take advantage of cached splits. Uses broadcast-based locality information for accurate cluster-wide
-   * cache tracking.
+   * Provide preferred locations for this partition based on driver-side split assignment.
+   * The preferredHost is computed during partition planning using per-query load balancing
+   * while maintaining sticky assignments for cache locality.
    */
-  override def preferredLocations(): Array[String] = {
-    val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(addAction.path)
-    if (preferredHosts.nonEmpty) {
-      preferredHosts
-    } else {
-      // Fallback to legacy registry for compatibility
-      val legacyHosts = SplitLocationRegistry.getPreferredHosts(addAction.path)
-      if (legacyHosts.nonEmpty) {
-        legacyHosts
-      } else {
-        // No cache history available, let Spark decide
-        Array.empty[String]
-      }
-    }
-  }
+  override def preferredLocations(): Array[String] =
+    preferredHost.toArray
 }
 
 class IndexTables4SparkReaderFactory(
@@ -233,12 +219,8 @@ class IndexTables4SparkPartitionReader(
         logger.debug(s"ENTERING initialize() for split: ${addAction.path}")
         logger.debug(s"V2 PartitionReader initializing for split: ${addAction.path}")
 
-        // Record that this host has accessed this split for future scheduling locality
-        val currentHostname = SplitLocationRegistry.getCurrentHostname
-        // Record in both systems for transition period
-        SplitLocationRegistry.recordSplitAccess(addAction.path, currentHostname)
-        BroadcastSplitLocalityManager.recordSplitAccess(addAction.path, currentHostname)
-        logger.debug(s"Recorded split access for locality: ${addAction.path} on host $currentHostname")
+        // Note: Split locality is now tracked by DriverSplitLocalityManager on the driver
+        // No executor-side recording needed - assignments are managed during partition planning
 
         // Check if pre-warm is enabled and try to join warmup future
         val broadcasted      = config

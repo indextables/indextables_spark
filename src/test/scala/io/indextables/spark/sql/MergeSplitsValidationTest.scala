@@ -784,9 +784,9 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     transactionLog.invalidateCache()
     // Clear global split cache to avoid schema pollution and stale data
     try {
-      import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+      import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
       GlobalSplitCacheManager.flushAllCaches()
-      SplitLocationRegistry.clearAllLocations()
+      DriverSplitLocalityManager.clear()
     } catch {
       case _: Exception => // Ignore if cache clearing fails
     }

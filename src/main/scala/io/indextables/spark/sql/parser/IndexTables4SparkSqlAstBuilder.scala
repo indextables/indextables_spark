@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
+  DescribeDiskCacheCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
   FlushIndexTablesCacheCommand,
@@ -380,6 +381,13 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         logger.error(s"Exception in visitDescribeTransactionLog: ${e.getMessage}", e)
         throw e
     }
+  }
+
+  override def visitDescribeDiskCache(ctx: DescribeDiskCacheContext): LogicalPlan = {
+    logger.debug("visitDescribeDiskCache called")
+    val result = DescribeDiskCacheCommand()
+    logger.debug(s"Created DescribeDiskCacheCommand: $result")
+    result
   }
 
   override def visitPassThrough(ctx: PassThroughContext): AnyRef = {

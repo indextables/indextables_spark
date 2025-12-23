@@ -31,7 +31,7 @@ import org.apache.spark.SparkContext
 
 import io.indextables.spark.core.FiltersToQueryConverter
 import io.indextables.spark.search.SplitSearchEngine
-import io.indextables.spark.storage.{BroadcastSplitLocalityManager, GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.query.Query
 import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery}
@@ -77,11 +77,13 @@ object PreWarmManager {
     val startTime = System.currentTimeMillis()
     logger.info(s"🔥 Starting pre-warm for ${addActions.length} splits")
 
-    // Update broadcast locality to get current cache distribution
-    BroadcastSplitLocalityManager.updateBroadcastLocality(sc)
+    // Get available hosts and assign splits using driver-based locality
+    val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sc)
+    val splitPaths = addActions.map(_.path)
+    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
 
-    // Group splits by their preferred hosts for efficient distribution
-    val splitsByHost = groupSplitsByPreferredHosts(addActions)
+    // Group splits by their assigned hosts for efficient distribution
+    val splitsByHost = groupSplitsByAssignedHosts(addActions, assignments)
     logger.info(
       s"🔥 Pre-warm distribution: ${splitsByHost.size} hosts, ${splitsByHost.map(_._2.size).sum} split assignments"
     )
@@ -149,15 +151,17 @@ object PreWarmManager {
     }
   }
 
-  /** Group splits by their preferred hosts based on cache locality information. */
-  private def groupSplitsByPreferredHosts(addActions: Seq[AddAction]): Map[String, Seq[AddAction]] =
+  /** Group splits by their assigned hosts based on driver-based locality assignments. */
+  private def groupSplitsByAssignedHosts(
+      addActions: Seq[AddAction],
+      assignments: Map[String, String]
+  ): Map[String, Seq[AddAction]] =
     addActions
       .groupBy { addAction =>
-        val preferredHosts = BroadcastSplitLocalityManager.getPreferredHosts(addAction.path)
-        // Use the first preferred host, or "any" if no preference
-        if (preferredHosts.nonEmpty) preferredHosts.head else "any"
+        // Use the assigned host from DriverSplitLocalityManager
+        assignments.getOrElse(addAction.path, "any")
       }
-      .filter(_._1 != "any") // Only include splits with known preferred hosts
+      .filter(_._1 != "any") // Only include splits with known host assignments
 
   /** Distribute pre-warm tasks to executors using Spark's task distribution system. */
   private def distributePreWarmTasks(
@@ -249,8 +253,8 @@ object PreWarmManager {
       val futureKey = buildFutureKey(task.addAction.path, actualHostname, task.queryHash)
       warmupFutures.put(futureKey, warmupFuture)
 
-      // Record that this host has accessed this split for locality tracking
-      BroadcastSplitLocalityManager.recordSplitAccess(task.addAction.path, actualHostname)
+      // Note: Split locality is now tracked on the driver side via DriverSplitLocalityManager
+      // No executor-side recording needed - assignments are managed during partition planning
 
       logger.info(s"🔥 Pre-warm initiated for split: ${task.addAction.path} on host: $actualHostname")
 

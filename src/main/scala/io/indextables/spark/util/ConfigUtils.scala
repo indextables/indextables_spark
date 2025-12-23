@@ -148,7 +148,17 @@ object ConfigUtils {
       // Adaptive tuning configuration
       adaptiveTuningEnabled = getConfigOption("spark.indextables.read.adaptiveTuning.enabled").map(_.toBoolean),
       adaptiveTuningMinBatches =
-        getConfigOption("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment").map(_.toInt)
+        getConfigOption("spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment").map(_.toInt),
+      // L2 Disk Cache configuration (persistent NVMe caching)
+      diskCacheEnabled = getConfigOption("spark.indextables.cache.disk.enabled").map(_.toBoolean),
+      diskCachePath = getConfigOption("spark.indextables.cache.disk.path"),
+      diskCacheMaxSize = getConfigOption("spark.indextables.cache.disk.maxSize")
+        .map(SplitCacheConfig.parseSizeString),
+      diskCacheCompression = getConfigOption("spark.indextables.cache.disk.compression"),
+      diskCacheMinCompressSize = getConfigOption("spark.indextables.cache.disk.minCompressSize")
+        .map(SplitCacheConfig.parseSizeString),
+      diskCacheManifestSyncInterval =
+        getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt)
     )
   }
 

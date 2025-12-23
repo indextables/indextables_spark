@@ -23,7 +23,7 @@ import java.nio.file.{Files, Paths}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions.{col, _}
 
-import io.indextables.spark.storage.BroadcastSplitLocalityManager
+import io.indextables.spark.storage.DriverSplitLocalityManager
 import org.apache.commons.io.FileUtils
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
@@ -70,12 +70,12 @@ class PreWarmIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAft
   override def beforeEach(): Unit = {
     // Clear any previous pre-warm state
     PreWarmManager.clearAll()
-    BroadcastSplitLocalityManager.clearAll()
+    DriverSplitLocalityManager.clear()
   }
 
   override def afterEach(): Unit = {
     PreWarmManager.clearAll()
-    BroadcastSplitLocalityManager.clearAll()
+    DriverSplitLocalityManager.clear()
   }
 
   // Note: These are integration tests that would require the full IndexTables4Spark implementation
