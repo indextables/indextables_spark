@@ -26,12 +26,9 @@ import org.scalatest.matchers.should.Matchers
  * Tests for L2 Disk Cache configuration.
  *
  * This test suite validates:
- *   1. IndexTables4SparkOptions disk cache accessors
- *   2. SplitCacheConfig disk cache field handling
- *   3. Compression algorithm configuration
- *   4. Size parsing for disk cache parameters
- *   5. ConfigUtils disk cache option parsing
- *   6. DiskCacheStats case class functionality
+ *   1. IndexTables4SparkOptions disk cache accessors 2. SplitCacheConfig disk cache field handling 3. Compression
+ *      algorithm configuration 4. Size parsing for disk cache parameters 5. ConfigUtils disk cache option parsing 6.
+ *      DiskCacheStats case class functionality
  */
 class DiskCacheConfigTest extends AnyFunSuite with Matchers {
 
@@ -225,8 +222,8 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
       diskCachePath = Some("/tmp/test_cache"),
       diskCacheMaxSize = Some(50L * 1024L * 1024L * 1024L), // 50GB
       diskCacheCompression = Some("lz4"),
-      diskCacheMinCompressSize = Some(4096L),               // 4KB
-      diskCacheManifestSyncInterval = Some(30)              // 30 seconds
+      diskCacheMinCompressSize = Some(4096L),  // 4KB
+      diskCacheManifestSyncInterval = Some(30) // 30 seconds
     )
 
     config.diskCacheEnabled shouldBe Some(true)
@@ -439,8 +436,8 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
 
   test("DiskCacheStats - summary format") {
     val stats = DiskCacheStats(
-      totalBytes = 52428800000L,     // ~50GB
-      maxBytes = 107374182400L,      // 100GB
+      totalBytes = 52428800000L, // ~50GB
+      maxBytes = 107374182400L,  // 100GB
       usagePercent = 48.8,
       splitCount = 1247,
       componentCount = 8729
@@ -532,12 +529,12 @@ class DiskCacheConfigTest extends AnyFunSuite with Matchers {
   test("full config with both disk cache and batch optimization via ConfigUtils") {
     val configMap = Map(
       // Disk cache
-      "spark.indextables.cache.disk.enabled"              -> "true",
-      "spark.indextables.cache.disk.path"                 -> "/tmp/combined_cache",
-      "spark.indextables.cache.disk.compression"          -> "lz4",
+      "spark.indextables.cache.disk.enabled"     -> "true",
+      "spark.indextables.cache.disk.path"        -> "/tmp/combined_cache",
+      "spark.indextables.cache.disk.compression" -> "lz4",
       // Batch optimization
-      "spark.indextables.read.batchOptimization.enabled"  -> "true",
-      "spark.indextables.read.batchOptimization.profile"  -> "aggressive"
+      "spark.indextables.read.batchOptimization.enabled" -> "true",
+      "spark.indextables.read.batchOptimization.profile" -> "aggressive"
     )
 
     val config = ConfigUtils.createSplitCacheConfig(configMap, Some("test-table"))

@@ -22,28 +22,22 @@ import java.nio.file.{Files, Path}
 import java.util.Comparator
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
 
 import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Integration tests for L2 Disk Cache functionality.
  *
  * This test suite validates:
- *   1. Disk cache configuration flows through to tantivy4java
- *   2. Cache files are created at the specified path
- *   3. Disk cache can be explicitly disabled
- *   4. GlobalSplitCacheManager disk cache methods work correctly
- *   5. Disk cache works alongside batch optimization
+ *   1. Disk cache configuration flows through to tantivy4java 2. Cache files are created at the specified path 3. Disk
+ *      cache can be explicitly disabled 4. GlobalSplitCacheManager disk cache methods work correctly 5. Disk cache
+ *      works alongside batch optimization
  */
-class DiskCacheIntegrationTest
-    extends AnyFunSuite
-    with Matchers
-    with BeforeAndAfterAll
-    with BeforeAndAfterEach {
+class DiskCacheIntegrationTest extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var spark: SparkSession = _
   private var tempDir: Path       = _
@@ -100,7 +94,8 @@ class DiskCacheIntegrationTest
 
   private def deleteDirectory(path: Path): Unit =
     if (Files.exists(path)) {
-      Files.walk(path)
+      Files
+        .walk(path)
         .sorted(Comparator.reverseOrder[Path]())
         .forEach(p => Files.deleteIfExists(p))
     }
@@ -109,11 +104,13 @@ class DiskCacheIntegrationTest
     import org.apache.spark.sql.Row
     import org.apache.spark.sql.types._
 
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("content", StringType, nullable = false),
-      StructField("score", DoubleType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("content", StringType, nullable = false),
+        StructField("score", DoubleType, nullable = false)
+      )
+    )
 
     val data = Seq(
       Row(1, "hello world", 100.0),
@@ -148,8 +145,8 @@ class DiskCacheIntegrationTest
   }
 
   test("disk cache disabled should not create cache files") {
-    val testTablePath   = tablePath.resolve("disabled_test").toString
-    val localCachePath  = diskCachePath.resolve("disabled_cache")
+    val testTablePath  = tablePath.resolve("disabled_test").toString
+    val localCachePath = diskCachePath.resolve("disabled_cache")
     Files.createDirectories(localCachePath)
 
     // Write with disk cache explicitly disabled
@@ -251,7 +248,7 @@ class DiskCacheIntegrationTest
       .load(testTablePath)
       .filter("score > 200")
 
-    df.count() shouldBe 3  // IDs 3, 4, 5 have score > 200
+    df.count() shouldBe 3 // IDs 3, 4, 5 have score > 200
   }
 
   // ===== Combined Configuration Tests =====
@@ -379,8 +376,8 @@ class DiskCacheIntegrationTest
   // ===== Edge Case Tests =====
 
   test("disk cache path with spaces should work") {
-    val spacePath       = diskCachePath.resolve("path with spaces")
-    val testTablePath   = tablePath.resolve("space_test").toString
+    val spacePath     = diskCachePath.resolve("path with spaces")
+    val testTablePath = tablePath.resolve("space_test").toString
     Files.createDirectories(spacePath)
 
     createTestData().write

@@ -79,8 +79,8 @@ object PreWarmManager {
 
     // Get available hosts and assign splits using driver-based locality
     val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sc)
-    val splitPaths = addActions.map(_.path)
-    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val splitPaths     = addActions.map(_.path)
+    val assignments    = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
 
     // Group splits by their assigned hosts for efficient distribution
     val splitsByHost = groupSplitsByAssignedHosts(addActions, assignments)
@@ -153,8 +153,8 @@ object PreWarmManager {
 
   /** Group splits by their assigned hosts based on driver-based locality assignments. */
   private def groupSplitsByAssignedHosts(
-      addActions: Seq[AddAction],
-      assignments: Map[String, String]
+    addActions: Seq[AddAction],
+    assignments: Map[String, String]
   ): Map[String, Seq[AddAction]] =
     addActions
       .groupBy { addAction =>

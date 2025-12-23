@@ -73,7 +73,7 @@ class IndexTables4SparkGroupByAggregateScan(
     resultSchema
   }
 
-  override def toBatch: Batch = {
+  override def toBatch: Batch =
     // Note: Split locality is now managed by DriverSplitLocalityManager
     // Assignment happens during partition planning in the batch
 
@@ -88,7 +88,6 @@ class IndexTables4SparkGroupByAggregateScan(
       groupByColumns,
       indexQueryFilters
     )
-  }
 
   override def description(): String = {
     val groupByDesc = groupByColumns.mkString(", ")
@@ -243,7 +242,7 @@ class IndexTables4SparkGroupByAggregateBatch(
     logger.debug(s"GROUP BY BATCH: Planning input partitions for GROUP BY aggregation")
 
     // Get available hosts for driver-based locality assignment
-    val sparkContext = sparkSession.sparkContext
+    val sparkContext   = sparkSession.sparkContext
     val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
     logger.debug(s"GROUP BY BATCH: Available hosts: ${availableHosts.mkString(", ")}")
 
@@ -268,7 +267,8 @@ class IndexTables4SparkGroupByAggregateBatch(
 
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths = filteredSplits.map(_.path)
-    val assignments = io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val assignments =
+      io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     logger.debug(s"GROUP BY BATCH: Assigned ${assignments.size} splits to hosts")
 
     // Create one partition per filtered split for distributed GROUP BY processing
@@ -327,9 +327,9 @@ class IndexTables4SparkGroupByAggregatePartition(
   logger.debug(s"GROUP BY PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
-   * Provide preferred locations for this GROUP BY aggregate partition based on driver-side split assignment.
-   * The preferredHost is computed during partition planning using per-query load balancing
-   * while maintaining sticky assignments for cache locality.
+   * Provide preferred locations for this GROUP BY aggregate partition based on driver-side split assignment. The
+   * preferredHost is computed during partition planning using per-query load balancing while maintaining sticky
+   * assignments for cache locality.
    */
   override def preferredLocations(): Array[String] =
     preferredHost.toArray
@@ -874,11 +874,10 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Convert a date string to days since epoch (Int) as Spark expects for DateType.
-   * Handles multiple formats:
-   * - YYYY-MM-DD format (e.g., "2024-01-15")
-   * - ISO datetime format (e.g., "2024-01-02T00:00:00Z") - extracts date part
-   * - LocalDateTime format (e.g., "2024-01-02T00:00:00") - extracts date part
+   * Convert a date string to days since epoch (Int) as Spark expects for DateType. Handles multiple formats:
+   *   - YYYY-MM-DD format (e.g., "2024-01-15")
+   *   - ISO datetime format (e.g., "2024-01-02T00:00:00Z") - extracts date part
+   *   - LocalDateTime format (e.g., "2024-01-02T00:00:00") - extracts date part
    */
   private def convertDateStringToDays(dateStr: String): Int = {
     import java.time.{LocalDate, LocalDateTime}
@@ -908,12 +907,12 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Convert a timestamp string to microseconds since epoch (Long) as Spark expects for TimestampType.
-   * Handles multiple formats:
-   * - Numeric microseconds (already in correct format from tantivy)
-   * - ISO instant format (e.g., "2024-01-01T10:00:00Z")
-   * - URL-encoded strings (e.g., "2024-01-01T15%3A00%3A00Z") - partition paths encode colons
-   * - LocalDateTime format (e.g., "2024-01-01T10:00:00")
+   * Convert a timestamp string to microseconds since epoch (Long) as Spark expects for TimestampType. Handles multiple
+   * formats:
+   *   - Numeric microseconds (already in correct format from tantivy)
+   *   - ISO instant format (e.g., "2024-01-01T10:00:00Z")
+   *   - URL-encoded strings (e.g., "2024-01-01T15%3A00%3A00Z") - partition paths encode colons
+   *   - LocalDateTime format (e.g., "2024-01-01T10:00:00")
    */
   private def convertTimestampStringToMicros(tsStr: String): Long = {
     import java.time.{Instant, LocalDateTime, ZoneOffset}

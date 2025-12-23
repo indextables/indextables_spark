@@ -479,7 +479,8 @@ class TantivyDirectInterface(
   private val threadCount = getConfigValueInt("spark.indextables.indexWriter.threads", 2) // 2 threads default
   private val batchSize = getConfigValueInt("spark.indextables.indexWriter.batchSize", 10000) // 10,000 records default
   // Max batch buffer size: 90MB default (leaves 10MB safety margin under native 100MB limit)
-  private val maxBatchBufferSize = getConfigValueSize("spark.indextables.indexWriter.maxBatchBufferSize", 90L * 1024 * 1024)
+  private val maxBatchBufferSize =
+    getConfigValueSize("spark.indextables.indexWriter.maxBatchBufferSize", 90L * 1024 * 1024)
   private val useBatch = getConfigValue("spark.indextables.indexWriter.useBatch", "true").toBoolean // Use batch by default
 
   logger.info(s"Index writer configuration: heapSize=$heapSize bytes, threadCount=$threadCount, batchSize=$batchSize, maxBatchBufferSize=$maxBatchBufferSize bytes, useBatch=$useBatch")

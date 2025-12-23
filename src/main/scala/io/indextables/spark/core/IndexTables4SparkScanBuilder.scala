@@ -385,9 +385,9 @@ class IndexTables4SparkScanBuilder(
       effectiveFilters,
       options,
       config,
-      None,         // No GROUP BY columns for simple count
-      true,         // hasAggregations
-      Some(schema)  // Pass table schema for proper type conversion
+      None,        // No GROUP BY columns for simple count
+      true,        // hasAggregations
+      Some(schema) // Pass table schema for proper type conversion
     )
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {

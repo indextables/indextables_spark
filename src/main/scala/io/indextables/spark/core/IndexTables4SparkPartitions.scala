@@ -35,10 +35,7 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
-import io.indextables.spark.storage.{
-  GlobalSplitCacheManager,
-  SplitCacheConfig
-}
+import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
 import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
@@ -119,9 +116,8 @@ class IndexTables4SparkInputPartition(
     extends InputPartition {
 
   /**
-   * Provide preferred locations for this partition based on driver-side split assignment.
-   * The preferredHost is computed during partition planning using per-query load balancing
-   * while maintaining sticky assignments for cache locality.
+   * Provide preferred locations for this partition based on driver-side split assignment. The preferredHost is computed
+   * during partition planning using per-query load balancing while maintaining sticky assignments for cache locality.
    */
   override def preferredLocations(): Array[String] =
     preferredHost.toArray

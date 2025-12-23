@@ -340,12 +340,12 @@ case class SplitCacheConfig(
   adaptiveTuningEnabled: Option[Boolean] = None,
   adaptiveTuningMinBatches: Option[Int] = None,
   // L2 Disk Cache configuration (persistent NVMe caching)
-  diskCacheEnabled: Option[Boolean] = None,           // Master switch (auto-enabled on /local_disk0)
-  diskCachePath: Option[String] = None,               // Cache directory path
-  diskCacheMaxSize: Option[Long] = None,              // Max size in bytes (0 = auto: 2/3 available disk)
-  diskCacheCompression: Option[String] = None,        // "lz4" (default), "zstd", "none"
-  diskCacheMinCompressSize: Option[Long] = None,      // Skip compression below threshold (default: 4096)
-  diskCacheManifestSyncInterval: Option[Int] = None   // Seconds between manifest writes (default: 30)
+  diskCacheEnabled: Option[Boolean] = None,         // Master switch (auto-enabled on /local_disk0)
+  diskCachePath: Option[String] = None,             // Cache directory path
+  diskCacheMaxSize: Option[Long] = None,            // Max size in bytes (0 = auto: 2/3 available disk)
+  diskCacheCompression: Option[String] = None,      // "lz4" (default), "zstd", "none"
+  diskCacheMinCompressSize: Option[Long] = None,    // Skip compression below threshold (default: 4096)
+  diskCacheManifestSyncInterval: Option[Int] = None // Seconds between manifest writes (default: 30)
 ) {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitCacheConfig])
@@ -609,8 +609,8 @@ case class SplitCacheConfig(
       batchOptMaxConcurrentPrefetch.isDefined
 
   /**
-   * Create TieredCacheConfig for L2 disk caching.
-   * Returns None if disk cache is explicitly disabled or no suitable path is available.
+   * Create TieredCacheConfig for L2 disk caching. Returns None if disk cache is explicitly disabled or no suitable path
+   * is available.
    */
   private def createTieredCacheConfig(): Option[SplitCacheManager.TieredCacheConfig] = {
     // Determine effective path (explicit config or auto-detected)
@@ -654,7 +654,7 @@ case class SplitCacheConfig(
             logger.warn(s"Unknown disk cache compression: '$other'. Valid options: lz4, zstd, none. Using LZ4.")
             tieredConfig = tieredConfig.withCompression(SplitCacheManager.CompressionAlgorithm.LZ4)
           case None =>
-            // Default: LZ4 (best balance of speed and compression)
+          // Default: LZ4 (best balance of speed and compression)
         }
 
         // Apply min compress size (convert Long to Int for API compatibility)
@@ -716,9 +716,8 @@ object SplitCacheConfig {
   def parseSizeString(sizeStr: String): Long = SizeParser.parseSize(sizeStr)
 
   /**
-   * Auto-detect the optimal L2 disk cache path.
-   * Defaults to /local_disk0/tantivy4spark_slicecache if it exists and is writable (Databricks/EMR NVMe),
-   * otherwise returns None (disk cache disabled - spinning disks negate the benefit).
+   * Auto-detect the optimal L2 disk cache path. Defaults to /local_disk0/tantivy4spark_slicecache if it exists and is
+   * writable (Databricks/EMR NVMe), otherwise returns None (disk cache disabled - spinning disks negate the benefit).
    *
    * Note: This is separate from getDefaultCachePath() which is for L1 in-memory cache directory.
    */
@@ -894,25 +893,28 @@ object GlobalSplitCacheManager {
   }
 
   /**
-   * Get L2 disk cache statistics across all cache managers.
-   * Returns the stats from the first cache manager that has disk cache enabled.
+   * Get L2 disk cache statistics across all cache managers. Returns the stats from the first cache manager that has
+   * disk cache enabled.
    */
   def getDiskCacheStats(): Option[DiskCacheStats] = {
     import scala.jdk.CollectionConverters._
-    SplitCacheManager.getAllInstances().asScala.values.flatMap { manager =>
-      try {
-        Option(manager.getDiskCacheStats()).map(DiskCacheStats.fromJavaStats)
-      } catch {
-        case e: Exception =>
-          logger.debug(s"Error getting disk cache stats: ${e.getMessage}")
-          None
+    SplitCacheManager
+      .getAllInstances()
+      .asScala
+      .values
+      .flatMap { manager =>
+        try
+          Option(manager.getDiskCacheStats()).map(DiskCacheStats.fromJavaStats)
+        catch {
+          case e: Exception =>
+            logger.debug(s"Error getting disk cache stats: ${e.getMessage}")
+            None
+        }
       }
-    }.headOption
+      .headOption
   }
 
-  /**
-   * Check if L2 disk cache is enabled for any cache manager.
-   */
+  /** Check if L2 disk cache is enabled for any cache manager. */
   def isDiskCacheEnabled(): Boolean = {
     import scala.jdk.CollectionConverters._
     SplitCacheManager.getAllInstances().asScala.values.exists { manager =>
@@ -940,8 +942,7 @@ case class DiskCacheStats(
   maxBytes: Long,
   usagePercent: Double,
   splitCount: Long,
-  componentCount: Long
-) {
+  componentCount: Long) {
 
   /** Format statistics as human-readable summary string. */
   def summary: String =
@@ -955,9 +956,7 @@ case class DiskCacheStats(
 object DiskCacheStats {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  /**
-   * Create DiskCacheStats from tantivy4java's DiskCacheStats.
-   */
+  /** Create DiskCacheStats from tantivy4java's DiskCacheStats. */
   def fromJavaStats(stats: SplitCacheManager.DiskCacheStats): DiskCacheStats =
     DiskCacheStats(
       totalBytes = stats.getTotalBytes(),

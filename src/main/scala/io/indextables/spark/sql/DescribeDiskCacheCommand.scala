@@ -28,9 +28,7 @@ import org.slf4j.LoggerFactory
 /**
  * SQL command to describe disk cache statistics across all executors.
  *
- * Syntax:
- *   DESCRIBE INDEXTABLES DISK CACHE
- *   DESCRIBE TANTIVY4SPARK DISK CACHE
+ * Syntax: DESCRIBE INDEXTABLES DISK CACHE DESCRIBE TANTIVY4SPARK DISK CACHE
  *
  * Returns a DataFrame with disk cache statistics aggregated from all executors:
  *   - executor_id: Identifier of the executor
@@ -41,8 +39,8 @@ import org.slf4j.LoggerFactory
  *   - splits_cached: Number of splits in cache
  *   - components_cached: Number of components in cache
  *
- * Note: Each executor maintains its own independent disk cache. This command
- * aggregates statistics from all active executors in the cluster.
+ * Note: Each executor maintains its own independent disk cache. This command aggregates statistics from all active
+ * executors in the cluster.
  */
 case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
 
@@ -66,21 +64,22 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
 
     // Get the driver's block manager to exclude it from executor count
     val driverBlockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-    val driverHostPort = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
+    val driverHostPort       = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
 
     // Count only actual executors (exclude driver), at least 1 for local mode
     val numExecutors = math.max(1, sc.getExecutorMemoryStatus.keys.count(_ != driverHostPort))
 
     try {
       // Collect stats from all executors
-      val executorStats = sc.parallelize(1 to numExecutors, numExecutors)
+      val executorStats = sc
+        .parallelize(1 to numExecutors, numExecutors)
         .mapPartitionsWithIndex { (index, _) =>
           val executorId = s"executor-$index"
           // Get the host from this executor's block manager
           val blockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-          val host = s"${blockManagerId.host}:${blockManagerId.port}"
-          val enabled = GlobalSplitCacheManager.isDiskCacheEnabled()
-          val stats = GlobalSplitCacheManager.getDiskCacheStats()
+          val host           = s"${blockManagerId.host}:${blockManagerId.port}"
+          val enabled        = GlobalSplitCacheManager.isDiskCacheEnabled()
+          val stats          = GlobalSplitCacheManager.getDiskCacheStats()
 
           val row = stats match {
             case Some(s) =>
@@ -113,7 +112,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
 
       // Also get driver stats
       val driverEnabled = GlobalSplitCacheManager.isDiskCacheEnabled()
-      val driverStats = GlobalSplitCacheManager.getDiskCacheStats()
+      val driverStats   = GlobalSplitCacheManager.getDiskCacheStats()
 
       val driverRow = driverStats match {
         case Some(s) =>
@@ -148,7 +147,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
         logger.warn(s"Failed to collect executor stats, returning driver-only stats: ${e.getMessage}")
         // Fallback to driver-only stats
         val driverEnabled = GlobalSplitCacheManager.isDiskCacheEnabled()
-        val driverStats = GlobalSplitCacheManager.getDiskCacheStats()
+        val driverStats   = GlobalSplitCacheManager.getDiskCacheStats()
 
         val driverRow = driverStats match {
           case Some(s) =>

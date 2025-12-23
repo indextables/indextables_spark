@@ -17,30 +17,28 @@
 
 package io.indextables.spark.storage
 
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantReadWriteLock
+import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.SparkContext
+
 import org.slf4j.LoggerFactory
 
 /**
- * Driver-based split locality manager that maintains sticky split-to-host assignments
- * with per-query load balancing.
+ * Driver-based split locality manager that maintains sticky split-to-host assignments with per-query load balancing.
  *
- * This manager replaces the broadcast-based approach (BroadcastSplitLocalityManager)
- * with a simpler, more efficient driver-side assignment strategy:
+ * This manager replaces the broadcast-based approach (BroadcastSplitLocalityManager) with a simpler, more efficient
+ * driver-side assignment strategy:
  *
- * 1. **Sticky assignments**: Once a split is assigned to a host, it stays there
- *    unless the host becomes unavailable
- * 2. **Per-query load balancing**: New splits (unassigned or host unavailable)
- *    are assigned to hosts with the fewest splits IN THE CURRENT QUERY
- * 3. **Zero per-query overhead**: No broadcast jobs, no network collection
+ *   1. **Sticky assignments**: Once a split is assigned to a host, it stays there unless the host becomes unavailable
+ *      2. **Per-query load balancing**: New splits (unassigned or host unavailable) are assigned to hosts with the
+ *      fewest splits IN THE CURRENT QUERY 3. **Zero per-query overhead**: No broadcast jobs, no network collection
  *
- * The key insight is that we track historical assignments for cache locality,
- * but balance NEW assignments based on the current query's workload distribution.
+ * The key insight is that we track historical assignments for cache locality, but balance NEW assignments based on the
+ * current query's workload distribution.
  */
 object DriverSplitLocalityManager {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -56,16 +54,18 @@ object DriverSplitLocalityManager {
   private val lock = new ReentrantReadWriteLock()
 
   /**
-   * Assign all splits for a query in a single batch operation.
-   * Uses per-query load balancing for new assignments.
+   * Assign all splits for a query in a single batch operation. Uses per-query load balancing for new assignments.
    *
-   * @param splitPaths All split paths involved in the current query
-   * @param availableHosts Currently available executor hosts
-   * @return Map of splitPath -> assigned host (for this query)
+   * @param splitPaths
+   *   All split paths involved in the current query
+   * @param availableHosts
+   *   Currently available executor hosts
+   * @return
+   *   Map of splitPath -> assigned host (for this query)
    */
   def assignSplitsForQuery(
-      splitPaths: Seq[String],
-      availableHosts: Set[String]
+    splitPaths: Seq[String],
+    availableHosts: Set[String]
   ): Map[String, String] = {
     if (availableHosts.isEmpty) {
       logger.debug("No available hosts, returning empty assignments")
@@ -83,16 +83,16 @@ object DriverSplitLocalityManager {
           .exists(availableHosts.contains)
       }
 
-      logger.debug(s"Split assignment: ${alreadyAssigned.size} already assigned, ${needsAssignment.size} need assignment")
+      logger.debug(
+        s"Split assignment: ${alreadyAssigned.size} already assigned, ${needsAssignment.size} need assignment"
+      )
 
       // PHASE 2: Count per-query load from existing assignments
       // This is the count of splits IN THIS QUERY assigned to each host
       val perQueryHostCounts = mutable.Map[String, Int]().withDefaultValue(0)
 
       // Initialize all available hosts with 0 count
-      availableHosts.foreach { host =>
-        perQueryHostCounts(host) = 0
-      }
+      availableHosts.foreach(host => perQueryHostCounts(host) = 0)
 
       alreadyAssigned.foreach { splitPath =>
         val host = splitAssignments.get(splitPath)
@@ -121,39 +121,39 @@ object DriverSplitLocalityManager {
       }
 
       // Return all assignments for this query
-      splitPaths.flatMap { splitPath =>
-        Option(splitAssignments.get(splitPath)).map(splitPath -> _)
-      }.toMap
+      splitPaths.flatMap(splitPath => Option(splitAssignments.get(splitPath)).map(splitPath -> _)).toMap
 
-    } finally {
+    } finally
       lock.writeLock().unlock()
-    }
   }
 
   /**
-   * Get preferred host for a split.
-   * Returns None if unassigned or assigned host is unavailable.
+   * Get preferred host for a split. Returns None if unassigned or assigned host is unavailable.
    *
-   * @param splitPath The split path to look up
-   * @param availableHosts Set of currently available hosts
-   * @return The assigned host if still available, None otherwise
+   * @param splitPath
+   *   The split path to look up
+   * @param availableHosts
+   *   Set of currently available hosts
+   * @return
+   *   The assigned host if still available, None otherwise
    */
   def getPreferredHost(splitPath: String, availableHosts: Set[String]): Option[String] =
     Option(splitAssignments.get(splitPath))
       .filter(availableHosts.contains)
 
   /**
-   * Get available executor hosts from SparkContext.
-   * Excludes the driver since it doesn't run tasks in distributed mode.
+   * Get available executor hosts from SparkContext. Excludes the driver since it doesn't run tasks in distributed mode.
    *
-   * @param sc The SparkContext
-   * @return Set of hostnames where executors are running
+   * @param sc
+   *   The SparkContext
+   * @return
+   *   Set of hostnames where executors are running
    */
   def getAvailableHosts(sc: SparkContext): Set[String] =
     try {
       // Get the driver's block manager ID to exclude it from executor list
       val driverBlockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
-      val driverHostPort = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
+      val driverHostPort       = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
 
       // Get all block managers and filter out the driver
       val executorHosts = sc.getExecutorMemoryStatus.keys
@@ -177,11 +177,13 @@ object DriverSplitLocalityManager {
     }
 
   /**
-   * Optional: Cleanup old assignments to prevent unbounded memory growth.
-   * Call this periodically with the set of currently valid split paths.
+   * Optional: Cleanup old assignments to prevent unbounded memory growth. Call this periodically with the set of
+   * currently valid split paths.
    *
-   * @param currentlyValidSplits Set of split paths that are still valid
-   * @return Number of stale assignments pruned
+   * @param currentlyValidSplits
+   *   Set of split paths that are still valid
+   * @return
+   *   Number of stale assignments pruned
    */
   def pruneStaleAssignments(currentlyValidSplits: Set[String]): Int = {
     lock.writeLock().lock()
@@ -192,14 +194,11 @@ object DriverSplitLocalityManager {
         logger.debug(s"Pruned ${staleKeys.size} stale split assignments")
       }
       staleKeys.size
-    } finally {
+    } finally
       lock.writeLock().unlock()
-    }
   }
 
-  /**
-   * Clear all assignments (for testing or session reset).
-   */
+  /** Clear all assignments (for testing or session reset). */
   def clear(): Unit = {
     lock.writeLock().lock()
     try {
@@ -207,37 +206,32 @@ object DriverSplitLocalityManager {
       splitAssignments.clear()
       knownHosts = Set.empty
       logger.info(s"Cleared all split assignments ($count entries) and known hosts")
-    } finally {
+    } finally
       lock.writeLock().unlock()
-    }
   }
 
-  /**
-   * Get statistics about current assignments.
-   */
+  /** Get statistics about current assignments. */
   def getStats(): DriverLocalityStats = {
     lock.readLock().lock()
     try {
       val assignments = splitAssignments.asScala.toMap
-      val hostCounts = assignments.values.groupBy(identity).map { case (k, v) => k -> v.size }
+      val hostCounts  = assignments.values.groupBy(identity).map { case (k, v) => k -> v.size }
       DriverLocalityStats(
         totalTrackedSplits = assignments.size,
         hostsWithAssignments = hostCounts.size,
         splitsPerHost = hostCounts
       )
-    } finally {
+    } finally
       lock.readLock().unlock()
-    }
   }
 
   /**
-   * Detect new hosts and redistribute splits to them for fair load distribution.
-   * Called at the start of each query while holding the write lock.
+   * Detect new hosts and redistribute splits to them for fair load distribution. Called at the start of each query
+   * while holding the write lock.
    *
    * When new hosts are detected:
-   * 1. Calculate fair share per host
-   * 2. Identify overloaded hosts (above fair share)
-   * 3. Move splits from overloaded hosts to new hosts until new hosts reach fair share
+   *   1. Calculate fair share per host 2. Identify overloaded hosts (above fair share) 3. Move splits from overloaded
+   *      hosts to new hosts until new hosts reach fair share
    *
    * This ensures new executors get work immediately without destroying all cache locality.
    */
@@ -265,7 +259,7 @@ object DriverSplitLocalityManager {
 
     // Calculate current distribution for splits in this query
     val currentDistribution = mutable.Map[String, mutable.ArrayBuffer[String]]()
-    availableHosts.foreach { host => currentDistribution(host) = mutable.ArrayBuffer.empty }
+    availableHosts.foreach(host => currentDistribution(host) = mutable.ArrayBuffer.empty)
 
     splitsInQuery.foreach { splitPath =>
       val host = splitAssignments.get(splitPath)
@@ -276,7 +270,7 @@ object DriverSplitLocalityManager {
 
     // Calculate fair share per host
     val totalSplits = splitsInQuery.size
-    val fairShare = math.ceil(totalSplits.toDouble / availableHosts.size).toInt
+    val fairShare   = math.ceil(totalSplits.toDouble / availableHosts.size).toInt
 
     // New hosts should get up to fairShare splits
     var splitsToMove = mutable.ArrayBuffer[(String, String)]() // (splitPath, newHost)
@@ -306,10 +300,11 @@ object DriverSplitLocalityManager {
 
     // Apply the moves
     if (splitsToMove.nonEmpty) {
-      splitsToMove.foreach { case (splitPath, newHost) =>
-        val oldHost = splitAssignments.get(splitPath)
-        splitAssignments.put(splitPath, newHost)
-        logger.debug(s"Rebalanced split $splitPath: $oldHost -> $newHost")
+      splitsToMove.foreach {
+        case (splitPath, newHost) =>
+          val oldHost = splitAssignments.get(splitPath)
+          splitAssignments.put(splitPath, newHost)
+          logger.debug(s"Rebalanced split $splitPath: $oldHost -> $newHost")
       }
       logger.info(s"🔄 Rebalanced ${splitsToMove.size} splits to new hosts (fair share: $fairShare per host)")
     }
@@ -320,9 +315,9 @@ object DriverSplitLocalityManager {
 
   /** Get current hostname for this JVM. */
   private def getCurrentHostname: String =
-    try {
+    try
       java.net.InetAddress.getLocalHost.getHostName
-    } catch {
+    catch {
       case ex: Exception =>
         logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
         "unknown"
@@ -331,6 +326,6 @@ object DriverSplitLocalityManager {
 
 /** Statistics about the driver locality manager state. */
 case class DriverLocalityStats(
-    totalTrackedSplits: Int,
-    hostsWithAssignments: Int,
-    splitsPerHost: Map[String, Int])
+  totalTrackedSplits: Int,
+  hostsWithAssignments: Int,
+  splitsPerHost: Map[String, Int])

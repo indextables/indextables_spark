@@ -199,7 +199,7 @@ class IndexTables4SparkSimpleAggregateBatch(
     logger.debug(s"SIMPLE AGGREGATE BATCH: Planning input partitions for simple aggregation")
 
     // Get available hosts for driver-based locality assignment
-    val sparkContext = sparkSession.sparkContext
+    val sparkContext   = sparkSession.sparkContext
     val availableHosts = io.indextables.spark.storage.DriverSplitLocalityManager.getAvailableHosts(sparkContext)
     logger.debug(s"SIMPLE AGGREGATE BATCH: Available hosts: ${availableHosts.mkString(", ")}")
 
@@ -224,7 +224,8 @@ class IndexTables4SparkSimpleAggregateBatch(
 
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths = filteredSplits.map(_.path)
-    val assignments = io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    val assignments =
+      io.indextables.spark.storage.DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     logger.debug(s"SIMPLE AGGREGATE BATCH: Assigned ${assignments.size} splits to hosts")
 
     // Create one partition per filtered split for distributed aggregation processing
@@ -278,9 +279,9 @@ class IndexTables4SparkSimpleAggregatePartition(
   logger.debug(s"SIMPLE AGGREGATE PARTITION: IndexQuery filters: ${indexQueryFilters.length}")
 
   /**
-   * Provide preferred locations for this aggregate partition based on driver-side split assignment.
-   * The preferredHost is computed during partition planning using per-query load balancing
-   * while maintaining sticky assignments for cache locality.
+   * Provide preferred locations for this aggregate partition based on driver-side split assignment. The preferredHost
+   * is computed during partition planning using per-query load balancing while maintaining sticky assignments for cache
+   * locality.
    */
   override def preferredLocations(): Array[String] =
     preferredHost.toArray

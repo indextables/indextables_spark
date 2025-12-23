@@ -87,7 +87,7 @@ class IndexTables4SparkScan(
     logger.debug(s"PLAN PARTITIONS: Found ${addActions.length} files in transaction log")
 
     // Get available hosts from SparkContext for driver-based locality assignment
-    val sparkContext = sparkSession.sparkContext
+    val sparkContext   = sparkSession.sparkContext
     val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sparkContext)
     logger.debug(s"Available hosts for locality: ${availableHosts.mkString(", ")}")
 
@@ -142,7 +142,7 @@ class IndexTables4SparkScan(
     logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
 
     // Batch-assign all splits for this query using per-query load balancing
-    val splitPaths = filteredActions.map(_.path)
+    val splitPaths  = filteredActions.map(_.path)
     val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
     logger.debug(s"Assigned ${assignments.size} splits to hosts")
 
