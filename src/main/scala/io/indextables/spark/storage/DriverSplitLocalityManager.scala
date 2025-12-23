@@ -144,25 +144,31 @@ object DriverSplitLocalityManager {
 
   /**
    * Get available executor hosts from SparkContext.
+   * Excludes the driver since it doesn't run tasks in distributed mode.
    *
    * @param sc The SparkContext
    * @return Set of hostnames where executors are running
    */
   def getAvailableHosts(sc: SparkContext): Set[String] =
     try {
-      // Get executor info from status tracker
-      val executorInfos = sc.statusTracker.getExecutorInfos
+      // Get executor memory status - keys are "host:port" for executors, "driver" for driver
+      // Filter out the driver and extract hostnames
+      val executorHosts = sc.getExecutorMemoryStatus.keys
+        .filter(_ != "driver")
+        .map { executorId =>
+          // Executor IDs are in "host:port" format
+          executorId.split(":")(0)
+        }
+        .toSet
 
-      // Extract unique hostnames from executors
-      val hosts = executorInfos.map(_.host()).toSet
-
-      if (hosts.isEmpty) {
+      if (executorHosts.isEmpty) {
         // In local mode or no executors registered yet, use localhost
-        logger.debug("No executor hosts found from status tracker, using localhost for local mode")
+        // Local mode runs tasks on the driver, so this is correct
+        logger.debug("No executor hosts found (local mode or no executors yet), using localhost")
         Set(getCurrentHostname)
       } else {
-        logger.debug(s"Found ${hosts.size} executor hosts: ${hosts.mkString(", ")}")
-        hosts
+        logger.debug(s"Found ${executorHosts.size} executor hosts (excluding driver): ${executorHosts.mkString(", ")}")
+        executorHosts
       }
     } catch {
       case ex: Exception =>

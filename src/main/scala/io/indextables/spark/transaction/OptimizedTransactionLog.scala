@@ -1105,8 +1105,8 @@ class OptimizedTransactionLog(
       }
     }
 
-    logger.debug(s" Final state has ${files.size} files: ${files.keys.mkString(", ")}")
-    logger.info(s"Final state has ${files.size} files: ${files.keys.mkString(", ")}")
+    logger.debug(s"Final state has ${files.size} files: ${files.keys.mkString(", ")}")
+    logger.info(s"Final state has ${files.size} files")
     files.values.toSeq
   }
 

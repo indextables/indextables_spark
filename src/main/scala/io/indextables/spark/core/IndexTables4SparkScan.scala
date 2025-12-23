@@ -149,32 +149,25 @@ class IndexTables4SparkScan(
     val partitions = filteredActions.zipWithIndex.map {
       case (addAction, index) =>
         val preferredHost = assignments.get(addAction.path)
-        logger.debug(s"Creating partition $index for split: ${addAction.path} -> host: ${preferredHost.getOrElse("none")}")
-        logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
-        pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
-        val partition =
-          new IndexTables4SparkInputPartition(
-            addAction,
-            readSchema,
-            fullTableSchema,
-            pushedFilters,
-            index,
-            limit,
-            indexQueryFilters,
-            preferredHost
-          )
-        if (preferredHost.isDefined) {
-          logger.info(s"Partition $index (${addAction.path}) assigned to host: ${preferredHost.get}")
-        } else {
-          logger.debug(s"Partition $index (${addAction.path}) has no host assignment")
-        }
-        partition
+        new IndexTables4SparkInputPartition(
+          addAction,
+          readSchema,
+          fullTableSchema,
+          pushedFilters,
+          index,
+          limit,
+          indexQueryFilters,
+          preferredHost
+        )
     }
 
+    // Log summary at info level, details at debug level
     val totalPreferred = partitions.count(_.preferredLocations().nonEmpty)
-    logger.info(
-      s"Split cache locality: $totalPreferred of ${partitions.length} partitions have preferred host assignments"
-    )
+    if (logger.isDebugEnabled) {
+      val hostDistribution = assignments.values.groupBy(identity).map { case (h, s) => s"$h=${s.size}" }.mkString(", ")
+      logger.debug(s"Partition host distribution: $hostDistribution")
+    }
+    logger.info(s"Planned ${partitions.length} partitions ($totalPreferred with locality hints)")
 
     partitions.toArray[InputPartition]
   }
