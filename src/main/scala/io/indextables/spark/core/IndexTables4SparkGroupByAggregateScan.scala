@@ -404,8 +404,15 @@ class IndexTables4SparkGroupByAggregateReader(
   override def get(): org.apache.spark.sql.catalyst.InternalRow =
     groupByResults.next()
 
-  override def close(): Unit =
+  override def close(): Unit = {
     logger.debug(s"GROUP BY READER: Closing GROUP BY reader")
+
+    // Report bytesRead to Spark UI
+    val bytesRead = partition.split.size
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for ${partition.split.path}: $bytesRead bytes")
+    }
+  }
 
   /** Initialize the GROUP BY aggregation by executing terms aggregation via tantivy4java. */
   private def initialize(): Unit = {

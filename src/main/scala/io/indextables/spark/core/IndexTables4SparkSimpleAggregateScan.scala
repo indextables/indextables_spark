@@ -342,8 +342,15 @@ class IndexTables4SparkSimpleAggregateReader(
   override def get(): org.apache.spark.sql.catalyst.InternalRow =
     aggregateResults.next()
 
-  override def close(): Unit =
+  override def close(): Unit = {
     logger.debug(s"SIMPLE AGGREGATE READER: Closing simple aggregate reader")
+
+    // Report bytesRead to Spark UI
+    val bytesRead = partition.split.size
+    if (org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(bytesRead, 0)) {
+      logger.debug(s"Reported input metrics for ${partition.split.path}: $bytesRead bytes")
+    }
+  }
 
   /** Initialize the simple aggregation by executing aggregation via tantivy4java. */
   private def initialize(): Unit = {
