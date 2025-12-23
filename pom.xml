@@ -167,8 +167,8 @@
         <!-- Version 0.25.14: L2 Disk Cache support (persistent NVMe caching) -->
         <dependency>
             <groupId>io.indextables</groupId>
-            <artifactId>tantivy4javaexperimental</artifactId>
-            <version>0.25.14</version>
+            <artifactId>tantivy4java</artifactId>
+            <version>0.26.1</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
