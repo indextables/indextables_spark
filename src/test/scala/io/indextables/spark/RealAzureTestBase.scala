@@ -199,9 +199,9 @@ abstract class RealAzureTestBase extends AnyFunSuite with Matchers with BeforeAn
     super.beforeEach()
     // Clear global split cache before each test to avoid schema pollution
     try {
-      import _root_.io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+      import _root_.io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
       GlobalSplitCacheManager.flushAllCaches()
-      SplitLocationRegistry.clearAllLocations()
+      DriverSplitLocalityManager.clear()
     } catch {
       case _: Exception => // Ignore if cache clearing fails
     }

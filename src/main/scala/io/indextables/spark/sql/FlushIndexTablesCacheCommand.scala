@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.{LongType, StringType}
 
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
 import org.slf4j.LoggerFactory
 
 /**
@@ -60,13 +60,14 @@ case class FlushIndexTablesCacheCommand() extends LeafRunnableCommand {
         s"Flushed ${splitCacheResult.flushedManagers} split cache managers"
       )
 
-      // 2. Clear SplitLocationRegistry
-      val locationResult = SplitLocationRegistry.clearAllLocations()
+      // 2. Clear driver-side split locality assignments
+      DriverSplitLocalityManager.clear()
+      val localityStats = DriverSplitLocalityManager.getStats()
       results += Row(
-        "location_registry",
+        "locality_manager",
         "success",
-        locationResult.clearedEntries.toLong,
-        s"Cleared ${locationResult.clearedEntries} split location entries"
+        localityStats.totalTrackedSplits.toLong,
+        s"Cleared driver split locality assignments"
       )
 
       // 3. Flush tantivy4java searcher cache

@@ -32,7 +32,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.prewarm.PreWarmManager
-import io.indextables.spark.storage.{BroadcastSplitLocalityManager, SplitLocationRegistry}
+import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
 import io.indextables.spark.util.TimestampUtils
 // Removed unused imports
@@ -86,18 +86,10 @@ class IndexTables4SparkScan(
     val addActions = transactionLog.listFiles()
     logger.debug(s"PLAN PARTITIONS: Found ${addActions.length} files in transaction log")
 
-    // Update broadcast locality information for better scheduling
-    // This helps ensure preferred locations are accurate during partition planning
-    try {
-      // Access the SparkContext from the SparkSession
-      val sparkContext = sparkSession.sparkContext
-      logger.debug("Updating broadcast locality before partition planning")
-      BroadcastSplitLocalityManager.updateBroadcastLocality(sparkContext)
-      logger.debug("Broadcast locality update completed")
-    } catch {
-      case ex: Exception =>
-        logger.warn("Failed to update broadcast locality information", ex)
-    }
+    // Get available hosts from SparkContext for driver-based locality assignment
+    val sparkContext = sparkSession.sparkContext
+    val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sparkContext)
+    logger.debug(s"Available hosts for locality: ${availableHosts.mkString(", ")}")
 
     // Auto-register metrics accumulator if metrics collection is enabled
     val metricsEnabled = config.getOrElse("spark.indextables.read.batchOptimization.metrics.enabled", "false").toBoolean
@@ -149,9 +141,15 @@ class IndexTables4SparkScan(
 
     logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
 
+    // Batch-assign all splits for this query using per-query load balancing
+    val splitPaths = filteredActions.map(_.path)
+    val assignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+    logger.debug(s"Assigned ${assignments.size} splits to hosts")
+
     val partitions = filteredActions.zipWithIndex.map {
       case (addAction, index) =>
-        logger.debug(s"Creating partition $index for split: ${addAction.path}")
+        val preferredHost = assignments.get(addAction.path)
+        logger.debug(s"Creating partition $index for split: ${addAction.path} -> host: ${preferredHost.getOrElse("none")}")
         logger.debug(s"CREATE PARTITION: Creating partition $index with ${pushedFilters.length} pushed filters")
         pushedFilters.foreach(f => logger.debug(s"CREATE PARTITION:   - Filter: $f"))
         val partition =
@@ -162,13 +160,13 @@ class IndexTables4SparkScan(
             pushedFilters,
             index,
             limit,
-            indexQueryFilters
+            indexQueryFilters,
+            preferredHost
           )
-        val preferredHosts = partition.preferredLocations()
-        if (preferredHosts.nonEmpty) {
-          logger.info(s"Partition $index (${addAction.path}) has preferred hosts: ${preferredHosts.mkString(", ")}")
+        if (preferredHost.isDefined) {
+          logger.info(s"Partition $index (${addAction.path}) assigned to host: ${preferredHost.get}")
         } else {
-          logger.debug(s"Partition $index (${addAction.path}) has no cache locality information")
+          logger.debug(s"Partition $index (${addAction.path}) has no host assignment")
         }
         partition
     }

@@ -3,7 +3,7 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
 import io.indextables.spark.TestBase
 
 class FlushIndexTablesCacheCommandTest extends TestBase {
@@ -63,16 +63,16 @@ class FlushIndexTablesCacheCommandTest extends TestBase {
 
       // Verify results - access by index instead of field name
       val splitCacheResult = results.find(_.getString(0) == "split_cache")
-      val locationResult   = results.find(_.getString(0) == "location_registry")
+      val localityResult   = results.find(_.getString(0) == "locality_manager")
       val tantivyResult    = results.find(_.getString(0) == "tantivy_java_cache")
 
       assert(splitCacheResult.isDefined)
-      assert(locationResult.isDefined)
+      assert(localityResult.isDefined)
       assert(tantivyResult.isDefined)
 
       // All should report success
       assert(splitCacheResult.get.getString(1) == "success") // status
-      assert(locationResult.get.getString(1) == "success")   // status
+      assert(localityResult.get.getString(1) == "success")   // status
       assert(tantivyResult.get.getString(1) == "success")    // status
     }
   }

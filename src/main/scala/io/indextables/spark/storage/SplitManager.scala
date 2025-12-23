@@ -734,56 +734,8 @@ object SplitCacheConfig {
   }
 }
 
-/**
- * Registry for tracking which hosts have cached which splits. This enables Spark to use preferredLocations for better
- * data locality.
- */
-object SplitLocationRegistry {
-  private val logger = LoggerFactory.getLogger(getClass)
-
-  // Map from splitPath to Set of hostnames that have cached it
-  @volatile private var splitLocations: Map[String, Set[String]] = Map.empty
-  private val lock                                               = new Object
-
-  /** Record that a split has been accessed/cached on a particular host. */
-  def recordSplitAccess(splitPath: String, hostname: String): Unit =
-    lock.synchronized {
-      val currentHosts = splitLocations.getOrElse(splitPath, Set.empty)
-      val updatedHosts = currentHosts + hostname
-      splitLocations = splitLocations + (splitPath -> updatedHosts)
-      logger.debug(s"Recorded split access: $splitPath on host $hostname (total hosts: ${updatedHosts.size})")
-    }
-
-  /** Get the list of hosts that have likely cached this split. */
-  def getPreferredHosts(splitPath: String): Array[String] =
-    splitLocations.getOrElse(splitPath, Set.empty).toArray
-
-  /** Clear location tracking for a specific split (e.g., when it's no longer relevant). */
-  def clearSplitLocations(splitPath: String): Unit =
-    lock.synchronized {
-      splitLocations = splitLocations - splitPath
-      logger.debug(s"Cleared location tracking for split: $splitPath")
-    }
-
-  /** Get current hostname for this JVM. */
-  def getCurrentHostname: String =
-    try
-      java.net.InetAddress.getLocalHost.getHostName
-    catch {
-      case ex: Exception =>
-        logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
-        "unknown"
-    }
-
-  /** Clear all split location tracking information. Returns the number of entries that were cleared. */
-  def clearAllLocations(): SplitLocationFlushResult =
-    lock.synchronized {
-      val clearedCount = splitLocations.size
-      splitLocations = Map.empty
-      logger.info(s"Cleared all split location tracking ($clearedCount entries)")
-      SplitLocationFlushResult(clearedCount)
-    }
-}
+// Note: SplitLocationRegistry has been removed in favor of DriverSplitLocalityManager
+// which provides per-query load balancing with sticky assignments on the driver side.
 
 /**
  * Global manager for split cache instances - thin wrapper around tantivy4java's SplitCacheManager.
@@ -977,7 +929,6 @@ object GlobalSplitCacheManager {
 
 // Result classes for cache flush operations
 case class SplitCacheFlushResult(flushedManagers: Int)
-case class SplitLocationFlushResult(clearedEntries: Int)
 
 /**
  * L2 Disk cache statistics from tantivy4java native layer.

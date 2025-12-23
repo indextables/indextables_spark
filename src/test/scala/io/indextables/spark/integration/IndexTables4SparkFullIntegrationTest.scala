@@ -95,9 +95,9 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
       // Ensure clean state by explicitly clearing any cached splits
       try {
         // Clear global split cache to avoid schema pollution between tests
-        import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitLocationRegistry}
+        import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
         GlobalSplitCacheManager.flushAllCaches()
-        SplitLocationRegistry.clearAllLocations()
+        DriverSplitLocalityManager.clear()
       } catch {
         case _: Exception => // Ignore if cache clearing fails
       }
