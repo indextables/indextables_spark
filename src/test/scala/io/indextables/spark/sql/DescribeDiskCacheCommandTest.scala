@@ -76,6 +76,7 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
     // Verify schema
     val columns = result.columns.toSet
     columns should contain("executor_id")
+    columns should contain("host")
     columns should contain("enabled")
     columns should contain("total_bytes")
     columns should contain("max_bytes")
@@ -119,7 +120,8 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
     driverRow shouldBe defined
 
     // Driver should show disk cache as disabled (no cache managers active)
-    driverRow.get.getBoolean(1) shouldBe false
+    // Index 2 is 'enabled' (after executor_id at 0 and host at 1)
+    driverRow.get.getBoolean(2) shouldBe false
   }
 
   test("DESCRIBE INDEXTABLES DISK CACHE should show enabled=true when disk cache is configured") {
@@ -169,6 +171,7 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
     val schema = result.schema
 
     schema("executor_id").dataType.typeName shouldBe "string"
+    schema("host").dataType.typeName shouldBe "string"
     schema("enabled").dataType.typeName shouldBe "boolean"
     schema("total_bytes").dataType.typeName shouldBe "long"
     schema("max_bytes").dataType.typeName shouldBe "long"
