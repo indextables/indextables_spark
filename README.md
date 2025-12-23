@@ -185,7 +185,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 ## Installation
 ### OSS Spark
 
-1. **Install the JAR**: Add the platform-specific [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.3.2_spark_3.5.3/indextables_spark-0.3.2_spark_3.5.3-linux-x86_64-shaded.jar) to the boot classpath for both executors and driver
+1. **Install the JAR**: Add the platform-specific [IndexTables JAR](https://repo1.maven.org/maven2/io/indextables/indextables_spark/0.3.3_spark_3.5.3/indextables_spark-0.3.3_spark_3.5.3-linux-x86_64-shaded.jar) to the boot classpath for both executors and driver
 2. **Enable SQL extensions**: Set `spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions`
 3. **Configure memory**: Allocate 50% for Spark heap and 50% for native memory overhead (IndexTables runs primarily in native heap)
 4. **Java version**: Requires Java 11 or higher
