@@ -229,10 +229,10 @@ object IndexTables4SparkOptions {
   val ADAPTIVE_TUNING_MIN_BATCHES = "spark.indextables.read.adaptiveTuning.minBatchesBeforeAdjustment"
 
   // L2 Disk Cache configuration keys
-  val DISK_CACHE_ENABLED               = "spark.indextables.cache.disk.enabled"
-  val DISK_CACHE_PATH                  = "spark.indextables.cache.disk.path"
-  val DISK_CACHE_MAX_SIZE              = "spark.indextables.cache.disk.maxSize"
-  val DISK_CACHE_COMPRESSION           = "spark.indextables.cache.disk.compression"
-  val DISK_CACHE_MIN_COMPRESS_SIZE     = "spark.indextables.cache.disk.minCompressSize"
+  val DISK_CACHE_ENABLED                = "spark.indextables.cache.disk.enabled"
+  val DISK_CACHE_PATH                   = "spark.indextables.cache.disk.path"
+  val DISK_CACHE_MAX_SIZE               = "spark.indextables.cache.disk.maxSize"
+  val DISK_CACHE_COMPRESSION            = "spark.indextables.cache.disk.compression"
+  val DISK_CACHE_MIN_COMPRESS_SIZE      = "spark.indextables.cache.disk.minCompressSize"
   val DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
 }

@@ -157,8 +157,7 @@ object ConfigUtils {
       diskCacheCompression = getConfigOption("spark.indextables.cache.disk.compression"),
       diskCacheMinCompressSize = getConfigOption("spark.indextables.cache.disk.minCompressSize")
         .map(SplitCacheConfig.parseSizeString),
-      diskCacheManifestSyncInterval =
-        getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt)
+      diskCacheManifestSyncInterval = getConfigOption("spark.indextables.cache.disk.manifestSyncInterval").map(_.toInt)
     )
   }
 

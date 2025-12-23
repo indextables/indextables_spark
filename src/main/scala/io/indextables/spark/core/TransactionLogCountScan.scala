@@ -376,8 +376,8 @@ class TransactionLogGroupByCountPartitionReader(
     }
 
   /**
-   * Convert a partition value string to the appropriate Spark internal representation.
-   * Handles DateType (days since epoch) and TimestampType (microseconds since epoch).
+   * Convert a partition value string to the appropriate Spark internal representation. Handles DateType (days since
+   * epoch) and TimestampType (microseconds since epoch).
    */
   private def convertPartitionValue(
     value: String,
@@ -397,18 +397,18 @@ class TransactionLogGroupByCountPartitionReader(
         UTF8String.fromString(value)
 
       case IntegerType =>
-        try {
+        try
           value.toInt
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.warn(s"Cannot convert partition value '$value' for column '$columnName' to Int: ${e.getMessage}")
             0
         }
 
       case LongType =>
-        try {
+        try
           value.toLong
-        } catch {
+        catch {
           case e: NumberFormatException =>
             logger.warn(s"Cannot convert partition value '$value' for column '$columnName' to Long: ${e.getMessage}")
             0L
@@ -435,7 +435,7 @@ class TransactionLogGroupByCountPartitionReader(
 
       case TimestampType =>
         // Convert timestamp string to microseconds since epoch (Long) as Spark expects
-        try {
+        try
           // Check if already numeric (microseconds from tantivy)
           if (value.forall(c => c.isDigit || c == '-')) {
             value.toLong
@@ -459,7 +459,7 @@ class TransactionLogGroupByCountPartitionReader(
             // Convert to microseconds
             instant.getEpochSecond * 1000000L + instant.getNano / 1000L
           }
-        } catch {
+        catch {
           case e: IllegalArgumentException => throw e
           case e: Exception =>
             throw new IllegalArgumentException(

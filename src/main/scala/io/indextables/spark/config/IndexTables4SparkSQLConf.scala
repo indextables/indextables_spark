@@ -77,10 +77,10 @@ object IndexTables4SparkSQLConf {
   // L2 Disk Cache Configuration (persistent NVMe caching)
   /////////////////////
 
-  val TANTIVY4SPARK_DISK_CACHE_ENABLED               = "spark.indextables.cache.disk.enabled"
-  val TANTIVY4SPARK_DISK_CACHE_PATH                  = "spark.indextables.cache.disk.path"
-  val TANTIVY4SPARK_DISK_CACHE_MAX_SIZE              = "spark.indextables.cache.disk.maxSize"
-  val TANTIVY4SPARK_DISK_CACHE_COMPRESSION           = "spark.indextables.cache.disk.compression"
-  val TANTIVY4SPARK_DISK_CACHE_MIN_COMPRESS_SIZE     = "spark.indextables.cache.disk.minCompressSize"
+  val TANTIVY4SPARK_DISK_CACHE_ENABLED                = "spark.indextables.cache.disk.enabled"
+  val TANTIVY4SPARK_DISK_CACHE_PATH                   = "spark.indextables.cache.disk.path"
+  val TANTIVY4SPARK_DISK_CACHE_MAX_SIZE               = "spark.indextables.cache.disk.maxSize"
+  val TANTIVY4SPARK_DISK_CACHE_COMPRESSION            = "spark.indextables.cache.disk.compression"
+  val TANTIVY4SPARK_DISK_CACHE_MIN_COMPRESS_SIZE      = "spark.indextables.cache.disk.minCompressSize"
   val TANTIVY4SPARK_DISK_CACHE_MANIFEST_SYNC_INTERVAL = "spark.indextables.cache.disk.manifestSyncInterval"
 }

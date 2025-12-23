@@ -22,11 +22,12 @@ import java.nio.file.{Files, Paths}
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.sources.EqualTo
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+
+import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
@@ -84,8 +85,8 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
   )
 
   /**
-   * Create a real indextables table and return its AddActions with full paths.
-   * This ensures tests use real split files with proper metadata.
+   * Create a real indextables table and return its AddActions with full paths. This ensures tests use real split files
+   * with proper metadata.
    */
   private def createRealTableAndGetAddActions(tableName: String, numRows: Int = 100): (String, Seq[AddAction]) = {
     val tablePath = new File(tempDir, tableName).getAbsolutePath
@@ -106,7 +107,7 @@ class PreWarmManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterAl
 
     // Get AddActions from transaction log
     val transactionLog = TransactionLogFactory.create(new Path(tablePath), spark)
-    val addActions = transactionLog.listFiles()
+    val addActions     = transactionLog.listFiles()
 
     // Validate that AddActions have required metadata
     addActions.foreach { action =>

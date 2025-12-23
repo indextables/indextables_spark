@@ -27,12 +27,12 @@ import org.scalatest.matchers.should.Matchers._
 /**
  * Test suite for GROUP BY queries on tables with Date/Timestamp partition columns.
  *
- * This tests the fix for ClassCastException that occurred when running GROUP BY queries
- * on tables with DateType or TimestampType partition columns.
+ * This tests the fix for ClassCastException that occurred when running GROUP BY queries on tables with DateType or
+ * TimestampType partition columns.
  *
- * Root cause: Missing type conversion in IndexTables4SparkGroupByAggregateScan and
- * TransactionLogCountScan - values fell through to default case returning UTF8String,
- * but the schema declared the proper type (DateType expects Int, TimestampType expects Long).
+ * Root cause: Missing type conversion in IndexTables4SparkGroupByAggregateScan and TransactionLogCountScan - values
+ * fell through to default case returning UTF8String, but the schema declared the proper type (DateType expects Int,
+ * TimestampType expects Long).
  */
 class PartitionColumnGroupByTest extends TestBase {
 

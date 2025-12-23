@@ -29,9 +29,9 @@ import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import io.indextables.spark.TestBase
 
 /**
- * Test to validate that aggregate scans (both simple and GROUP BY) work correctly with the
- * driver-based locality management. Locality is automatically assigned during partition planning
- * via DriverSplitLocalityManager.assignSplitsForQuery().
+ * Test to validate that aggregate scans (both simple and GROUP BY) work correctly with the driver-based locality
+ * management. Locality is automatically assigned during partition planning via
+ * DriverSplitLocalityManager.assignSplitsForQuery().
  */
 class AggregationCacheLocalityValidationTest extends TestBase {
 
@@ -303,7 +303,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val splitPaths = (1 to 10).map(i => s"split-$i.split")
 
     // Initial assignment with 2 hosts
-    val initialHosts = Set("host-a", "host-b")
+    val initialHosts       = Set("host-a", "host-b")
     val initialAssignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, initialHosts)
 
     // Verify initial distribution (should be 5 splits per host)
@@ -313,7 +313,7 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     assert(initialDistribution("host-b") == 5)
 
     // Now add a new host
-    val expandedHosts = Set("host-a", "host-b", "host-c")
+    val expandedHosts         = Set("host-a", "host-b", "host-c")
     val rebalancedAssignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, expandedHosts)
 
     // Verify rebalanced distribution (should be ~3-4 splits per host)
@@ -344,22 +344,23 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val splitPaths = (1 to 12).map(i => s"split-$i.split")
 
     // Initial assignment with 1 host (all splits on one host)
-    val initialHosts = Set("host-a")
+    val initialHosts       = Set("host-a")
     val initialAssignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, initialHosts)
 
     assert(initialAssignments.values.count(_ == "host-a") == 12)
     println(s"Initial: all 12 splits on host-a")
 
     // Now add 3 more hosts (total 4)
-    val expandedHosts = Set("host-a", "host-b", "host-c", "host-d")
+    val expandedHosts         = Set("host-a", "host-b", "host-c", "host-d")
     val rebalancedAssignments = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, expandedHosts)
 
     val rebalancedDistribution = rebalancedAssignments.values.groupBy(identity).map { case (k, v) => k -> v.size }
     println(s"Rebalanced distribution: $rebalancedDistribution")
 
     // Fair share is 12/4 = 3 splits per host
-    rebalancedDistribution.foreach { case (host, count) =>
-      assert(count == 3, s"Host $host has $count splits, expected 3")
+    rebalancedDistribution.foreach {
+      case (host, count) =>
+        assert(count == 3, s"Host $host has $count splits, expected 3")
     }
 
     println(s"✅ All 4 hosts have exactly 3 splits each after rebalancing")

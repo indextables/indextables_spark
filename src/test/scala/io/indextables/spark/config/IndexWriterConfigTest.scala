@@ -295,8 +295,8 @@ class IndexWriterConfigTest extends TestBase {
       // This should trigger early flushes based on buffer size, not document count
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexWriter.maxBatchBufferSize", "2M")   // 2MB buffer limit
-        .option("spark.indextables.indexWriter.batchSize", "10000")         // Would never trigger by count
+        .option("spark.indextables.indexWriter.maxBatchBufferSize", "2M") // 2MB buffer limit
+        .option("spark.indextables.indexWriter.batchSize", "10000")       // Would never trigger by count
         .mode(SaveMode.Overwrite)
         .save(tempPath)
 

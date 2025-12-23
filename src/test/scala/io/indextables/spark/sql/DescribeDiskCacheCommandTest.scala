@@ -21,19 +21,17 @@ import java.io.File
 import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
-import org.scalatest.funsuite.AnyFunSuite
-import org.scalatest.matchers.should.Matchers
 
 import io.indextables.spark.storage.GlobalSplitCacheManager
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
-/**
- * Tests for DESCRIBE INDEXTABLES DISK CACHE command.
- */
+/** Tests for DESCRIBE INDEXTABLES DISK CACHE command. */
 class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
   private var spark: SparkSession = _
-  private var tempDir: File = _
+  private var tempDir: File       = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -110,7 +108,7 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
     GlobalSplitCacheManager.clearAll()
 
     val result = spark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     // Should have at least driver row
     rows.length should be >= 1
@@ -126,18 +124,20 @@ class DescribeDiskCacheCommandTest extends AnyFunSuite with Matchers with Before
 
   test("DESCRIBE INDEXTABLES DISK CACHE should show enabled=true when disk cache is configured") {
     val diskCachePath = new File(tempDir, "disk_cache").getAbsolutePath
-    val tablePath = new File(tempDir, "test_table").getAbsolutePath
+    val tablePath     = new File(tempDir, "test_table").getAbsolutePath
 
     // Create test data
     import org.apache.spark.sql.Row
     import org.apache.spark.sql.types._
 
-    val schema = StructType(Seq(
-      StructField("id", IntegerType, nullable = false),
-      StructField("value", StringType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("value", StringType, nullable = false)
+      )
+    )
     val data = Seq(Row(1, "one"), Row(2, "two"))
-    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     // Write with disk cache enabled
     df.write
