@@ -151,14 +151,14 @@ object DriverSplitLocalityManager {
    */
   def getAvailableHosts(sc: SparkContext): Set[String] =
     try {
-      // Get executor memory status - keys are "host:port" for executors, "driver" for driver
-      // Filter out the driver and extract hostnames
+      // Get the driver's block manager ID to exclude it from executor list
+      val driverBlockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
+      val driverHostPort = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
+
+      // Get all block managers and filter out the driver
       val executorHosts = sc.getExecutorMemoryStatus.keys
-        .filter(_ != "driver")
-        .map { executorId =>
-          // Executor IDs are in "host:port" format
-          executorId.split(":")(0)
-        }
+        .filter(_ != driverHostPort)
+        .map(_.split(":")(0))
         .toSet
 
       if (executorHosts.isEmpty) {
