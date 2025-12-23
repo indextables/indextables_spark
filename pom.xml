@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.3.3_spark_3.5.3</version>
+    <version>0.3.4_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>Tantivy4Spark</name>
@@ -168,7 +168,7 @@
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.26.1</version>
+            <version>0.26.2</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
@@ -521,7 +521,7 @@
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>io.indextables:tantivy4javaexperimental</include>
+                                    <include>io.indextables:tantivy4java</include>
                                     <include>software.amazon.awssdk:*</include>
                                     <!-- <include>com.fasterxml.jackson.core:*</include>
                                     <include>com.fasterxml.jackson.module:*</include> -->
