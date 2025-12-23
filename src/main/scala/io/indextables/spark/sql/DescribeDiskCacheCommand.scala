@@ -50,6 +50,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("executor_id", StringType, nullable = false)(),
+    AttributeReference("host", StringType, nullable = false)(),
     AttributeReference("enabled", BooleanType, nullable = false)(),
     AttributeReference("total_bytes", LongType, nullable = true)(),
     AttributeReference("max_bytes", LongType, nullable = true)(),
@@ -63,14 +64,21 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
 
     val sc = sparkSession.sparkContext
 
-    // Get number of executors (at least 1 for local mode)
-    val numExecutors = math.max(1, sc.getExecutorMemoryStatus.size)
+    // Get the driver's block manager to exclude it from executor count
+    val driverBlockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
+    val driverHostPort = s"${driverBlockManagerId.host}:${driverBlockManagerId.port}"
+
+    // Count only actual executors (exclude driver), at least 1 for local mode
+    val numExecutors = math.max(1, sc.getExecutorMemoryStatus.keys.count(_ != driverHostPort))
 
     try {
       // Collect stats from all executors
       val executorStats = sc.parallelize(1 to numExecutors, numExecutors)
         .mapPartitionsWithIndex { (index, _) =>
           val executorId = s"executor-$index"
+          // Get the host from this executor's block manager
+          val blockManagerId = org.apache.spark.SparkEnv.get.blockManager.blockManagerId
+          val host = s"${blockManagerId.host}:${blockManagerId.port}"
           val enabled = GlobalSplitCacheManager.isDiskCacheEnabled()
           val stats = GlobalSplitCacheManager.getDiskCacheStats()
 
@@ -78,6 +86,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
             case Some(s) =>
               Row(
                 executorId,
+                host,
                 enabled,
                 s.totalBytes,
                 s.maxBytes,
@@ -88,6 +97,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
             case None =>
               Row(
                 executorId,
+                host,
                 enabled,
                 null,
                 null,
@@ -109,6 +119,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
         case Some(s) =>
           Row(
             "driver",
+            driverHostPort,
             driverEnabled,
             s.totalBytes,
             s.maxBytes,
@@ -119,6 +130,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
         case None =>
           Row(
             "driver",
+            driverHostPort,
             driverEnabled,
             null,
             null,
@@ -142,6 +154,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
           case Some(s) =>
             Row(
               "driver",
+              driverHostPort,
               driverEnabled,
               s.totalBytes,
               s.maxBytes,
@@ -152,6 +165,7 @@ case class DescribeDiskCacheCommand() extends LeafRunnableCommand {
           case None =>
             Row(
               "driver",
+              driverHostPort,
               driverEnabled,
               null,
               null,
