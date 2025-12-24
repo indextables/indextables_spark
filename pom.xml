@@ -528,8 +528,15 @@
                                     <include>com.thoughtworks.paranamer:paranamer</include>
                                     <include>org.reactivestreams:reactive-streams</include>
                                     <include>software.amazon.eventstream:eventstream</include>
+                                    <!-- Databricks SDK and all its transitive dependencies -->
                                     <include>com.databricks:databricks-sdk-java</include>
                                     <include>org.apache.commons:commons-configuration2</include>
+                                    <include>org.json:json</include>
+                                    <include>com.google.auth:google-auth-library-oauth2-http</include>
+                                    <include>com.google.auth:google-auth-library-credentials</include>
+                                    <include>com.google.http-client:google-http-client</include>
+                                    <include>com.google.http-client:google-http-client-gson</include>
+                                    <include>com.fasterxml.jackson.datatype:jackson-datatype-jsr310</include>
                                     <include>com.fasterxml.jackson.datatype:jackson-datatype-guava</include>
                                 </includes>
                             </artifactSet>
