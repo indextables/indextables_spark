@@ -530,6 +530,7 @@
                                     <include>software.amazon.eventstream:eventstream</include>
                                     <include>com.databricks:databricks-sdk-java</include>
                                     <include>org.apache.commons:commons-configuration2</include>
+                                    <include>com.fasterxml.jackson.datatype:jackson-datatype-guava</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
