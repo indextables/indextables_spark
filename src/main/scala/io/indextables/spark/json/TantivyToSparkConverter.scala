@@ -224,14 +224,11 @@ class TantivyToSparkConverter(
     if (jsonValue == null) return null
 
     // Parse JSON string to Map (tantivy4java stores JSON fields as strings)
-    val jsonString   = jsonValue.asInstanceOf[String]
-    val objectMapper = new com.fasterxml.jackson.databind.ObjectMapper()
-    val jsonMap = objectMapper
-      .readValue(
-        jsonString,
-        classOf[java.util.Map[String, Object]]
-      )
-      .asInstanceOf[java.util.Map[String, Object]]
+    val jsonString = jsonValue.asInstanceOf[String]
+    val jsonMap = io.indextables.spark.util.JsonUtil.parseAs(
+      jsonString,
+      classOf[java.util.Map[String, Object]]
+    ).asInstanceOf[java.util.Map[String, Object]]
 
     field.dataType match {
       case st: StructType =>

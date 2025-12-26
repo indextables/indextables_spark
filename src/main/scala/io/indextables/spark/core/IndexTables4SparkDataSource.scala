@@ -77,60 +77,20 @@ class IndexTables4SparkTable(
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
     // Extract configurations from Hadoop config (lowest precedence)
-    val hadoopTantivyConfigs = hadoopConf
-      .iterator()
-      .asScala
-      .filter { entry =>
-        entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")
-      }
-      .map { entry =>
-        val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-          entry.getKey.replace("spark.indextables.", "spark.indextables.")
-        } else entry.getKey
-        normalizedKey -> entry.getValue
-      }
-      .filter(_._2 != null) // Filter out null values
-      .toMap
+    val hadoopTantivyConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
 
     // Extract configurations from Spark session config (middle precedence)
-    val sparkTantivyConfigs =
-      try
-        spark.conf.getAll
-          .filter {
-            case (key, _) =>
-              key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
-          }
-          .map {
-            case (key, value) =>
-              val normalizedKey = if (key.startsWith("spark.indextables.")) {
-                key.replace("spark.indextables.", "spark.indextables.")
-              } else key
-              normalizedKey -> value
-          }
-          .filter(_._2 != null)
-          .toMap
-      catch {
-        case _: Exception => Map.empty[String, String]
-      }
+    val sparkTantivyConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromSpark(spark)
 
     // Extract configurations from read options (highest precedence)
-    val readTantivyConfigs = options.asScala
-      .filter {
-        case (key, _) =>
-          key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")
-      }
-      .map {
-        case (key, value) =>
-          val normalizedKey = if (key.startsWith("spark.indextables.")) {
-            key.replace("spark.indextables.", "spark.indextables.")
-          } else key
-          normalizedKey -> value
-      }
-      .filter(_._2 != null) // Filter out null values
-      .toMap
+    val readTantivyConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromOptions(options)
 
     // Merge with proper precedence: Hadoop < Spark config < read options
-    val tantivyConfigs = hadoopTantivyConfigs ++ sparkTantivyConfigs ++ readTantivyConfigs
+    val tantivyConfigs = io.indextables.spark.util.ConfigNormalization.mergeWithPrecedence(
+      hadoopTantivyConfigs,
+      sparkTantivyConfigs,
+      readTantivyConfigs
+    )
 
     // Validate numeric configuration values early to provide better error messages
     def validateNumericConfig(
@@ -263,11 +223,7 @@ class IndexTables4SparkTable(
       val optionsMap = options.asScala.toMap
 
       // Serialize partition columns as JSON array
-      import com.fasterxml.jackson.databind.ObjectMapper
-      import com.fasterxml.jackson.module.scala.DefaultScalaModule
-      val mapper = new ObjectMapper()
-      mapper.registerModule(DefaultScalaModule)
-      val partitionColumnsJson = mapper.writeValueAsString(partitionColumnNames.toArray)
+      val partitionColumnsJson = io.indextables.spark.util.JsonUtil.toJson(partitionColumnNames.toArray)
 
       val enhancedOptionsMap = optionsMap + ("__partition_columns" -> partitionColumnsJson)
       new org.apache.spark.sql.util.CaseInsensitiveStringMap(enhancedOptionsMap.asJava)
@@ -316,14 +272,9 @@ class IndexTables4SparkTableProvider extends org.apache.spark.sql.connector.cata
   }
 
   private def parsePathsFromJson(pathStr: String): Seq[String] =
-    try {
-      import com.fasterxml.jackson.databind.ObjectMapper
-      import com.fasterxml.jackson.module.scala.DefaultScalaModule
-
-      val objectMapper = new ObjectMapper()
-      objectMapper.registerModule(DefaultScalaModule)
-      objectMapper.readValue(pathStr, classOf[Array[String]]).toSeq
-    } catch {
+    try
+      io.indextables.spark.util.JsonUtil.parseStringArray(pathStr)
+    catch {
       case _: Exception =>
         throw new IllegalArgumentException(s"Invalid paths format: $pathStr. Expected JSON array of strings.")
     }

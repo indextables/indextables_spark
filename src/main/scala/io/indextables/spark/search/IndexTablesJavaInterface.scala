@@ -21,8 +21,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 import org.apache.spark.sql.catalyst.InternalRow
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import io.indextables.spark.util.JsonUtil
 import io.indextables.tantivy4java.core.Tantivy
 import org.slf4j.LoggerFactory
 
@@ -32,7 +31,6 @@ import org.slf4j.LoggerFactory
  */
 object TantivyJavaAdapter {
   private val logger = LoggerFactory.getLogger(TantivyJavaAdapter.getClass)
-  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
 
   // Simple interface storage for compatibility
   private val interfaces   = new ConcurrentHashMap[java.lang.Long, TantivyDirectInterface]()
@@ -73,7 +71,7 @@ object TantivyJavaAdapter {
     try
       Option(interfaces.get(indexHandle)) match {
         case Some(interface) =>
-          val docMap = mapper.readValue(documentJson, classOf[Map[String, Any]])
+          val docMap = JsonUtil.parseAs(documentJson, classOf[Map[String, Any]])
           val row    = RowConverter.jsonToInternalRow(docMap, interface.schema)
           interface.addDocument(row)
           true
@@ -116,15 +114,15 @@ object TantivyJavaAdapter {
             val docMap = RowConverter.internalRowToMap(row, interface.schema)
             Map("doc" -> docMap, "score" -> 1.0)
           }.toList
-          mapper.writeValueAsString(Map("hits" -> hits))
+          JsonUtil.toJson(Map("hits" -> hits))
         case None =>
           logger.error(s"Index not found: $indexHandle")
-          mapper.writeValueAsString(Map("hits" -> List.empty))
+          JsonUtil.toJson(Map("hits" -> List.empty))
       }
     catch {
       case e: Exception =>
         logger.error("Failed to search", e)
-        mapper.writeValueAsString(Map("hits" -> List.empty))
+        JsonUtil.toJson(Map("hits" -> List.empty))
     }
 
   def searchAll(indexHandle: Long, limit: Int): String =

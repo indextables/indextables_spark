@@ -231,40 +231,20 @@ object FiltersToQueryConverter {
       originalSchema.close()
   }
 
-  /** Convert Spark filters to a tantivy4java SplitQuery object using the new API. */
-  def convertToSplitQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): SplitQuery =
-    convertToSplitQuery(filters, splitSearchEngine, None, None)
-
-  /** Convert Spark filters to a tantivy4java SplitQuery object with field configuration. */
+  /**
+   * Convert Spark filters to a tantivy4java SplitQuery object.
+   *
+   * @param filters          Array of Spark filters to convert
+   * @param splitSearchEngine The split search engine for query conversion
+   * @param schemaFieldNames Optional set of valid field names for schema validation
+   * @param options          Optional configuration options for field type resolution
+   * @return A SplitQuery object representing the combined filters
+   */
   def convertToSplitQuery(
     filters: Array[Filter],
     splitSearchEngine: SplitSearchEngine,
-    options: org.apache.spark.sql.util.CaseInsensitiveStringMap
-  ): SplitQuery =
-    convertToSplitQuery(filters, splitSearchEngine, None, Some(options))
-
-  /** Convert Spark filters to a tantivy4java Query object (legacy API). */
-  def convertToQuery(filters: Array[Filter], splitSearchEngine: SplitSearchEngine): Query =
-    convertToQuery(filters, splitSearchEngine, None)
-
-  /** Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object. */
-  def convertToQuery(filters: Array[Any], splitSearchEngine: SplitSearchEngine): Query =
-    convertToQuery(filters, splitSearchEngine, None)
-
-  /** Convert Spark filters to a tantivy4java SplitQuery object with schema field validation. */
-  def convertToSplitQuery(
-    filters: Array[Filter],
-    splitSearchEngine: SplitSearchEngine,
-    schemaFieldNames: Option[Set[String]]
-  ): SplitQuery =
-    convertToSplitQuery(filters, splitSearchEngine, schemaFieldNames, None)
-
-  /** Convert Spark filters to a tantivy4java SplitQuery object with schema field validation and field configuration. */
-  def convertToSplitQuery(
-    filters: Array[Filter],
-    splitSearchEngine: SplitSearchEngine,
-    schemaFieldNames: Option[Set[String]],
-    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap]
+    schemaFieldNames: Option[Set[String]] = None,
+    options: Option[org.apache.spark.sql.util.CaseInsensitiveStringMap] = None
   ): SplitQuery = {
     if (filters.isEmpty) {
       return new SplitMatchAllQuery() // Match-all query using object type
@@ -325,8 +305,12 @@ object FiltersToQueryConverter {
   }
 
   /**
-   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object with schema field
-   * validation.
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object.
+   *
+   * @param filters          Array of mixed filters (Spark Filter or custom filters) to convert
+   * @param splitSearchEngine The split search engine for query conversion
+   * @param schemaFieldNames Optional set of valid field names for schema validation
+   * @return A SplitQuery object representing the combined filters
    */
   def convertToSplitQuery(
     filters: Array[Any],
@@ -379,7 +363,12 @@ object FiltersToQueryConverter {
   }
 
   /**
-   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object with schema field validation.
+   * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object.
+   *
+   * @param filters          Array of mixed filters (Spark Filter or custom filters) to convert
+   * @param splitSearchEngine The split search engine for query conversion
+   * @param schemaFieldNames Optional set of valid field names for schema validation
+   * @return A Query object representing the combined filters
    */
   def convertToQuery(
     filters: Array[Any],
@@ -471,11 +460,18 @@ object FiltersToQueryConverter {
     }
   }
 
-  /** Convert Spark filters to a tantivy4java Query object with schema field validation. */
+  /**
+   * Convert Spark filters to a tantivy4java Query object.
+   *
+   * @param filters          Array of Spark filters to convert
+   * @param splitSearchEngine The split search engine for query conversion
+   * @param schemaFieldNames Optional set of valid field names for schema validation
+   * @return A Query object representing the combined filters
+   */
   def convertToQuery(
     filters: Array[Filter],
     splitSearchEngine: SplitSearchEngine,
-    schemaFieldNames: Option[Set[String]]
+    schemaFieldNames: Option[Set[String]] = None
   ): Query = {
     if (filters.isEmpty) {
       return Query.allQuery()

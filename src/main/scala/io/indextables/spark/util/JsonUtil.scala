@@ -20,8 +20,48 @@ package io.indextables.spark.util
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 
+/**
+ * Centralized JSON utilities using a shared ObjectMapper instance.
+ *
+ * Provides consistent JSON handling across the codebase and avoids creating multiple ObjectMapper instances.
+ */
 object JsonUtil {
 
+  /** Shared ObjectMapper instance with Scala module registered. */
   val mapper: ObjectMapper = new ObjectMapper().registerModule(DefaultScalaModule)
 
+  /**
+   * Parse a JSON string array to a Scala Seq.
+   *
+   * @param json
+   *   JSON array string like ["a", "b", "c"]
+   * @return
+   *   Seq of strings
+   */
+  def parseStringArray(json: String): Seq[String] =
+    mapper.readValue(json, classOf[Array[String]]).toSeq
+
+  /**
+   * Parse a JSON value to a specific class type.
+   *
+   * @param json
+   *   JSON string
+   * @param clazz
+   *   Target class type
+   * @return
+   *   Parsed value
+   */
+  def parseAs[T](json: String, clazz: Class[T]): T =
+    mapper.readValue(json, clazz)
+
+  /**
+   * Convert an object to a JSON string.
+   *
+   * @param value
+   *   Object to convert
+   * @return
+   *   JSON string representation
+   */
+  def toJson(value: Any): String =
+    mapper.writeValueAsString(value)
 }

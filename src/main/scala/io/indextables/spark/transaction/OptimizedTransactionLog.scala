@@ -92,19 +92,6 @@ class OptimizedTransactionLog(
     spark
   )
 
-  // Memory optimized operations
-  private val memoryOps = new MemoryOptimizedOperations(
-    transactionLogPath,
-    cloudProvider,
-    spark
-  )
-
-  // Advanced optimizations
-  private val advancedOps = new AdvancedOptimizations(
-    transactionLogPath,
-    cloudProvider,
-    spark
-  )
 
   // Checkpoint handler
   private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
@@ -121,7 +108,6 @@ class OptimizedTransactionLog(
   // Performance configuration
   private val maxStaleness        = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
-  private val asyncUpdatesEnabled = options.getBoolean("spark.indextables.async.updates.enabled", false) // Disabled by default for stability
 
   def getTablePath(): Path = tablePath
 
@@ -199,13 +185,6 @@ class OptimizedTransactionLog(
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
-
-    // Schedule async snapshot update if enabled
-    if (asyncUpdatesEnabled) {
-      advancedOps.scheduleAsyncUpdate {
-        updateSnapshot(version)
-      }
-    }
 
     version
   }
