@@ -21,14 +21,17 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 
 /**
- * Centralized JSON utilities using a shared ObjectMapper instance.
+ * Centralized JSON utilities using shared ObjectMapper instances.
  *
  * Provides consistent JSON handling across the codebase and avoids creating multiple ObjectMapper instances.
  */
 object JsonUtil {
 
-  /** Shared ObjectMapper instance with Scala module registered. */
+  /** Shared ObjectMapper instance with Scala module registered for Scala types. */
   val mapper: ObjectMapper = new ObjectMapper().registerModule(DefaultScalaModule)
+
+  /** Plain ObjectMapper without Scala module for Java collections (Maps, Lists). */
+  private val javaMapper: ObjectMapper = new ObjectMapper()
 
   /**
    * Parse a JSON string array to a Scala Seq.
@@ -57,11 +60,42 @@ object JsonUtil {
   /**
    * Convert an object to a JSON string.
    *
+   * Uses plain ObjectMapper for Java collections to avoid DefaultScalaModule interference.
+   *
    * @param value
    *   Object to convert
    * @return
    *   JSON string representation
    */
   def toJson(value: Any): String =
-    mapper.writeValueAsString(value)
+    value match {
+      case _: java.util.Map[_, _] | _: java.util.List[_] =>
+        javaMapper.writeValueAsString(value)
+      case _ =>
+        mapper.writeValueAsString(value)
+    }
+
+  /**
+   * Convert a Java Map to a JSON string using plain ObjectMapper.
+   *
+   * @param map
+   *   Java Map to convert
+   * @return
+   *   JSON string representation
+   */
+  def toJsonJava(map: java.util.Map[_, _]): String =
+    javaMapper.writeValueAsString(map)
+
+  /**
+   * Parse a JSON string to a Java Map using plain ObjectMapper.
+   *
+   * @param json
+   *   JSON string
+   * @param clazz
+   *   Target class type
+   * @return
+   *   Parsed Java Map
+   */
+  def parseAsJava[T](json: String, clazz: Class[T]): T =
+    javaMapper.readValue(json, clazz)
 }
