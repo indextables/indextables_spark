@@ -2244,11 +2244,15 @@ MERGE SPLITS 's3://bucket/path' TARGET SIZE 104857600;  -- 100MB
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M;       -- 100MB with suffix
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G;         -- 1GB with suffix
 
--- With group limit constraint (limit number of merge operations)
-MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;          -- Limit to 10 merge groups
+-- Limit number of destination (merged) splits to process (oldest first)
+MERGE SPLITS 's3://bucket/path' MAX DEST SPLITS 10;
+
+-- Limit number of source splits per merge (default: 1000)
+MERGE SPLITS 's3://bucket/path' MAX SOURCE SPLITS PER MERGE 500;
 
 -- Combined constraints for fine-grained control
-MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX GROUPS 5;
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M MAX DEST SPLITS 5;
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G MAX DEST SPLITS 10 MAX SOURCE SPLITS PER MERGE 100;
 
 -- With WHERE clause for partition filtering
 MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M;
@@ -2264,15 +2268,24 @@ spark.sql("MERGE SPLITS 's3://bucket/path'")
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M")
 spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G")
 
-// Limit the number of merge groups created
-spark.sql("MERGE SPLITS 's3://bucket/path' MAX GROUPS 10")
+// Limit the number of destination splits (oldest first)
+spark.sql("MERGE SPLITS 's3://bucket/path' MAX DEST SPLITS 10")
 
-// Combined size and job constraints
-spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 4G MAX GROUPS 5")
+// Limit source splits per merge operation (prevents excessive memory usage)
+spark.sql("MERGE SPLITS 's3://bucket/path' MAX SOURCE SPLITS PER MERGE 500")
+
+// Combined size and limit constraints
+spark.sql("MERGE SPLITS 's3://bucket/path' TARGET SIZE 4G MAX DEST SPLITS 5 MAX SOURCE SPLITS PER MERGE 100")
 
 // With partition filtering
 spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 ```
+
+##### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `spark.indextables.merge.maxSourceSplitsPerMerge` | 1000 | Maximum number of source splits that can be merged into a single destination split |
 
 #### Dropping Partitions with DROP INDEXTABLES PARTITIONS
 
@@ -2665,7 +2678,7 @@ A: Set `spark.indextables.aws.credentialsProviderClass` to your provider class n
 ### Operational Questions
 
 **Q: How does MERGE SPLITS work?**
-A: MERGE SPLITS consolidates small split files into larger ones to reduce overhead. Use `MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M` to merge splits up to 100MB each.
+A: MERGE SPLITS consolidates small split files into larger ones to reduce overhead. Use `MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M` to merge splits up to 100MB each. You can limit the number of destination splits with `MAX DEST SPLITS` and control the maximum number of source splits per merge with `MAX SOURCE SPLITS PER MERGE` (default: 1000).
 
 **Q: What happens when a merge operation encounters corrupted files?**
 A: Corrupted files are automatically skipped with cooldown tracking (default: 24 hours). Original files remain accessible and the operation continues gracefully without failing.

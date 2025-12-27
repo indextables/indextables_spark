@@ -74,6 +74,14 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_SKIPPED_FILES_TRACKING_ENABLED  = "spark.indextables.skippedFiles.trackingEnabled"
 
   /////////////////////
+  // Merge Splits Configuration
+  /////////////////////
+
+  /** Maximum number of source splits that can be merged in a single merge operation (default: 1000) */
+  val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE = "spark.indextables.merge.maxSourceSplitsPerMerge"
+  val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT = 1000
+
+  /////////////////////
   // L2 Disk Cache Configuration (persistent NVMe caching)
   /////////////////////
 

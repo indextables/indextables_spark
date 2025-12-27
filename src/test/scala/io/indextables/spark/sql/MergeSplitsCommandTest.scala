@@ -89,45 +89,45 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     assert(full.userPartitionPredicates.nonEmpty)
     assert(full.userPartitionPredicates.head == "partition_col = 'value'")
     assert(full.targetSize.contains(1073741824L)) // 1GB
-    assert(full.maxGroups.isEmpty)
+    assert(full.maxDestSplits.isEmpty)
 
-    // Test with MAX GROUPS
-    val maxGroupsCommand = "MERGE SPLITS '/path/to/table' MAX GROUPS 5"
-    val parsedMaxGroups  = sqlParser.parsePlan(maxGroupsCommand)
+    // Test with MAX DEST SPLITS (formerly MAX GROUPS)
+    val maxDestSplitsCommand = "MERGE SPLITS '/path/to/table' MAX DEST SPLITS 5"
+    val parsedMaxDestSplits  = sqlParser.parsePlan(maxDestSplitsCommand)
 
-    assert(parsedMaxGroups.isInstanceOf[MergeSplitsCommand])
-    val withMaxGroups = parsedMaxGroups.asInstanceOf[MergeSplitsCommand]
-    assert(withMaxGroups.maxGroups.contains(5))
-    assert(withMaxGroups.targetSize.isEmpty)
-    assert(withMaxGroups.userPartitionPredicates.isEmpty)
+    assert(parsedMaxDestSplits.isInstanceOf[MergeSplitsCommand])
+    val withMaxDestSplits = parsedMaxDestSplits.asInstanceOf[MergeSplitsCommand]
+    assert(withMaxDestSplits.maxDestSplits.contains(5))
+    assert(withMaxDestSplits.targetSize.isEmpty)
+    assert(withMaxDestSplits.userPartitionPredicates.isEmpty)
 
     // Test TARGET SIZE first (to isolate the issue)
     val targetSizeOnlyCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 100M"
     val parsedTargetSizeOnly  = sqlParser.parsePlan(targetSizeOnlyCommand)
     assert(parsedTargetSizeOnly.isInstanceOf[MergeSplitsCommand])
 
-    // Test with TARGET SIZE and MAX GROUPS (numeric value - this works)
-    val targetSizeMaxGroupsNumericCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 104857600 MAX GROUPS 3"
-    val parsedTargetSizeMaxGroupsNumeric  = sqlParser.parsePlan(targetSizeMaxGroupsNumericCommand)
+    // Test with TARGET SIZE and MAX DEST SPLITS (numeric value - this works)
+    val targetSizeMaxDestSplitsNumericCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 104857600 MAX DEST SPLITS 3"
+    val parsedTargetSizeMaxDestSplitsNumeric  = sqlParser.parsePlan(targetSizeMaxDestSplitsNumericCommand)
 
-    assert(parsedTargetSizeMaxGroupsNumeric.isInstanceOf[MergeSplitsCommand])
-    val withTargetSizeMaxGroupsNumeric = parsedTargetSizeMaxGroupsNumeric.asInstanceOf[MergeSplitsCommand]
-    assert(withTargetSizeMaxGroupsNumeric.targetSize.contains(104857600L)) // 100MB
-    assert(withTargetSizeMaxGroupsNumeric.maxGroups.contains(3))
+    assert(parsedTargetSizeMaxDestSplitsNumeric.isInstanceOf[MergeSplitsCommand])
+    val withTargetSizeMaxDestSplitsNumeric = parsedTargetSizeMaxDestSplitsNumeric.asInstanceOf[MergeSplitsCommand]
+    assert(withTargetSizeMaxDestSplitsNumeric.targetSize.contains(104857600L)) // 100MB
+    assert(withTargetSizeMaxDestSplitsNumeric.maxDestSplits.contains(3))
 
-    // Test with TARGET SIZE suffix and MAX GROUPS (this might have parsing issues)
+    // Test with TARGET SIZE suffix and MAX DEST SPLITS (this might have parsing issues)
     try {
-      val targetSizeMaxGroupsSuffixCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 100M MAX GROUPS 3"
-      val parsedTargetSizeMaxGroupsSuffix  = sqlParser.parsePlan(targetSizeMaxGroupsSuffixCommand)
+      val targetSizeMaxDestSplitsSuffixCommand = "MERGE SPLITS '/path/to/table' TARGET SIZE 100M MAX DEST SPLITS 3"
+      val parsedTargetSizeMaxDestSplitsSuffix  = sqlParser.parsePlan(targetSizeMaxDestSplitsSuffixCommand)
 
-      assert(parsedTargetSizeMaxGroupsSuffix.isInstanceOf[MergeSplitsCommand])
-      val withTargetSizeMaxGroupsSuffix = parsedTargetSizeMaxGroupsSuffix.asInstanceOf[MergeSplitsCommand]
-      assert(withTargetSizeMaxGroupsSuffix.targetSize.contains(104857600L)) // 100MB
-      assert(withTargetSizeMaxGroupsSuffix.maxGroups.contains(3))
+      assert(parsedTargetSizeMaxDestSplitsSuffix.isInstanceOf[MergeSplitsCommand])
+      val withTargetSizeMaxDestSplitsSuffix = parsedTargetSizeMaxDestSplitsSuffix.asInstanceOf[MergeSplitsCommand]
+      assert(withTargetSizeMaxDestSplitsSuffix.targetSize.contains(104857600L)) // 100MB
+      assert(withTargetSizeMaxDestSplitsSuffix.maxDestSplits.contains(3))
     } catch {
       case e: Exception =>
-        println(s"⚠️  Size suffix with MAX GROUPS parsing failed: ${e.getMessage}")
-      // This is a known limitation - size suffixes may not work with MAX GROUPS in complex syntax
+        println(s"⚠️  Size suffix with MAX DEST SPLITS parsing failed: ${e.getMessage}")
+      // This is a known limitation - size suffixes may not work with MAX DEST SPLITS in complex syntax
     }
   }
 
@@ -219,14 +219,24 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
       sqlParser.parsePlan("MERGE SPLITS '/path/to/table' TARGET SIZE invalid")
     }
 
-    // Test invalid MAX GROUPS format
+    // Test invalid MAX DEST SPLITS format
     assertThrows[NumberFormatException] {
-      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX GROUPS invalid")
+      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX DEST SPLITS invalid")
     }
 
-    // Test zero MAX GROUPS value
+    // Test zero MAX DEST SPLITS value
     assertThrows[IllegalArgumentException] {
-      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX GROUPS 0")
+      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX DEST SPLITS 0")
+    }
+
+    // Test invalid MAX SOURCE SPLITS PER MERGE format
+    assertThrows[NumberFormatException] {
+      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX SOURCE SPLITS PER MERGE invalid")
+    }
+
+    // Test MAX SOURCE SPLITS PER MERGE less than 2
+    assertThrows[IllegalArgumentException] {
+      sqlParser.parsePlan("MERGE SPLITS '/path/to/table' MAX SOURCE SPLITS PER MERGE 1")
     }
   }
 
