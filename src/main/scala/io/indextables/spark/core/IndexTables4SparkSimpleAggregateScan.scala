@@ -17,9 +17,6 @@
 
 package io.indextables.spark.core
 
-import scala.jdk.CollectionConverters._
-
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
 import org.apache.spark.sql.sources.Filter
@@ -38,7 +35,6 @@ import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.split.SplitCacheManager
 import org.slf4j.LoggerFactory
 
 /**
@@ -155,21 +151,6 @@ class IndexTables4SparkSimpleAggregateScan(
     }
 
     // Look up field type in schema
-    schema.fields.find(_.name == fieldName) match {
-      case Some(field) => field.dataType
-      case None =>
-        logger.warn(s"Could not find field '$fieldName' in schema, defaulting to LongType")
-        LongType
-    }
-  }
-
-  /** Get the data type of a column from an expression. */
-  private def getColumnDataType(column: org.apache.spark.sql.connector.expressions.Expression)
-    : org.apache.spark.sql.types.DataType = {
-    import org.apache.spark.sql.types.LongType
-
-    // Extract field name and look it up in schema
-    val fieldName = io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
     schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
@@ -326,12 +307,6 @@ class IndexTables4SparkSimpleAggregateReader(
   private var aggregateResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
   private var isInitialized                                                         = false
 
-  // Helper function to get config with defaults
-  private def getConfig(configKey: String, default: String = ""): String = {
-    val value = partition.config.getOrElse(configKey, default)
-    Option(value).getOrElse(default)
-  }
-
   override def next(): Boolean = {
     if (!isInitialized) {
       initialize()
@@ -384,17 +359,8 @@ class IndexTables4SparkSimpleAggregateReader(
       s"EXECUTE SIMPLE AGGREGATION: Aggregate expressions count: ${partition.aggregation.aggregateExpressions.length}"
     )
     import org.apache.spark.sql.catalyst.InternalRow
-    import org.apache.spark.unsafe.types.UTF8String
-    import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
-    import io.indextables.tantivy4java.aggregation.{
-      CountAggregation,
-      SumAggregation,
-      AverageAggregation,
-      MinAggregation,
-      MaxAggregation
-    }
+    import io.indextables.tantivy4java.split.SplitMatchAllQuery
     import scala.collection.mutable.ArrayBuffer
-    import scala.collection.JavaConverters._
 
     logger.debug(s"SIMPLE AGGREGATE EXECUTION: Starting simple aggregation")
     logger.debug(s"SIMPLE AGGREGATE EXECUTION: Split path: ${partition.split.path}")
@@ -887,7 +853,6 @@ class IndexTables4SparkSimpleAggregateReader(
     partition.split.docMappingJson match {
       case Some(mappingJson) =>
         try {
-          import com.fasterxml.jackson.databind.JsonNode
           import io.indextables.spark.util.JsonUtil
           import scala.jdk.CollectionConverters._
 

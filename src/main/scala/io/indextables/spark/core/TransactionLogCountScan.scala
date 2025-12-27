@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReader, PartitionReaderFactory, Scan}
 import org.apache.spark.sql.sources.Filter
@@ -224,8 +223,6 @@ class TransactionLogCountBatch(
     if (filters.isEmpty) {
       true
     } else {
-      // Use PartitionPruning to check if the file matches the filters
-      val fileSeq = Seq(file)
       // We need partition columns for this, but we can't access transaction log here easily
       // Let's implement a simple match logic for now
       filters.forall(matchesFilter(file, _))
@@ -325,7 +322,6 @@ class TransactionLogCountPartitionReader(
   config: Map[String, String] // Direct config instead of broadcast
 ) extends PartitionReader[InternalRow] {
 
-  private val logger  = LoggerFactory.getLogger(classOf[TransactionLogCountPartitionReader])
   private var hasNext = true
 
   override def next(): Boolean =

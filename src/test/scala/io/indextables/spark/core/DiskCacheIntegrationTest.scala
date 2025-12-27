@@ -23,7 +23,7 @@ import java.util.Comparator
 
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.spark.storage.GlobalSplitCacheManager
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll

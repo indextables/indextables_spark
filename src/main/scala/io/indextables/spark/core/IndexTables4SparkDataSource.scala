@@ -151,7 +151,6 @@ class IndexTables4SparkTable(
     // Copy write options to Hadoop configuration so they're available in executors
     // Write options from info.options() should override any existing configuration
     // IMPORTANT: Create a COPY of hadoopConf to avoid polluting the shared Spark session configuration
-    import scala.jdk.CollectionConverters._
     val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
 
     val writeOptions = info.options()

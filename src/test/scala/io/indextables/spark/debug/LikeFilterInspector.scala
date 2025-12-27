@@ -1,6 +1,5 @@
 package io.indextables.spark.debug
 
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.SparkSession
 
 object LikeFilterInspector {

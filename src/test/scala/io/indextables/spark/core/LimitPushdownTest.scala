@@ -20,7 +20,6 @@ package io.indextables.spark.core
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 class LimitPushdownTest extends TestBase {
 
@@ -165,7 +164,7 @@ class LimitPushdownTest extends TestBase {
         .save(tempPath)
 
       // Read the transaction log to get the schema
-      import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+      import io.indextables.spark.transaction.TransactionLogFactory
       import org.apache.hadoop.fs.Path
       import org.apache.spark.sql.types.DataType
       val transactionLog = TransactionLogFactory.create(new Path(tempPath), spark)

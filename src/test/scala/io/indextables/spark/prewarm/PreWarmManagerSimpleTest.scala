@@ -17,9 +17,9 @@
 
 package io.indextables.spark.prewarm
 
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Simple unit test for PreWarmManager that doesn't require full Spark setup. This tests the basic functionality without
@@ -75,8 +75,6 @@ class PreWarmManagerSimpleTest extends AnyFunSuite with Matchers with BeforeAndA
   test("PreWarmManager should have expected public methods") {
     // This test verifies that the PreWarmManager has the expected API
     // without actually executing complex operations
-
-    import java.lang.reflect.Method
 
     val methods = PreWarmManager.getClass.getMethods.map(_.getName).toSet
 

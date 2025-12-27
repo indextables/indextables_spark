@@ -20,8 +20,6 @@ package io.indextables.spark.core
 import java.io.File
 import java.nio.file.Files
 
-import scala.util.Random
-
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.SparkSession
@@ -165,7 +163,7 @@ class AvgAggregationTest extends AnyFunSuite with Matchers {
         val avgRating = row.getDouble(2)
         val count     = row.getLong(3)
         println(s"  $category: AVG(score)=$avgScore, AVG(rating)=$avgRating, COUNT=$count")
-        category -> (avgScore, avgRating, count)
+        category -> ((avgScore, avgRating, count))
       }.toMap
 
       // Verify expected results

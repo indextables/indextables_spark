@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.read.{
   Batch,
   InputPartition,
@@ -341,8 +340,6 @@ class IndexTables4SparkScan(
    * Determine if a file can potentially match the given filters. This implements proper OR/AND logic for data skipping.
    */
   private def canFileMatchFilters(addAction: AddAction, filters: Array[Filter]): Boolean = {
-    import org.apache.spark.sql.sources._
-
     logger.debug(s"canFileMatchFilters: Checking file ${addAction.path} against ${filters.length} filters")
     filters.foreach(f => logger.debug(s"canFileMatchFilters: Filter: $f"))
 
@@ -388,7 +385,6 @@ class IndexTables4SparkScan(
 
   private def shouldSkipFile(addAction: AddAction, filter: Filter): Boolean = {
     import org.apache.spark.sql.sources._
-    import java.time.LocalDate
 
     (addAction.minValues, addAction.maxValues) match {
       case (Some(minVals), Some(maxVals)) =>

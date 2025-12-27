@@ -287,7 +287,7 @@ object JsonUtils {
    *   if JSON is invalid
    */
   def parseJson(jsonString: String): java.util.Map[String, Object] =
-    io.indextables.spark.util.JsonUtil.parseAs(jsonString, classOf[java.util.Map[String, Object]])
+    io.indextables.spark.util.JsonUtil.parseAsJava(jsonString, classOf[java.util.Map[String, Object]])
 
   /**
    * Serializes a Java Map to a JSON string.

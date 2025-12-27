@@ -28,7 +28,6 @@ import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import io.indextables.spark.search.{SplitSearchEngine, TantivyNative, TantivySearchEngine}
 import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 class NativeLibraryTest extends TestBase {
 
@@ -200,7 +199,6 @@ class NativeLibraryTest extends TestBase {
 
       // Create cache manager for split searching
       import io.indextables.tantivy4java.split.SplitCacheManager
-      import io.indextables.tantivy4java.query.Query
       val cacheConfig = new SplitCacheManager.CacheConfig(s"native-test-cache-${System.nanoTime()}")
         .withMaxCacheSize(50000000L) // 50MB
       val cacheManager = SplitCacheManager.getInstance(cacheConfig)

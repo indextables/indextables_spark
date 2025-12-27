@@ -117,9 +117,9 @@ class MultipartUploadVerificationTest extends AnyFunSuite {
     // - Maximum 10,000 parts per upload
     // - Maximum 5TB per upload
 
-    val minPartSize = 5L * 1024 * 1024               // 5MB
-    val maxParts    = 10000L
-    val maxFileSize = 5L * 1024 * 1024 * 1024 * 1024 // 5TB
+    val minPartSize  = 5L * 1024 * 1024               // 5MB
+    val maxParts     = 10000L
+    val _maxFileSize = 5L * 1024 * 1024 * 1024 * 1024 // 5TB (unused, for documentation)
 
     // For a 5GB file with 128MB parts: 5120MB / 128MB = 40 parts (OK)
     val file5GB         = 5L * 1024 * 1024 * 1024

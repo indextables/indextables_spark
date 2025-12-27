@@ -18,10 +18,7 @@
 package io.indextables.spark.transaction
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-
-import scala.collection.mutable
 
 import com.codahale.metrics._
 import org.slf4j.LoggerFactory

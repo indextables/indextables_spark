@@ -20,9 +20,6 @@ package io.indextables.spark.core
 import java.io.File
 import java.nio.file.Files
 
-import scala.util.Random
-
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
 import org.apache.spark.sql.SparkSession
 
 import io.indextables.tantivy4java.aggregation.{
@@ -39,9 +36,8 @@ import io.indextables.tantivy4java.aggregation.{
   SumAggregation,
   SumResult
 }
-import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
-import io.indextables.tantivy4java.split.{SplitAggregation, SplitCacheManager, SplitMatchAllQuery, SplitSearcher}
+import io.indextables.tantivy4java.core.{Document, Index, SchemaBuilder}
+import io.indextables.tantivy4java.split.{SplitAggregation, SplitCacheManager, SplitMatchAllQuery}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -312,14 +308,16 @@ class AggregatePushdownIntegrationTest extends AnyFunSuite {
       .getOrCreate()
 
     try {
-      import spark.implicits._
-
       // Create test data with numeric fields
-      val testData = Seq(
-        ("doc1", "content1", 10, 100L),
-        ("doc2", "content2", 20, 200L),
-        ("doc3", "content3", 30, 300L)
-      ).toDF("id", "content", "score", "value")
+      val testData = spark
+        .createDataFrame(
+          Seq(
+            ("doc1", "content1", 10, 100L),
+            ("doc2", "content2", 20, 200L),
+            ("doc3", "content3", 30, 300L)
+          )
+        )
+        .toDF("id", "content", "score", "value")
 
       val tempDir   = Files.createTempDirectory("auto-fast-field-test").toFile
       val tablePath = tempDir.getAbsolutePath

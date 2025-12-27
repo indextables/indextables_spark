@@ -1,7 +1,5 @@
 package io.indextables.spark.debug
 
-import java.lang.reflect.Method
-
 import org.apache.spark.sql.connector.read.SupportsPushDownAggregates
 
 object SparkInterfaceInspection {

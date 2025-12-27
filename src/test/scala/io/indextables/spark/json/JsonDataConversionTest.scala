@@ -445,7 +445,7 @@ class JsonDataConversionTest extends AnyFunSuite with Matchers {
 
   test("mapToJsonMap handles null values") {
     val mapType  = MapType(StringType, IntegerType)
-    val sparkMap = scala.collection.Map("count" -> 42, "total" -> null)
+    val sparkMap = scala.collection.Map[String, Any]("count" -> 42, "total" -> null)
 
     val schema    = StructType(Seq.empty)
     val mapper    = new SparkSchemaToTantivyMapper(createOptions())

@@ -17,8 +17,8 @@
 
 package io.indextables.spark.performance
 
-import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 

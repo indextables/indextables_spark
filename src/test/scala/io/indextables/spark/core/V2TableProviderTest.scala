@@ -18,11 +18,9 @@
 package io.indextables.spark.core
 
 import org.apache.spark.sql.connector.catalog.TableCapability
-import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /** Tests for V2 TableProvider methods and capabilities that weren't covered in the basic V2 tests. */
 class V2TableProviderTest extends TestBase {

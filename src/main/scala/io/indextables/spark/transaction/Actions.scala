@@ -17,9 +17,7 @@
 
 package io.indextables.spark.transaction
 
-import scala.util.Try
-
-import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize

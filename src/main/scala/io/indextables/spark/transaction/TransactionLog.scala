@@ -28,7 +28,7 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -64,13 +64,6 @@ class TransactionLog(
   }
 
   private val logger = LoggerFactory.getLogger(classOf[TransactionLog])
-
-  // Determine if we should use cloud-optimized transaction log
-  private val protocol = ProtocolBasedIOFactory.determineProtocol(tablePath.toString)
-  private val useCloudOptimized = protocol match {
-    case ProtocolBasedIOFactory.S3Protocol => !options.getBoolean("spark.indextables.transaction.force.hadoop", false)
-    case _                                 => false
-  }
 
   // Use cloud storage provider instead of direct Hadoop filesystem
   private val cloudProvider =

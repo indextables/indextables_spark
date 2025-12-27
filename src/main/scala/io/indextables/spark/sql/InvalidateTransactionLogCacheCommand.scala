@@ -25,7 +25,7 @@ import org.apache.spark.sql.types.{LongType, StringType}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
 /**
@@ -104,8 +104,8 @@ case class InvalidateTransactionLogCacheCommand(
       try {
         // Try to access the transaction log to validate it exists and has been initialized
         // This will throw an exception if the transaction log doesn't exist or is invalid
-        val files    = transactionLog.listFiles()
-        val metadata = transactionLog.getMetadata()
+        transactionLog.listFiles()
+        transactionLog.getMetadata()
 
         // If we get here without an exception, the transaction log exists and is valid
 

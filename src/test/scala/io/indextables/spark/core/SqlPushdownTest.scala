@@ -21,7 +21,6 @@ import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 class SqlPushdownTest extends TestBase {
 
@@ -37,7 +36,6 @@ class SqlPushdownTest extends TestBase {
     println(planString)
 
     // Look for evidence of pushdown in the plan string
-    val hasPushedFilters   = planString.contains("PushedFilters:")
     val pushedFiltersMatch = """PushedFilters: \[(.*?)\]""".r.findFirstMatchIn(planString)
 
     pushedFiltersMatch match {

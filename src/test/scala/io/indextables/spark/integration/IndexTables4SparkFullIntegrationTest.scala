@@ -697,9 +697,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   // Helper methods to create test datasets
 
   private def createComprehensiveTestDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random      = new Random(42)
     val departments = Array("Engineering", "Data Science", "Product", "Marketing", "Sales", "HR")
     val locations   = Array("San Francisco", "New York", "Seattle", "Austin", "Denver", "Boston")
@@ -759,9 +756,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createTextSearchDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val textData = Seq(
       (
         1,
@@ -809,9 +803,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createNumericDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random = new Random(42)
     val numericData = (1 to 100).map { i =>
       (
@@ -827,9 +818,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createCategoricalDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random      = new Random(42)
     val departments = Array("Engineering", "Marketing", "Sales", "HR", "Legal", "Finance")
     val statuses    = Array("active", "inactive", "pending", "deleted", "archived")
@@ -850,9 +838,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createNullableDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random = new Random(42)
     val nullableData = (1 to 100).map { i =>
       (
@@ -869,9 +854,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createBooleanDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random = new Random(42)
     val booleanData = (1 to 100).map { i =>
       (
@@ -886,9 +868,6 @@ class IndexTables4SparkFullIntegrationTest extends TestBase {
   }
 
   private def createDateTimeDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random   = new Random(42)
     val baseTime = System.currentTimeMillis()
     val dateTimeData = (1 to 100).map { i =>

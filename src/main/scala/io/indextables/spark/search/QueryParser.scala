@@ -18,7 +18,6 @@
 package io.indextables.spark.search
 
 import scala.jdk.CollectionConverters._
-import scala.util.Try
 
 import io.indextables.tantivy4java.core.Schema
 import io.indextables.tantivy4java.query.{Occur, Query}

@@ -113,7 +113,7 @@ class IndexQueryParserTest extends AnyFunSuite with TestBase {
     val parser = new IndexTables4SparkSqlParser(CatalystSqlParser)
 
     // This should fallback to the default parser since the left side is invalid for column reference
-    val expr = parser.parseExpression("'literal_string' indexquery 'query'")
+    val _expr = parser.parseExpression("'literal_string' indexquery 'query'")
 
     // The default parser should handle this gracefully or throw an appropriate error
     // The exact behavior depends on how the default parser handles this invalid syntax

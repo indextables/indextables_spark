@@ -21,13 +21,10 @@ import java.io.{File, FileInputStream}
 import java.util.Properties
 import java.util.UUID
 
-// Import Scala collection conversions and implicits
-import scala.collection.JavaConverters._
 import scala.util.{Failure, Success, Try}
 
-import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.DataFrame
 
 import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}

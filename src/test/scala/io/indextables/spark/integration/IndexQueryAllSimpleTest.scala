@@ -19,7 +19,6 @@ package io.indextables.spark.integration
 
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.IndexQueryAllExpression

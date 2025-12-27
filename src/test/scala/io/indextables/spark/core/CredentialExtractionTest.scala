@@ -22,7 +22,6 @@ import scala.jdk.CollectionConverters._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /**
  * Test to verify that credential extraction logic works correctly. This test validates the actual credential values are
@@ -187,15 +186,10 @@ class CredentialExtractionTest extends TestBase {
 
   test("should validate that TransactionLog receives the extracted credentials") {
     // This test simulates credential extraction from Spark/Hadoop config
-    import io.indextables.spark.transaction.TransactionLog
-    import org.apache.hadoop.fs.Path
-
     // Set test credentials
     spark.conf.set("spark.indextables.aws.accessKey", "validation-key")
     spark.conf.set("spark.indextables.aws.secretKey", "validation-secret")
     spark.conf.set("spark.indextables.aws.region", "ap-southeast-1")
-
-    val tablePath = "/tmp/validation-test-table"
 
     // Extract credentials from Hadoop config
     val hadoopConf = spark.sparkContext.hadoopConfiguration

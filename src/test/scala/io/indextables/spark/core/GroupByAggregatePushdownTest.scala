@@ -93,7 +93,7 @@ class GroupByAggregatePushdownTest extends AnyFunSuite with BeforeAndAfterAll {
     val transactionLog  = createMockTransactionLog()
     val broadcastConfig = spark.sparkContext.broadcast(Map[String, String]())
 
-    val scanBuilder = new IndexTables4SparkScanBuilder(
+    val _scanBuilder = new IndexTables4SparkScanBuilder(
       spark,
       transactionLog,
       schema,

@@ -26,7 +26,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
 import io.indextables.spark.TestBase
-import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 

@@ -19,8 +19,6 @@ package io.indextables.spark.core
 
 import java.sql.Date
 
-import org.apache.spark.sql.functions._
-
 import io.indextables.spark.TestBase
 
 /**

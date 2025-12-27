@@ -20,12 +20,7 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions.{concat, lit}
-import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
-
 import io.indextables.spark.TestBase
-import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 
 class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
@@ -302,10 +297,7 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("MERGE SPLITS should handle S3 paths correctly") {
-    import io.indextables.spark.sql.{MergeSplitsCommand, MergeSplitsExecutor, MergeGroup}
-    import io.indextables.spark.transaction.{TransactionLog, AddAction, MetadataAction}
-    import org.apache.hadoop.fs.Path
-    import scala.collection.JavaConverters._
+    import io.indextables.spark.sql.MergeSplitsCommand
 
     // Test S3 path handling without actual S3 connection
     val s3TablePath = "s3://test-bucket/test-table"
@@ -349,13 +341,13 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
       SerializableAwsConfig,
       SerializableAzureConfig
     }
-    import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory, AddAction}
+    import io.indextables.spark.transaction.{TransactionLogFactory, AddAction}
     import org.apache.hadoop.fs.Path
     import java.lang.reflect.Method
 
     // Create a mock executor to test path construction
-    val s3TablePath        = new Path("s3://test-bucket/test-table")
-    val mockTransactionLog = TransactionLogFactory.create(s3TablePath, spark)
+    val s3TablePath         = new Path("s3://test-bucket/test-table")
+    val _mockTransactionLog = TransactionLogFactory.create(s3TablePath, spark)
 
     // Create test merge group with S3 paths
     val testFiles = Seq(

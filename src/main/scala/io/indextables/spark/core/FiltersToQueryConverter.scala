@@ -234,11 +234,16 @@ object FiltersToQueryConverter {
   /**
    * Convert Spark filters to a tantivy4java SplitQuery object.
    *
-   * @param filters          Array of Spark filters to convert
-   * @param splitSearchEngine The split search engine for query conversion
-   * @param schemaFieldNames Optional set of valid field names for schema validation
-   * @param options          Optional configuration options for field type resolution
-   * @return A SplitQuery object representing the combined filters
+   * @param filters
+   *   Array of Spark filters to convert
+   * @param splitSearchEngine
+   *   The split search engine for query conversion
+   * @param schemaFieldNames
+   *   Optional set of valid field names for schema validation
+   * @param options
+   *   Optional configuration options for field type resolution
+   * @return
+   *   A SplitQuery object representing the combined filters
    */
   def convertToSplitQuery(
     filters: Array[Filter],
@@ -307,10 +312,14 @@ object FiltersToQueryConverter {
   /**
    * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java SplitQuery object.
    *
-   * @param filters          Array of mixed filters (Spark Filter or custom filters) to convert
-   * @param splitSearchEngine The split search engine for query conversion
-   * @param schemaFieldNames Optional set of valid field names for schema validation
-   * @return A SplitQuery object representing the combined filters
+   * @param filters
+   *   Array of mixed filters (Spark Filter or custom filters) to convert
+   * @param splitSearchEngine
+   *   The split search engine for query conversion
+   * @param schemaFieldNames
+   *   Optional set of valid field names for schema validation
+   * @return
+   *   A SplitQuery object representing the combined filters
    */
   def convertToSplitQuery(
     filters: Array[Any],
@@ -365,10 +374,14 @@ object FiltersToQueryConverter {
   /**
    * Convert mixed filters (Spark Filter + custom filters) to a tantivy4java Query object.
    *
-   * @param filters          Array of mixed filters (Spark Filter or custom filters) to convert
-   * @param splitSearchEngine The split search engine for query conversion
-   * @param schemaFieldNames Optional set of valid field names for schema validation
-   * @return A Query object representing the combined filters
+   * @param filters
+   *   Array of mixed filters (Spark Filter or custom filters) to convert
+   * @param splitSearchEngine
+   *   The split search engine for query conversion
+   * @param schemaFieldNames
+   *   Optional set of valid field names for schema validation
+   * @return
+   *   A Query object representing the combined filters
    */
   def convertToQuery(
     filters: Array[Any],
@@ -463,10 +476,14 @@ object FiltersToQueryConverter {
   /**
    * Convert Spark filters to a tantivy4java Query object.
    *
-   * @param filters          Array of Spark filters to convert
-   * @param splitSearchEngine The split search engine for query conversion
-   * @param schemaFieldNames Optional set of valid field names for schema validation
-   * @return A Query object representing the combined filters
+   * @param filters
+   *   Array of Spark filters to convert
+   * @param splitSearchEngine
+   *   The split search engine for query conversion
+   * @param schemaFieldNames
+   *   Optional set of valid field names for schema validation
+   * @return
+   *   A Query object representing the combined filters
    */
   def convertToQuery(
     filters: Array[Filter],
@@ -564,24 +581,22 @@ object FiltersToQueryConverter {
     import org.apache.spark.sql.sources._
 
     def getFilterFieldNames(f: Filter): Set[String] = f match {
-      case EqualTo(attribute, _)              => Set(attribute)
-      case EqualNullSafe(attribute, _)        => Set(attribute)
-      case GreaterThan(attribute, _)          => Set(attribute)
-      case GreaterThanOrEqual(attribute, _)   => Set(attribute)
-      case LessThan(attribute, _)             => Set(attribute)
-      case LessThanOrEqual(attribute, _)      => Set(attribute)
-      case In(attribute, _)                   => Set(attribute)
-      case IsNull(attribute)                  => Set(attribute)
-      case IsNotNull(attribute)               => Set(attribute)
-      case StringStartsWith(attribute, _)     => Set(attribute)
-      case StringEndsWith(attribute, _)       => Set(attribute)
-      case StringContains(attribute, _)       => Set(attribute)
-      case indexQuery: IndexQueryFilter       => Set(indexQuery.columnName)
-      case indexQueryAll: IndexQueryAllFilter => Set.empty // No specific field references
-      case And(left, right)                   => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Or(left, right)                    => getFilterFieldNames(left) ++ getFilterFieldNames(right)
-      case Not(child)                         => getFilterFieldNames(child)
-      case _                                  => Set.empty
+      case EqualTo(attribute, _)            => Set(attribute)
+      case EqualNullSafe(attribute, _)      => Set(attribute)
+      case GreaterThan(attribute, _)        => Set(attribute)
+      case GreaterThanOrEqual(attribute, _) => Set(attribute)
+      case LessThan(attribute, _)           => Set(attribute)
+      case LessThanOrEqual(attribute, _)    => Set(attribute)
+      case In(attribute, _)                 => Set(attribute)
+      case IsNull(attribute)                => Set(attribute)
+      case IsNotNull(attribute)             => Set(attribute)
+      case StringStartsWith(attribute, _)   => Set(attribute)
+      case StringEndsWith(attribute, _)     => Set(attribute)
+      case StringContains(attribute, _)     => Set(attribute)
+      case And(left, right)                 => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Or(left, right)                  => getFilterFieldNames(left) ++ getFilterFieldNames(right)
+      case Not(child)                       => getFilterFieldNames(child)
+      case _                                => Set.empty
     }
 
     val filterFields = getFilterFieldNames(filter)
@@ -898,58 +913,6 @@ object FiltersToQueryConverter {
             Query.regexQuery(schema, attribute, regexPattern)
           }
 
-        case indexQuery: IndexQueryFilter =>
-          queryLog(s"Creating IndexQuery: ${indexQuery.columnName} indexquery '${indexQuery.queryString}'")
-
-          // Validate that the field exists in the schema
-          val fieldExists =
-            try {
-              val fieldInfo = schema.getFieldInfo(indexQuery.columnName)
-              true
-            } catch {
-              case _: Exception =>
-                logger.warn(s"IndexQuery field '${indexQuery.columnName}' not found in schema, skipping")
-                false
-            }
-
-          if (!fieldExists) {
-            // Return match-all query if field doesn't exist (graceful degradation)
-            queryLog(s"Field '${indexQuery.columnName}' not found, using match-all query")
-            Query.allQuery()
-          } else {
-            // Use parseQuery with the specified field
-            val fieldNames = List(indexQuery.columnName).asJava
-            queryLog(s"Executing parseQuery: '${indexQuery.queryString}' on field '${indexQuery.columnName}'")
-
-            withTemporaryIndex(schema) { index =>
-              try
-                index.parseQuery(indexQuery.queryString, fieldNames)
-              catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to parse indexquery '${indexQuery.queryString}': ${e.getMessage}")
-                  // Fallback to match-all on parse failure
-                  Query.allQuery()
-              }
-            }
-          }
-
-        case indexQueryAll: IndexQueryAllFilter =>
-          queryLog(s"Creating IndexQueryAll: indexqueryall('${indexQueryAll.queryString}')")
-
-          // Use single-argument parseQuery for all-fields search
-          queryLog(s"Executing parseQuery across all fields: '${indexQueryAll.queryString}'")
-
-          withTemporaryIndex(schema) { index =>
-            try
-              index.parseQuery(indexQueryAll.queryString)
-            catch {
-              case e: Exception =>
-                logger.warn(s"Failed to parse indexqueryall '${indexQueryAll.queryString}': ${e.getMessage}")
-                // Fallback to match-all on parse failure
-                Query.allQuery()
-            }
-          }
-
         case _ =>
           logger.warn(s"Unsupported filter: $filter, falling back to match-all")
           Query.allQuery()
@@ -1029,7 +992,7 @@ object FiltersToQueryConverter {
         // Validate that the field exists in the schema
         val fieldExists =
           try {
-            val fieldInfo = schema.getFieldInfo(indexQuery.columnName)
+            schema.getFieldInfo(indexQuery.columnName)
             true
           } catch {
             case _: Exception =>
@@ -1108,7 +1071,7 @@ object FiltersToQueryConverter {
       case FieldType.DATE =>
         // Convert to YYYY-MM-DD date string format for SplitRangeQuery compatibility
         // Based on SplitDateRangeQueryTest: uses simple date strings like "2021-01-01"
-        import java.time.{LocalDateTime, LocalDate}
+        import java.time.LocalDate
         val localDate = value match {
           case ts: java.sql.Timestamp =>
             ts.toLocalDateTime().toLocalDate // Get date part only
@@ -1286,11 +1249,9 @@ object FiltersToQueryConverter {
         val fieldType      = getFieldType(schema, attribute)
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
-        // Use SplitRangeQuery for range operations
-        val tantivyFieldType = fieldType match {
-          case FieldType.INTEGER => "i64"
-          case FieldType.FLOAT   => "f64"
-          case FieldType.DATE    => "date"
+        // Validate field type supports range operations
+        fieldType match {
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1312,11 +1273,9 @@ object FiltersToQueryConverter {
         val fieldType      = getFieldType(schema, attribute)
         val convertedValue = convertSparkValueToTantivy(value, fieldType)
 
-        // Use SplitRangeQuery for range operations
-        val tantivyFieldType = fieldType match {
-          case FieldType.INTEGER => "i64"
-          case FieldType.FLOAT   => "f64"
-          case FieldType.DATE    => "date"
+        // Validate field type supports range operations
+        fieldType match {
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1372,11 +1331,9 @@ object FiltersToQueryConverter {
           return None
         }
 
-        // Use SplitRangeQuery for range operations
-        val tantivyFieldType = fieldType match {
-          case FieldType.INTEGER => "i64"
-          case FieldType.FLOAT   => "f64"
-          case FieldType.DATE    => "date"
+        // Validate field type supports range operations
+        fieldType match {
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1432,11 +1389,9 @@ object FiltersToQueryConverter {
           return None
         }
 
-        // Use SplitRangeQuery for range operations
-        val tantivyFieldType = fieldType match {
-          case FieldType.INTEGER => "i64"
-          case FieldType.FLOAT   => "f64"
-          case FieldType.DATE    => "date"
+        // Validate field type supports range operations
+        fieldType match {
+          case FieldType.INTEGER | FieldType.FLOAT | FieldType.DATE => // OK
           case _ =>
             queryLog(s"Unsupported field type for range query: $fieldType")
             return None
@@ -1654,41 +1609,5 @@ object FiltersToQueryConverter {
           s"Failed to determine field configuration for '$fieldName', defaulting to exact matching: ${ex.getMessage}"
         )
         false // Default to exact matching on error
-    }
-
-  /**
-   * Create a tokenized text query for text fields. This tokenizes the input string and creates a boolean query where
-   * all tokens must be present.
-   */
-  private def createTokenizedTextQuery(
-    fieldName: String,
-    inputString: String,
-    splitSearchEngine: SplitSearchEngine
-  ): Option[SplitQuery] =
-    try {
-      // Use tantivy4java's tokenize method to tokenize the input string
-      import scala.jdk.CollectionConverters._
-      val tokens = splitSearchEngine.getSplitSearcher().tokenize(fieldName, inputString).asScala.toList
-
-      if (tokens.isEmpty) {
-        logger.warn(s"Tokenization of '$inputString' for field '$fieldName' resulted in no tokens")
-        Some(new SplitMatchAllQuery()) // Return match-all if no tokens
-      } else if (tokens.length == 1) {
-        // Single token - use a simple term query
-        Some(new SplitTermQuery(fieldName, tokens.head))
-      } else {
-        // Multiple tokens - create a boolean query where all tokens must be present (AND logic)
-        val boolQuery = new SplitBooleanQuery()
-        tokens.foreach { token =>
-          val termQuery = new SplitTermQuery(fieldName, token)
-          boolQuery.addMust(termQuery)
-        }
-        Some(boolQuery)
-      }
-    } catch {
-      case ex: Exception =>
-        logger.warn(s"Failed to tokenize '$inputString' for field '$fieldName': ${ex.getMessage}", ex)
-        // Fall back to exact term matching if tokenization fails
-        Some(new SplitTermQuery(fieldName, inputString))
     }
 }

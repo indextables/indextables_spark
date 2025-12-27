@@ -18,7 +18,7 @@
 package io.indextables.spark.debug
 
 import java.sql.{Date, Timestamp}
-import java.time.{LocalDate, LocalDateTime}
+import java.time.LocalDate
 
 import scala.util.Random
 

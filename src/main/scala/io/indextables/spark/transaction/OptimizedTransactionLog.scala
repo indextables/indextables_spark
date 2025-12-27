@@ -19,10 +19,8 @@ package io.indextables.spark.transaction
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
-import scala.collection.mutable.ListBuffer
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -30,7 +28,7 @@ import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -91,7 +89,6 @@ class OptimizedTransactionLog(
     cloudProvider,
     spark
   )
-
 
   // Checkpoint handler
   private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
@@ -538,19 +535,6 @@ class OptimizedTransactionLog(
     }
   }
 
-  /** Initialize protocol for legacy tables */
-  private def initializeProtocolIfNeeded(): Unit = {
-    val actions     = getVersions().flatMap(readVersionOptimized)
-    val hasProtocol = actions.exists(_.isInstanceOf[ProtocolAction])
-
-    if (!hasProtocol) {
-      logger.info(s"Initializing protocol for legacy table at $tablePath")
-      val version = getNextVersion()
-      writeAction(version, ProtocolVersion.defaultProtocol())
-      enhancedCache.invalidateProtocol(tablePath.toString)
-    }
-  }
-
   /** Get total row count using optimized operations */
   def getTotalRowCount(): Long =
     // First try to get from checkpoint info
@@ -899,7 +883,7 @@ class OptimizedTransactionLog(
 
     val addActions = if (parallelReadEnabled && versionsToProcess.size > 10) {
       // Use parallel reconstruction for remaining versions
-      val newFiles = parallelOps.reconstructStateParallel(versionsToProcess)
+      parallelOps.reconstructStateParallel(versionsToProcess)
       // BUG FIX: Apply the changes from versionsToProcess on top of checkpoint state
       // Don't just concatenate and take .last - we need to handle REMOVE actions properly
       val finalFiles = scala.collection.mutable.HashMap[String, AddAction]()
@@ -1014,24 +998,6 @@ class OptimizedTransactionLog(
     }
   }
 
-  /** Helper method to reconstruct state from a sequence of versions without checkpoint handling */
-  private def reconstructStateFromVersions(versions: Seq[Long]): Seq[AddAction] = {
-    val files = scala.collection.mutable.HashMap[String, AddAction]()
-
-    for (version <- versions.sorted) {
-      val actions = readVersionOptimized(version)
-      actions.foreach {
-        case add: AddAction =>
-          files(add.path) = add
-        case remove: RemoveAction =>
-          files.remove(remove.path)
-        case _ => // Ignore other actions
-      }
-    }
-
-    files.values.toSeq
-  }
-
   private def reconstructStateStandard(versions: Seq[Long]): Seq[AddAction] = {
     val files = scala.collection.mutable.HashMap[String, AddAction]()
 
@@ -1088,43 +1054,6 @@ class OptimizedTransactionLog(
     logger.info(s"Final state has ${files.size} files")
     files.values.toSeq
   }
-
-  // Backward compatibility method
-  private def reconstructStateStandard(): Seq[AddAction] =
-    reconstructStateStandard(getVersions())
-
-  private def reconstructStateFromListing(listing: FileListingResult): Seq[AddAction] = {
-    // Implement state reconstruction from listing result
-    val files = scala.collection.mutable.HashMap[String, AddAction]()
-
-    // Process transaction files in order
-    listing.transactionFiles.sortBy(_.version).foreach { tf =>
-      val actions = readVersionOptimized(tf.version)
-      actions.foreach {
-        case add: AddAction =>
-          files(add.path) = add
-        case remove: RemoveAction =>
-          files.remove(remove.path)
-        case _ => // Ignore
-      }
-    }
-
-    files.values.toSeq
-  }
-
-  private def updateSnapshot(version: Long): Unit = {
-    // Avoid recursive calls to listFilesOptimized - compute files directly
-    val versions = getVersions()
-    val files    = reconstructStateStandard(versions)
-    val metadata = getMetadata()
-    val snapshot = Snapshot(version, files, metadata)
-    currentSnapshot.set(Some(snapshot))
-    logger.debug(s" Updated snapshot to version $version with ${files.size} files")
-  }
-
-  private def computeCurrentChecksum(): String =
-    // Simple checksum based on latest version
-    s"${tablePath.toString}-${getLatestVersion()}"
 
   private def computeCurrentChecksumWithVersions(versions: Seq[Long]): String = {
     // Include sorted version list in key, not just latest - this ensures cache invalidation

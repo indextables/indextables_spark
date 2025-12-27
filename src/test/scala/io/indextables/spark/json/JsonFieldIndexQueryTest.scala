@@ -17,8 +17,6 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.functions._
-
 import io.indextables.spark.TestBase
 
 /**

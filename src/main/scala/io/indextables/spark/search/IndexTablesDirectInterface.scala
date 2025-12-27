@@ -28,7 +28,7 @@ import org.apache.spark.sql.types.StructType
 
 import io.indextables.spark.json.{SparkSchemaToTantivyMapper, SparkToTantivyConverter}
 import io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Tantivy}
+import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, SchemaBuilder, Tantivy}
 import org.slf4j.LoggerFactory
 
 /**
@@ -325,7 +325,6 @@ class TantivyDirectInterface(
     try {
       import com.fasterxml.jackson.databind.JsonNode
       import io.indextables.spark.util.JsonUtil
-      import scala.jdk.CollectionConverters._
 
       // Parse existing doc mapping JSON to extract field configurations
       val existingMapping = JsonUtil.mapper.readTree(existingDocMapping)
@@ -401,9 +400,7 @@ class TantivyDirectInterface(
     }
 
   // Configuration resolution with proper hierarchy: options -> table props -> spark props -> defaults
-  private def getConfigValue(key: String, defaultValue: String): String = {
-    import io.indextables.spark.config.IndexTables4SparkSQLConf._
-
+  private def getConfigValue(key: String, defaultValue: String): String =
     // First try options (highest precedence)
     Option(options.get(key)).filter(_.nonEmpty).getOrElse {
       // Then try hadoop conf (includes table properties)
@@ -416,16 +413,6 @@ class TantivyDirectInterface(
           case _: Exception => defaultValue
         }
       }
-    }
-  }
-
-  private def getConfigValueLong(key: String, defaultValue: Long): Long =
-    try
-      getConfigValue(key, defaultValue.toString).toLong
-    catch {
-      case _: NumberFormatException =>
-        logger.warn(s"Invalid numeric value for $key, using default: $defaultValue")
-        defaultValue
     }
 
   private def getConfigValueInt(key: String, defaultValue: Int): Int =
@@ -719,8 +706,7 @@ class TantivyDirectInterface(
     addFloat: (String, Double) => Unit,
     addBoolean: (String, Boolean) => Unit,
     addBytes: (String, Array[Byte]) => Unit,
-    addDate: (String, java.time.LocalDateTime) => Unit
-  )
+    addDate: (String, java.time.LocalDateTime) => Unit)
 
   private def addFieldToDocument(
     document: Document,
@@ -781,9 +767,9 @@ class TantivyDirectInterface(
           adder.addJson(fieldName, io.indextables.spark.util.JsonUtil.toJson(jsonMap))
 
         case at: org.apache.spark.sql.types.ArrayType =>
-          val arrayData = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
-          val seq = (0 until arrayData.numElements()).map(i => arrayData.get(i, at.elementType))
-          val jsonList = jsonConverter.arrayToJsonList(seq, at)
+          val arrayData  = value.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
+          val seq        = (0 until arrayData.numElements()).map(i => arrayData.get(i, at.elementType))
+          val jsonList   = jsonConverter.arrayToJsonList(seq, at)
           val wrappedMap = jsonConverter.wrapArrayInObject(jsonList)
           adder.addJson(fieldName, io.indextables.spark.util.JsonUtil.toJson(wrappedMap))
 
@@ -822,9 +808,9 @@ class TantivyDirectInterface(
         case org.apache.spark.sql.types.TimestampType =>
           adder.addInteger(fieldName, value.asInstanceOf[Long])
         case org.apache.spark.sql.types.DateType =>
-          import java.time.{LocalDate, LocalDateTime}
+          import java.time.LocalDate
           val daysSinceEpoch = value.asInstanceOf[Int]
-          val localDate = LocalDate.of(1970, 1, 1).plusDays(daysSinceEpoch.toLong)
+          val localDate      = LocalDate.of(1970, 1, 1).plusDays(daysSinceEpoch.toLong)
           adder.addDate(fieldName, localDate.atStartOfDay())
         case _ =>
           logger.warn(s"Unsupported field type for $fieldName: $dataType")

@@ -17,8 +17,6 @@
 
 package io.indextables.spark.core
 
-import java.util.OptionalLong
-
 import org.apache.spark.sql.types._
 
 import io.indextables.spark.TestBase

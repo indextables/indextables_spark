@@ -45,9 +45,6 @@ class IndexTables4SparkBatchWrite(
 
     // Set split conversion max parallelism if not already configured
     // Default: max(1, availableProcessors / 4)
-    import org.apache.spark.sql.SparkSession
-    import scala.jdk.CollectionConverters._
-
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     val computedMaxParallelism = if (options.get(configKey) == null) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
@@ -68,7 +65,8 @@ class IndexTables4SparkBatchWrite(
       case (key, value) =>
         enrichedHadoopConf.set(key, value)
         logger.info(
-          s"Copied DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          s"Copied DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction
+              .redactValue(key, value)}"
         )
     }
 
@@ -80,7 +78,8 @@ class IndexTables4SparkBatchWrite(
     }
 
     // Serialize hadoop config properties to avoid Configuration serialization issues
-    val serializedHadoopConfig = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(enrichedHadoopConf)
+    val serializedHadoopConfig =
+      io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(enrichedHadoopConf)
 
     // BatchWrite does NOT support merge-on-write - pass empty partition columns
     new IndexTables4SparkWriterFactory(

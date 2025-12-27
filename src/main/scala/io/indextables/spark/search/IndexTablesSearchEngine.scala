@@ -23,14 +23,11 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.conf.Configuration
 
-import org.slf4j.LoggerFactory
-
 class TantivySearchEngine private (
   private val directInterface: TantivyDirectInterface,
   private val options: CaseInsensitiveStringMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
   private val hadoopConf: Configuration = new Configuration())
     extends AutoCloseable {
-  private val logger = LoggerFactory.getLogger(classOf[TantivySearchEngine])
 
   // Primary constructor for creating new search engines
   def this(schema: StructType) = this(new TantivyDirectInterface(schema))
@@ -99,71 +96,6 @@ class TantivySearchEngine private (
 }
 
 object TantivySearchEngine {
-  private val logger = LoggerFactory.getLogger(TantivySearchEngine.getClass)
-
-  /**
-   * Extract SplitCacheConfig from active Spark session when available. Falls back to default config if no session is
-   * available.
-   */
-  private def extractCacheConfigFromSparkSession(): io.indextables.spark.storage.SplitCacheConfig =
-    try {
-      import org.apache.spark.sql.SparkSession
-      val spark = SparkSession.getActiveSession
-
-      spark match {
-        case Some(session) =>
-          val sparkConf  = session.conf
-          val hadoopConf = session.sparkContext.hadoopConfiguration
-
-          // Helper function to get config with Hadoop fallback (same pattern as CloudStorageProviderFactory)
-          def getConfigWithFallback(sparkKey: String): Option[String] = {
-            val sparkValue  = sparkConf.getOption(sparkKey)
-            val hadoopValue = Option(hadoopConf.get(sparkKey))
-            val result      = sparkValue.orElse(hadoopValue)
-
-            logger.info(s"Config fallback for $sparkKey: spark=${sparkValue.getOrElse("None")}, hadoop=${hadoopValue.getOrElse("None")}, final=${result.getOrElse("None")}")
-            result
-          }
-
-          logger.debug(
-            s"Extracting SplitCacheConfig from SparkSession (executor context: ${session.sparkContext.isLocal})"
-          )
-
-          io.indextables.spark.storage.SplitCacheConfig(
-            cacheName = sparkConf.get("spark.indextables.cache.name", "tantivy4spark-cache"),
-            maxCacheSize = sparkConf.get("spark.indextables.cache.maxSize", "200000000").toLong,
-            maxConcurrentLoads = sparkConf.get("spark.indextables.cache.maxConcurrentLoads", "8").toInt,
-            enableQueryCache = sparkConf.get("spark.indextables.cache.queryCache", "true").toBoolean,
-            splitCachePath = getConfigWithFallback("spark.indextables.cache.directoryPath")
-              .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultCachePath()),
-            // AWS configuration with session token support - use Hadoop fallback for executor context
-            awsAccessKey = getConfigWithFallback("spark.indextables.aws.accessKey"),
-            awsSecretKey = getConfigWithFallback("spark.indextables.aws.secretKey"),
-            awsSessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken"),
-            awsRegion = getConfigWithFallback("spark.indextables.aws.region"),
-            awsEndpoint = getConfigWithFallback("spark.indextables.s3.endpoint"),
-            awsPathStyleAccess =
-              getConfigWithFallback("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
-            // Azure configuration
-            azureAccountName = getConfigWithFallback("spark.indextables.azure.accountName"),
-            azureAccountKey = getConfigWithFallback("spark.indextables.azure.accountKey"),
-            azureConnectionString = getConfigWithFallback("spark.indextables.azure.connectionString"),
-            azureEndpoint = getConfigWithFallback("spark.indextables.azure.endpoint"),
-            // GCP configuration
-            gcpProjectId = getConfigWithFallback("spark.indextables.gcp.projectId"),
-            gcpServiceAccountKey = getConfigWithFallback("spark.indextables.gcp.serviceAccountKey"),
-            gcpCredentialsFile = getConfigWithFallback("spark.indextables.gcp.credentialsFile"),
-            gcpEndpoint = getConfigWithFallback("spark.indextables.gcp.endpoint")
-          )
-        case None =>
-          logger.debug("No active Spark session found, using default SplitCacheConfig")
-          io.indextables.spark.storage.SplitCacheConfig()
-      }
-    } catch {
-      case ex: Exception =>
-        logger.warn("Failed to extract cache config from Spark session, using defaults", ex)
-        io.indextables.spark.storage.SplitCacheConfig()
-    }
 
   /** Creates a TantivySearchEngine from a direct interface (for write operations). */
   def fromDirectInterface(directInterface: TantivyDirectInterface): TantivySearchEngine =

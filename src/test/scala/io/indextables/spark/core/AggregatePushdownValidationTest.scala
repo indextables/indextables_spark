@@ -107,7 +107,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig1 = spark.sparkContext.broadcast(optionsWithFastFields)
 
-      val scanBuilder1 = new IndexTables4SparkScanBuilder(
+      val _scanBuilder1 = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog1,
         testSchema,
@@ -253,7 +253,7 @@ class AggregatePushdownValidationTest extends AnyFunSuite {
       )
       val broadcastConfig = spark.sparkContext.broadcast(optionsMap)
 
-      val scanBuilder = new IndexTables4SparkScanBuilder(
+      val _scanBuilder = new IndexTables4SparkScanBuilder(
         spark,
         transactionLog,
         testSchema,

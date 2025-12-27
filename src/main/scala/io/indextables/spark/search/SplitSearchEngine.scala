@@ -26,14 +26,7 @@ import io.indextables.spark.schema.SchemaMapping
 import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
 import io.indextables.tantivy4java.core.Schema
 import io.indextables.tantivy4java.result.SearchResult
-import io.indextables.tantivy4java.split.{
-  SplitBooleanQuery,
-  SplitCacheManager,
-  SplitMatchAllQuery,
-  SplitQuery,
-  SplitSearcher,
-  SplitTermQuery
-}
+import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery, SplitSearcher}
 import org.slf4j.LoggerFactory
 
 /**
@@ -48,8 +41,8 @@ class SplitSearchEngine private (
   sparkSchema: StructType,
   splitPath: String,
   metadata: io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata,
-  cacheConfig: SplitCacheConfig = SplitCacheConfig(),
-  options: Option[io.indextables.spark.core.IndexTables4SparkOptions] = None)
+  cacheConfig: SplitCacheConfig,
+  options: Option[io.indextables.spark.core.IndexTables4SparkOptions])
     extends AutoCloseable {
 
   private val logger = LoggerFactory.getLogger(classOf[SplitSearchEngine])

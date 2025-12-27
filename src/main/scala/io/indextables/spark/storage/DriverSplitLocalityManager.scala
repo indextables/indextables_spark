@@ -273,7 +273,7 @@ object DriverSplitLocalityManager {
     val fairShare   = math.ceil(totalSplits.toDouble / availableHosts.size).toInt
 
     // New hosts should get up to fairShare splits
-    var splitsToMove = mutable.ArrayBuffer[(String, String)]() // (splitPath, newHost)
+    val splitsToMove = mutable.ArrayBuffer[(String, String)]() // (splitPath, newHost)
 
     newHosts.foreach { newHost =>
       var splitsNeeded = fairShare

@@ -20,7 +20,6 @@ package io.indextables.spark.json
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.Row
 
 import org.slf4j.LoggerFactory
 
@@ -224,11 +223,12 @@ class TantivyToSparkConverter(
     if (jsonValue == null) return null
 
     // Parse JSON string to Map (tantivy4java stores JSON fields as strings)
+    // Use parseAsJava to avoid DefaultScalaModule interference with Java collections
     val jsonString = jsonValue.asInstanceOf[String]
-    val jsonMap = io.indextables.spark.util.JsonUtil.parseAs(
+    val jsonMap = io.indextables.spark.util.JsonUtil.parseAsJava(
       jsonString,
       classOf[java.util.Map[String, Object]]
-    ).asInstanceOf[java.util.Map[String, Object]]
+    )
 
     field.dataType match {
       case st: StructType =>

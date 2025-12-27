@@ -19,12 +19,11 @@ package io.indextables.spark.core
 
 import java.nio.file.Files
 import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong}
+import java.util.concurrent.atomic.AtomicInteger
 
 import io.indextables.spark.config.IndexTables4SparkSQLConf
 import io.indextables.spark.storage.SplitConversionThrottle
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /**
  * Tests for split conversion throttling functionality.

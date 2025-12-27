@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.read.{
@@ -389,8 +388,6 @@ class IndexTables4SparkScanBuilder(
     )
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    import org.apache.spark.sql.sources._
-
     logger.debug(
       s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters"
     )
@@ -639,10 +636,6 @@ class IndexTables4SparkScanBuilder(
       case _                 => false
     }
   }
-
-  /** Check if an attribute references a nested JSON field (contains dot notation). */
-  private def isNestedJsonField(attribute: String): Boolean =
-    attribute.contains(".")
 
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
     // For V2 predicates, we need to inspect the actual predicate type
@@ -970,7 +963,6 @@ class IndexTables4SparkScanBuilder(
         logger.debug("Found doc mapping, parsing fast fields")
 
         // Parse the docMappingJson to extract fast field information
-        import com.fasterxml.jackson.databind.JsonNode
         import io.indextables.spark.util.JsonUtil
         import scala.jdk.CollectionConverters._
 
@@ -1160,7 +1152,6 @@ class IndexTables4SparkScanBuilder(
       // Check if the column exists in the schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>
-          import org.apache.spark.sql.types._
           // Check if field is configured as fast field
           if (!fastFields.contains(columnName)) {
             missingFastFields += columnName
@@ -1265,8 +1256,6 @@ class IndexTables4SparkScanBuilder(
  */
 object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
-
-  import scala.collection.JavaConverters._
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

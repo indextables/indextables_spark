@@ -29,7 +29,7 @@ import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{AddAction, MetadataAction, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.util.{JsonUtil, StatisticsTruncation}
 import org.slf4j.LoggerFactory
 

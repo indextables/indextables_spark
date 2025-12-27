@@ -17,12 +17,11 @@
 
 package io.indextables.spark.core
 
-import java.io.{ByteArrayOutputStream, IOException}
+import java.io.IOException
 import java.util.UUID
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.sql.connector.write.{DataWriter, DataWriterFactory, WriterCommitMessage}
@@ -35,7 +34,7 @@ import org.apache.hadoop.fs.Path
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.prewarm.PreWarmManager
 import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
-import io.indextables.spark.storage.{GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
 import io.indextables.spark.util.StatisticsCalculator
 import org.slf4j.LoggerFactory
@@ -585,7 +584,7 @@ class IndexTables4SparkPartitionReader(
 
     // Parse timestamp/date values from statistics and filter values
     // Statistics store timestamps as microseconds (Long string) and dates as days since epoch
-    def parseTimestamp(value: Any, fromStats: Boolean = false): Option[Long] = value match {
+    def parseTimestamp(value: Any, fromStats: Boolean): Option[Long] = value match {
       // getTime() returns millis since epoch (includes sub-second millis)
       // getNanos() returns the fractional second in nanos (0-999,999,999) INCLUDING the millis
       // To avoid double-counting millis: use epochSeconds (truncated) + getNanos()/1000
@@ -617,7 +616,7 @@ class IndexTables4SparkPartitionReader(
       case _       => None
     }
 
-    def parseDate(value: Any, fromStats: Boolean = false): Option[Long] = value match {
+    def parseDate(value: Any, fromStats: Boolean): Option[Long] = value match {
       case d: Date   => Some(d.toLocalDate.toEpochDay) // Convert to days since epoch
       case s: String =>
         // Statistics are stored as days since epoch (Int as String)
@@ -642,7 +641,7 @@ class IndexTables4SparkPartitionReader(
     def parseValue(
       value: Any,
       dataType: DataType,
-      fromStats: Boolean = false
+      fromStats: Boolean
     ): Option[Long] = dataType match {
       case TimestampType => parseTimestamp(value, fromStats)
       case DateType      => parseDate(value, fromStats)

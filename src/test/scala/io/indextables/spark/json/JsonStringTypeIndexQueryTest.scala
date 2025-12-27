@@ -17,7 +17,6 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
@@ -36,9 +35,6 @@ class JsonStringTypeIndexQueryTest extends TestBase {
 
   test("should use IndexQuery with Struct fields (val_field.one:two example)") {
     withTempPath { path =>
-      val spark = this.spark
-      import spark.implicits._
-
       // Define schema with Struct (will be automatically indexed as JSON)
       val valFieldSchema = StructType(
         Seq(
@@ -107,9 +103,6 @@ class JsonStringTypeIndexQueryTest extends TestBase {
 
   test("should query nested Struct properties with AND") {
     withTempPath { path =>
-      val spark = this.spark
-      import spark.implicits._
-
       // Schema with multiple properties
       val userDataSchema = StructType(
         Seq(
@@ -180,9 +173,6 @@ class JsonStringTypeIndexQueryTest extends TestBase {
 
   test("should query nested Struct properties with OR") {
     withTempPath { path =>
-      val spark = this.spark
-      import spark.implicits._
-
       val productSchema = StructType(
         Seq(
           StructField("name", StringType, nullable = false),

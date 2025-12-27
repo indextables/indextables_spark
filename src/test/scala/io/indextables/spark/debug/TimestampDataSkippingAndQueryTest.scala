@@ -18,10 +18,10 @@
 package io.indextables.spark.debug
 
 import java.sql.Timestamp
-import java.time.{Instant, LocalDateTime, ZoneOffset}
+import java.time.Instant
 
-import org.apache.spark.sql.{SaveMode, SparkSession}
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 

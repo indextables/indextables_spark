@@ -99,14 +99,16 @@ class IndexTables4SparkStandardWrite(
     }
 
     // Combine serialized hadoop config with indextables options from DataFrame options
-    val normalizedTantivyOptions = io.indextables.spark.util.ConfigNormalization.filterAndNormalizeTantivyConfigs(serializedOptions)
-    val combinedHadoopConfig     = serializedHadoopConf ++ normalizedTantivyOptions
+    val normalizedTantivyOptions =
+      io.indextables.spark.util.ConfigNormalization.filterAndNormalizeTantivyConfigs(serializedOptions)
+    val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
 
     // Log the options being passed
     normalizedTantivyOptions.foreach {
       case (key, value) =>
         logger.info(
-          s"Will copy DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          s"Will copy DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction
+              .redactValue(key, value)}"
         )
     }
 
@@ -201,7 +203,6 @@ class IndexTables4SparkStandardWrite(
     transactionLog.initialize(writeSchema, partitionColumns)
 
     // Convert serializedOptions Map to CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
     val optionsMap = new java.util.HashMap[String, String]()
     serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
     val writeOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
@@ -280,7 +281,6 @@ class IndexTables4SparkStandardWrite(
         logger.debug("VALIDATION DEBUG: Found existing doc mapping, validating configuration")
 
         // Parse existing configuration
-        import com.fasterxml.jackson.databind.JsonNode
         import io.indextables.spark.util.JsonUtil
         import scala.jdk.CollectionConverters._
 
@@ -489,7 +489,6 @@ class IndexTables4SparkStandardWrite(
    */
   private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit =
     try {
-      import io.indextables.spark.sql.MergeSplitsExecutor
       import scala.jdk.CollectionConverters._
 
       val targetSizeStr   = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
@@ -513,7 +512,9 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Passing ${optionsToPass.size} options to MERGE SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
       optionsToPass.foreach {
         case (key, value) =>
-          logger.debug(s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}")
+          logger.debug(
+            s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          )
       }
 
       // Create executor with transaction log and write options
@@ -652,7 +653,9 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Passing ${optionsToPass.size} options to PURGE ORPHANED SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
       optionsToPass.foreach {
         case (key, value) =>
-          logger.debug(s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}")
+          logger.debug(
+            s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          )
       }
 
       // Convert retention from hours to milliseconds for transaction log

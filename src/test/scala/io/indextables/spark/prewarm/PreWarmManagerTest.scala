@@ -18,14 +18,12 @@
 package io.indextables.spark.prewarm
 
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.Files
 
-import scala.jdk.CollectionConverters._
-
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.sources.EqualTo
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 

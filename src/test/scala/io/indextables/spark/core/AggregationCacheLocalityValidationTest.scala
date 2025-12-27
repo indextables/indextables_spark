@@ -18,14 +18,10 @@
 package io.indextables.spark.core
 
 import java.io.File
-import java.nio.file.Files
 
-import org.apache.spark.sql.connector.expressions.aggregate._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
 
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, TransactionLogFactory}
 import io.indextables.spark.TestBase
 
 /**
@@ -51,8 +47,6 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val tablePath = new File(tempDir, "simple_aggregate_locality_test").getAbsolutePath
 
     // Create test data
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
     val testData = (1 to 100).map(i => (i, s"item_$i", i * 10))
     val df       = spark.createDataFrame(testData).toDF("id", "name", "value")
 
@@ -121,8 +115,6 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     val tablePath = new File(tempDir, "groupby_aggregate_locality_test").getAbsolutePath
 
     // Create test data with categories for GROUP BY
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
     val testData = (1 to 100).map { i =>
       val category = if (i % 3 == 0) "A" else if (i % 3 == 1) "B" else "C"
       (i, category, s"item_$i", i * 10)
@@ -191,8 +183,6 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     DriverSplitLocalityManager.clear()
 
     // Create test data
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
     val testData = (1 to 50).map(i => (i, s"item_$i", i * 5))
     val df       = spark.createDataFrame(testData).toDF("id", "name", "value")
 
@@ -251,8 +241,6 @@ class AggregationCacheLocalityValidationTest extends TestBase {
     DriverSplitLocalityManager.clear()
 
     // Create test data
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
     val testData = (1 to 100).map(i => (i, s"item_$i", i * 10))
     val df       = spark.createDataFrame(testData).toDF("id", "name", "value")
 

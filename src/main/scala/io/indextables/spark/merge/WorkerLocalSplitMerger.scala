@@ -17,13 +17,9 @@
 
 package io.indextables.spark.merge
 
-import java.io.{File, FileInputStream}
-import java.nio.file.Files
+import java.io.File
 import java.util.concurrent.Semaphore
 import java.util.UUID
-
-import scala.collection.mutable
-import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.TaskContext

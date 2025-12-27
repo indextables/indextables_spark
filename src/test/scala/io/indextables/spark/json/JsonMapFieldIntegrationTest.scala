@@ -17,8 +17,6 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.Row
-
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 

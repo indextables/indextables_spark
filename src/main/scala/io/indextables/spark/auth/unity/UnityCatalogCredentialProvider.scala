@@ -27,12 +27,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.conf.Configuration
 
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
-import com.databricks.sdk.service.catalog.{
-  AwsCredentials,
-  GenerateTemporaryPathCredentialRequest,
-  GenerateTemporaryPathCredentialResponse,
-  PathOperation
-}
+import com.databricks.sdk.service.catalog.{GenerateTemporaryPathCredentialRequest, PathOperation}
 import com.databricks.sdk.WorkspaceClient
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
 import org.slf4j.LoggerFactory
@@ -262,9 +257,6 @@ object UnityCatalogCredentialProvider {
   private val logger = LoggerFactory.getLogger(classOf[UnityCatalogCredentialProvider])
 
   // Configuration keys
-  private val WorkspaceHostKey   = "spark.databricks.workspace.host"
-  private val TokenKey           = "spark.databricks.token"
-  private val UserEmailKey       = "spark.databricks.user.email"
   private val CacheTtlKey        = "spark.indextables.unity.cache.ttl.minutes"
   private val CacheMaxSizeKey    = "spark.indextables.unity.cache.maxSize"
   private val FallbackEnabledKey = "spark.indextables.unity.fallback.enabled"
@@ -275,7 +267,6 @@ object UnityCatalogCredentialProvider {
   private val DefaultCacheMaxSize    = 100
   private val DefaultFallbackEnabled = true
   private val DefaultRetryAttempts   = 3
-  private val CredentialExpiryMillis = 3600000L // 1 hour
 
   // Process-global static variables for sharing across all instances
   @volatile private var globalWorkspaceClient: WorkspaceClient                   = _

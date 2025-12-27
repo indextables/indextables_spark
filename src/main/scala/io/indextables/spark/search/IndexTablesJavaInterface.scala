@@ -19,8 +19,6 @@ package io.indextables.spark.search
 
 import java.util.concurrent.ConcurrentHashMap
 
-import org.apache.spark.sql.catalyst.InternalRow
-
 import io.indextables.spark.util.JsonUtil
 import io.indextables.tantivy4java.core.Tantivy
 import org.slf4j.LoggerFactory

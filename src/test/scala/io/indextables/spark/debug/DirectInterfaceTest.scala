@@ -17,14 +17,13 @@
 
 package io.indextables.spark.debug
 
-import java.io.File
 import java.nio.file.Files
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
-import io.indextables.spark.search.{SplitSearchEngine, TantivyDirectInterface, TantivySearchEngine}
+import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
 import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.TestBase
 

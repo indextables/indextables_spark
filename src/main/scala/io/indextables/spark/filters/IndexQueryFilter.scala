@@ -17,9 +17,6 @@
 
 package io.indextables.spark.filters
 
-import org.apache.spark.sql.connector.expressions.filter.Predicate
-import org.apache.spark.sql.sources.Filter
-
 /**
  * Custom filter representing an indexquery operation for pushdown to Tantivy data source.
  *

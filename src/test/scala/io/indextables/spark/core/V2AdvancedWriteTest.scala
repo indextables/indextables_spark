@@ -21,7 +21,6 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /** Tests for advanced V2 write operations including overwrite with filters, truncate, and error handling. */
 class V2AdvancedWriteTest extends TestBase {

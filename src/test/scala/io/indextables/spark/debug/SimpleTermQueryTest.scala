@@ -17,14 +17,10 @@
 
 package io.indextables.spark.debug
 
-import org.apache.spark.sql.{DataFrame, SaveMode}
-import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder, Searcher}
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery, SplitSearcher, SplitTermQuery}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery, SplitTermQuery}
 
 /** Simple test to validate that tantivy4java term queries work properly on the indexes we create. */
 class SimpleTermQueryTest extends TestBase {
@@ -83,7 +79,7 @@ class SimpleTermQueryTest extends TestBase {
       println(s"🔍 Reading metadata from transaction log for split: $splitPath")
       println(s"🔍 File exists: ${splitFile.exists()}")
 
-      import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+      import io.indextables.spark.transaction.TransactionLogFactory
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tempPath), spark)
       try {
         val allFiles = transactionLog.listFiles()

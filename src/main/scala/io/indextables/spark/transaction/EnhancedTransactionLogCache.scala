@@ -20,7 +20,6 @@ package io.indextables.spark.transaction
 import java.util.concurrent.TimeUnit
 
 import scala.collection.concurrent.TrieMap
-import scala.util.Try
 
 import com.google.common.cache.{Cache, CacheBuilder, RemovalListener, RemovalNotification}
 import com.google.common.cache.{CacheStats => GuavaCacheStats}

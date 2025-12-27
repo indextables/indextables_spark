@@ -163,15 +163,15 @@ class V2LocalDateFilterTest extends TestBase {
       row.getDate(2) shouldBe java.sql.Date.valueOf("2024-01-15")
 
     // Verify the specific reviews that should be returned
-    val reviewTexts = filteredRows.map(_.getString(0)).sorted
-    val expectedTexts = Array(
+    val _reviewTexts = filteredRows.map(_.getString(0)).sorted
+    val _expectedTexts = Array(
       "Amazing value for money",
       "Excellent service and quality",
       "Fantastic product!",
       "Great product, highly recommend!"
     ).sorted
 
-    // reviewTexts shouldBe expectedTexts
+    // _reviewTexts shouldBe _expectedTexts
 
     println(s"🔍 TEST: Date filtering test completed successfully!")
   }

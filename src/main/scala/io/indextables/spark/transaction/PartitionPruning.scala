@@ -67,15 +67,6 @@ object PartitionPruning {
   }
 
   /**
-   * Check if a filter applies to partition columns. A filter is considered a partition filter if ALL referenced columns
-   * are partition columns. This ensures we don't try to apply filters that reference non-partition columns.
-   */
-  private def isPartitionFilter(filter: Filter, partitionColumns: Seq[String]): Boolean = {
-    val referencedColumns = getReferencedColumns(filter)
-    referencedColumns.nonEmpty && referencedColumns.forall(partitionColumns.contains)
-  }
-
-  /**
    * Extract the partition-filterable parts of a complex filter. This handles cases where a filter contains both
    * partition and non-partition column references.
    */

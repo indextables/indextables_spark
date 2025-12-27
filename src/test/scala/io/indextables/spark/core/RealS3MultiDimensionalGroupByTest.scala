@@ -207,18 +207,18 @@ class RealS3MultiDimensionalGroupByTest extends RealS3TestBase {
 
     // Expected results based on test data
     val expectedResults = Map(
-      ("eu-west", "books", "active")         -> (1L, 55.0),
-      ("eu-west", "books", "inactive")       -> (1L, 45.0),
-      ("eu-west", "electronics", "active")   -> (1L, 120.0),
-      ("eu-west", "electronics", "inactive") -> (1L, 110.0),
-      ("us-east", "books", "active")         -> (2L, 110.0),
-      ("us-east", "books", "inactive")       -> (1L, 30.0),
-      ("us-east", "electronics", "active")   -> (2L, 250.0),
-      ("us-east", "electronics", "inactive") -> (1L, 75.0),
-      ("us-west", "books", "active")         -> (2L, 150.0),
-      ("us-west", "books", "inactive")       -> (1L, 40.0),
-      ("us-west", "electronics", "active")   -> (2L, 380.0),
-      ("us-west", "electronics", "inactive") -> (1L, 90.0)
+      ("eu-west", "books", "active")         -> ((1L, 55.0)),
+      ("eu-west", "books", "inactive")       -> ((1L, 45.0)),
+      ("eu-west", "electronics", "active")   -> ((1L, 120.0)),
+      ("eu-west", "electronics", "inactive") -> ((1L, 110.0)),
+      ("us-east", "books", "active")         -> ((2L, 110.0)),
+      ("us-east", "books", "inactive")       -> ((1L, 30.0)),
+      ("us-east", "electronics", "active")   -> ((2L, 250.0)),
+      ("us-east", "electronics", "inactive") -> ((1L, 75.0)),
+      ("us-west", "books", "active")         -> ((2L, 150.0)),
+      ("us-west", "books", "inactive")       -> ((1L, 40.0)),
+      ("us-west", "electronics", "active")   -> ((2L, 380.0)),
+      ("us-west", "electronics", "inactive") -> ((1L, 90.0))
     )
 
     // Validate results
