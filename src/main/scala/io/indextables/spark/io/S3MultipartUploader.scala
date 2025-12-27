@@ -17,16 +17,13 @@
 
 package io.indextables.spark.io
 
-import java.io.{ByteArrayInputStream, InputStream}
+import java.io.InputStream
 import java.nio.channels.FileChannel
 import java.nio.file.{Path, StandardOpenOption}
-import java.security.MessageDigest
-import java.util.concurrent.{CompletableFuture, Executors, ForkJoinPool, ThreadFactory}
+import java.util.concurrent.{CompletableFuture, Executors, ThreadFactory}
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success, Try}
 
 import org.slf4j.LoggerFactory
 import software.amazon.awssdk.core.async.AsyncRequestBody
@@ -65,8 +62,6 @@ class S3MultipartUploader(
     }
     Executors.newFixedThreadPool(config.maxConcurrency, threadFactory)
   }
-
-  implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(uploadExecutor)
 
   /**
    * Upload a file using multipart upload strategy. Automatically chooses between single-part and multipart based on
@@ -627,62 +622,6 @@ class S3MultipartUploader(
         logger.error(s"❌ Parallel upload failed for s3://$bucket/$key", ex)
         throw new RuntimeException(s"Parallel upload failed: ${ex.getMessage}", ex)
     }
-  }
-
-  /** Upload a single part with retry logic (synchronous - for byte array uploads) */
-  private def uploadSinglePart(
-    bucket: String,
-    key: String,
-    uploadId: String,
-    partNumber: Int,
-    partData: Array[Byte]
-  ): String = {
-
-    var attempt                  = 0
-    var lastException: Exception = null
-
-    while (attempt < config.maxRetries)
-      try {
-        val partStartTime = System.currentTimeMillis()
-
-        val request = UploadPartRequest
-          .builder()
-          .bucket(bucket)
-          .key(key)
-          .uploadId(uploadId)
-          .partNumber(partNumber)
-          .contentLength(partData.length.toLong)
-          .build()
-
-        val response = s3Client.uploadPart(request, RequestBody.fromBytes(partData))
-        val partTime = System.currentTimeMillis() - partStartTime
-
-        logger.debug(s"✅ Part $partNumber uploaded: ${formatBytes(partData.length)} in ${partTime}ms")
-        return response.eTag()
-
-      } catch {
-        case ex: Exception =>
-          attempt += 1
-          lastException = ex
-
-          if (attempt < config.maxRetries) {
-            val delay = config.baseRetryDelay * math.pow(2, attempt - 1).toLong
-            logger.warn(
-              s"⚠️ Part $partNumber upload failed (attempt $attempt/${config.maxRetries}), retrying in ${delay}ms",
-              ex
-            )
-
-            try
-              Thread.sleep(delay)
-            catch {
-              case _: InterruptedException =>
-                Thread.currentThread().interrupt()
-                throw new RuntimeException("Upload interrupted", ex)
-            }
-          }
-      }
-
-    throw new RuntimeException(s"Part $partNumber upload failed after ${config.maxRetries} attempts", lastException)
   }
 
   /**

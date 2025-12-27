@@ -17,7 +17,7 @@
 
 package io.indextables.spark.io
 
-import java.io.{File, IOException}
+import java.io.File
 import java.nio.file.Files
 
 import io.indextables.spark.TestBase

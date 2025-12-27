@@ -1,12 +1,9 @@
 package io.indextables.spark
 
-import java.nio.file.{Files, Paths}
-
-import scala.jdk.CollectionConverters._
+import java.nio.file.Files
 
 import _root_.io.indextables.tantivy4java.batch.{BatchDocument, BatchDocumentBuilder}
-import _root_.io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
-import _root_.io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher}
+import _root_.io.indextables.tantivy4java.core.{Index, SchemaBuilder}
 import _root_.io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 

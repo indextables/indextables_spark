@@ -124,8 +124,6 @@ object TransactionLogThreadPools {
  */
 class DeltaThreadPool(private val executor: ThreadPoolExecutor) {
 
-  private val logger = LoggerFactory.getLogger(classOf[DeltaThreadPool])
-
   implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
   /** Submit a task to be executed with the active Spark session */

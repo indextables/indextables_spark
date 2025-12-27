@@ -18,7 +18,6 @@
 package io.indextables.spark.core
 
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
 
 import io.indextables.spark.TestBase
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}

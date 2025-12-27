@@ -26,7 +26,6 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.TestBase
-import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 
@@ -263,7 +262,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       )
     )
 
-    val filesPartition3 = Seq(
+    val _filesPartition3 = Seq(
       AddAction(
         path = "year=2024/quarter=Q1/file4.split",
         partitionValues = partition2024Q1,

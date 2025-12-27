@@ -275,7 +275,6 @@ class SparkToTantivyConverter(
 
 /** JSON parsing and serialization utilities. */
 object JsonUtils {
-  private val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
 
   /**
    * Parses a JSON string into a Java Map.
@@ -288,7 +287,7 @@ object JsonUtils {
    *   if JSON is invalid
    */
   def parseJson(jsonString: String): java.util.Map[String, Object] =
-    mapper.readValue(jsonString, classOf[java.util.Map[String, Object]])
+    io.indextables.spark.util.JsonUtil.parseAsJava(jsonString, classOf[java.util.Map[String, Object]])
 
   /**
    * Serializes a Java Map to a JSON string.
@@ -299,7 +298,7 @@ object JsonUtils {
    *   JSON string
    */
   def serializeToJson(jsonMap: java.util.Map[String, Object]): String =
-    mapper.writeValueAsString(jsonMap)
+    io.indextables.spark.util.JsonUtil.toJson(jsonMap)
 
   /**
    * Serializes a Java List to a JSON string.
@@ -310,5 +309,5 @@ object JsonUtils {
    *   JSON string
    */
   def serializeListToJson(jsonList: java.util.List[Object]): String =
-    mapper.writeValueAsString(jsonList)
+    io.indextables.spark.util.JsonUtil.toJson(jsonList)
 }

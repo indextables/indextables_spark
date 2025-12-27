@@ -22,7 +22,6 @@ import java.sql.{Date, Timestamp}
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /**
  * Test suite for GROUP BY queries on tables with Date/Timestamp partition columns.

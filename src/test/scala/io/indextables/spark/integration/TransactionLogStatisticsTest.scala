@@ -153,9 +153,6 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("should maintain statistics isolation across multiple files") {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     // Write three separate batches with distinct ranges
     val batch1 = createBatchData(1, 100, "Batch1")
     val batch2 = createBatchData(1001, 1100, "Batch2")
@@ -265,9 +262,6 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("should verify statistics persistence and retrieval") {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     // Write data
     val testData = createBatchData(500, 600, "PersistenceTest")
     testData
@@ -301,9 +295,6 @@ class TransactionLogStatisticsTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("should write statistics incrementally for append operations") {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     // Initial write
     val initial = createBatchData(1, 50, "Initial")
     initial

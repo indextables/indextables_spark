@@ -20,10 +20,7 @@ package io.indextables.spark.filters
 import org.apache.spark.sql.catalyst.expressions.{Expression, Predicate}
 import org.apache.spark.sql.catalyst.expressions.codegen.{CodegenContext, ExprCode, JavaCode}
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.{BooleanType, DataType}
-
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
 
 /**
  * V2-compatible marker expression for IndexQuery operations.

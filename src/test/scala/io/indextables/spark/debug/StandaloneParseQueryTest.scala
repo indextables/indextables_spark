@@ -1,12 +1,6 @@
 package io.indextables.spark.debug
 
-import java.util.Arrays
-
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{Document, Index, Schema, SchemaBuilder}
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher}
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 class StandaloneParseQueryTest extends TestBase {
 

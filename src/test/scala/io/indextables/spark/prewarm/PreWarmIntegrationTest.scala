@@ -18,10 +18,10 @@
 package io.indextables.spark.prewarm
 
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.Files
 
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions.{col, _}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import org.apache.commons.io.FileUtils

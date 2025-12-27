@@ -230,7 +230,7 @@ class OutputMetricsTest extends TestBase {
       captureEnabled = true
 
       // Read the data
-      val result = spark.read
+      val _result = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
         .collect()

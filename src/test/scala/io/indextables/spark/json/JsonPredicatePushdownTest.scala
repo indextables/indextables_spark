@@ -211,7 +211,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
     method.setAccessible(true)
     val result = method.invoke(translator, "user.name").asInstanceOf[(String, String)]
 
-    result shouldBe ("user", "name")
+    result shouldBe (("user", "name"))
   }
 
   test("splitNestedAttribute correctly splits multi-level nested path") {
@@ -242,7 +242,7 @@ class JsonPredicatePushdownTest extends AnyFunSuite with Matchers {
     method.setAccessible(true)
     val result = method.invoke(translator, "user.address.city").asInstanceOf[(String, String)]
 
-    result shouldBe ("user", "address.city")
+    result shouldBe (("user", "address.city"))
   }
 
   test("isNestedAttribute detects nested struct field") {

@@ -25,7 +25,7 @@ import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 

@@ -17,7 +17,6 @@
 
 package io.indextables.spark.json
 
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
@@ -349,9 +348,6 @@ class JsonIndexQueryIntegrationTest extends TestBase {
 
   test("should use IndexQuery with actual Struct fields (not JSON strings)") {
     withTempPath { path =>
-      val spark = this.spark
-      import spark.implicits._
-
       // Create test data with actual Struct fields using Spark's Row and schema
       // Note: We simplify the schema to avoid UnsafeArrayData conversion issues
       val docSchema = StructType(

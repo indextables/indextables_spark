@@ -17,15 +17,9 @@
 
 package io.indextables.spark.sql
 
-import java.io.File
-import java.nio.file.Files
-
-import scala.util.Try
-
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.sql.SerializableSplitMetadata
-import io.indextables.spark.transaction.{AddAction, SkipAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 

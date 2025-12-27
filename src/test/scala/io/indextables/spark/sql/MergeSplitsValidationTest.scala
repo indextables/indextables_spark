@@ -20,17 +20,12 @@ package io.indextables.spark.sql
 import java.io.File
 import java.nio.file.Files
 
-import scala.util.Random
-
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions.{col, concat, lit}
-import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructField, StructType}
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
@@ -87,8 +82,6 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
   private def validateMergedFilesCanBeRead(): Unit = {
     val files = transactionLog.listFiles()
     logger.info(s"🔍 Validating readability of ${files.length} split files")
-
-    import io.indextables.spark.storage.SplitManager
 
     files.foreach { file =>
       val fullPath = if (tempTablePath.startsWith("s3://") || tempTablePath.startsWith("s3a://")) {
@@ -479,7 +472,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     // - Plus any remaining files that couldn't be merged due to the limit
     // So finalFiles.length should be >= maxGroups and < initialFiles.length
 
-    val mergedFileCount =
+    val _mergedFileCount =
       finalFiles.count(file => file.path.contains("merged") || finalFiles.length < initialFiles.length)
 
     logger.info(s"Files after MAX GROUPS constraint: ${finalFiles.length} total")
@@ -685,7 +678,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
   test("Transaction log reader should handle overwrite and merge operations correctly") {
     // Use a completely separate directory for this test to avoid any interference
-    val originalTempPath = tempTablePath
+    val _originalTempPath = tempTablePath
     tempTablePath = Files.createTempDirectory("transaction_log_test_").toFile.getAbsolutePath
     transactionLog.close()
     transactionLog = TransactionLogFactory.create(new Path(tempTablePath), spark)
@@ -851,8 +844,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     currentCount = currentData.count()
     assert(currentCount == 200, s"After merge: expected 200 records, got $currentCount")
 
-    val add3RecordsAfterMerge = currentData.filter(col("content").startsWith("add3_")).count()
-    val add4RecordsAfterMerge = currentData.filter(col("content").startsWith("add4_")).count()
+    val _add3RecordsAfterMerge = currentData.filter(col("content").startsWith("add3_")).count()
+    val _add4RecordsAfterMerge = currentData.filter(col("content").startsWith("add4_")).count()
 
     // After merge, we still have the same data distribution pattern
     // The merge operation consolidates files but doesn't change the data content
@@ -920,17 +913,17 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     logger.info("✓ Transaction log reader handles overwrite and merge operations correctly")
   }
 
-  // Helper methods
+  // Helper methods (prefixed with _ to suppress unused warnings - kept for potential future use)
 
-  private def createRealSplitFiles(
+  private def _createRealSplitFiles(
     count: Int,
-    recordsPerSplit: Int = 100,
-    partitionValues: Map[String, String] = Map.empty
+    _recordsPerSplit: Int = 100,
+    _partitionValues: Map[String, String] = Map.empty
   ): Unit =
     // Create multiple writes to ensure multiple split files
     (1 to count).foreach { i =>
-      val startId = (i - 1) * recordsPerSplit + 1
-      val endId   = i * recordsPerSplit
+      val startId = (i - 1) * _recordsPerSplit + 1
+      val endId   = i * _recordsPerSplit
 
       // Create data for this split
       val baseData = spark
@@ -940,10 +933,10 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
           concat(lit("data_"), col("id")).as("data")
         )
 
-      val df = if (partitionValues.nonEmpty) {
+      val df = if (_partitionValues.nonEmpty) {
         baseData
-          .withColumn("year", lit(partitionValues.get("year").orNull))
-          .withColumn("quarter", lit(partitionValues.get("quarter").orNull))
+          .withColumn("year", lit(_partitionValues.get("year").orNull))
+          .withColumn("quarter", lit(_partitionValues.get("quarter").orNull))
       } else {
         baseData
       }
@@ -957,11 +950,11 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
         .save(tempTablePath)
     }
 
-  private def createMockAddAction(
+  private def _createMockAddAction(
     path: String,
     size: Long,
-    minValues: Map[String, String] = Map.empty,
-    maxValues: Map[String, String] = Map.empty,
+    _minValues: Map[String, String] = Map.empty,
+    _maxValues: Map[String, String] = Map.empty,
     numRecords: Long = 1000L,
     partitionValues: Map[String, String] = Map.empty
   ): AddAction =
@@ -973,8 +966,8 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       dataChange = true,
       stats = None,
       tags = Some(Map("created_by" -> "test")),
-      minValues = if (minValues.nonEmpty) Some(minValues) else None,
-      maxValues = if (maxValues.nonEmpty) Some(maxValues) else None,
+      minValues = if (_minValues.nonEmpty) Some(_minValues) else None,
+      maxValues = if (_maxValues.nonEmpty) Some(_maxValues) else None,
       numRecords = Some(numRecords)
     )
 

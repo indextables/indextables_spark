@@ -2,8 +2,8 @@ package io.indextables.spark.debug
 
 import java.nio.file.Files
 
-import org.apache.spark.sql.{Row, SaveMode}
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 
@@ -48,7 +48,7 @@ class OverwriteDebugTest extends TestBase {
     read2.show()
 
     // Check what's in the transaction log
-    import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+    import io.indextables.spark.transaction.TransactionLogFactory
     import org.apache.hadoop.fs.Path
     val transactionLog = TransactionLogFactory.create(new Path(testPath), spark)
     val files          = transactionLog.listFiles()

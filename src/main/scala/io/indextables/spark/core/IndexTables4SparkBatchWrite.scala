@@ -37,44 +37,14 @@ class IndexTables4SparkBatchWrite(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkBatchWrite])
 
-  // Validate schema for duplicate column names
-  private def validateSchema(schema: org.apache.spark.sql.types.StructType): Unit = {
-    val fieldNames = schema.fieldNames
-    val duplicates = fieldNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
-
-    if (duplicates.nonEmpty) {
-      val duplicateList = duplicates.mkString(", ")
-      val errorMsg = s"Schema contains duplicate column names: [$duplicateList]. " +
-        s"Please ensure all column names are unique. Duplicate columns can cause JVM crashes."
-      logger.error(errorMsg)
-      throw new IllegalArgumentException(errorMsg)
-    }
-
-    // Also check for case-insensitive duplicates (warn only, don't fail)
-    val lowerCaseNames            = fieldNames.map(_.toLowerCase)
-    val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
-
-    if (caseInsensitiveDuplicates.nonEmpty) {
-      val originalNames =
-        caseInsensitiveDuplicates.flatMap(lower => fieldNames.filter(_.toLowerCase == lower)).distinct.mkString(", ")
-      logger.warn(
-        s"Schema contains columns that differ only in case: [$originalNames]. " +
-          s"This may cause issues with case-insensitive storage systems."
-      )
-    }
-  }
-
   // Validate the write schema
-  validateSchema(writeInfo.schema())
+  io.indextables.spark.util.SchemaValidator.validateNoDuplicateColumns(writeInfo.schema())
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
 
     // Set split conversion max parallelism if not already configured
     // Default: max(1, availableProcessors / 4)
-    import org.apache.spark.sql.SparkSession
-    import scala.jdk.CollectionConverters._
-
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     val computedMaxParallelism = if (options.get(configKey) == null) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
@@ -88,22 +58,16 @@ class IndexTables4SparkBatchWrite(
     // Ensure DataFrame options are copied to Hadoop configuration for executor distribution
     val enrichedHadoopConf = new org.apache.hadoop.conf.Configuration(hadoopConf)
 
-    // Copy all tantivy4spark options to hadoop config to ensure they reach executors
-    val serializedOptions = scala.collection.mutable.Map[String, String]()
-    options.entrySet().asScala.foreach { entry =>
-      val key   = entry.getKey
-      val value = entry.getValue
-      if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
-        val normalizedKey = if (key.startsWith("spark.indextables.")) {
-          key.replace("spark.indextables.", "spark.indextables.")
-        } else key
-        enrichedHadoopConf.set(normalizedKey, value)
-        serializedOptions.put(normalizedKey, value)
+    // Copy all indextables options to hadoop config to ensure they reach executors
+    val normalizedOptions = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromOptions(options)
+    val serializedOptions = scala.collection.mutable.Map[String, String]() ++ normalizedOptions
+    normalizedOptions.foreach {
+      case (key, value) =>
+        enrichedHadoopConf.set(key, value)
         logger.info(
-          s"Copied DataFrame option to Hadoop config: $key = ${if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("token") || key.toLowerCase.contains("password")) "***"
-            else value}"
+          s"Copied DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction
+              .redactValue(key, value)}"
         )
-      }
     }
 
     // Add computed split conversion max parallelism if we calculated it
@@ -114,20 +78,8 @@ class IndexTables4SparkBatchWrite(
     }
 
     // Serialize hadoop config properties to avoid Configuration serialization issues
-    val serializedHadoopConfig = {
-      val props = scala.collection.mutable.Map[String, String]()
-      val iter  = enrichedHadoopConf.iterator()
-      while (iter.hasNext) {
-        val entry = iter.next()
-        if (entry.getKey.startsWith("spark.indextables.") || entry.getKey.startsWith("spark.indextables.")) {
-          val normalizedKey = if (entry.getKey.startsWith("spark.indextables.")) {
-            entry.getKey.replace("spark.indextables.", "spark.indextables.")
-          } else entry.getKey
-          props.put(normalizedKey, entry.getValue)
-        }
-      }
-      props.toMap
-    }
+    val serializedHadoopConfig =
+      io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(enrichedHadoopConf)
 
     // BatchWrite does NOT support merge-on-write - pass empty partition columns
     new IndexTables4SparkWriterFactory(
@@ -146,11 +98,7 @@ class IndexTables4SparkBatchWrite(
     val partitionColumns = Option(options.get("__partition_columns")) match {
       case Some(partitionColumnsJson) =>
         try {
-          import com.fasterxml.jackson.module.scala.DefaultScalaModule
-          import com.fasterxml.jackson.databind.ObjectMapper
-          val mapper = new ObjectMapper()
-          mapper.registerModule(DefaultScalaModule)
-          val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
+          val partitionCols = io.indextables.spark.util.JsonUtil.parseStringArray(partitionColumnsJson)
           logger.debug(s"V2 BATCH DEBUG: Extracted partition columns: $partitionCols")
           partitionCols
         } catch {

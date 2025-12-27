@@ -20,8 +20,6 @@ package io.indextables.spark.core
 import java.io.File
 import java.nio.file.Files
 
-import scala.util.Random
-
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SparkSession
 
@@ -408,7 +406,7 @@ class GroupByIntegrationTest extends AnyFunSuite {
       results.foreach(row => println(s"  ${row.getString(0)}: count=${row.getLong(1)}, sum=${row.getLong(2)}"))
 
       // Verify expected results
-      val resultMap = results.map(row => row.getString(0) -> (row.getLong(1), row.getLong(2))).toMap
+      val resultMap = results.map(row => row.getString(0) -> ((row.getLong(1), row.getLong(2)))).toMap
 
       // Expected results for referrer='myhost.com':
       // - status_ok: 3 docs (doc1, doc2, doc6) with sum=350 (100+200+50)
@@ -502,12 +500,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         )
 
       val results   = groupByResult.collect()
-      val resultMap = results.map(row => row.getInt(0) -> (row.getLong(1), row.getLong(2))).toMap
+      val resultMap = results.map(row => row.getInt(0) -> ((row.getLong(1), row.getLong(2)))).toMap
 
       // Expected: priority 1: count=2, sum=300; priority 2: count=2, sum=400; priority 3: count=1, sum=300
-      assert(resultMap(1) == (2L, 300L), s"priority 1 should have count=2, sum=300, got ${resultMap(1)}")
-      assert(resultMap(2) == (2L, 400L), s"priority 2 should have count=2, sum=400, got ${resultMap(2)}")
-      assert(resultMap(3) == (1L, 300L), s"priority 3 should have count=1, sum=300, got ${resultMap(3)}")
+      assert(resultMap(1) == ((2L, 300L)), s"priority 1 should have count=2, sum=300, got ${resultMap(1)}")
+      assert(resultMap(2) == ((2L, 400L)), s"priority 2 should have count=2, sum=400, got ${resultMap(2)}")
+      assert(resultMap(3) == ((1L, 300L)), s"priority 3 should have count=1, sum=300, got ${resultMap(3)}")
 
       println(s"✅ GROUP BY Integer key test: All assertions passed!")
 
@@ -558,12 +556,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         )
 
       val results   = groupByResult.collect()
-      val resultMap = results.map(row => row.getLong(0) -> (row.getLong(1), row.getLong(2))).toMap
+      val resultMap = results.map(row => row.getLong(0) -> ((row.getLong(1), row.getLong(2)))).toMap
 
       // Expected: 1000000000L: count=2, sum=300; 2000000000L: count=2, sum=400; 3000000000L: count=1, sum=300
-      assert(resultMap(1000000000L) == (2L, 300L), s"bucket 1000000000 should have count=2, sum=300")
-      assert(resultMap(2000000000L) == (2L, 400L), s"bucket 2000000000 should have count=2, sum=400")
-      assert(resultMap(3000000000L) == (1L, 300L), s"bucket 3000000000 should have count=1, sum=300")
+      assert(resultMap(1000000000L) == ((2L, 300L)), s"bucket 1000000000 should have count=2, sum=300")
+      assert(resultMap(2000000000L) == ((2L, 400L)), s"bucket 2000000000 should have count=2, sum=400")
+      assert(resultMap(3000000000L) == ((1L, 300L)), s"bucket 3000000000 should have count=1, sum=300")
 
       println(s"✅ GROUP BY Long key test: All assertions passed!")
 
@@ -614,12 +612,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         )
 
       val results   = groupByResult.collect()
-      val resultMap = results.map(row => row.getFloat(0) -> (row.getLong(1), row.getLong(2))).toMap
+      val resultMap = results.map(row => row.getFloat(0) -> ((row.getLong(1), row.getLong(2)))).toMap
 
       // Expected: 1.5f: count=2, sum=300; 2.5f: count=2, sum=400; 3.5f: count=1, sum=300
-      assert(resultMap(1.5f) == (2L, 300L), s"rating 1.5 should have count=2, sum=300, got ${resultMap(1.5f)}")
-      assert(resultMap(2.5f) == (2L, 400L), s"rating 2.5 should have count=2, sum=400, got ${resultMap(2.5f)}")
-      assert(resultMap(3.5f) == (1L, 300L), s"rating 3.5 should have count=1, sum=300, got ${resultMap(3.5f)}")
+      assert(resultMap(1.5f) == ((2L, 300L)), s"rating 1.5 should have count=2, sum=300, got ${resultMap(1.5f)}")
+      assert(resultMap(2.5f) == ((2L, 400L)), s"rating 2.5 should have count=2, sum=400, got ${resultMap(2.5f)}")
+      assert(resultMap(3.5f) == ((1L, 300L)), s"rating 3.5 should have count=1, sum=300, got ${resultMap(3.5f)}")
 
       println(s"✅ GROUP BY Float key test: All assertions passed!")
 
@@ -670,12 +668,12 @@ class GroupByIntegrationTest extends AnyFunSuite {
         )
 
       val results   = groupByResult.collect()
-      val resultMap = results.map(row => row.getDouble(0) -> (row.getLong(1), row.getLong(2))).toMap
+      val resultMap = results.map(row => row.getDouble(0) -> ((row.getLong(1), row.getLong(2)))).toMap
 
       // Expected: 1.123456789: count=2, sum=300; 2.987654321: count=2, sum=400; 3.555555555: count=1, sum=300
-      assert(resultMap(1.123456789) == (2L, 300L), s"latitude 1.123456789 should have count=2, sum=300")
-      assert(resultMap(2.987654321) == (2L, 400L), s"latitude 2.987654321 should have count=2, sum=400")
-      assert(resultMap(3.555555555) == (1L, 300L), s"latitude 3.555555555 should have count=1, sum=300")
+      assert(resultMap(1.123456789) == ((2L, 300L)), s"latitude 1.123456789 should have count=2, sum=300")
+      assert(resultMap(2.987654321) == ((2L, 400L)), s"latitude 2.987654321 should have count=2, sum=400")
+      assert(resultMap(3.555555555) == ((1L, 300L)), s"latitude 3.555555555 should have count=1, sum=300")
 
       println(s"✅ GROUP BY Double key test: All assertions passed!")
 
@@ -766,13 +764,13 @@ class GroupByIntegrationTest extends AnyFunSuite {
           row.getDouble(3), // latitude
           row.getFloat(4),  // rating
           row.getString(5)  // category
-        ) -> (
+        ) -> ((
           row.getLong(6),   // count
           row.getLong(7),   // sum
           row.getDouble(8), // avg
           row.getInt(9),    // min
           row.getInt(10)    // max
-        )
+        ))
       }.toMap
 
       // Group 1: north/1/1000000000/40.7128/4.5/electronics - 3 docs: 100, 150, 200

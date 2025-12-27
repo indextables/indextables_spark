@@ -8,7 +8,7 @@ import org.apache.spark.sql.sources.{EqualTo, Filter}
 
 import io.indextables.spark.core.FiltersToQueryConverter
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{FieldType, SchemaBuilder}
+import io.indextables.tantivy4java.core.SchemaBuilder
 import org.scalatest.matchers.should.Matchers
 
 /** Test to debug boolean value conversion with explicit logging */

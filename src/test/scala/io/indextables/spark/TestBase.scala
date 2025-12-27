@@ -75,9 +75,6 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
     }
 
   protected def createTestDataFrame(): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val data = Seq(
       (1, "John Doe", 30, "Engineer", 75000.0, true),
       (2, "Jane Smith", 25, "Data Scientist", 85000.0, false),
@@ -90,9 +87,6 @@ trait TestBase extends AnyFunSuite with Matchers with BeforeAndAfterAll with Bef
   }
 
   protected def createLargeTestDataFrame(numRows: Int = 10000): DataFrame = {
-    val sparkImplicits = spark.implicits
-    import sparkImplicits._
-
     val random     = new Random(42) // Deterministic seed for tests
     val roles      = Array("Engineer", "Data Scientist", "Manager", "Designer", "Developer")
     val _names     = Array("John", "Jane", "Bob", "Alice", "Charlie", "Diana", "Eve", "Frank")

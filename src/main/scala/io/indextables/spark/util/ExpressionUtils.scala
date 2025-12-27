@@ -20,7 +20,6 @@ package io.indextables.spark.util
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.connector.expressions.Expression
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StringType
 import org.apache.spark.unsafe.types.UTF8String
 

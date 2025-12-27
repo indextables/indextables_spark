@@ -18,12 +18,12 @@
 package io.indextables.spark.debug
 
 import java.io.File
-import java.nio.file.{Files, Paths}
+import java.nio.file.Files
 
-import org.apache.spark.sql.{Column, DataFrame}
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.functions.col
 import org.apache.spark.sql.types.StringType
+import org.apache.spark.sql.Column
 import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.IndexQueryExpression

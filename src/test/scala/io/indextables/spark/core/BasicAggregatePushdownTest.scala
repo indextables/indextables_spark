@@ -35,7 +35,7 @@ class BasicAggregatePushdownTest extends AnyFunSuite {
       import spark.implicits._
 
       // Create a simple dataset
-      val data = Seq(
+      val _data = Seq(
         ("doc1", "content1", 10),
         ("doc2", "content2", 20),
         ("doc3", "content3", 30)

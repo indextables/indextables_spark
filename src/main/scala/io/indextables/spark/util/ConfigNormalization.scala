@@ -22,7 +22,6 @@ import scala.collection.JavaConverters._
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.SparkConf
 
 import org.apache.hadoop.conf.Configuration
 

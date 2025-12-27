@@ -18,9 +18,8 @@
 package io.indextables.spark.core
 
 import java.io.{File, FileWriter}
-import java.nio.file.{Files, Paths}
+import java.nio.file.Files
 
-import org.apache.spark.sql.{AnalysisException, SparkSession}
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase

@@ -21,9 +21,8 @@ import java.nio.file.Files
 
 import scala.collection.JavaConverters._
 
-import io.indextables.tantivy4java.core.{Document, Index, IndexWriter, Schema, SchemaBuilder}
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher, SplitTermQuery}
+import io.indextables.tantivy4java.core.{Document, Index, SchemaBuilder}
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitTermQuery}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -86,10 +85,11 @@ class FieldExtractionDebugTest extends AnyFunSuite {
       println(s"✅ Split file verified to exist: $splitPath (size: ${splitPath.toFile.length()} bytes)")
 
       // Step 3: Read from split exactly like successful test
-      val cacheConfig = new SplitCacheManager.CacheConfig("debug-field-cache")
+      // cacheConfig was created but never used - keeping for documentation purposes
+      val _cacheConfig = new SplitCacheManager.CacheConfig("debug-field-cache")
         .withMaxCacheSize(50000000L)
 
-      // val cacheManager = SplitCacheManager.getInstance(cacheConfig)
+      // val cacheManager = SplitCacheManager.getInstance(_cacheConfig)
       val config = new SplitCacheManager.CacheConfig("document-retrieval-cache")
         .withMaxCacheSize(100000000L)
         .withMaxConcurrentLoads(4)

@@ -19,7 +19,7 @@ package io.indextables.spark.core
 
 import scala.jdk.CollectionConverters._
 
-import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, Scan}
 import org.apache.spark.sql.sources.Filter
@@ -40,9 +40,8 @@ import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.tantivy4java.aggregation.TermsResult
+import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import io.indextables.tantivy4java.split.SplitCacheManager
-import io.indextables.tantivy4java.split.SplitMatchAllQuery
 import org.slf4j.LoggerFactory
 
 /**
@@ -190,28 +189,6 @@ class IndexTables4SparkGroupByAggregateScan(
     }
 
     // Look up field type in schema
-    schema.fields.find(_.name == fieldName) match {
-      case Some(field) => field.dataType
-      case None =>
-        logger.warn(s"Could not find field '$fieldName' in schema, defaulting to LongType")
-        LongType
-    }
-  }
-
-  /** Get the data type of a column from an expression. */
-  private def getColumnDataType(column: org.apache.spark.sql.connector.expressions.Expression)
-    : org.apache.spark.sql.types.DataType = {
-    import org.apache.spark.sql.types.LongType
-
-    // Extract field name using the same logic as getFieldName()
-    val fieldName = if (column.getClass.getSimpleName == "FieldReference") {
-      // For FieldReference, toString() returns the field name directly
-      column.toString
-    } else {
-      // Fallback to ExpressionUtils
-      io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
-    }
-
     schema.fields.find(_.name == fieldName) match {
       case Some(field) => field.dataType
       case None =>
@@ -377,19 +354,6 @@ class IndexTables4SparkGroupByAggregateReader(
   private var groupByResults: Iterator[org.apache.spark.sql.catalyst.InternalRow] = _
   private var isInitialized                                                       = false
 
-  // Helper function to get config from broadcast with defaults
-  private def getConfig(configKey: String, default: String = ""): String = {
-    val broadcasted = partition.config
-    val value       = broadcasted.getOrElse(configKey, default)
-    Option(value).getOrElse(default)
-  }
-
-  private def getConfigOption(configKey: String): Option[String] = {
-    val broadcasted = partition.config
-    // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-    broadcasted.get(configKey).orElse(broadcasted.get(configKey.toLowerCase))
-  }
-
   // We need the schema from the scan to properly convert bucket keys
   private lazy val fieldSchema: StructType = partition.schema
 
@@ -433,19 +397,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
   /** Execute GROUP BY aggregation using tantivy4java terms aggregation. */
   private def executeGroupByAggregation(): Array[org.apache.spark.sql.catalyst.InternalRow] = {
-    import org.apache.spark.sql.catalyst.InternalRow
-    import org.apache.spark.unsafe.types.UTF8String
-    import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitAggregation}
-    import io.indextables.tantivy4java.aggregation.{
-      CountAggregation,
-      SumAggregation,
-      AverageAggregation,
-      MinAggregation,
-      MaxAggregation,
-      TermsAggregation
-    }
-    import scala.collection.mutable.ArrayBuffer
-    import scala.collection.JavaConverters._
+    import io.indextables.tantivy4java.aggregation.TermsAggregation
 
     logger.debug(
       s"GROUP BY EXECUTION: Starting terms aggregation for GROUP BY columns: ${partition.groupByColumns.mkString(", ")}"
@@ -880,8 +832,7 @@ class IndexTables4SparkGroupByAggregateReader(
    *   - LocalDateTime format (e.g., "2024-01-02T00:00:00") - extracts date part
    */
   private def convertDateStringToDays(dateStr: String): Int = {
-    import java.time.{LocalDate, LocalDateTime}
-    import java.time.format.DateTimeFormatter
+    import java.time.LocalDate
 
     try {
       // Use format detection to avoid expensive exception-based control flow
@@ -950,50 +901,6 @@ class IndexTables4SparkGroupByAggregateReader(
           s"Cannot convert timestamp string '$tsStr' to microseconds since epoch: ${e.getMessage}",
           e
         )
-    }
-  }
-
-  /** Calculate aggregation values from bucket data. Currently only supports COUNT aggregations with GROUP BY. */
-  private def calculateAggregationValues(
-    bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket,
-    aggregation: Aggregation
-  ): Array[Any] = {
-    // This method is now deprecated - metric aggregations are calculated separately
-    // Keep for backward compatibility with COUNT-only queries
-    import org.apache.spark.sql.connector.expressions.aggregate._
-
-    if (bucket == null) {
-      logger.warn(s"GROUP BY EXECUTION: Bucket is null in calculateAggregationValues")
-      return Array(0L)
-    }
-
-    if (aggregation == null || aggregation.aggregateExpressions == null) {
-      logger.warn(s"GROUP BY EXECUTION: Aggregation or aggregateExpressions is null")
-      return Array(0L)
-    }
-
-    aggregation.aggregateExpressions.map { aggExpr =>
-      if (aggExpr == null) {
-        logger.warn(s"GROUP BY EXECUTION: Aggregate expression is null")
-        0L
-      } else {
-        aggExpr match {
-          case _: Count | _: CountStar =>
-            // For COUNT/COUNT(*), use the document count from the bucket
-            bucket.getDocCount.toLong
-
-          case _: Sum | _: Avg | _: Min | _: Max =>
-            // These should now be handled by separate metric aggregations
-            logger.debug(
-              s"GROUP BY EXECUTION: Metric aggregation ${aggExpr.getClass.getSimpleName} should be handled separately"
-            )
-            bucket.getDocCount.toLong // Fallback
-
-          case other =>
-            logger.debug(s"GROUP BY EXECUTION: Unknown aggregation type: ${other.getClass.getSimpleName}")
-            0L
-        }
-      }
     }
   }
 

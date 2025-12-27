@@ -3,7 +3,6 @@ package io.indextables.spark.sql
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.Row
 
-import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
 import io.indextables.spark.TestBase
 
 class FlushIndexTablesCacheCommandTest extends TestBase {

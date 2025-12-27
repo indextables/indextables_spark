@@ -64,17 +64,6 @@ class TransactionLogCheckpoint(
 
   // Performance configuration
   private val checkpointReadTimeoutSeconds = options.getInt("spark.indextables.checkpoint.read.timeoutSeconds", 30)
-  private val enableChecksumValidation =
-    options.getBoolean("spark.indextables.checkpoint.checksumValidation.enabled", true)
-
-  // Advanced configuration for large tables
-  private val enableMultiPartCheckpoints = options.getBoolean("spark.indextables.checkpoint.multipart.enabled", false)
-  private val maxActionsPerCheckpointPart =
-    options.getInt("spark.indextables.checkpoint.multipart.maxActionsPerPart", 50000)
-
-  // Auto-compaction like Delta's auto-optimize
-  private val autoCheckpointEnabled = options.getBoolean("spark.indextables.checkpoint.auto.enabled", true)
-  private val autoCheckpointMinFileAge = options.getLong("spark.indextables.checkpoint.auto.minFileAge", 10 * 60 * 1000L) // 10 minutes
 
   // Compression configuration
   private val compressionEnabled = options.getBoolean("spark.indextables.checkpoint.compression.enabled", true)

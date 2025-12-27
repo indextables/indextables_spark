@@ -17,12 +17,11 @@
 
 package io.indextables.spark.io
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, OutputStream}
+import java.io.{ByteArrayOutputStream, InputStream, OutputStream}
 import java.net.URI
 import java.util.concurrent.{CompletableFuture, Executors}
 
 import scala.jdk.CollectionConverters._
-import scala.util.Try
 
 import io.indextables.spark.utils.CredentialProviderFactory
 import org.slf4j.LoggerFactory
@@ -33,7 +32,6 @@ import software.amazon.awssdk.auth.credentials.{
   StaticCredentialsProvider
 }
 import software.amazon.awssdk.core.sync.RequestBody
-import software.amazon.awssdk.core.ResponseInputStream
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.{S3AsyncClient, S3Client}
 import software.amazon.awssdk.services.s3.model._

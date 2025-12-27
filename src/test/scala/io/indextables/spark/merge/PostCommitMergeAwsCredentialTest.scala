@@ -33,13 +33,13 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[PostCommitMergeAwsCredentialTest])
 
   // S3 test configuration - uses environment variables for credentials
-  private val s3Bucket     = sys.env.getOrElse("TEST_S3_BUCKET", "indextables-test")
+  private val _s3Bucket    = sys.env.getOrElse("TEST_S3_BUCKET", "indextables-test")
   private val awsAccessKey = sys.env.getOrElse("AWS_ACCESS_KEY_ID", "")
   private val awsSecretKey = sys.env.getOrElse("AWS_SECRET_ACCESS_KEY", "")
-  private val awsRegion    = sys.env.getOrElse("AWS_REGION", "us-west-2")
+  private val _awsRegion   = sys.env.getOrElse("AWS_REGION", "us-west-2")
 
   // Skip tests if S3 credentials not available
-  private def skipIfNoS3Credentials(): Unit =
+  private def _skipIfNoS3Credentials(): Unit =
     assume(
       awsAccessKey.nonEmpty && awsSecretKey.nonEmpty,
       "S3 credentials not available - set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
@@ -117,7 +117,7 @@ class PostCommitMergeAwsCredentialTest extends TestBase with BeforeAndAfterEach 
     logger.info(s"Testing credential logging at: $tablePath")
 
     // Enable debug logging to verify credential passing
-    val previousLevel = logger.getClass.getName
+    val _previousLevel = logger.getClass.getName
 
     val df = spark
       .range(0, 500)

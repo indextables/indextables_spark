@@ -17,8 +17,6 @@
 
 package io.indextables.spark.sql
 
-import scala.jdk.CollectionConverters._
-
 import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
@@ -72,8 +70,6 @@ class PurgeOrphanedSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
   def purge(): PurgeResult = {
-    import spark.implicits._
-
     // Step 1: Get transaction log
     val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
     val txLog    = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
@@ -566,10 +562,8 @@ class PurgeOrphanedSplitsExecutor(
   ): PurgeResult = {
     import spark.implicits._
 
-    val filesToDelete  = files.collect()
-    val totalSizeBytes = filesToDelete.map(_.size).sum
-    val totalSizeMB    = totalSizeBytes / (1024.0 * 1024.0)
-    val totalCount     = filesToDelete.length
+    val filesToDelete = files.collect()
+    val totalCount    = filesToDelete.length
 
     // Get parallelism config
     val parallelism = spark.conf

@@ -23,7 +23,7 @@ import java.time.{LocalDate, LocalDateTime}
 import org.apache.spark.sql.types._
 
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{FieldType, SchemaBuilder}
+import io.indextables.tantivy4java.core.FieldType
 import org.scalatest.matchers.should.Matchers
 
 /**

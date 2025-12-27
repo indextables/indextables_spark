@@ -17,8 +17,6 @@
 
 package io.indextables.spark.util
 
-import java.net.URI
-
 import scala.jdk.CollectionConverters._
 
 import io.indextables.spark.transaction.AddAction

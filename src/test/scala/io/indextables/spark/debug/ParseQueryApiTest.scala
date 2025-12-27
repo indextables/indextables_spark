@@ -3,10 +3,8 @@ package io.indextables.spark.debug
 import java.util.Arrays
 
 import io.indextables.spark.TestBase
-import io.indextables.tantivy4java.core.{Document, Index, Schema, SchemaBuilder}
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitCacheManager, SplitSearcher}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
+import io.indextables.tantivy4java.split.SplitCacheManager
 
 class ParseQueryApiTest extends TestBase {
 
@@ -62,7 +60,7 @@ class ParseQueryApiTest extends TestBase {
 
           // Test method 1: parseQuery(String)
           try {
-            val query1 = searcher.parseQuery("machine")
+            val _query1 = searcher.parseQuery("machine")
             println("✅ parseQuery(String) method available and working")
           } catch {
             case e: Exception =>
@@ -71,7 +69,7 @@ class ParseQueryApiTest extends TestBase {
 
           // Test method 2: parseQuery(String, String)
           try {
-            val query2 = searcher.parseQuery("machine", "title")
+            val _query2 = searcher.parseQuery("machine", "title")
             println("✅ parseQuery(String, String) method available and working")
           } catch {
             case e: NoSuchMethodError =>
@@ -82,7 +80,7 @@ class ParseQueryApiTest extends TestBase {
 
           // Test method 3: parseQuery(String, List<String>)
           try {
-            val query3 = searcher.parseQuery("machine", Arrays.asList("title", "category"))
+            val _query3 = searcher.parseQuery("machine", Arrays.asList("title", "category"))
             println("✅ parseQuery(String, List<String>) method available and working")
           } catch {
             case e: NoSuchMethodError =>

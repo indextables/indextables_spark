@@ -1,7 +1,5 @@
 package io.indextables.spark.util
 
-import scala.collection.JavaConverters._
-
 import org.apache.hadoop.conf.Configuration
 
 import org.slf4j.LoggerFactory

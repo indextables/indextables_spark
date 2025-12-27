@@ -119,7 +119,7 @@ class RealS3PostCommitMergeOnWriteTest extends RealS3TestBase {
     }
 
   /** Get write options with AWS credentials for executor distribution. */
-  private def getWriteOptions(additionalOptions: Map[String, String] = Map.empty): Map[String, String] = {
+  private def getWriteOptions(additionalOptions: Map[String, String]): Map[String, String] = {
     val (accessKey, secretKey) = awsCredentials.get
     Map(
       "spark.indextables.aws.accessKey" -> accessKey,

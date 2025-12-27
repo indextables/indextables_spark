@@ -23,8 +23,6 @@ import org.apache.spark.sql.{Row, SparkSession}
 
 import org.apache.hadoop.fs.Path
 
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import io.indextables.spark.transaction._
 import org.slf4j.LoggerFactory
 
@@ -39,7 +37,6 @@ class DescribeTransactionLogExecutor(
   includeAll: Boolean) {
 
   private val logger = LoggerFactory.getLogger(classOf[DescribeTransactionLogExecutor])
-  private val mapper = new ObjectMapper().registerModule(DefaultScalaModule)
 
   def execute(): Seq[Row] = {
     logger.info(s"Executing DESCRIBE TRANSACTION LOG for table: $tablePath (includeAll=$includeAll)")
@@ -463,7 +460,7 @@ class DescribeTransactionLogExecutor(
   /** Convert a Scala object to JSON string. */
   private def toJsonString(obj: Any): String =
     try
-      mapper.writeValueAsString(obj)
+      io.indextables.spark.util.JsonUtil.toJson(obj)
     catch {
       case e: Exception =>
         logger.warn(s"Failed to serialize object to JSON: ${e.getMessage}")

@@ -17,8 +17,6 @@
 
 package io.indextables.spark.storage
 
-import java.io.IOException
-
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.conf.Configuration

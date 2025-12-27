@@ -17,9 +17,6 @@
 
 package io.indextables.spark.core
 
-import java.io.File
-import java.nio.file.Files
-
 import org.apache.spark.sql.{DataFrame, SaveMode}
 import org.apache.spark.sql.functions._
 

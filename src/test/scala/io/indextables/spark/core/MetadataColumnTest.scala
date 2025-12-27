@@ -17,8 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.functions._
-
 import io.indextables.spark.TestBase
 
 class MetadataColumnTest extends TestBase {

@@ -23,11 +23,9 @@ import java.nio.file.{Files, Paths}
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StringType
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.IndexQueryAllExpression
-import io.indextables.spark.filters.IndexQueryAllFilter
 import io.indextables.spark.util.ExpressionUtils
 import io.indextables.spark.TestBase
 import org.scalatest.funsuite.AnyFunSuite
@@ -177,7 +175,7 @@ class IndexQueryAllIntegrationTest extends AnyFunSuite with TestBase with Before
     spark.sessionState.sqlParser match {
       case parser if !parser.isInstanceOf[IndexTables4SparkSqlParser] =>
         // Only register if not already registered
-        val newParser = new IndexTables4SparkSqlParser(CatalystSqlParser)
+        val _newParser = new IndexTables4SparkSqlParser(CatalystSqlParser)
       // Note: Cannot directly replace sessionState.sqlParser, so we test parsing directly
       case _ => // Already registered or is instance of our parser
     }

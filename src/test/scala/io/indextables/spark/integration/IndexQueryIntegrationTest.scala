@@ -19,9 +19,7 @@ package io.indextables.spark.integration
 
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.DataFrame
 import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.IndexQueryExpression
@@ -46,18 +44,6 @@ class IndexQueryIntegrationTest extends AnyFunSuite with TestBase {
   }
 
   test("IndexQueryFilter should be recognized as supported filter") {
-    import org.apache.spark.sql.util.CaseInsensitiveStringMap
-    import io.indextables.spark.core.IndexTables4SparkScanBuilder
-    import io.indextables.spark.transaction.TransactionLog
-
-    val testSchema = StructType(
-      Array(
-        StructField("id", IntegerType, nullable = false),
-        StructField("title", StringType, nullable = true),
-        StructField("content", StringType, nullable = true)
-      )
-    )
-
     // Create a mock transaction log and scan builder to test filter support
     // Note: This would require more setup in a real integration test
     val indexQueryFilter = IndexQueryFilter("title", "spark AND sql")

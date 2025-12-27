@@ -27,8 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import io.findify.s3mock.S3Mock
 import io.indextables.spark.io.{CloudStorageProviderFactory, S3CloudStorageProvider}
 import io.indextables.spark.TestBase
-import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
-import org.scalatest.matchers.should.Matchers._
+import org.scalatest.BeforeAndAfterAll
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest
@@ -313,7 +312,7 @@ class S3FlowDebugTest extends TestBase with BeforeAndAfterAll {
 
   ignore("TransactionLog with S3Mock integration") {
     // Test 5: Can TransactionLog work with S3Mock?
-    import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+    import io.indextables.spark.transaction.TransactionLogFactory
     import org.apache.hadoop.fs.Path
     import org.apache.spark.sql.types._
 

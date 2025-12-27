@@ -19,10 +19,8 @@ package io.indextables.spark.io
 
 import java.io.{InputStream, OutputStream}
 
-import scala.util.Try
-
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.{FileStatus, FileSystem, Path}
+import org.apache.hadoop.fs.{FileStatus, Path}
 
 import org.slf4j.LoggerFactory
 

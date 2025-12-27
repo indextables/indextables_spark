@@ -17,7 +17,6 @@
 
 package io.indextables.spark.storage
 
-import java.io.File
 import java.nio.file.{Files, Paths}
 import java.time.Instant
 import java.util.concurrent.Semaphore
@@ -25,11 +24,9 @@ import java.util.UUID
 
 import scala.util.Try
 
-import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import io.indextables.spark.util.SizeParser
@@ -849,10 +846,8 @@ object GlobalSplitCacheManager {
    *
    * Delegates to tantivy4java to count active cache instances.
    */
-  def getCacheManagerCount(): Int = {
-    import scala.jdk.CollectionConverters._
+  def getCacheManagerCount(): Int =
     SplitCacheManager.getAllInstances().size
-  }
 
   /**
    * Invalidate cache managers with stale credentials.
@@ -954,7 +949,6 @@ case class DiskCacheStats(
 }
 
 object DiskCacheStats {
-  private val logger = LoggerFactory.getLogger(getClass)
 
   /** Create DiskCacheStats from tantivy4java's DiskCacheStats. */
   def fromJavaStats(stats: SplitCacheManager.DiskCacheStats): DiskCacheStats =

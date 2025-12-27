@@ -17,15 +17,12 @@
 
 package io.indextables.spark.sql
 
-import java.util.concurrent.ThreadLocalRandom
-
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UnaryNode}
-import org.apache.spark.sql.catalyst.util.DateTimeUtils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
@@ -34,11 +31,8 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.storage.SplitManager
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.util.ConfigNormalization
-import io.indextables.tantivy4java.core.Index
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -443,7 +437,6 @@ class MergeSplitsExecutor(
    */
   private def extractAwsConfig(): SerializableAwsConfig =
     try {
-      val sparkConf  = sparkSession.conf
       val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
 
       // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
@@ -546,7 +539,6 @@ class MergeSplitsExecutor(
    */
   private def extractAzureConfig(): SerializableAzureConfig =
     try {
-      val sparkConf  = sparkSession.conf
       val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
 
       // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
@@ -595,24 +587,6 @@ class MergeSplitsExecutor(
         // Return empty config - Azure is optional
         SerializableAzureConfig(None, None, None, None, None, None, None, None)
     }
-
-  /**
-   * Smart string ordering that handles numeric values correctly. Tries numeric comparison first, falls back to string
-   * comparison.
-   */
-  private val smartStringOrdering: Ordering[String] = new Ordering[String] {
-    override def compare(x: String, y: String): Int =
-      try {
-        // Try to parse both as doubles
-        val xNum = x.toDouble
-        val yNum = y.toDouble
-        xNum.compare(yNum)
-      } catch {
-        case _: NumberFormatException =>
-          // Fall back to string comparison
-          x.compare(y)
-      }
-  }
 
   def merge(): Seq[Row] = {
     if (preCommitMerge) {
@@ -803,7 +777,6 @@ class MergeSplitsExecutor(
 
     // Process batches with controlled concurrency using Scala parallel collections
     import scala.collection.parallel.ForkJoinTaskSupport
-    import scala.collection.parallel.immutable.ParSeq
     import java.util.concurrent.ForkJoinPool
     import scala.util.{Try, Success, Failure}
 
@@ -1139,11 +1112,6 @@ class MergeSplitsExecutor(
     val totalMergedSize   = allResults.map(_.mergedSize).sum
 
     val status = if (failedBatchCount == 0) "success" else "partial_success"
-    val statusMessage = if (failedBatchCount == 0) {
-      s"All ${batches.length} batches completed successfully"
-    } else {
-      s"$successfulBatchCount/${batches.length} batches succeeded, $failedBatchCount failed"
-    }
 
     logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits across ${batches.length} batches")
     logger.info(s"Batch summary: $successfulBatchCount successful, $failedBatchCount failed")

@@ -317,19 +317,6 @@ class JsonPredicateTranslator(
   }
 
   /**
-   * Gets the Spark field type for an attribute.
-   *
-   * @param attr
-   *   Attribute name
-   * @return
-   *   DataType or null if not found
-   */
-  private def getFieldType(attr: String): DataType = {
-    val rootField = if (attr.contains(".")) attr.split("\\.")(0) else attr
-    sparkSchema.find(_.name == rootField).map(_.dataType).orNull
-  }
-
-  /**
    * Converts a value to String for term queries.
    *
    * @param value

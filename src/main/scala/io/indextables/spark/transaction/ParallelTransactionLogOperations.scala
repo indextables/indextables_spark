@@ -23,13 +23,13 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider}
+import io.indextables.spark.io.CloudStorageProvider
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 

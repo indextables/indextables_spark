@@ -25,7 +25,6 @@ import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.TransactionLogFactory
 import org.slf4j.LoggerFactory
 
 /**

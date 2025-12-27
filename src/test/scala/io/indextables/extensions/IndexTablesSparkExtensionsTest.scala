@@ -17,7 +17,7 @@
 
 package io.indextables.extensions
 
-import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
+import org.apache.spark.sql.SparkSessionExtensions
 
 import io.indextables.spark.extensions.IndexTables4SparkExtensions
 import org.scalatest.funsuite.AnyFunSuite

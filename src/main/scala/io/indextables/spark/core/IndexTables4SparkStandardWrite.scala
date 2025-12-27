@@ -52,35 +52,8 @@ class IndexTables4SparkStandardWrite(
   // Extract serializable values from transient fields during construction
   private val writeSchema = writeInfo.schema()
 
-  // Validate schema for duplicate column names
-  private def validateSchema(schema: org.apache.spark.sql.types.StructType): Unit = {
-    val fieldNames = schema.fieldNames
-    val duplicates = fieldNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
-
-    if (duplicates.nonEmpty) {
-      val duplicateList = duplicates.mkString(", ")
-      val errorMsg = s"Schema contains duplicate column names: [$duplicateList]. " +
-        s"Please ensure all column names are unique. Duplicate columns can cause JVM crashes."
-      logger.error(errorMsg)
-      throw new IllegalArgumentException(errorMsg)
-    }
-
-    // Also check for case-insensitive duplicates (warn only, don't fail)
-    val lowerCaseNames            = fieldNames.map(_.toLowerCase)
-    val caseInsensitiveDuplicates = lowerCaseNames.groupBy(identity).filter(_._2.length > 1).keys.toSeq
-
-    if (caseInsensitiveDuplicates.nonEmpty) {
-      val originalNames =
-        caseInsensitiveDuplicates.flatMap(lower => fieldNames.filter(_.toLowerCase == lower)).distinct.mkString(", ")
-      logger.warn(
-        s"Schema contains columns that differ only in case: [$originalNames]. " +
-          s"This may cause issues with case-insensitive storage systems."
-      )
-    }
-  }
-
   // Validate the write schema
-  validateSchema(writeSchema)
+  io.indextables.spark.util.SchemaValidator.validateNoDuplicateColumns(writeSchema)
   private val serializedHadoopConf =
     // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
     io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
@@ -90,15 +63,7 @@ class IndexTables4SparkStandardWrite(
     serializedOptions.get("__partition_columns") match {
       case Some(partitionColumnsJson) =>
         try {
-          // Parse JSON array to extract column names
-          import com.fasterxml.jackson.module.scala.DefaultScalaModule
-          import com.fasterxml.jackson.databind.ObjectMapper
-
-          val mapper = new ObjectMapper()
-          mapper.registerModule(DefaultScalaModule)
-          val partitionCols = mapper.readValue(partitionColumnsJson, classOf[Array[String]]).toSeq
-
-          logger.debug(s"PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
+          val partitionCols = io.indextables.spark.util.JsonUtil.parseStringArray(partitionColumnsJson)
           logger.debug(s"PARTITION DEBUG: Extracted partition columns from options: $partitionCols")
           partitionCols
         } catch {
@@ -113,7 +78,6 @@ class IndexTables4SparkStandardWrite(
         // Fallback: try to read from existing transaction log
         try {
           val cols = transactionLog.getPartitionColumns()
-          logger.debug(s"PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
           logger.debug(s"PARTITION DEBUG: Fallback - read partition columns from transaction log: $cols")
           cols
         } catch {
@@ -134,29 +98,18 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Table is partitioned by: ${partitionColumns.mkString(", ")}")
     }
 
-    // Combine serialized hadoop config with tantivy4spark options (normalize spark.indextables to spark.tantivy4spark)
-    val normalizedTantivyOptions = serializedOptions
-      .filter(kv => kv._1.startsWith("spark.indextables.") || kv._1.startsWith("spark.indextables."))
-      .map {
-        case (key, value) =>
-          val normalizedKey = if (key.startsWith("spark.indextables.")) {
-            key.replace("spark.indextables.", "spark.indextables.")
-          } else key
-          normalizedKey -> value
-      }
+    // Combine serialized hadoop config with indextables options from DataFrame options
+    val normalizedTantivyOptions =
+      io.indextables.spark.util.ConfigNormalization.filterAndNormalizeTantivyConfigs(serializedOptions)
     val combinedHadoopConfig = serializedHadoopConf ++ normalizedTantivyOptions
 
-    serializedOptions.foreach {
+    // Log the options being passed
+    normalizedTantivyOptions.foreach {
       case (key, value) =>
-        if (key.startsWith("spark.indextables.") || key.startsWith("spark.indextables.")) {
-          val normalizedKey = if (key.startsWith("spark.indextables.")) {
-            key.replace("spark.indextables.", "spark.indextables.")
-          } else key
-          logger.info(
-            s"Will copy DataFrame option to Hadoop config: $normalizedKey = ${if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("token") || key.toLowerCase.contains("password")) "***"
-              else value}"
-          )
-        }
+        logger.info(
+          s"Will copy DataFrame option to Hadoop config: $key = ${io.indextables.spark.util.CredentialRedaction
+              .redactValue(key, value)}"
+        )
     }
 
     new IndexTables4SparkWriterFactory(
@@ -174,16 +127,7 @@ class IndexTables4SparkStandardWrite(
     logger.debug(s"DEBUG: serializedOptions keys: ${serializedOptions.keys.mkString(", ")}")
     serializedOptions.foreach {
       case (k, v) =>
-        val redactedValue =
-          if (
-            k.toLowerCase.contains("secret") || k.toLowerCase
-              .contains("key") || k.toLowerCase.contains("password") || k.toLowerCase.contains("token")
-          ) {
-            "***REDACTED***"
-          } else {
-            v
-          }
-        logger.debug(s"DEBUG: serializedOption $k = $redactedValue")
+        logger.debug(s"DEBUG: serializedOption $k = ${io.indextables.spark.util.CredentialRedaction.redactValue(k, v)}")
     }
 
     // Validate indexing configuration for append operations
@@ -259,7 +203,6 @@ class IndexTables4SparkStandardWrite(
     transactionLog.initialize(writeSchema, partitionColumns)
 
     // Convert serializedOptions Map to CaseInsensitiveStringMap
-    import scala.jdk.CollectionConverters._
     val optionsMap = new java.util.HashMap[String, String]()
     serializedOptions.foreach { case (k, v) => optionsMap.put(k, v) }
     val writeOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(optionsMap)
@@ -338,7 +281,6 @@ class IndexTables4SparkStandardWrite(
         logger.debug("VALIDATION DEBUG: Found existing doc mapping, validating configuration")
 
         // Parse existing configuration
-        import com.fasterxml.jackson.databind.JsonNode
         import io.indextables.spark.util.JsonUtil
         import scala.jdk.CollectionConverters._
 
@@ -547,7 +489,6 @@ class IndexTables4SparkStandardWrite(
    */
   private def executeMergeSplitsCommand(writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap): Unit =
     try {
-      import io.indextables.spark.sql.MergeSplitsExecutor
       import scala.jdk.CollectionConverters._
 
       val targetSizeStr   = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.targetSize", "4G")
@@ -571,13 +512,9 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Passing ${optionsToPass.size} options to MERGE SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
       optionsToPass.foreach {
         case (key, value) =>
-          val displayValue =
-            if (
-              key.toLowerCase.contains("secret") || key.toLowerCase
-                .contains("key") || key.toLowerCase.contains("password")
-            ) "***"
-            else value
-          logger.debug(s"  Passing option: $key = $displayValue")
+          logger.debug(
+            s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          )
       }
 
       // Create executor with transaction log and write options
@@ -716,13 +653,9 @@ class IndexTables4SparkStandardWrite(
       logger.info(s"Passing ${optionsToPass.size} options to PURGE ORPHANED SPLITS executor (${optionsFromWrite.size} from write options, ${serializedHadoopConf.size} from hadoop conf)")
       optionsToPass.foreach {
         case (key, value) =>
-          val displayValue =
-            if (
-              key.toLowerCase.contains("secret") || key.toLowerCase
-                .contains("key") || key.toLowerCase.contains("password")
-            ) "***"
-            else value
-          logger.debug(s"  Passing option: $key = $displayValue")
+          logger.debug(
+            s"  Passing option: $key = ${io.indextables.spark.util.CredentialRedaction.redactValue(key, value)}"
+          )
       }
 
       // Convert retention from hours to milliseconds for transaction log

@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase

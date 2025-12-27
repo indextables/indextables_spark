@@ -1,7 +1,6 @@
 package io.indextables.spark.debug
 
-import org.apache.spark.sql.{DataFrame, SaveMode}
-import org.apache.spark.sql.functions.{col, lit}
+import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 

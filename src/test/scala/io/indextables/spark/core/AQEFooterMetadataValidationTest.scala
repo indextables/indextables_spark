@@ -17,17 +17,14 @@
 
 package io.indextables.spark.core
 
-import scala.collection.mutable
-
-import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.catalyst.plans.logical.{GlobalLimit, LocalLimit}
-import org.apache.spark.sql.execution.{CollectLimitExec, SparkPlan}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanExec
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.DataFrame
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers
 
@@ -429,7 +426,7 @@ class AQEFooterMetadataValidationTest extends TestBase with Matchers {
   }
 
   /** Helper method to extract metadata validation information from query execution */
-  private def validateMetadataPreservation(df: DataFrame, testName: String): Unit =
+  private def _validateMetadataPreservation(df: DataFrame, testName: String): Unit =
     // The fact that the query executes successfully validates metadata preservation
     // Our PartitionReader validates footer metadata during construction
     try {

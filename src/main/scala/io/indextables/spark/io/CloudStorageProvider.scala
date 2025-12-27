@@ -252,14 +252,7 @@ object CloudStorageProviderFactory {
               val value        = sparkConf.get(key, defaultValue)
               if (value != defaultValue) {
                 enriched.set(key, value)
-                // Mask sensitive credentials in logs
-                val maskedValue = if (key.toLowerCase.contains("secret") || key.toLowerCase.contains("sessiontoken")) {
-                  "***"
-                } else if (key.toLowerCase.contains("accesskey")) {
-                  value.take(4) + "..."
-                } else {
-                  value
-                }
+                val maskedValue = io.indextables.spark.util.CredentialRedaction.redactValue(key, value)
                 logger.debug(s"Copied string Spark config to Hadoop conf: $key = $maskedValue")
                 logger.info(s"✅ Copied string Spark config to Hadoop conf: $key = $maskedValue")
               } else {

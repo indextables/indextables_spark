@@ -22,19 +22,14 @@ import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 
 import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success, Try}
 
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.SparkContext
 
-import io.indextables.spark.core.FiltersToQueryConverter
 import io.indextables.spark.search.SplitSearchEngine
-import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager, SplitCacheConfig}
+import io.indextables.spark.storage.{DriverSplitLocalityManager, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
-import io.indextables.tantivy4java.query.Query
-import io.indextables.tantivy4java.split.{SplitMatchAllQuery, SplitQuery}
 import org.slf4j.LoggerFactory
 
 /**
@@ -374,46 +369,6 @@ object PreWarmManager {
       java.util.Collections.emptyList[String]()                     // skippedSplits
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
-  }
-
-  /**
-   * Safely extract schema field names from SplitSearchEngine using Schema cloning. This prevents Arc reference counting
-   * issues by creating an independent Schema copy.
-   */
-  private def extractSchemaFieldNames(splitSearchEngine: SplitSearchEngine): Option[Set[String]] = {
-    // CRITICAL: Both original and copy schemas must be closed to prevent native memory leak
-    var originalSchema: io.indextables.tantivy4java.core.Schema = null
-    try {
-      originalSchema = splitSearchEngine.getSchema()
-      // Create an independent copy of the schema to avoid Arc reference counting issues
-      val schemaCopy = originalSchema.copy()
-
-      try {
-        import scala.jdk.CollectionConverters._
-        val fieldNames = schemaCopy.getFieldNames().asScala.toSet
-        Some(fieldNames)
-      } finally
-        // Close our independent schema copy
-        schemaCopy.close()
-    } catch {
-      case _: IllegalStateException =>
-        logger.warn("Schema has been closed during field name extraction, using None for splitFieldNames")
-        None
-      case e: RuntimeException if e.getMessage == "Invalid Schema pointer" =>
-        logger.warn("Invalid Schema pointer detected during field name extraction, using None for splitFieldNames")
-        None
-      case e: Exception =>
-        logger.warn(s"Error extracting schema field names: ${e.getMessage}, using None for splitFieldNames")
-        None
-    } finally
-      // Close the original schema to prevent native memory leak
-      if (originalSchema != null) {
-        try
-          originalSchema.close()
-        catch {
-          case _: Exception => // Ignore close errors
-        }
-      }
   }
 
   /** Generate a hash for the query to uniquely identify warmup futures. */

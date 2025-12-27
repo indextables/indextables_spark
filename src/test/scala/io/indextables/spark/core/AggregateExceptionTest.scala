@@ -5,7 +5,6 @@
 package io.indextables.spark.core
 
 import io.indextables.spark.TestBase
-import org.scalatest.Assertion
 
 /**
  * Tests that aggregate queries with unsupported filters fail with a clear exception rather than returning incorrect

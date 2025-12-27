@@ -24,14 +24,13 @@ import java.util.concurrent.{CompletableFuture, Executors}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
-import scala.util.{Failure, Success, Try}
 
 import org.apache.hadoop.conf.Configuration
 
 import com.azure.core.credential.{AccessToken, TokenCredential, TokenRequestContext}
 import com.azure.core.http.rest.PagedIterable
 import com.azure.core.util.BinaryData
-import com.azure.identity.{ClientSecretCredentialBuilder, DefaultAzureCredentialBuilder}
+import com.azure.identity.ClientSecretCredentialBuilder
 import com.azure.storage.blob.{
   BlobAsyncClient,
   BlobClient,
@@ -39,8 +38,8 @@ import com.azure.storage.blob.{
   BlobServiceClient,
   BlobServiceClientBuilder
 }
-import com.azure.storage.blob.models.{BlobItem, BlobItemProperties, BlobRequestConditions, BlobStorageException}
-import com.azure.storage.blob.specialized.{BlockBlobAsyncClient, BlockBlobClient}
+import com.azure.storage.blob.models.{BlobItem, BlobRequestConditions, BlobStorageException}
+import com.azure.storage.blob.specialized.BlockBlobAsyncClient
 import com.azure.storage.common.StorageSharedKeyCredential
 import org.slf4j.LoggerFactory
 
@@ -68,9 +67,6 @@ class AzureCloudStorageProvider(
   logger.debug(s"  - accountKey: ${config.azureAccountKey.map(_ => "***")}")
   logger.debug(s"  - connectionString: ${config.azureConnectionString.map(_ => "***")}")
   logger.debug(s"  - endpoint: ${config.azureEndpoint}")
-
-  // Detect if we're running against Azurite for compatibility adjustments
-  private val isAzurite = config.azureEndpoint.exists(e => e.contains("localhost") || e.contains("127.0.0.1"))
 
   /**
    * Parse Azure URI to extract container and blob path Supports multiple URL schemes:
@@ -508,8 +504,7 @@ class AzureCloudStorageProvider(
     inputStream: InputStream,
     contentLength: Option[Long] = None
   ): Unit = {
-    val blobClient      = getBlobClient(path)
-    val blockBlobClient = blobClient.getBlockBlobClient
+    val blobClient = getBlobClient(path)
 
     // Configuration (using same defaults as S3 for consistency)
     val partSize       = config.partSize.getOrElse(128L * 1024 * 1024)                 // 128MB

@@ -1,11 +1,10 @@
 package io.indextables.spark.sql
 
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.Row
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.TransactionLogFactory
 import io.indextables.spark.TestBase
 
 class InvalidateTransactionLogCacheCommandTest extends TestBase {

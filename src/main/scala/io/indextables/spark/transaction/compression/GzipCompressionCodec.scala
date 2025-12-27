@@ -1,7 +1,7 @@
 package io.indextables.spark.transaction.compression
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, InputStream, OutputStream}
-import java.util.zip.{Deflater, GZIPInputStream, GZIPOutputStream}
+import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
 /**
  * GZIP compression codec for transaction logs.

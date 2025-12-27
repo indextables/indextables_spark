@@ -17,7 +17,7 @@
 
 package io.indextables.spark.sql
 
-import org.apache.spark.sql.{DataFrame, Row, SaveMode}
+import org.apache.spark.sql.{Row, SaveMode}
 import org.apache.spark.sql.types._
 
 import org.apache.hadoop.fs.Path

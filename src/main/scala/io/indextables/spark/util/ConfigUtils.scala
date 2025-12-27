@@ -64,7 +64,7 @@ object ConfigUtils {
 
     // Helper function to get config with defaults
     // Tries both original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
-    def getConfig(configKey: String, default: String = ""): String =
+    def getConfig(configKey: String, default: String): String =
       configMap
         .get(configKey)
         .orElse(configMap.get(configKey.toLowerCase))

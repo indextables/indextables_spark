@@ -17,7 +17,6 @@
 
 package io.indextables.spark.core
 
-import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
 import org.apache.spark.sql.connector.expressions.filter.Predicate
 import org.apache.spark.sql.connector.read.{
@@ -215,10 +214,8 @@ class IndexTables4SparkScanBuilder(
         // Check if we can use transaction log count optimization
         if (canUseTransactionLogCount(aggregation, effectiveFilters)) {
           logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
-          logger.debug(s"AGGREGATE SCAN: Using transaction log count optimization")
           createTransactionLogCountScan(aggregation, effectiveFilters)
         } else {
-          logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
           logger.debug(s"AGGREGATE SCAN: Creating simple aggregation scan")
           createSimpleAggregateScan(aggregation, effectiveFilters)
         }
@@ -391,8 +388,6 @@ class IndexTables4SparkScanBuilder(
     )
 
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    import org.apache.spark.sql.sources._
-
     logger.debug(
       s"PUSHFILTERS: pushFilters called on instance ${System.identityHashCode(this)} with ${filters.length} filters"
     )
@@ -502,7 +497,6 @@ class IndexTables4SparkScanBuilder(
 
     logger.debug(s"GROUP BY CHECK: hasGroupBy = $hasGroupBy")
     if (hasGroupBy) {
-      logger.debug(s"GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
       logger.debug(s"GROUP BY DETECTED: Found ${groupByExpressions.length} GROUP BY expressions")
       groupByExpressions.foreach(expr => logger.debug(s"GROUP BY EXPRESSION: $expr"))
 
@@ -642,10 +636,6 @@ class IndexTables4SparkScanBuilder(
       case _                 => false
     }
   }
-
-  /** Check if an attribute references a nested JSON field (contains dot notation). */
-  private def isNestedJsonField(attribute: String): Boolean =
-    attribute.contains(".")
 
   private def isSupportedPredicate(predicate: Predicate): Boolean = {
     // For V2 predicates, we need to inspect the actual predicate type
@@ -797,10 +787,8 @@ class IndexTables4SparkScanBuilder(
       val isSupported = expr match {
         case _: Count =>
           logger.debug(s"AGGREGATE VALIDATION: COUNT aggregation is supported")
-          logger.debug(s"AGGREGATE VALIDATION: COUNT aggregation is supported")
           true
         case _: CountStar =>
-          logger.debug(s"AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
           logger.debug(s"AGGREGATE VALIDATION: COUNT(*) aggregation is supported")
           true
         case sum: Sum =>
@@ -824,7 +812,6 @@ class IndexTables4SparkScanBuilder(
           logger.debug(s"AGGREGATE VALIDATION: MAX on field '$fieldName' supported: $isSupported")
           isSupported
         case other =>
-          logger.debug(s"AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
           logger.debug(s"AGGREGATE VALIDATION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
           false
       }
@@ -976,7 +963,6 @@ class IndexTables4SparkScanBuilder(
         logger.debug("Found doc mapping, parsing fast fields")
 
         // Parse the docMappingJson to extract fast field information
-        import com.fasterxml.jackson.databind.JsonNode
         import io.indextables.spark.util.JsonUtil
         import scala.jdk.CollectionConverters._
 
@@ -1125,156 +1111,6 @@ class IndexTables4SparkScanBuilder(
         Set.empty[String]
     }
 
-  /** Check if GROUP BY columns are supported for pushdown. */
-  private def areGroupByColumnsSupported(groupByColumns: Array[String]): Boolean = {
-    logger.debug(s"GROUP BY VALIDATION: Checking ${groupByColumns.length} columns: ${groupByColumns.mkString(", ")}")
-    logger.debug(s"GROUP BY VALIDATION: Schema fields: ${schema.fields.map(_.name).mkString(", ")}")
-
-    groupByColumns.forall { columnName =>
-      logger.debug(s"GROUP BY VALIDATION: Checking column '$columnName'")
-      // Check if the column exists in the schema
-      val fieldExists = schema.fields.exists(_.name == columnName)
-      logger.debug(s"GROUP BY VALIDATION: Field '$columnName' exists: $fieldExists")
-      if (!fieldExists) {
-        logger.debug(s"GROUP BY VALIDATION: Field '$columnName' not found in schema")
-        logger.debug(s"GROUP BY VALIDATION: Field '$columnName' not found in schema")
-        return false
-      }
-
-      // For GROUP BY, we need fields that can be used for terms aggregation
-      // String fields work well for grouping
-      schema.fields.find(_.name == columnName) match {
-        case Some(field) =>
-          import org.apache.spark.sql.types._
-          // ALL GROUP BY fields must be fast fields for tantivy4java TermsAggregation
-          val fastFields = getActualFastFieldsFromSchema()
-          val isFast     = fastFields.contains(columnName)
-
-          field.dataType match {
-            case StringType =>
-              if (isFast) {
-                logger.debug(s"GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
-                logger.debug(s"GROUP BY VALIDATION: Fast string field '$columnName' is supported for GROUP BY")
-                true
-              } else {
-                logger.info(
-                  s"GROUP BY VALIDATION: String field '$columnName' must be fast field for tantivy4java GROUP BY"
-                )
-                false
-              }
-            case IntegerType | LongType =>
-              if (isFast) {
-                logger.debug(s"GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
-                logger.debug(s"GROUP BY VALIDATION: Fast numeric field '$columnName' is supported for GROUP BY")
-                true
-              } else {
-                logger.info(
-                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
-                )
-                logger.debug(
-                  s"GROUP BY VALIDATION: Numeric field '$columnName' must be fast field for efficient GROUP BY"
-                )
-                false
-              }
-            case DateType | TimestampType =>
-              if (isFast) {
-                logger.debug(
-                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
-                )
-                logger.debug(
-                  s"GROUP BY VALIDATION: Fast date/timestamp field '$columnName' is supported for GROUP BY"
-                )
-                true
-              } else {
-                logger.info(
-                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
-                )
-                logger.debug(
-                  s"GROUP BY VALIDATION: Date/timestamp field '$columnName' must be fast field for GROUP BY"
-                )
-                false
-              }
-            case _ =>
-              logger.debug(s"GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
-              logger.debug(s"GROUP BY VALIDATION: Field type ${field.dataType} not supported for GROUP BY")
-              false
-          }
-        case None => false
-      }
-    }
-  }
-
-  /** Check if the current aggregation is compatible with GROUP BY. */
-  private def isAggregationCompatibleWithGroupBy(aggregation: Aggregation): Boolean = {
-    import org.apache.spark.sql.connector.expressions.aggregate._
-    logger.debug(s"GROUP BY COMPATIBILITY: Checking ${aggregation.aggregateExpressions.length} aggregate expressions")
-
-    // Check each aggregate expression - for GROUP BY, ALL aggregated fields must be fast fields
-    val result = aggregation.aggregateExpressions.forall { expr =>
-      val isCompatible = expr match {
-        case _: Count =>
-          logger.debug(s"GROUP BY COMPATIBILITY: COUNT is compatible with GROUP BY (no field required)")
-          true
-        case _: CountStar =>
-          logger.debug(s"GROUP BY COMPATIBILITY: COUNT(*) is compatible with GROUP BY (no field required)")
-          true
-        case sum: Sum =>
-          val fieldName = getFieldName(sum.column)
-          val isFast    = isNumericFastField(fieldName)
-          if (isFast) {
-            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) is compatible with GROUP BY (fast field)")
-            true
-          } else {
-            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"GROUP BY COMPATIBILITY: SUM($fieldName) requires fast field for GROUP BY")
-            false
-          }
-        case avg: Avg =>
-          val fieldName = getFieldName(avg.column)
-          val isFast    = isNumericFastField(fieldName)
-          if (isFast) {
-            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) is compatible with GROUP BY (fast field)")
-            true
-          } else {
-            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"GROUP BY COMPATIBILITY: AVG($fieldName) requires fast field for GROUP BY")
-            false
-          }
-        case min: Min =>
-          val fieldName = getFieldName(min.column)
-          val isFast    = isNumericFastField(fieldName)
-          if (isFast) {
-            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) is compatible with GROUP BY (fast field)")
-            true
-          } else {
-            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"GROUP BY COMPATIBILITY: MIN($fieldName) requires fast field for GROUP BY")
-            false
-          }
-        case max: Max =>
-          val fieldName = getFieldName(max.column)
-          val isFast    = isNumericFastField(fieldName)
-          if (isFast) {
-            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) is compatible with GROUP BY (fast field)")
-            true
-          } else {
-            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
-            logger.debug(s"GROUP BY COMPATIBILITY: MAX($fieldName) requires fast field for GROUP BY")
-            false
-          }
-        case other =>
-          logger.info(
-            s"GROUP BY COMPATIBILITY: Unsupported aggregation type with GROUP BY: ${other.getClass.getSimpleName}"
-          )
-          false
-      }
-      logger.debug(s"GROUP BY COMPATIBILITY: Expression $expr compatible: $isCompatible")
-      isCompatible
-    }
-    logger.debug(s"GROUP BY COMPATIBILITY: Overall compatibility: $result")
-    result
-  }
-
   /** Check if a filter is a partition filter. */
   private def isPartitionFilter(filter: org.apache.spark.sql.sources.Filter): Boolean = {
     val partitionColumns  = getPartitionColumns()
@@ -1316,7 +1152,6 @@ class IndexTables4SparkScanBuilder(
       // Check if the column exists in the schema
       schema.fields.find(_.name == columnName) match {
         case Some(field) =>
-          import org.apache.spark.sql.types._
           // Check if field is configured as fast field
           if (!fastFields.contains(columnName)) {
             missingFastFields += columnName
@@ -1421,8 +1256,6 @@ class IndexTables4SparkScanBuilder(
  */
 object IndexTables4SparkScanBuilder {
   import java.util.WeakHashMap
-
-  import scala.collection.JavaConverters._
 
   // WeakHashMap using DataSourceV2Relation object as key
   // The relation object is passed from V2IndexQueryExpressionRule and accessible during planning

@@ -3,7 +3,6 @@ package io.indextables.spark.core
 import org.apache.spark.sql.functions._
 
 import io.indextables.spark.TestBase
-import org.scalatest.matchers.should.Matchers._
 
 /**
  * Test suite for transaction log optimization of GROUP BY partition columns COUNT queries. Validates that queries like
