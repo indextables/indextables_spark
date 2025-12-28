@@ -30,6 +30,8 @@ import org.apache.spark.SparkContext
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{DriverSplitLocalityManager, SplitCacheConfig}
 import io.indextables.spark.transaction.AddAction
+import io.indextables.tantivy4java.split.SplitSearcher
+import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
 import org.slf4j.LoggerFactory
 
 /**
@@ -106,6 +108,241 @@ object PreWarmManager {
       totalWarmupsCreated = warmupAssignments.size
     )
   }
+
+  /**
+   * Execute pre-warming with specific component selection for all splits that will be queried.
+   * This is the enhanced version that supports segment/field selection from configuration.
+   *
+   * @param sc SparkContext for distributed execution
+   * @param addActions Sequence of splits to prewarm
+   * @param segments Set of IndexComponents to prewarm (e.g., TERM, FASTFIELD, POSTINGS)
+   * @param fields Optional sequence of field names to prewarm (None = all fields)
+   * @param splitsPerTask Number of splits to batch per Spark task (default: 2)
+   * @param config Configuration map for cache and storage settings
+   * @return PreWarmResult with warmup statistics
+   */
+  def executePreWarmWithComponents(
+    sc: SparkContext,
+    addActions: Seq[AddAction],
+    segments: Set[IndexComponent],
+    fields: Option[Seq[String]],
+    splitsPerTask: Int,
+    config: Map[String, String]
+  ): PreWarmResult = {
+
+    if (addActions.isEmpty) {
+      logger.info("No splits to prewarm")
+      return PreWarmResult(warmupInitiated = false, Map.empty, 0)
+    }
+
+    val startTime = System.currentTimeMillis()
+    logger.info(s"Starting component-based prewarm for ${addActions.length} splits")
+    logger.info(s"Prewarming components: ${segments.map(_.name()).mkString(", ")}")
+
+    // Get available hosts and assign splits using driver-based locality
+    val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sc)
+    val splitPaths     = addActions.map(_.path)
+    val assignments    = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+
+    // Group splits by their assigned hosts for efficient distribution
+    val splitsByHost = groupSplitsByAssignedHosts(addActions, assignments)
+    logger.info(
+      s"Prewarm distribution: ${splitsByHost.size} hosts, ${splitsByHost.map(_._2.size).sum} split assignments"
+    )
+
+    // Create batched prewarm tasks based on splitsPerTask
+    val componentPrewarmTasks = splitsByHost.flatMap {
+      case (hostname, hostSplits) =>
+        hostSplits.grouped(splitsPerTask).zipWithIndex.map {
+          case (batch, batchIndex) =>
+            ComponentPrewarmTask(
+              batchIndex = batchIndex,
+              hostname = hostname,
+              addActions = batch,
+              segments = segments,
+              fields = fields
+            )
+        }
+    }.toSeq
+
+    logger.info(s"Created ${componentPrewarmTasks.length} prewarm tasks (${splitsPerTask} splits per task)")
+
+    // Broadcast config for executor access
+    val broadcastConfig = sc.broadcast(config)
+
+    // Execute prewarm tasks on executors
+    val jobGroup       = s"tantivy4spark-prewarm-${System.currentTimeMillis()}"
+    val jobDescription = s"Prewarming ${addActions.length} splits across ${splitsByHost.size} hosts"
+
+    sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
+
+    val taskResults =
+      try
+        sc.parallelize(componentPrewarmTasks, math.min(componentPrewarmTasks.length, sc.defaultParallelism))
+          .setName(s"Prewarm Cache: ${addActions.length} splits")
+          .map { task =>
+            executeComponentPrewarmTask(task, broadcastConfig)
+          }
+          .collect()
+          .toSeq
+      finally
+        sc.clearJobGroup()
+
+    // Aggregate results by hostname
+    val warmupAssignments = taskResults.groupBy(_.hostname).map {
+      case (hostname, results) => hostname -> results.map(_.splitsPrewarmed).sum
+    }
+
+    val endTime = System.currentTimeMillis()
+    logger.info(s"Component-based prewarm completed in ${endTime - startTime}ms: ${warmupAssignments.map { case (h, c) => s"$h: $c splits" }.mkString(", ")}")
+
+    PreWarmResult(
+      warmupInitiated = true,
+      warmupAssignments = warmupAssignments,
+      totalWarmupsCreated = componentPrewarmTasks.length
+    )
+  }
+
+  /**
+   * Execute a component-based prewarm task on an executor.
+   * Supports both full-component preloading and field-specific preloading.
+   */
+  private def executeComponentPrewarmTask(
+    task: ComponentPrewarmTask,
+    broadcastConfig: Broadcast[Map[String, String]]
+  ): ComponentPrewarmTaskResult = {
+    val taskStartTime = System.currentTimeMillis()
+    val actualHostname = getCurrentHostname
+    val config = broadcastConfig.value
+    val failOnMissingField = config.getOrElse("spark.indextables.prewarm.failOnMissingField", "true").toBoolean
+
+    try {
+      var prewarmedCount = 0
+      var skippedFields = scala.collection.mutable.Set[String]()
+
+      task.addActions.foreach { addAction =>
+        // Create cache configuration
+        val cacheConfig = createCacheConfigFromBroadcast(config, addAction.path)
+
+        // Create split search engine
+        val splitSearchEngine = createSplitSearchEngine(addAction, StructType(Seq.empty), cacheConfig)
+
+        try {
+          val splitSearcher = splitSearchEngine.getSplitSearcher()
+
+          task.fields match {
+            case Some(requestedFields) =>
+              // Field-specific preloading using preloadFields()
+              // Validate fields exist in the split metadata if available
+              val availableFields = extractFieldsFromMetadata(addAction)
+
+              val (validFields, invalidFields) = if (availableFields.nonEmpty) {
+                requestedFields.partition(f => availableFields.contains(f.toLowerCase))
+              } else {
+                // If we can't determine available fields, assume all are valid
+                (requestedFields, Seq.empty[String])
+              }
+
+              if (invalidFields.nonEmpty) {
+                if (failOnMissingField) {
+                  throw new IllegalArgumentException(
+                    s"Fields not found in split ${addAction.path}: ${invalidFields.mkString(", ")}. " +
+                    s"Available fields: ${availableFields.mkString(", ")}"
+                  )
+                } else {
+                  logger.warn(s"Skipping missing fields for split ${addAction.path}: ${invalidFields.mkString(", ")}")
+                  skippedFields ++= invalidFields
+                }
+              }
+
+              if (validFields.nonEmpty) {
+                // Preload each component for the valid fields
+                val futures = task.segments.map { component =>
+                  logger.debug(s"Preloading ${component.name()} for fields ${validFields.mkString(",")} in split ${addAction.path}")
+                  splitSearcher.preloadFields(component, validFields: _*)
+                }
+                // Wait for all to complete
+                futures.foreach(_.join())
+              }
+
+            case None =>
+              // Full component preloading (all fields)
+              val componentsArray = task.segments.toArray
+              logger.debug(s"Preloading components ${componentsArray.map(_.name()).mkString(",")} for all fields in split ${addAction.path}")
+              val prewarmFuture = splitSearcher.preloadComponents(componentsArray: _*)
+              prewarmFuture.join()
+          }
+
+          prewarmedCount += 1
+
+          // Record prewarm completion for catch-up tracking
+          DriverSplitLocalityManager.recordPrewarmCompletion(
+            addAction.path,
+            actualHostname,
+            task.segments,
+            task.fields.map(_.toSet)
+          )
+
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to prewarm split ${addAction.path}: ${e.getMessage}")
+        }
+      }
+
+      val duration = System.currentTimeMillis() - taskStartTime
+      logger.info(s"Prewarm task completed on $actualHostname: $prewarmedCount splits in ${duration}ms")
+
+      ComponentPrewarmTaskResult(
+        hostname = actualHostname,
+        splitsPrewarmed = prewarmedCount,
+        durationMs = duration,
+        success = true,
+        errorMessage = None,
+        skippedFields = if (skippedFields.isEmpty) None else Some(skippedFields.toSet)
+      )
+    } catch {
+      case e: Exception =>
+        val duration = System.currentTimeMillis() - taskStartTime
+        logger.error(s"Prewarm task failed on $actualHostname: ${e.getMessage}", e)
+        ComponentPrewarmTaskResult(
+          hostname = actualHostname,
+          splitsPrewarmed = 0,
+          durationMs = duration,
+          success = false,
+          errorMessage = Some(e.getMessage),
+          skippedFields = None
+        )
+    }
+  }
+
+  /**
+   * Extract field names from AddAction metadata (docMappingJson).
+   */
+  private def extractFieldsFromMetadata(addAction: AddAction): Set[String] =
+    addAction.docMappingJson match {
+      case Some(json) =>
+        try {
+          // Parse docMappingJson to extract field names
+          // Format: {"field_mappings":[{"name":"field1",...},{"name":"field2",...}]}
+          val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+          val root = mapper.readTree(json)
+          val fieldMappings = root.path("field_mappings")
+          if (fieldMappings.isArray) {
+            import scala.jdk.CollectionConverters._
+            fieldMappings.elements().asScala.flatMap { fm =>
+              Option(fm.path("name").asText(null))
+            }.map(_.toLowerCase).toSet
+          } else {
+            Set.empty[String]
+          }
+        } catch {
+          case e: Exception =>
+            logger.debug(s"Failed to parse docMappingJson for field extraction: ${e.getMessage}")
+            Set.empty[String]
+        }
+      case None =>
+        Set.empty[String]
+    }
 
   /**
    * Join on a warmup future for a specific split during query execution. This should be called in the partition reader
@@ -432,3 +669,22 @@ case class PreWarmStats(
   hostsInvolved: Int,
   warmupTasksCreated: Int,
   preWarmTimeMs: Long)
+
+/** Task for component-based prewarm with segment/field selection. */
+case class ComponentPrewarmTask(
+  batchIndex: Int,
+  hostname: String,
+  addActions: Seq[AddAction],
+  segments: Set[IndexComponent],
+  fields: Option[Seq[String]])
+    extends Serializable
+
+/** Result from a component-based prewarm task execution. */
+case class ComponentPrewarmTaskResult(
+  hostname: String,
+  splitsPrewarmed: Int,
+  durationMs: Long,
+  success: Boolean,
+  errorMessage: Option[String],
+  skippedFields: Option[Set[String]] = None)
+    extends Serializable

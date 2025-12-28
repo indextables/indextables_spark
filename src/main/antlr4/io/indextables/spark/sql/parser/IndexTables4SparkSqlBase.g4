@@ -56,11 +56,17 @@ statement
     | REPAIR INDEXFILES TRANSACTION LOG sourcePath=STRING
         AT LOCATION targetPath=STRING                           #repairIndexFilesTransactionLog
     | FLUSH indexTablesKeyword SEARCHER CACHE                       #flushIndexTablesCache
+    | FLUSH indexTablesKeyword DISK CACHE                          #flushDiskCache
     | INVALIDATE indexTablesKeyword TRANSACTION LOG CACHE
         (FOR (path=STRING | table=qualifiedName))?             #invalidateIndexTablesTransactionLogCache
     | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
         (INCLUDE ALL)?                                          #describeTransactionLog
     | DESCRIBE indexTablesKeyword DISK CACHE                    #describeDiskCache
+    | PREWARM indexTablesKeyword CACHE (path=STRING | table=qualifiedName)
+        (FOR SEGMENTS '(' segmentList=identifierList ')')?
+        (ON FIELDS '(' fieldList=identifierList ')')?
+        (WITH PERWORKER PARALLELISM OF parallelism=INTEGER_VALUE)?
+        (WHERE whereClause=predicateToken)?                     #prewarmCache
     | .*?                                                       #passThrough
     ;
 
@@ -70,6 +76,10 @@ indexTablesKeyword
 
 alphanumericValue
     : IDENTIFIER | INTEGER_VALUE | STRING
+    ;
+
+identifierList
+    : identifier (',' identifier)*
     ;
 
 predicateToken
@@ -93,7 +103,8 @@ quotedIdentifier
 nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
-    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK
+    | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
+    | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON
     ;
 
 // Keywords (case-insensitive)
@@ -134,6 +145,14 @@ DROP: [Dd][Rr][Oo][Pp];
 PARTITIONS: [Pp][Aa][Rr][Tt][Ii][Tt][Ii][Oo][Nn][Ss];
 FROM: [Ff][Rr][Oo][Mm];
 DISK: [Dd][Ii][Ss][Kk];
+WITH: [Ww][Ii][Tt][Hh];
+PREWARM: [Pp][Rr][Ee][Ww][Aa][Rr][Mm];
+SEGMENTS: [Ss][Ee][Gg][Mm][Ee][Nn][Tt][Ss];
+FIELDS: [Ff][Ii][Ee][Ll][Dd][Ss];
+PERWORKER: [Pp][Ee][Rr][Ww][Oo][Rr][Kk][Ee][Rr];
+PARALLELISM: [Pp][Aa][Rr][Aa][Ll][Ll][Ee][Ll][Ii][Ss][Mm];
+OF: [Oo][Ff];
+ON: [Oo][Nn];
 
 // Literals
 STRING

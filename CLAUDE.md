@@ -24,6 +24,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Drop partitions**: SQL-based partition removal with WHERE clause validation (`DROP INDEXTABLES PARTITIONS`)
 - **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
+- **Cache prewarming**: SQL-based (`PREWARM INDEXTABLES CACHE`) and read-time prewarming with segment/field selection
 - **IndexQuery operators**: Native Tantivy syntax (`content indexquery 'query'`)
 - **V2 DataSource API**: Recommended for partition column indexing
 - **Multi-cloud**: S3 and Azure Blob Storage with native authentication
@@ -357,6 +358,81 @@ val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProv
 df.filter($"date" === "2024-01-01" && $"hour" === 10).show()
 ```
 
+### Prewarm Cache
+
+Pre-warm index caches across all executors for optimal query performance.
+
+```sql
+-- Register extensions
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Basic prewarm (preloads default segments: TERM, FASTFIELD, POSTINGS, FIELDNORM)
+PREWARM INDEXTABLES CACHE 's3://bucket/path';
+
+-- Prewarm specific segments
+PREWARM INDEXTABLES CACHE 's3://bucket/path' FOR SEGMENTS (TERM_DICT, FAST_FIELD);
+
+-- Prewarm with field selection
+PREWARM INDEXTABLES CACHE 's3://bucket/path' ON FIELDS (title, content, timestamp);
+
+-- Prewarm with partition filter
+PREWARM INDEXTABLES CACHE 's3://bucket/path' WHERE date >= '2024-01-01';
+
+-- Prewarm with custom parallelism (splits per task)
+PREWARM INDEXTABLES CACHE 's3://bucket/path' WITH PERWORKER PARALLELISM OF 5;
+
+-- Full syntax with all options
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  FOR SEGMENTS (TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM)
+  ON FIELDS (title, content)
+  WITH PERWORKER PARALLELISM OF 4
+  WHERE region = 'us-east';
+```
+
+**Segment Aliases:**
+| SQL Name | Description |
+|----------|-------------|
+| TERM_DICT, TERM | Term dictionary (FST) |
+| FAST_FIELD, FASTFIELD | Fast fields for aggregations |
+| POSTINGS, POSTING_LISTS | Inverted index postings |
+| FIELD_NORM, FIELDNORM | Field norms for scoring |
+| DOC_STORE, STORE | Document storage |
+
+**Default segments**: TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM (excludes DOC_STORE)
+
+**Read-time prewarm configuration:**
+```scala
+// Enable prewarm on read
+spark.indextables.prewarm.enabled: false (default)
+
+// Segment selection (comma-separated)
+spark.indextables.prewarm.segments: "TERM_DICT,FAST_FIELD,POSTINGS,FIELD_NORM"
+
+// Field selection (comma-separated, empty = all fields)
+spark.indextables.prewarm.fields: ""
+
+// Splits per Spark task (controls batch size)
+spark.indextables.prewarm.splitsPerTask: 2 (default)
+
+// Partition filter WHERE clause (prewarm only matching partitions)
+spark.indextables.prewarm.partitionFilter: "" (default: empty = all partitions)
+
+// Missing field handling (true = fail, false = warn and skip)
+spark.indextables.prewarm.failOnMissingField: true (default)
+
+// Catch-up behavior for new hosts
+spark.indextables.prewarm.catchUpNewHosts: false (default)
+```
+
+**Output schema:**
+- `host`: Executor hostname
+- `splits_prewarmed`: Count of splits prewarmed
+- `segments`: Comma-separated segment names
+- `fields`: Comma-separated field names (or "all")
+- `duration_ms`: Prewarm duration in milliseconds
+- `status`: "success", "partial", or "no_splits"
+- `skipped_fields`: Missing fields (if any)
+
 ### Merge Splits
 ```sql
 -- Register extensions
@@ -477,6 +553,30 @@ DESCRIBE TANTIVY4SPARK DISK CACHE;  -- alternate syntax
 - Returns NULL values when cache is disabled (no `/local_disk0` and not explicitly configured)
 - Use to monitor cache utilization and tune `maxSize` setting
 - To disable auto-detection, set `spark.indextables.cache.disk.enabled=false`
+
+### Flush Disk Cache
+```sql
+-- Flush disk cache across all executors (clears cached data and locality state)
+FLUSH INDEXTABLES DISK CACHE;
+FLUSH TANTIVY4SPARK DISK CACHE;  -- alternate syntax
+
+-- Example output:
+-- +-----------+----------------+-------+------------+-------------+------------------------------------------+
+-- |executor_id|cache_type      |status |bytes_freed |files_deleted|message                                   |
+-- +-----------+----------------+-------+------------+-------------+------------------------------------------+
+-- |driver     |split_cache     |success|           0|            2|Flushed 2 split cache managers            |
+-- |driver     |locality_manager|success|           0|            0|Cleared split locality assignments...     |
+-- |driver     |disk_cache_files|success|   524288000|          125|Deleted 125 files (524288000 bytes)...    |
+-- |executor-0 |disk_cache      |success|   524288000|          125|Deleted 125 files (524288000 bytes)...    |
+-- +-----------+----------------+-------+------------+-------------+------------------------------------------+
+```
+
+**Key points:**
+- Flushes split cache managers (closes disk cache handles)
+- Clears split locality assignments and prewarm state tracking
+- Deletes all disk cache files at the configured path
+- Uses explicitly configured path (`spark.indextables.cache.disk.path`) or auto-detected default
+- Useful for testing, maintenance, and troubleshooting cache issues
 
 ### Purge-On-Write (Automatic Table Hygiene)
 ```scala

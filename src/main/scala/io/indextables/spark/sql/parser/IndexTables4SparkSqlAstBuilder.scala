@@ -27,9 +27,11 @@ import io.indextables.spark.sql.{
   DescribeDiskCacheCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
+  FlushDiskCacheCommand,
   FlushIndexTablesCacheCommand,
   InvalidateTransactionLogCacheCommand,
   MergeSplitsCommand,
+  PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand
 }
@@ -290,6 +292,9 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
   override def visitFlushIndexTablesCache(ctx: FlushIndexTablesCacheContext): LogicalPlan =
     FlushIndexTablesCacheCommand()
 
+  override def visitFlushDiskCache(ctx: FlushDiskCacheContext): LogicalPlan =
+    FlushDiskCacheCommand()
+
   override def visitInvalidateIndexTablesTransactionLogCache(ctx: InvalidateIndexTablesTransactionLogCacheContext)
     : LogicalPlan = {
     logger.debug(s"visitInvalidateTantivyTransactionLogCache called with context: $ctx")
@@ -388,6 +393,90 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     val result = DescribeDiskCacheCommand()
     logger.debug(s"Created DescribeDiskCacheCommand: $result")
     result
+  }
+
+  override def visitPrewarmCache(ctx: PrewarmCacheContext): LogicalPlan = {
+    logger.debug(s"visitPrewarmCache called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val tablePath = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        pathStr
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException("PREWARM INDEXTABLES CACHE requires either a path or table identifier")
+      }
+
+      // Extract segment list (FOR SEGMENTS clause)
+      val segments: Seq[String] = if (ctx.segmentList != null) {
+        val segList = ctx.segmentList.identifier().asScala.map(_.getText.toUpperCase).toSeq
+        logger.debug(s"Found segments: ${segList.mkString(", ")}")
+        segList
+      } else {
+        logger.debug("No segments specified, will use defaults")
+        Seq.empty
+      }
+
+      // Extract field list (ON FIELDS clause)
+      val fields: Option[Seq[String]] = if (ctx.fieldList != null) {
+        val fieldSeq = ctx.fieldList.identifier().asScala.map(_.getText).toSeq
+        logger.debug(s"Found fields: ${fieldSeq.mkString(", ")}")
+        Some(fieldSeq)
+      } else {
+        logger.debug("No fields specified, will prewarm all fields")
+        None
+      }
+
+      // Extract parallelism (WITH PERWORKER PARALLELISM OF N)
+      val splitsPerTask: Int = if (ctx.parallelism != null) {
+        val parallelismValue = ctx.parallelism.getText.toInt
+        logger.debug(s"Found parallelism: $parallelismValue")
+        if (parallelismValue <= 0) {
+          throw new IllegalArgumentException(s"PERWORKER PARALLELISM must be positive, got: $parallelismValue")
+        }
+        parallelismValue
+      } else {
+        logger.debug("No parallelism specified, will use default (2)")
+        2 // Default: 2 splits per task
+      }
+
+      // Extract WHERE clause for partition filtering
+      val wherePredicates: Seq[String] = if (ctx.whereClause != null) {
+        val originalText = extractRawText(ctx.whereClause)
+        logger.debug(s"Found WHERE clause: $originalText")
+        Seq(originalText)
+      } else {
+        logger.debug("No WHERE clause")
+        Seq.empty
+      }
+
+      // Create command
+      logger.debug(
+        s"Creating PrewarmCacheCommand with tablePath=$tablePath, segments=$segments, " +
+          s"fields=$fields, splitsPerTask=$splitsPerTask, wherePredicates=$wherePredicates"
+      )
+      val result = PrewarmCacheCommand(
+        tablePath = tablePath,
+        segments = segments,
+        fields = fields,
+        splitsPerTask = splitsPerTask,
+        wherePredicates = wherePredicates
+      )
+      logger.debug(s"Created PrewarmCacheCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitPrewarmCache: ${e.getMessage}", e)
+        throw e
+    }
   }
 
   override def visitPassThrough(ctx: PassThroughContext): AnyRef = {

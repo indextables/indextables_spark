@@ -104,6 +104,9 @@ class IndexTables4SparkTable(
             value.toLong
           case "Int" =>
             value.toInt
+          case "Size" =>
+            // Parse size strings like "1G", "500M", "1024K"
+            io.indextables.spark.util.SizeParser.parseSize(value)
           case _ => // No validation needed
         }
       catch {
@@ -117,7 +120,7 @@ class IndexTables4SparkTable(
       case (key, value) =>
         key.toLowerCase match {
           case k if k.contains("maxsize") =>
-            validateNumericConfig(key, value, "Long")
+            validateNumericConfig(key, value, "Size") // Use Size parser for maxSize configs
           case k if k.contains("maxconcurrentloads") =>
             validateNumericConfig(key, value, "Int")
           case k if k.contains("targetrecordspersplit") =>
