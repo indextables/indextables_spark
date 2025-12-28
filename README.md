@@ -105,6 +105,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - [Configuration Options](#configuration-options-read-options-andor-spark-properties)
   - [Field Indexing Configuration](#field-indexing-configuration)
   - [JSON Field Support](#json-field-support-for-nested-data)
+  - [Bucket Aggregations](#bucket-aggregations)
   - [String Pattern Filter Pushdown](#string-pattern-filter-pushdown)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
@@ -139,6 +140,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
 - 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
+- 📈 **Bucket Aggregations**: DateHistogram, Histogram, and Range bucketing functions for time-series and distribution analysis in SQL GROUP BY
 - 🗂️ **JSON Field Support**: Native support for Spark Struct, Array, and Map fields with automatic detection, type-safe round-tripping, high-performance filter pushdown, and configurable indexing modes (114/114 tests passing)
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
@@ -1168,6 +1170,66 @@ df.write.format("io.indextables.provider.IndexTablesProvider")
 - ✅ Storage costs matter more than query performance
 
 For comprehensive documentation, usage examples, and technical details, see the **JSON Field Support** section in `CLAUDE.md`.
+
+#### Bucket Aggregations
+
+IndexTables4Spark supports bucket aggregation functions for time-series analysis and numeric distribution analysis. These functions execute directly in Tantivy and can be used in SQL GROUP BY clauses.
+
+##### SQL Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `indextables_histogram(column, interval)` | Fixed-interval numeric bucketing | `indextables_histogram(price, 50.0)` |
+| `indextables_date_histogram(column, interval)` | Time-based bucketing | `indextables_date_histogram(event_time, '1d')` |
+| `indextables_range(column, name, from, to, ...)` | Custom named ranges | `indextables_range(price, 'cheap', NULL, 50.0, 'expensive', 100.0, NULL)` |
+
+##### Histogram Example
+
+```sql
+-- Bucket products by price in $50 intervals
+SELECT indextables_histogram(price, 50.0) as price_bucket,
+       COUNT(*) as cnt,
+       SUM(quantity) as total_qty
+FROM products
+GROUP BY indextables_histogram(price, 50.0)
+ORDER BY price_bucket
+```
+
+##### DateHistogram Example
+
+```sql
+-- Bucket events by day
+SELECT indextables_date_histogram(event_time, '1d') as day_bucket,
+       COUNT(*) as event_count
+FROM events
+GROUP BY indextables_date_histogram(event_time, '1d')
+ORDER BY day_bucket
+
+-- Supported intervals: ms, s, m, h, d (e.g., '1h', '7d', '30m', '500ms')
+```
+
+##### Range Example
+
+```sql
+-- Create custom price tiers
+SELECT indextables_range(price, 'cheap', NULL, 50.0, 'mid', 50.0, 100.0, 'expensive', 100.0, NULL) as tier,
+       COUNT(*) as cnt
+FROM products
+GROUP BY indextables_range(price, 'cheap', NULL, 50.0, 'mid', 50.0, 100.0, 'expensive', 100.0, NULL)
+```
+
+**Requirements:**
+- Bucket aggregation fields must be configured as fast fields
+- DateHistogram works with Spark `Timestamp` columns
+- Use `NULL` for unbounded range values (e.g., `'cheap', NULL, 50.0` means "less than 50")
+
+**Writing with Fast Fields:**
+```scala
+df.write
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.indexing.fastfields", "price,event_time")
+  .save("s3://bucket/path")
+```
 
 #### String Pattern Filter Pushdown
 

@@ -1069,28 +1069,49 @@ object FiltersToQueryConverter {
 
     fieldType match {
       case FieldType.DATE =>
-        // Convert to YYYY-MM-DD date string format for SplitRangeQuery compatibility
-        // Based on SplitDateRangeQueryTest: uses simple date strings like "2021-01-01"
-        import java.time.LocalDate
-        val localDate = value match {
+        // Convert to ISO datetime format for tantivy DATE fields
+        // For timestamps, preserve full datetime; for dates, use date-only format
+        // IMPORTANT: Use UTC timezone to match how data is indexed
+        import java.time.{LocalDate, LocalDateTime, ZoneOffset, Instant}
+        import java.time.format.DateTimeFormatter
+        value match {
           case ts: java.sql.Timestamp =>
-            ts.toLocalDateTime().toLocalDate // Get date part only
+            // For timestamps, convert to UTC and use RFC3339 format: YYYY-MM-DDTHH:MM:SSZ
+            // This matches how timestamps are indexed (using UTC) and tantivy's expected format
+            val instant = ts.toInstant()
+            val utcDateTime = instant.atOffset(ZoneOffset.UTC)
+            val dateTimeString = utcDateTime.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+            queryLog(s"DATE conversion (Timestamp): $value -> $dateTimeString (RFC3339 UTC)")
+            dateTimeString
           case date: java.sql.Date =>
-            date.toLocalDate() // Direct conversion to LocalDate
+            // For dates, use date-only format: YYYY-MM-DD
+            val dateString = date.toLocalDate().toString
+            queryLog(s"DATE conversion (Date): $value -> $dateString")
+            dateString
           case dateStr: String =>
-            // Parse string date to LocalDate
-            LocalDate.parse(dateStr)
+            // String dates - pass through as-is
+            queryLog(s"DATE conversion (String): $value -> $dateStr")
+            dateStr
           case daysSinceEpoch: Int =>
             // Convert days since epoch to LocalDate
             val epochDate = LocalDate.of(1970, 1, 1)
-            epochDate.plusDays(daysSinceEpoch.toLong)
+            val dateString = epochDate.plusDays(daysSinceEpoch.toLong).toString
+            queryLog(s"DATE conversion (Days): $value -> $dateString")
+            dateString
+          case microseconds: Long =>
+            // Spark timestamps are stored as microseconds since epoch
+            // Convert to ISO datetime format
+            val seconds = microseconds / 1000000L
+            val nanos = ((microseconds % 1000000L) * 1000L).toInt
+            val instant = java.time.Instant.ofEpochSecond(seconds, nanos)
+            val localDateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
+            val dateTimeString = localDateTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            queryLog(s"DATE conversion (Long microseconds): $value -> $dateTimeString")
+            dateTimeString
           case other =>
             queryLog(s"DATE conversion: Unexpected type ${other.getClass.getSimpleName}, trying to parse as string")
-            LocalDate.parse(other.toString)
+            other.toString
         }
-        val dateString = localDate.toString // This gives YYYY-MM-DD format
-        queryLog(s"DATE conversion: $value -> $dateString")
-        dateString
       case FieldType.INTEGER =>
         // Keep original types for range queries - tantivy4java handles type conversion internally
         val result = value match {
@@ -1181,24 +1202,62 @@ object FiltersToQueryConverter {
           val queryString = s"$attribute:$quotedValue"
           Some(splitSearchEngine.parseQuery(queryString))
         } else if (fieldType == FieldType.DATE) {
-          // For date fields, use SplitRangeQuery covering the entire day
+          // For date/timestamp fields, use range query for proper datetime matching
           convertedValue match {
-            case dateString: String =>
-              // For date equality, create a range covering the entire day using date strings
-              // Based on SplitDateRangeQueryTest: use YYYY-MM-DD format strings with "date" field type
-              import java.time.LocalDate
-              val localDate    = LocalDate.parse(dateString)
-              val nextDay      = localDate.plusDays(1)
-              val startDateStr = localDate.toString // YYYY-MM-DD format
-              val endDateStr   = nextDay.toString   // YYYY-MM-DD format
+            case dateTimeString: String if dateTimeString.contains("T") =>
+              // Full datetime (timestamp) - create a small range around the exact time
+              // For timestamp equality, we need a very narrow range (1 microsecond window)
+              import java.time.{OffsetDateTime, LocalDateTime, ZoneOffset}
+              import java.time.format.DateTimeFormatter
+
+              // Parse the RFC3339 datetime string (may have Z or +00:00 suffix)
+              val (localDateTime, startStr) = if (dateTimeString.endsWith("Z") || dateTimeString.contains("+") || dateTimeString.contains("-")) {
+                // RFC3339 format with timezone - parse and extract local datetime
+                val offsetDateTime = OffsetDateTime.parse(dateTimeString, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                val ldt = offsetDateTime.toLocalDateTime
+                (ldt, dateTimeString) // Use original RFC3339 string for query
+              } else {
+                // ISO_LOCAL_DATE_TIME format without timezone
+                val ldt = LocalDateTime.parse(dateTimeString, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                (ldt, dateTimeString)
+              }
+
+              // For equality matching, create a 1 microsecond range to match exact value
+              // Add 1 nanosecond to get exclusive upper bound that still matches just this value
+              val endDateTime = localDateTime.plusNanos(1000) // 1 microsecond
+              val endStr = if (dateTimeString.endsWith("Z")) {
+                endDateTime.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+              } else if (dateTimeString.contains("+") || (dateTimeString.contains("-") && dateTimeString.lastIndexOf("-") > 10)) {
+                // Has timezone offset - preserve it
+                val offset = OffsetDateTime.parse(dateTimeString).getOffset
+                endDateTime.atOffset(offset).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+              } else {
+                endDateTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+              }
 
               val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
                 attribute,
-                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(startDateStr), // Include start of day
-                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endDateStr), // Exclude start of next day
-                "date" // Use "date" field type as shown in SplitDateRangeQueryTest
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(startStr),
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endStr),
+                "date"
               )
-              queryLog(s"Creating date equality SplitRangeQuery with date strings: [$startDateStr TO $endDateStr) for $localDate")
+              queryLog(s"Creating datetime equality SplitRangeQuery: [$startStr TO $endStr)")
+              Some(rangeQuery)
+            case dateString: String =>
+              // Date-only - create a range covering the entire day
+              import java.time.LocalDate
+              val localDate    = LocalDate.parse(dateString)
+              val nextDay      = localDate.plusDays(1)
+              val startDateStr = localDate.toString
+              val endDateStr   = nextDay.toString
+
+              val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
+                attribute,
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(startDateStr),
+                io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(endDateStr),
+                "date"
+              )
+              queryLog(s"Creating date equality SplitRangeQuery: [$startDateStr TO $endDateStr)")
               Some(rangeQuery)
             case other =>
               queryLog(s"Unexpected date value type: ${other.getClass.getSimpleName}, falling back to term query")
@@ -1257,16 +1316,26 @@ object FiltersToQueryConverter {
             return None
         }
 
-        // Use query string parsing for range queries - parseQuery can handle range syntax
+        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
-          val queryString = s"$attribute:>$convertedValue"
-          queryLog(s"Creating GreaterThan query using parseQuery: $queryString")
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          Some(parsedQuery)
+          val tantivyFieldType = fieldType match {
+            case FieldType.DATE     => "date"
+            case FieldType.INTEGER  => "i64"
+            case FieldType.FLOAT    => "f64"
+            case _                  => "str"
+          }
+          val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
+            attribute,
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(convertedValue.toString),
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded(),
+            tantivyFieldType
+          )
+          queryLog(s"Creating GreaterThan SplitRangeQuery: $attribute > $convertedValue")
+          Some(rangeQuery)
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create range query using parseQuery for GreaterThan: ${e.getMessage}")
-            None // Fall back completely if parsing fails
+            queryLog(s"Failed to create SplitRangeQuery for GreaterThan: ${e.getMessage}")
+            None
         }
 
       case GreaterThanOrEqual(attribute, value) =>
@@ -1281,16 +1350,26 @@ object FiltersToQueryConverter {
             return None
         }
 
-        // Use query string parsing for range queries - parseQuery can handle range syntax
+        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
-          val queryString = s"$attribute:>=$convertedValue"
-          queryLog(s"Creating GreaterThanOrEqual query using parseQuery: $queryString")
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          Some(parsedQuery)
+          val tantivyFieldType = fieldType match {
+            case FieldType.DATE     => "date"
+            case FieldType.INTEGER  => "i64"
+            case FieldType.FLOAT    => "f64"
+            case _                  => "str"
+          }
+          val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
+            attribute,
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(convertedValue.toString),
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded(),
+            tantivyFieldType
+          )
+          queryLog(s"Creating GreaterThanOrEqual SplitRangeQuery: $attribute >= $convertedValue")
+          Some(rangeQuery)
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create range query using parseQuery for GreaterThanOrEqual: ${e.getMessage}")
-            None // Fall back completely if parsing fails
+            queryLog(s"Failed to create SplitRangeQuery for GreaterThanOrEqual: ${e.getMessage}")
+            None
         }
 
       case LessThan(attribute, value) =>
@@ -1339,16 +1418,26 @@ object FiltersToQueryConverter {
             return None
         }
 
-        // Use query string parsing for range queries - parseQuery can handle range syntax
+        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
-          val queryString = s"$attribute:<$convertedValue"
-          queryLog(s"Creating LessThan query using parseQuery: $queryString")
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          Some(parsedQuery)
+          val tantivyFieldType = fieldType match {
+            case FieldType.DATE     => "date"
+            case FieldType.INTEGER  => "i64"
+            case FieldType.FLOAT    => "f64"
+            case _                  => "str"
+          }
+          val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
+            attribute,
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded(),
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.exclusive(convertedValue.toString),
+            tantivyFieldType
+          )
+          queryLog(s"Creating LessThan SplitRangeQuery: $attribute < $convertedValue")
+          Some(rangeQuery)
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create range query using parseQuery for LessThan: ${e.getMessage}")
-            None // Fall back completely if parsing fails
+            queryLog(s"Failed to create SplitRangeQuery for LessThan: ${e.getMessage}")
+            None
         }
 
       case LessThanOrEqual(attribute, value) =>
@@ -1397,16 +1486,26 @@ object FiltersToQueryConverter {
             return None
         }
 
-        // Use query string parsing for range queries - parseQuery can handle range syntax
+        // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
-          val queryString = s"$attribute:<=$convertedValue"
-          queryLog(s"Creating LessThanOrEqual query using parseQuery: $queryString")
-          val parsedQuery = splitSearchEngine.parseQuery(queryString)
-          Some(parsedQuery)
+          val tantivyFieldType = fieldType match {
+            case FieldType.DATE     => "date"
+            case FieldType.INTEGER  => "i64"
+            case FieldType.FLOAT    => "f64"
+            case _                  => "str"
+          }
+          val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
+            attribute,
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.unbounded(),
+            io.indextables.tantivy4java.split.SplitRangeQuery.RangeBound.inclusive(convertedValue.toString),
+            tantivyFieldType
+          )
+          queryLog(s"Creating LessThanOrEqual SplitRangeQuery: $attribute <= $convertedValue")
+          Some(rangeQuery)
         } catch {
           case e: Exception =>
-            queryLog(s"Failed to create range query using parseQuery for LessThanOrEqual: ${e.getMessage}")
-            None // Fall back completely if parsing fails
+            queryLog(s"Failed to create SplitRangeQuery for LessThanOrEqual: ${e.getMessage}")
+            None
         }
 
       case StringStartsWith(attribute, value) =>

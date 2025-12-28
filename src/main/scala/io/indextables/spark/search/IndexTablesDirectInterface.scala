@@ -258,7 +258,7 @@ object TantivyDirectInterface {
             case org.apache.spark.sql.types.BinaryType =>
               builder.addBytesField(fieldName, stored, indexed, fast, "position")
             case org.apache.spark.sql.types.TimestampType =>
-              builder.addIntegerField(fieldName, stored, indexed, fast) // Store as microseconds since epoch
+              builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field for timestamp
             case org.apache.spark.sql.types.DateType =>
               builder.addDateField(fieldName, stored, indexed, fast) // Use proper date field
             case org.apache.spark.sql.types.StructType(_) | org.apache.spark.sql.types.ArrayType(_, _) =>
@@ -806,7 +806,15 @@ class TantivyDirectInterface(
         case org.apache.spark.sql.types.BinaryType =>
           adder.addBytes(fieldName, value.asInstanceOf[Array[Byte]])
         case org.apache.spark.sql.types.TimestampType =>
-          adder.addInteger(fieldName, value.asInstanceOf[Long])
+          // Spark stores timestamps as microseconds since epoch
+          // Convert to LocalDateTime for tantivy date field
+          import java.time.{Instant, LocalDateTime, ZoneOffset}
+          val microseconds = value.asInstanceOf[Long]
+          val seconds = microseconds / 1000000L
+          val nanoAdjustment = (microseconds % 1000000L) * 1000L
+          val instant = Instant.ofEpochSecond(seconds, nanoAdjustment)
+          val localDateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
+          adder.addDate(fieldName, localDateTime)
         case org.apache.spark.sql.types.DateType =>
           import java.time.LocalDate
           val daysSinceEpoch = value.asInstanceOf[Int]

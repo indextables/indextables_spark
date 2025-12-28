@@ -164,11 +164,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.25.14: L2 Disk Cache support (persistent NVMe caching) -->
+        <!-- Version 0.26.3: Bucket aggregations (DateHistogram, Histogram, Range) -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.26.2</version>
+            <version>0.26.3</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->

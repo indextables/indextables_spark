@@ -22,8 +22,15 @@ import org.apache.spark.sql.catalyst.expressions.ExpressionInfo
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.SparkSessionExtensions
 
-import io.indextables.spark.catalyst.V2IndexQueryExpressionRule
-import io.indextables.spark.expressions.{IndexQueryAllExpression, IndexQueryExpression}
+import io.indextables.spark.catalyst.{V2BucketExpressionRule, V2IndexQueryExpressionRule}
+import io.indextables.spark.expressions.{
+  BucketFunctionBuilder,
+  DateHistogramExpression,
+  HistogramExpression,
+  IndexQueryAllExpression,
+  IndexQueryExpression,
+  RangeExpression
+}
 import io.indextables.spark.sql.IndexTables4SparkSqlParser
 
 /**
@@ -87,6 +94,56 @@ class IndexTables4SparkExtensions extends (SparkSessionExtensions => Unit) {
     // Register V2 IndexQuery expression conversion rule in resolution phase
     // This runs during analysis, before scan planning
     extensions.injectResolutionRule(session => V2IndexQueryExpressionRule)
+
+    // Register V2 Bucket expression conversion rule in resolution phase
+    // This transforms bucket aggregation expressions in GROUP BY for V2 pushdown
+    extensions.injectResolutionRule(session => V2BucketExpressionRule)
+
+    // Register bucket aggregation functions
+    // DateHistogram: indextables_date_histogram(column, interval, [offset], [min_doc_count])
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("indextables_date_histogram"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.DateHistogramExpression",
+          "indextables_date_histogram",
+          "indextables_date_histogram(column, interval, [offset], [min_doc_count]) - " +
+            "Creates date histogram buckets for time-series analysis. " +
+            "Interval examples: '1h', '1d', '7d', '30m'."
+        ),
+        (children: Seq[Expression]) => BucketFunctionBuilder.buildDateHistogram(children)
+      )
+    )
+
+    // Histogram: indextables_histogram(column, interval, [offset], [min_doc_count])
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("indextables_histogram"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.HistogramExpression",
+          "indextables_histogram",
+          "indextables_histogram(column, interval, [offset], [min_doc_count]) - " +
+            "Creates fixed-interval numeric histogram buckets. " +
+            "Example: indextables_histogram(price, 50.0) creates $0-50, $50-100, etc."
+        ),
+        (children: Seq[Expression]) => BucketFunctionBuilder.buildHistogram(children)
+      )
+    )
+
+    // Range: indextables_range(column, name1, from1, to1, name2, from2, to2, ...)
+    extensions.injectFunction(
+      (
+        FunctionIdentifier("indextables_range"),
+        new ExpressionInfo(
+          "io.indextables.spark.expressions.RangeExpression",
+          "indextables_range",
+          "indextables_range(column, name, from, to, ...) - " +
+            "Creates custom range buckets. Use NULL for unbounded values. " +
+            "Example: indextables_range(price, 'cheap', NULL, 50, 'expensive', 50, NULL)"
+        ),
+        (children: Seq[Expression]) => BucketFunctionBuilder.buildRange(children)
+      )
+    )
 
     // Future: Add planning strategies
     // extensions.injectPlannerStrategy { session =>
