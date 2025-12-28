@@ -18,6 +18,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
 - **Transaction log**: Delta Lake-style with atomic operations, checkpoints, and GZIP compression
 - **Aggregate pushdown**: COUNT(), SUM(), AVG(), MIN(), MAX() with transaction log optimization
+- **Bucket aggregations**: DateHistogram, Histogram, and Range bucketing via SQL functions for time-series and distribution analysis
 - **Partitioned datasets**: Full support with partition pruning
 - **Merge operations**: SQL-based split consolidation (`MERGE SPLITS`)
 - **Drop partitions**: SQL-based partition removal with WHERE clause validation (`DROP INDEXTABLES PARTITIONS`)
@@ -194,6 +195,39 @@ df.filter($"content" indexquery "machine learning").show()
 // Aggregations (pushed down to tantivy)
 df.agg(count("*"), sum("score"), avg("score")).show()
 ```
+
+### Bucket Aggregations
+
+Bucket aggregation functions enable time-series analysis and numeric distribution analysis using SQL GROUP BY clauses. These execute directly in Tantivy.
+
+#### SQL Functions
+- `indextables_histogram(column, interval)` - Fixed-interval numeric bucketing
+- `indextables_date_histogram(column, interval)` - Time-based bucketing (supports: `ms`, `s`, `m`, `h`, `d`)
+- `indextables_range(column, name1, from1, to1, ...)` - Custom named range buckets
+
+#### Examples
+```sql
+-- Histogram: Bucket by price in $50 intervals with sub-aggregations
+SELECT indextables_histogram(price, 50.0) as price_bucket,
+       COUNT(*) as cnt, SUM(quantity) as total_qty
+FROM products
+GROUP BY indextables_histogram(price, 50.0)
+
+-- DateHistogram: Bucket events by day
+SELECT indextables_date_histogram(event_time, '1d') as day_bucket, COUNT(*) as cnt
+FROM events
+GROUP BY indextables_date_histogram(event_time, '1d')
+
+-- Range: Create custom price tiers (NULL = unbounded)
+SELECT indextables_range(price, 'cheap', NULL, 50.0, 'mid', 50.0, 100.0, 'expensive', 100.0, NULL) as tier,
+       COUNT(*) as cnt
+FROM products
+GROUP BY indextables_range(price, 'cheap', NULL, 50.0, 'mid', 50.0, 100.0, 'expensive', 100.0, NULL)
+```
+
+**Requirements:**
+- Fields must be configured as fast fields: `spark.indextables.indexing.fastfields: "price,event_time"`
+- DateHistogram works with Spark `Timestamp` columns (indexed as tantivy date fields)
 
 ### Batch Retrieval Optimization
 
@@ -565,6 +599,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - ✅ **JSON fields**: 114/114 tests passing (99 Struct/Array/Map tests + 15 aggregate/configuration tests)
 - ✅ **JSON configuration**: 6/6 tests passing (json.mode validation)
 - ✅ **JSON aggregates**: 9/9 tests passing (aggregates on nested fields with filter pushdown)
+- ✅ **Bucket aggregations**: 4/4 tests passing (Histogram, DateHistogram, Range, sub-aggregations)
 - ✅ **Partitioned datasets**: 7/7 tests
 - ✅ **Transaction log**: All checkpoint and compression tests passing
 - ✅ **PURGE INDEXTABLE**: 40/40 tests passing (integration, parsing, error handling, transaction log cleanup)
@@ -585,6 +620,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Purge-on-write triggers**: Can run after merge-on-write or after N writes per table (per-session counters)
 - **Purge-on-write safety**: Disabled by default, respects minimum retention periods, propagates credentials, graceful failure handling
 - **L2 Disk Cache**: Auto-enabled on Databricks/EMR when `/local_disk0` detected; disabled on spinning disk systems (no benefit). Use `spark.indextables.cache.disk.enabled=false` to explicitly disable.
+- **Bucket aggregations**: Use `indextables_histogram`, `indextables_date_histogram`, `indextables_range` functions in GROUP BY for time-series and distribution analysis. Requires fast fields.
 
 ---
 

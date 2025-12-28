@@ -54,6 +54,7 @@ object TimestampUtils {
    */
   def toMicros(ldt: LocalDateTime): Long = {
     val millis = ldt.atZone(java.time.ZoneOffset.UTC).toInstant.toEpochMilli
-    (millis * 1000L) + (ldt.getNano / 1000L)
+    // Only add sub-millisecond microseconds (millis already includes ms portion)
+    (millis * 1000L) + ((ldt.getNano / 1000L) % 1000L)
   }
 }

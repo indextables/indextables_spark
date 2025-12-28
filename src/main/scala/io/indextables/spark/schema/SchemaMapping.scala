@@ -314,17 +314,60 @@ object SchemaMapping {
               java.time.temporal.ChronoUnit.DAYS.between(epochDate, ld).toInt
             case l: java.lang.Long    => l.intValue() // Days since epoch
             case i: java.lang.Integer => i.intValue()
-            case s: String            => s.toInt
+            case s: String            =>
+              // Try to parse as numeric days first, then as LocalDateTime/LocalDate string
+              try
+                s.toInt // Parse as days since epoch
+              catch {
+                case _: NumberFormatException =>
+                  // Parse as LocalDateTime/LocalDate string
+                  try {
+                    val epochDate = java.time.LocalDate.of(1970, 1, 1)
+                    if (s.contains("T")) {
+                      val localDateTime = java.time.LocalDateTime.parse(s)
+                      java.time.temporal.ChronoUnit.DAYS.between(epochDate, localDateTime.toLocalDate).toInt
+                    } else {
+                      val localDate = java.time.LocalDate.parse(s)
+                      java.time.temporal.ChronoUnit.DAYS.between(epochDate, localDate).toInt
+                    }
+                  } catch {
+                    case _: Exception => throw new IllegalArgumentException(s"Cannot parse date string: $s")
+                  }
+              }
             case other                => throw new IllegalArgumentException(s"Cannot convert $other to Date")
           }
 
-        // DATE -> TimestampType (DATE fields store microseconds, return directly)
+        // DATE -> TimestampType (DATE fields may return LocalDateTime or microseconds)
         case (FieldType.DATE, TimestampType) =>
           rawValue match {
             case l: java.lang.Long    => l.longValue() // Already in microseconds
             case i: java.lang.Integer => i.longValue() // Convert to Long
-            case s: String            => s.toLong      // Parse as microseconds
-            case other                => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
+            case ldt: java.time.LocalDateTime =>
+              // Convert LocalDateTime to microseconds since epoch
+              TimestampUtils.toMicros(ldt)
+            case ld: java.time.LocalDate =>
+              // Convert LocalDate to microseconds since epoch (start of day)
+              ld.atStartOfDay(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+            case s: String =>
+              // Try to parse as numeric microseconds first, then as LocalDateTime string
+              try
+                s.toLong // Parse as microseconds
+              catch {
+                case _: NumberFormatException =>
+                  // Parse as LocalDateTime/LocalDate string
+                  try
+                    if (s.contains("T")) {
+                      val localDateTime = java.time.LocalDateTime.parse(s)
+                      TimestampUtils.toMicros(localDateTime)
+                    } else {
+                      val localDate = java.time.LocalDate.parse(s)
+                      localDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant.toEpochMilli * 1000L
+                    }
+                  catch {
+                    case _: Exception => throw new IllegalArgumentException(s"Cannot parse timestamp string: $s")
+                  }
+              }
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Timestamp")
           }
 
         // BYTES -> BinaryType
