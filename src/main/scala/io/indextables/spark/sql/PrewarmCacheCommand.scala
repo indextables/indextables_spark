@@ -76,6 +76,8 @@ case class PrewarmCacheCommand(
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("host", StringType, nullable = false)(),
+    AttributeReference("assigned_host", StringType, nullable = false)(),
+    AttributeReference("locality_match", BooleanType, nullable = false)(),
     AttributeReference("splits_prewarmed", IntegerType, nullable = false)(),
     AttributeReference("segments", StringType, nullable = false)(),
     AttributeReference("fields", StringType, nullable = false)(),
@@ -140,13 +142,15 @@ case class PrewarmCacheCommand(
         logger.info("No splits to prewarm")
         return Seq(
           Row(
-            "none",
-            0,
+            "none",       // host
+            "none",       // assigned_host
+            true,         // locality_match (trivially true when no splits)
+            0,            // splits_prewarmed
             resolvedSegments.map(_.name()).toSeq.sorted.mkString(","),
             fields.map(_.mkString(",")).getOrElse("all"),
-            0L,
-            "no_splits",
-            null
+            0L,           // duration_ms
+            "no_splits",  // status
+            null          // skipped_fields
           )
         )
       }
@@ -229,8 +233,11 @@ case class PrewarmCacheCommand(
             val segmentsStr   = results.head.segments
             val fieldsStr     = results.head.fields
             val skippedStr    = if (allSkipped.isEmpty) null else allSkipped.mkString(",")
+            // Locality tracking - use first result's assigned host and check if all matched
+            val assignedHost  = results.head.assignedHost
+            val localityMatch = results.forall(_.localityMatch)
 
-            Row(hostname, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr)
+            Row(hostname, assignedHost, localityMatch, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr)
         }
         .toSeq
 
@@ -250,9 +257,16 @@ case class PrewarmCacheCommand(
     task: PrewarmTask,
     config: Map[String, String]
   ): PrewarmTaskResult = {
-    val taskStartTime = System.currentTimeMillis()
-    val hostname      = java.net.InetAddress.getLocalHost.getHostName
-    val taskLogger    = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
+    val taskStartTime  = System.currentTimeMillis()
+    val actualHostname = java.net.InetAddress.getLocalHost.getHostName
+    val taskLogger     = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
+
+    // Log locality verification
+    if (task.hostname != actualHostname) {
+      taskLogger.warn(s"LOCALITY MISMATCH: Task assigned to '${task.hostname}' but running on '$actualHostname'")
+    } else {
+      taskLogger.debug(s"LOCALITY VERIFIED: Task correctly running on assigned host '$actualHostname'")
+    }
 
     try {
       // Create cache config
@@ -327,7 +341,7 @@ case class PrewarmCacheCommand(
             // Record prewarm completion for catch-up tracking
             DriverSplitLocalityManager.recordPrewarmCompletion(
               addAction.path,
-              hostname,
+              actualHostname,
               task.segments,
               task.fields.map(_.toSet)
             )
@@ -347,8 +361,11 @@ case class PrewarmCacheCommand(
       val duration = System.currentTimeMillis() - taskStartTime
       val status   = if (skippedFields.isEmpty) "success" else "partial"
 
+      val localityMatch = task.hostname == actualHostname
       PrewarmTaskResult(
-        hostname = hostname,
+        hostname = actualHostname,
+        assignedHost = task.hostname,
+        localityMatch = localityMatch,
         splitsPrewarmed = prewarmedCount,
         segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
         fields = task.fields.map(_.mkString(",")).getOrElse("all"),
@@ -358,10 +375,13 @@ case class PrewarmCacheCommand(
       )
     } catch {
       case e: Exception =>
-        taskLogger.error(s"Prewarm task failed on host $hostname: ${e.getMessage}", e)
+        taskLogger.error(s"Prewarm task failed on host $actualHostname: ${e.getMessage}", e)
         val duration = System.currentTimeMillis() - taskStartTime
+        val localityMatch = task.hostname == actualHostname
         PrewarmTaskResult(
-          hostname = hostname,
+          hostname = actualHostname,
+          assignedHost = task.hostname,
+          localityMatch = localityMatch,
           splitsPrewarmed = 0,
           segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
           fields = task.fields.map(_.mkString(",")).getOrElse("all"),
@@ -415,6 +435,8 @@ private[sql] case class PrewarmTask(
 /** Result from a single prewarm task execution. */
 private[sql] case class PrewarmTaskResult(
   hostname: String,
+  assignedHost: String,
+  localityMatch: Boolean,
   splitsPrewarmed: Int,
   segments: String,
   fields: String,
