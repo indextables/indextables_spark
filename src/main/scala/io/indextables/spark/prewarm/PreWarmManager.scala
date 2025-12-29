@@ -29,6 +29,7 @@ import org.apache.spark.SparkContext
 
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{DriverSplitLocalityManager, SplitCacheConfig}
+import io.indextables.spark.util.ConfigUtils
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.SplitSearcher
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
@@ -521,38 +522,15 @@ object PreWarmManager {
     }
   }
 
-  /** Create a SplitCacheConfig from broadcast configuration. */
-  private def createCacheConfigFromBroadcast(configMap: Map[String, String], tablePath: String): SplitCacheConfig = {
-    def getConfig(key: String, default: String): String = configMap.getOrElse(key, default)
-    def getConfigOption(key: String): Option[String]    = configMap.get(key).filter(_.trim.nonEmpty)
-
-    SplitCacheConfig(
-      cacheName = {
-        val configName = getConfig("spark.indextables.cache.name", "")
-        if (configName.trim.nonEmpty) configName.trim
-        else s"tantivy4spark-${tablePath.replaceAll("[^a-zA-Z0-9]", "_")}"
-      },
-      maxCacheSize = getConfig("spark.indextables.cache.maxSize", "200000000").toLong,
-      maxConcurrentLoads = getConfig("spark.indextables.cache.maxConcurrentLoads", "8").toInt,
-      enableQueryCache = getConfig("spark.indextables.cache.queryCache", "true").toBoolean,
-      enableDocBatch = getConfig("spark.indextables.docBatch.enabled", "true").toBoolean,
-      docBatchMaxSize = getConfig("spark.indextables.docBatch.maxSize", "1000").toInt,
-      awsAccessKey = getConfigOption("spark.indextables.aws.accessKey"),
-      awsSecretKey = getConfigOption("spark.indextables.aws.secretKey"),
-      awsSessionToken = getConfigOption("spark.indextables.aws.sessionToken"),
-      awsRegion = getConfigOption("spark.indextables.aws.region"),
-      awsEndpoint = getConfigOption("spark.indextables.s3.endpoint"),
-      awsPathStyleAccess = getConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toLowerCase == "true"),
-      azureAccountName = getConfigOption("spark.indextables.azure.accountName"),
-      azureAccountKey = getConfigOption("spark.indextables.azure.accountKey"),
-      azureConnectionString = getConfigOption("spark.indextables.azure.connectionString"),
-      azureEndpoint = getConfigOption("spark.indextables.azure.endpoint"),
-      gcpProjectId = getConfigOption("spark.indextables.gcp.projectId"),
-      gcpServiceAccountKey = getConfigOption("spark.indextables.gcp.serviceAccountKey"),
-      gcpCredentialsFile = getConfigOption("spark.indextables.gcp.credentialsFile"),
-      gcpEndpoint = getConfigOption("spark.indextables.gcp.endpoint")
-    )
-  }
+  /**
+   * Create a SplitCacheConfig from broadcast configuration.
+   *
+   * Delegates to ConfigUtils.createSplitCacheConfig to ensure consistent configuration
+   * across all code paths (reads, aggregates, prewarm). This includes disk cache settings,
+   * batch optimization, and all cloud provider credentials.
+   */
+  private def createCacheConfigFromBroadcast(configMap: Map[String, String], tablePath: String): SplitCacheConfig =
+    ConfigUtils.createSplitCacheConfig(configMap, Some(tablePath))
 
   /** Create a SplitSearchEngine for the given AddAction. */
   private def createSplitSearchEngine(
