@@ -77,7 +77,8 @@ case class PrewarmCacheCommand(
   override val output: Seq[Attribute] = Seq(
     AttributeReference("host", StringType, nullable = false)(),
     AttributeReference("assigned_host", StringType, nullable = false)(),
-    AttributeReference("locality_match", BooleanType, nullable = false)(),
+    AttributeReference("locality_hits", IntegerType, nullable = false)(),
+    AttributeReference("locality_misses", IntegerType, nullable = false)(),
     AttributeReference("splits_prewarmed", IntegerType, nullable = false)(),
     AttributeReference("segments", StringType, nullable = false)(),
     AttributeReference("fields", StringType, nullable = false)(),
@@ -144,7 +145,8 @@ case class PrewarmCacheCommand(
           Row(
             "none",       // host
             "none",       // assigned_host
-            true,         // locality_match (trivially true when no splits)
+            0,            // locality_hits (no tasks)
+            0,            // locality_misses (no tasks)
             0,            // splits_prewarmed
             resolvedSegments.map(_.name()).toSeq.sorted.mkString(","),
             fields.map(_.mkString(",")).getOrElse("all"),
@@ -233,11 +235,12 @@ case class PrewarmCacheCommand(
             val segmentsStr   = results.head.segments
             val fieldsStr     = results.head.fields
             val skippedStr    = if (allSkipped.isEmpty) null else allSkipped.mkString(",")
-            // Locality tracking - use first result's assigned host and check if all matched
-            val assignedHost  = results.head.assignedHost
-            val localityMatch = results.forall(_.localityMatch)
+            // Locality tracking - count hits/misses for visibility into scheduling behavior
+            val assignedHost   = results.head.assignedHost
+            val localityHits   = results.count(_.localityMatch)
+            val localityMisses = results.count(!_.localityMatch)
 
-            Row(hostname, assignedHost, localityMatch, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr)
+            Row(hostname, assignedHost, localityHits, localityMisses, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr)
         }
         .toSeq
 

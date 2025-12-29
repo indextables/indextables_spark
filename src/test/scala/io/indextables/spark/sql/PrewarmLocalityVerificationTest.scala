@@ -85,32 +85,37 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     val columns = prewarmResult.columns
     assert(columns.contains("host"), "Result should contain 'host' column")
     assert(columns.contains("assigned_host"), "Result should contain 'assigned_host' column")
-    assert(columns.contains("locality_match"), "Result should contain 'locality_match' column")
+    assert(columns.contains("locality_hits"), "Result should contain 'locality_hits' column")
+    assert(columns.contains("locality_misses"), "Result should contain 'locality_misses' column")
 
     // Verify column order matches expected schema
     assert(columns(0) == "host")
     assert(columns(1) == "assigned_host")
-    assert(columns(2) == "locality_match")
+    assert(columns(2) == "locality_hits")
+    assert(columns(3) == "locality_misses")
 
     // Print results for visibility
     println("\n=== Prewarm Result with Locality Tracking ===")
     prewarmResult.show(truncate = false)
 
-    // In local mode, host and assigned_host should match
+    // In local mode, host and assigned_host should match (all hits, no misses)
     val results = prewarmResult.collect()
     results.foreach { row =>
       val host = row.getAs[String]("host")
       val assignedHost = row.getAs[String]("assigned_host")
-      val localityMatch = row.getAs[Boolean]("locality_match")
+      val localityHits = row.getAs[Int]("locality_hits")
+      val localityMisses = row.getAs[Int]("locality_misses")
 
-      println(s"Host: $host, Assigned: $assignedHost, Match: $localityMatch")
+      println(s"Host: $host, Assigned: $assignedHost, Hits: $localityHits, Misses: $localityMisses")
 
-      // In local mode, tasks should run on the assigned host
-      assert(localityMatch, s"In local mode, locality should match. Host=$host, Assigned=$assignedHost")
+      // In local mode, tasks should run on the assigned host (all hits)
+      assert(localityMisses == 0, s"In local mode, should have no locality misses. Host=$host, Misses=$localityMisses")
+      assert(localityHits > 0 || row.getAs[String]("status") == "no_splits",
+        s"Should have locality hits or be no_splits status")
     }
   }
 
-  test("prewarm should report locality_match=true in local mode") {
+  test("prewarm should report zero locality misses in local mode") {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
 
@@ -128,16 +133,16 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$tempTablePath'")
     val results = prewarmResult.collect()
 
-    // All results should have locality_match=true in local mode
+    // All results should have zero locality misses in local mode
     results.foreach { row =>
-      val localityMatch = row.getAs[Boolean]("locality_match")
-      assert(localityMatch, "locality_match should be true in local mode")
+      val localityMisses = row.getAs[Int]("locality_misses")
+      assert(localityMisses == 0, s"In local mode, should have zero locality misses but got $localityMisses")
     }
 
-    println("✅ All prewarm tasks report locality_match=true")
+    println("✅ All prewarm tasks report zero locality misses")
   }
 
-  test("prewarm with partition filter returning no splits should report locality_match=true") {
+  test("prewarm with partition filter returning no splits should report zero hits and misses") {
     val sparkImplicits = spark.implicits
     import sparkImplicits._
 
@@ -161,12 +166,13 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     )
     val results = prewarmResult.collect()
 
-    // Should return "no_splits" status with locality_match=true
+    // Should return "no_splits" status with zero hits and misses (no tasks ran)
     assert(results.length == 1, "Should have one result row")
     val row = results(0)
     assert(row.getAs[String]("status") == "no_splits")
-    assert(row.getAs[Boolean]("locality_match") == true)
+    assert(row.getAs[Int]("locality_hits") == 0, "No splits should mean zero locality hits")
+    assert(row.getAs[Int]("locality_misses") == 0, "No splits should mean zero locality misses")
 
-    println("✅ Prewarm with no matching splits correctly reports locality_match=true")
+    println("✅ Prewarm with no matching splits correctly reports zero hits and misses")
   }
 }
