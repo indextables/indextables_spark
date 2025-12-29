@@ -368,7 +368,11 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Verify all columns exist
     val columnNames = schema.fieldNames.toSet
-    val expectedColumns = Set("host", "splits_prewarmed", "segments", "fields", "duration_ms", "status", "skipped_fields")
+    val expectedColumns = Set(
+      "host", "assigned_host", "locality_hits", "locality_misses",
+      "splits_prewarmed", "segments", "fields", "duration_ms", "status",
+      "skipped_fields", "retries", "failed_splits_by_host"
+    )
 
     expectedColumns.foreach { col =>
       assert(columnNames.contains(col), s"Schema should include '$col' column")
@@ -380,12 +384,17 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     val row = rows.head
     assert(row.getAs[String]("host") != null, "host should be a string")
+    assert(row.getAs[String]("assigned_host") != null, "assigned_host should be a string")
+    assert(row.getAs[Int]("locality_hits") >= 0, "locality_hits should be non-negative integer")
+    assert(row.getAs[Int]("locality_misses") >= 0, "locality_misses should be non-negative integer")
     assert(row.getAs[Int]("splits_prewarmed") >= 0, "splits_prewarmed should be non-negative integer")
     assert(row.getAs[String]("segments") != null, "segments should be a string")
     assert(row.getAs[String]("fields") != null, "fields should be a string")
     assert(row.getAs[Long]("duration_ms") >= 0, "duration_ms should be non-negative long")
     assert(row.getAs[String]("status") != null, "status should be a string")
-    // skipped_fields can be null or empty string
+    // skipped_fields can be null
+    assert(row.getAs[Int]("retries") >= 0, "retries should be non-negative integer")
+    // failed_splits_by_host can be null
 
     logger.info("PREWARM output schema and types verified")
   }

@@ -87,12 +87,16 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     assert(columns.contains("assigned_host"), "Result should contain 'assigned_host' column")
     assert(columns.contains("locality_hits"), "Result should contain 'locality_hits' column")
     assert(columns.contains("locality_misses"), "Result should contain 'locality_misses' column")
+    assert(columns.contains("retries"), "Result should contain 'retries' column")
+    assert(columns.contains("failed_splits_by_host"), "Result should contain 'failed_splits_by_host' column")
 
     // Verify column order matches expected schema
     assert(columns(0) == "host")
     assert(columns(1) == "assigned_host")
     assert(columns(2) == "locality_hits")
     assert(columns(3) == "locality_misses")
+    assert(columns(10) == "retries")
+    assert(columns(11) == "failed_splits_by_host")
 
     // Print results for visibility
     println("\n=== Prewarm Result with Locality Tracking ===")
@@ -105,13 +109,18 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
       val assignedHost = row.getAs[String]("assigned_host")
       val localityHits = row.getAs[Int]("locality_hits")
       val localityMisses = row.getAs[Int]("locality_misses")
+      val retries = row.getAs[Int]("retries")
+      val failedSplitsByHost = row.getAs[String]("failed_splits_by_host")
 
-      println(s"Host: $host, Assigned: $assignedHost, Hits: $localityHits, Misses: $localityMisses")
+      println(s"Host: $host, Assigned: $assignedHost, Hits: $localityHits, Misses: $localityMisses, Retries: $retries")
 
       // In local mode, tasks should run on the assigned host (all hits)
       assert(localityMisses == 0, s"In local mode, should have no locality misses. Host=$host, Misses=$localityMisses")
       assert(localityHits > 0 || row.getAs[String]("status") == "no_splits",
         s"Should have locality hits or be no_splits status")
+      // In local mode, no retries should be needed
+      assert(retries == 0, s"In local mode, should have no retries. Retries=$retries")
+      assert(failedSplitsByHost == null, s"In local mode, should have no failed splits. FailedSplits=$failedSplitsByHost")
     }
   }
 

@@ -84,7 +84,9 @@ case class PrewarmCacheCommand(
     AttributeReference("fields", StringType, nullable = false)(),
     AttributeReference("duration_ms", LongType, nullable = false)(),
     AttributeReference("status", StringType, nullable = false)(),
-    AttributeReference("skipped_fields", StringType, nullable = true)()
+    AttributeReference("skipped_fields", StringType, nullable = true)(),
+    AttributeReference("retries", IntegerType, nullable = false)(),
+    AttributeReference("failed_splits_by_host", StringType, nullable = true)()
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -152,7 +154,9 @@ case class PrewarmCacheCommand(
             fields.map(_.mkString(",")).getOrElse("all"),
             0L,           // duration_ms
             "no_splits",  // status
-            null          // skipped_fields
+            null,         // skipped_fields
+            0,            // retries
+            null          // failed_splits_by_host
           )
         )
       }
@@ -197,32 +201,104 @@ case class PrewarmCacheCommand(
       // Broadcast config for executor access
       val broadcastConfig = sc.broadcast(sessionConfig)
 
-      // Execute prewarm tasks on executors
-      val jobGroup       = s"tantivy4spark-prewarm-${System.currentTimeMillis()}"
-      val jobDescription = s"Prewarming ${addActions.length} splits across ${splitsByHost.size} hosts"
+      // Build lookup: splitPath -> assigned hostname (for retry task creation)
+      val splitToHost: Map[String, String] = splitsByHost.flatMap {
+        case (host, actions) => actions.map(_.path -> host)
+      }.toMap
 
-      sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
+      // Get max retries from config
+      val maxRetries = sessionConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
 
-      // Create (task, preferredLocations) tuples for makeRDD
-      // This ensures prewarm tasks run on the same hosts where queries will execute
-      val tasksWithLocations = prewarmTasks.map { task =>
-        (task, Seq(task.hostname))
-      }
+      // Helper function to dispatch tasks and collect results
+      def dispatchTasks(tasks: Seq[PrewarmTask], retryNum: Int): Seq[PrewarmTaskResult] = {
+        val jobGroup       = s"tantivy4spark-prewarm-${System.currentTimeMillis()}"
+        val jobDescription = if (retryNum == 0) {
+          s"Prewarming ${addActions.length} splits across ${splitsByHost.size} hosts"
+        } else {
+          s"Prewarm retry $retryNum: ${tasks.flatMap(_.addActions).size} splits"
+        }
 
-      val taskResults =
+        sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
+
+        val tasksWithLocations = tasks.map(t => (t, Seq(t.hostname)))
+
         try
           sc.makeRDD(tasksWithLocations)
-            .setName(s"Prewarm Cache: ${addActions.length} splits")
-            .map { task =>
-              executePrewarmTask(task, broadcastConfig.value)
-            }
+            .setName(if (retryNum == 0) s"Prewarm Cache: ${addActions.length} splits" else s"Prewarm Retry $retryNum")
+            .map(task => executePrewarmTask(task, broadcastConfig.value))
             .collect()
             .toSeq
         finally
           sc.clearJobGroup()
+      }
+
+      // Retry loop - dispatch, collect wrong_host, rebuild per-split tasks, repeat
+      var retryCount = 0
+      var pendingTasks = prewarmTasks
+      var allSuccessfulResults = Seq.empty[PrewarmTaskResult]
+      var finalWrongHostResults = Seq.empty[PrewarmTaskResult]  // Track final failures
+
+      while (pendingTasks.nonEmpty) {
+        val taskResults = dispatchTasks(pendingTasks, retryCount)
+
+        val (succeeded, wrongHost) = taskResults.partition(_.status != "wrong_host")
+        allSuccessfulResults ++= succeeded
+
+        if (wrongHost.isEmpty) {
+          // All succeeded - exit loop
+          pendingTasks = Seq.empty
+        } else if (retryCount >= maxRetries) {
+          // Exhausted retries - record final failures and exit
+          finalWrongHostResults = wrongHost
+          logger.warn(s"Prewarm exhausted max retries ($maxRetries), ${wrongHost.size} tasks still on wrong host")
+          pendingTasks = Seq.empty
+        } else {
+          // Retry misrouted splits
+          retryCount += 1
+
+          // Get misrouted split paths from results and their original AddActions
+          val misroutedPaths = wrongHost.flatMap(_.splitPaths).toSet
+          val misroutedActions = addActions.filter(a => misroutedPaths.contains(a.path))
+
+          // Warn if any splits can't be found in splitToHost map
+          val unknownSplits = misroutedActions.filter(a => !splitToHost.contains(a.path))
+          if (unknownSplits.nonEmpty) {
+            logger.warn(s"${unknownSplits.size} splits have no assigned host, will use original assignment")
+          }
+
+          // Create individual task per split for better locality on retry
+          pendingTasks = misroutedActions.zipWithIndex.map { case (addAction, idx) =>
+            PrewarmTask(
+              batchIndex = idx,
+              hostname = splitToHost.getOrElse(addAction.path, wrongHost.find(_.splitPaths.contains(addAction.path)).map(_.assignedHost).getOrElse("unknown")),
+              addActions = Seq(addAction),
+              tablePath = tablePath,
+              segments = resolvedSegments,
+              fields = fields,
+              failOnMissingField = effectiveFailOnMissingField
+            )
+          }
+          logger.warn(s"Prewarm retry $retryCount/$maxRetries: ${pendingTasks.size} splits misrouted, retrying with per-split tasks")
+        }
+      }
+
+      // Track final failures by assigned host (from the wrong_host results)
+      val failedByHost: Map[String, Int] = if (finalWrongHostResults.nonEmpty) {
+        finalWrongHostResults.groupBy(_.assignedHost).map { case (h, results) =>
+          h -> results.flatMap(_.splitPaths).size
+        }
+      } else Map.empty
+
+      val failedByHostStr: String = if (failedByHost.nonEmpty) {
+        failedByHost.map { case (h, count) => s"$h:$count" }.mkString(",")
+      } else null
+
+      if (failedByHost.nonEmpty) {
+        logger.warn(s"Prewarm completed with ${failedByHost.values.sum} splits failed after $retryCount retries: $failedByHostStr")
+      }
 
       // Aggregate results by host
-      val hostResults = taskResults
+      val hostResults = allSuccessfulResults
         .groupBy(_.hostname)
         .map {
           case (hostname, results) =>
@@ -231,7 +307,8 @@ case class PrewarmCacheCommand(
             val allSkipped    = results.flatMap(_.skippedFields).distinct
             val hasErrors     = results.exists(_.status.startsWith("error"))
             val hasPartial    = results.exists(_.status == "partial")
-            val overallStatus = if (hasErrors) "error" else if (hasPartial) "partial" else "success"
+            val hasFailed     = failedByHost.contains(hostname)
+            val overallStatus = if (hasErrors) "error" else if (hasFailed) "partial" else if (hasPartial) "partial" else "success"
             val segmentsStr   = results.head.segments
             val fieldsStr     = results.head.fields
             val skippedStr    = if (allSkipped.isEmpty) null else allSkipped.mkString(",")
@@ -240,12 +317,12 @@ case class PrewarmCacheCommand(
             val localityHits   = results.count(_.localityMatch)
             val localityMisses = results.count(!_.localityMatch)
 
-            Row(hostname, assignedHost, localityHits, localityMisses, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr)
+            Row(hostname, assignedHost, localityHits, localityMisses, totalSplits, segmentsStr, fieldsStr, totalDuration, overallStatus, skippedStr, retryCount, failedByHostStr)
         }
         .toSeq
 
       val totalDuration = System.currentTimeMillis() - startTime
-      logger.info(s"Prewarm completed in ${totalDuration}ms: ${addActions.length} splits across ${hostResults.length} hosts")
+      logger.info(s"Prewarm completed in ${totalDuration}ms: ${addActions.length} splits across ${hostResults.length} hosts (retries: $retryCount)")
 
       hostResults
 
@@ -272,9 +349,22 @@ case class PrewarmCacheCommand(
     // hosts from sc.getExecutorMemoryStatus.keys - same source as blockManagerId.host
     val localityMatch = task.hostname == actualHostname
 
-    // Log locality verification
+    // Log locality verification and skip prewarm if on wrong host
     if (!localityMatch) {
-      taskLogger.warn(s"LOCALITY MISMATCH: Task assigned to '${task.hostname}' but running on '$actualHostname'")
+      taskLogger.warn(s"LOCALITY MISMATCH: Task assigned to '${task.hostname}' but running on '$actualHostname'. Skipping prewarm for retry.")
+      val duration = System.currentTimeMillis() - taskStartTime
+      return PrewarmTaskResult(
+        hostname = actualHostname,
+        assignedHost = task.hostname,
+        localityMatch = false,
+        splitsPrewarmed = 0,
+        segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
+        fields = task.fields.map(_.mkString(",")).getOrElse("all"),
+        durationMs = duration,
+        status = "wrong_host",
+        skippedFields = None,
+        splitPaths = task.addActions.map(_.path)
+      )
     } else {
       taskLogger.debug(s"LOCALITY VERIFIED: Task correctly running on assigned host '$actualHostname'")
     }
@@ -381,7 +471,8 @@ case class PrewarmCacheCommand(
         fields = task.fields.map(_.mkString(",")).getOrElse("all"),
         durationMs = duration,
         status = status,
-        skippedFields = if (skippedFields.isEmpty) None else Some(skippedFields.toSeq.distinct.mkString(","))
+        skippedFields = if (skippedFields.isEmpty) None else Some(skippedFields.toSeq.distinct.mkString(",")),
+        splitPaths = task.addActions.map(_.path)
       )
     } catch {
       case e: Exception =>
@@ -396,7 +487,8 @@ case class PrewarmCacheCommand(
           fields = task.fields.map(_.mkString(",")).getOrElse("all"),
           durationMs = duration,
           status = s"error: ${e.getMessage}",
-          skippedFields = None
+          skippedFields = None,
+          splitPaths = task.addActions.map(_.path)
         )
     }
   }
@@ -451,5 +543,6 @@ private[sql] case class PrewarmTaskResult(
   fields: String,
   durationMs: Long,
   status: String,
-  skippedFields: Option[String])
+  skippedFields: Option[String],
+  splitPaths: Seq[String] = Seq.empty)  // Split paths for retry tracking
     extends Serializable

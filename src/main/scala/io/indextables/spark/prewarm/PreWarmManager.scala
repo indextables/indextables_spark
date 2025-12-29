@@ -223,6 +223,23 @@ object PreWarmManager {
     val config = broadcastConfig.value
     val failOnMissingField = config.getOrElse("spark.indextables.prewarm.failOnMissingField", "true").toBoolean
 
+    // Check if we're on the expected host - skip prewarm if not
+    if (task.hostname != actualHostname) {
+      val duration = System.currentTimeMillis() - taskStartTime
+      logger.warn(s"🔥 LOCALITY MISMATCH: Task assigned to '${task.hostname}' but running on '$actualHostname'. Skipping prewarm for ${task.addActions.size} splits.")
+      return ComponentPrewarmTaskResult(
+        hostname = actualHostname,
+        assignedHost = task.hostname,
+        wrongHost = true,
+        splitsPrewarmed = 0,
+        splitPaths = task.addActions.map(_.path),
+        durationMs = duration,
+        success = false,
+        errorMessage = Some(s"Wrong host: expected ${task.hostname}, got $actualHostname"),
+        skippedFields = None
+      )
+    }
+
     try {
       var prewarmedCount = 0
       var skippedFields = scala.collection.mutable.Set[String]()
@@ -301,7 +318,10 @@ object PreWarmManager {
 
       ComponentPrewarmTaskResult(
         hostname = actualHostname,
+        assignedHost = task.hostname,
+        wrongHost = false,
         splitsPrewarmed = prewarmedCount,
+        splitPaths = task.addActions.map(_.path),
         durationMs = duration,
         success = true,
         errorMessage = None,
@@ -313,7 +333,10 @@ object PreWarmManager {
         logger.error(s"Prewarm task failed on $actualHostname: ${e.getMessage}", e)
         ComponentPrewarmTaskResult(
           hostname = actualHostname,
+          assignedHost = task.hostname,
+          wrongHost = false,
           splitsPrewarmed = 0,
+          splitPaths = task.addActions.map(_.path),
           durationMs = duration,
           success = false,
           errorMessage = Some(e.getMessage),
@@ -473,6 +496,19 @@ object PreWarmManager {
     actualHostname: String
   ): PreWarmTaskResult = {
 
+    // Check if we're on the expected host - skip prewarm if not
+    if (task.preferredHostname != actualHostname) {
+      logger.warn(s"🔥 LOCALITY MISMATCH: Task assigned to '${task.preferredHostname}' but running on '$actualHostname'. Skipping prewarm for split: ${task.addAction.path}")
+      return PreWarmTaskResult(
+        splitPath = task.addAction.path,
+        hostname = actualHostname,
+        assignedHost = task.preferredHostname,
+        wrongHost = true,
+        success = false,
+        errorMessage = Some(s"Wrong host: expected ${task.preferredHostname}, got $actualHostname")
+      )
+    }
+
     logger.debug(s"🔥 Executing pre-warm task for split: ${task.addAction.path} on host: $actualHostname")
 
     try {
@@ -506,6 +542,8 @@ object PreWarmManager {
       PreWarmTaskResult(
         splitPath = task.addAction.path,
         hostname = actualHostname,
+        assignedHost = task.preferredHostname,
+        wrongHost = false,
         success = true,
         errorMessage = None
       )
@@ -516,6 +554,8 @@ object PreWarmManager {
         PreWarmTaskResult(
           splitPath = task.addAction.path,
           hostname = actualHostname,
+          assignedHost = task.preferredHostname,
+          wrongHost = false,
           success = false,
           errorMessage = Some(e.getMessage)
         )
@@ -653,6 +693,8 @@ case class PreWarmTask(
 case class PreWarmTaskResult(
   splitPath: String,
   hostname: String,
+  assignedHost: String = "",   // Expected host from assignment
+  wrongHost: Boolean = false,  // True if task ran on wrong host (skipped prewarm)
   success: Boolean,
   errorMessage: Option[String])
 
@@ -681,7 +723,10 @@ case class ComponentPrewarmTask(
 /** Result from a component-based prewarm task execution. */
 case class ComponentPrewarmTaskResult(
   hostname: String,
+  assignedHost: String = "",   // Expected host from assignment
+  wrongHost: Boolean = false,  // True if task ran on wrong host (skipped prewarm)
   splitsPrewarmed: Int,
+  splitPaths: Seq[String] = Seq.empty,  // Split paths for retry tracking
   durationMs: Long,
   success: Boolean,
   errorMessage: Option[String],
