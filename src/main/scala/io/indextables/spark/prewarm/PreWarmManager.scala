@@ -170,15 +170,21 @@ object PreWarmManager {
     // Broadcast config for executor access
     val broadcastConfig = sc.broadcast(config)
 
-    // Execute prewarm tasks on executors
+    // Execute prewarm tasks on executors using makeRDD for locality-aware scheduling
     val jobGroup       = s"tantivy4spark-prewarm-${System.currentTimeMillis()}"
     val jobDescription = s"Prewarming ${addActions.length} splits across ${splitsByHost.size} hosts"
 
     sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
 
+    // Create (task, preferredLocations) tuples for makeRDD
+    // This ensures prewarm tasks run on the same hosts where queries will execute
+    val tasksWithLocations = componentPrewarmTasks.map { task =>
+      (task, Seq(task.hostname))
+    }
+
     val taskResults =
       try
-        sc.parallelize(componentPrewarmTasks, math.min(componentPrewarmTasks.length, sc.defaultParallelism))
+        sc.makeRDD(tasksWithLocations)
           .setName(s"Prewarm Cache: ${addActions.length} splits")
           .map { task =>
             executeComponentPrewarmTask(task, broadcastConfig)
@@ -422,6 +428,7 @@ object PreWarmManager {
     val broadcastConfig = sc.broadcast(config)
 
     // Execute pre-warm tasks on executors with descriptive Spark UI names
+    // Using makeRDD for locality-aware scheduling to ensure prewarm runs on intended hosts
     val stageName = s"Pre-warm Cache: ${preWarmTasks.length} splits across ${splitsByHost.size} hosts"
     val jobGroup  = s"tantivy4spark-prewarm-$queryHash"
     val jobDescription =
@@ -429,9 +436,14 @@ object PreWarmManager {
 
     sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
 
+    // Create (task, preferredLocations) tuples for makeRDD
+    val tasksWithLocations = preWarmTasks.map { task =>
+      (task, Seq(task.preferredHostname))
+    }
+
     val taskResults =
       try
-        sc.parallelize(preWarmTasks, math.min(preWarmTasks.length, sc.defaultParallelism))
+        sc.makeRDD(tasksWithLocations)
           .setName(stageName) // This shows up in Spark UI as the RDD name
           .mapPartitions { tasks =>
             val hostname = getCurrentHostname

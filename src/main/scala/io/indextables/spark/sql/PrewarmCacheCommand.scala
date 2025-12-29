@@ -197,9 +197,15 @@ case class PrewarmCacheCommand(
 
       sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
 
+      // Create (task, preferredLocations) tuples for makeRDD
+      // This ensures prewarm tasks run on the same hosts where queries will execute
+      val tasksWithLocations = prewarmTasks.map { task =>
+        (task, Seq(task.hostname))
+      }
+
       val taskResults =
         try
-          sc.parallelize(prewarmTasks, math.min(prewarmTasks.length, sc.defaultParallelism))
+          sc.makeRDD(tasksWithLocations)
             .setName(s"Prewarm Cache: ${addActions.length} splits")
             .map { task =>
               executePrewarmTask(task, broadcastConfig.value)
@@ -259,13 +265,13 @@ case class PrewarmCacheCommand(
       task.addActions.foreach { addAction =>
         try {
           // Normalize path for tantivy4java compatibility
-          val actualPath = ProtocolNormalizer.normalizeAllProtocols(
-            if (addAction.path.startsWith("s3://") || addAction.path.startsWith("s3a://")) {
-              addAction.path
-            } else {
-              s"${task.tablePath}/${addAction.path}"
-            }
-          )
+          // Check if path is already a full URL (S3 or Azure) or a relative path
+          val fullPath = if (ProtocolNormalizer.isS3Path(addAction.path) || ProtocolNormalizer.isAzurePath(addAction.path)) {
+            addAction.path
+          } else {
+            s"${task.tablePath}/${addAction.path}"
+          }
+          val actualPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
 
           // Create split metadata from AddAction
           val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
