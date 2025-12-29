@@ -258,11 +258,19 @@ case class PrewarmCacheCommand(
     config: Map[String, String]
   ): PrewarmTaskResult = {
     val taskStartTime  = System.currentTimeMillis()
-    val actualHostname = java.net.InetAddress.getLocalHost.getHostName
     val taskLogger     = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
 
+    // Get actual hostname using BlockManager's blockManagerId.host - this is the exact format
+    // Spark uses for task scheduling and is what getExecutorMemoryStatus returns.
+    // This ensures we compare apples to apples for locality verification.
+    val actualHostname = org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
+
+    // task.hostname comes from DriverSplitLocalityManager.getAvailableHosts() which extracts
+    // hosts from sc.getExecutorMemoryStatus.keys - same source as blockManagerId.host
+    val localityMatch = task.hostname == actualHostname
+
     // Log locality verification
-    if (task.hostname != actualHostname) {
+    if (!localityMatch) {
       taskLogger.warn(s"LOCALITY MISMATCH: Task assigned to '${task.hostname}' but running on '$actualHostname'")
     } else {
       taskLogger.debug(s"LOCALITY VERIFIED: Task correctly running on assigned host '$actualHostname'")
@@ -361,11 +369,10 @@ case class PrewarmCacheCommand(
       val duration = System.currentTimeMillis() - taskStartTime
       val status   = if (skippedFields.isEmpty) "success" else "partial"
 
-      val localityMatch = task.hostname == actualHostname
       PrewarmTaskResult(
         hostname = actualHostname,
         assignedHost = task.hostname,
-        localityMatch = localityMatch,
+        localityMatch = localityMatch,  // Uses the localityMatch computed at function start
         splitsPrewarmed = prewarmedCount,
         segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
         fields = task.fields.map(_.mkString(",")).getOrElse("all"),
@@ -377,11 +384,10 @@ case class PrewarmCacheCommand(
       case e: Exception =>
         taskLogger.error(s"Prewarm task failed on host $actualHostname: ${e.getMessage}", e)
         val duration = System.currentTimeMillis() - taskStartTime
-        val localityMatch = task.hostname == actualHostname
         PrewarmTaskResult(
           hostname = actualHostname,
           assignedHost = task.hostname,
-          localityMatch = localityMatch,
+          localityMatch = localityMatch,  // Uses the localityMatch computed at function start
           splitsPrewarmed = 0,
           segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
           fields = task.fields.map(_.mkString(",")).getOrElse("all"),

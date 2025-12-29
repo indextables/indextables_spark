@@ -634,12 +634,21 @@ object PreWarmManager {
   ): String =
     s"$splitPath|$hostname|$queryHash"
 
-  /** Get current hostname for this JVM. */
+  /** Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency.
+   * This ensures the hostname format matches what Spark uses for task scheduling.
+   */
   private def getCurrentHostname: String =
-    try
-      InetAddress.getLocalHost.getHostName
-    catch {
-      case _: Exception => "unknown"
+    try {
+      // Try to use BlockManager's host first - this is the canonical source for Spark scheduling
+      org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
+    } catch {
+      case _: Exception =>
+        // Fallback to InetAddress if SparkEnv not available
+        try
+          InetAddress.getLocalHost.getHostName
+        catch {
+          case _: Exception => "unknown"
+        }
     }
 
   /** Get statistics about pre-warm operations. */

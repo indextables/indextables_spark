@@ -325,14 +325,23 @@ object DriverSplitLocalityManager {
     knownHosts = availableHosts
   }
 
-  /** Get current hostname for this JVM. */
+  /** Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency.
+   * This ensures the hostname format matches what Spark uses for task scheduling.
+   */
   private def getCurrentHostname: String =
-    try
-      java.net.InetAddress.getLocalHost.getHostName
-    catch {
-      case ex: Exception =>
-        logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
-        "unknown"
+    try {
+      // Try to use BlockManager's host first - this is the canonical source for Spark scheduling
+      org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
+    } catch {
+      case _: Exception =>
+        // Fallback to InetAddress if SparkEnv not available (e.g., during initialization)
+        try
+          java.net.InetAddress.getLocalHost.getHostName
+        catch {
+          case ex: Exception =>
+            logger.warn(s"Could not determine hostname, using 'unknown': ${ex.getMessage}")
+            "unknown"
+        }
     }
 
   /**
