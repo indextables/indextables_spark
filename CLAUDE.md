@@ -366,7 +366,7 @@ Pre-warm index caches across all executors for optimal query performance.
 -- Register extensions
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Basic prewarm (preloads default segments: TERM, FASTFIELD, POSTINGS, FIELDNORM)
+-- Basic prewarm (preloads default segments: TERM, POSTINGS, POSITIONS)
 PREWARM INDEXTABLES CACHE 's3://bucket/path';
 
 -- Prewarm specific segments
@@ -395,10 +395,11 @@ PREWARM INDEXTABLES CACHE 's3://bucket/path'
 | TERM_DICT, TERM | Term dictionary (FST) |
 | FAST_FIELD, FASTFIELD | Fast fields for aggregations |
 | POSTINGS, POSTING_LISTS | Inverted index postings |
+| POSITIONS, POSITION_LISTS | Term positions within documents |
 | FIELD_NORM, FIELDNORM | Field norms for scoring |
 | DOC_STORE, STORE | Document storage |
 
-**Default segments**: TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM (excludes DOC_STORE)
+**Default segments**: TERM_DICT, POSTINGS, POSITIONS (minimal set for query operations)
 
 **Read-time prewarm configuration:**
 ```scala
@@ -406,7 +407,7 @@ PREWARM INDEXTABLES CACHE 's3://bucket/path'
 spark.indextables.prewarm.enabled: false (default)
 
 // Segment selection (comma-separated)
-spark.indextables.prewarm.segments: "TERM_DICT,FAST_FIELD,POSTINGS,FIELD_NORM"
+spark.indextables.prewarm.segments: "TERM_DICT,POSTINGS,POSITIONS"
 
 // Field selection (comma-separated, empty = all fields)
 spark.indextables.prewarm.fields: ""

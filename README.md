@@ -1908,7 +1908,7 @@ IndexTables4Spark supports comprehensive cache prewarming to load index segments
 -- Register IndexTables4Spark extensions for SQL parsing
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Basic prewarm - loads default segments (TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM)
+-- Basic prewarm - loads default segments (TERM_DICT, POSTINGS, POSITIONS)
 PREWARM INDEXTABLES CACHE 's3://bucket/path';
 
 -- Prewarm specific segments
@@ -1940,9 +1940,10 @@ PREWARM INDEXTABLES CACHE 's3://bucket/path'
 | SQL Name | Description | Default |
 |----------|-------------|---------|
 | `TERM_DICT` / `TERM_DICTIONARY` | Term dictionary for text search | Yes |
-| `FAST_FIELD` / `FASTFIELD` | Fast fields for aggregations/sorting | Yes |
+| `FAST_FIELD` / `FASTFIELD` | Fast fields for aggregations/sorting | No |
 | `POSTINGS` / `POSTING_LISTS` | Posting lists for term lookups | Yes |
-| `FIELD_NORM` / `FIELDNORM` | Field norms for scoring | Yes |
+| `POSITIONS` / `POSITION_LISTS` | Term positions within documents | Yes |
+| `FIELD_NORM` / `FIELDNORM` | Field norms for scoring | No |
 | `DOC_STORE` / `STORE` | Document store for retrieval | No (large) |
 
 **Output Schema:**
@@ -1963,7 +1964,7 @@ Enable automatic prewarming when reading data:
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.indextables.prewarm.enabled` | `false` | Enable prewarm on read |
-| `spark.indextables.prewarm.segments` | `TERM_DICT,FAST_FIELD,POSTINGS,FIELD_NORM` | Segments to prewarm (comma-separated) |
+| `spark.indextables.prewarm.segments` | `TERM_DICT,POSTINGS,POSITIONS` | Segments to prewarm (comma-separated) |
 | `spark.indextables.prewarm.fields` | (empty = all) | Fields to prewarm (comma-separated) |
 | `spark.indextables.prewarm.splitsPerTask` | `2` | Splits per Spark task (controls parallelism) |
 | `spark.indextables.prewarm.partitionFilter` | (empty) | WHERE clause for partition filtering |
@@ -1983,7 +1984,7 @@ val df = spark.read
 
 // Session-level configuration
 spark.conf.set("spark.indextables.prewarm.enabled", "true")
-spark.conf.set("spark.indextables.prewarm.segments", "TERM_DICT,FAST_FIELD,POSTINGS")
+spark.conf.set("spark.indextables.prewarm.segments", "TERM_DICT,POSTINGS,POSITIONS,FAST_FIELD")
 
 val df = spark.read
   .format("io.indextables.spark.core.IndexTables4SparkTableProvider")

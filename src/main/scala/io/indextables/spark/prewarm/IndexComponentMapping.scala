@@ -29,11 +29,13 @@ import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
  * | TERM_DICT, TERM_DICTIONARY | TERM |
  * | FAST_FIELD, FASTFIELD | FASTFIELD |
  * | POSTINGS, POSTING_LISTS | POSTINGS |
+ * | POSITIONS, POSITION_LISTS | POSITIONS |
  * | FIELD_NORM, FIELDNORM | FIELDNORM |
  * | DOC_STORE, STORE | STORE |
  *
- * Default components (when no segments specified): TERM, FASTFIELD, POSTINGS, FIELDNORM
- * Note: DOC_STORE (STORE) is excluded from defaults as it can be expensive for large indices.
+ * Default components (when no segments specified): TERM, POSTINGS, POSITIONS
+ * Note: DOC_STORE, FASTFIELD, and FIELDNORM are excluded from defaults as they can be expensive
+ * and are not required for basic query operations. Add them explicitly if needed for aggregations.
  */
 object IndexComponentMapping {
 
@@ -52,6 +54,9 @@ object IndexComponentMapping {
     // Postings (inverted index) aliases
     "POSTINGS"      -> IndexComponent.POSTINGS,
     "POSTING_LISTS" -> IndexComponent.POSTINGS,
+    // Positions (term positions within documents) aliases
+    "POSITIONS"      -> IndexComponent.POSITIONS,
+    "POSITION_LISTS" -> IndexComponent.POSITIONS,
     // Field norm aliases
     "FIELDNORM"  -> IndexComponent.FIELDNORM,
     "FIELD_NORM" -> IndexComponent.FIELDNORM,
@@ -62,13 +67,13 @@ object IndexComponentMapping {
 
   /**
    * Default components to prewarm when no segments are specified.
-   * Excludes STORE (document storage) as it can be expensive.
+   * Includes TERM, POSTINGS, and POSITIONS which are essential for query operations.
+   * Add FASTFIELD, FIELDNORM, or STORE explicitly if needed for aggregations or scoring.
    */
   val defaultComponents: Set[IndexComponent] = Set(
     IndexComponent.TERM,
-    IndexComponent.FASTFIELD,
     IndexComponent.POSTINGS,
-    IndexComponent.FIELDNORM
+    IndexComponent.POSITIONS
   )
 
   /**
@@ -78,6 +83,7 @@ object IndexComponentMapping {
     IndexComponent.TERM,
     IndexComponent.FASTFIELD,
     IndexComponent.POSTINGS,
+    IndexComponent.POSITIONS,
     IndexComponent.FIELDNORM,
     IndexComponent.STORE
   )
@@ -121,6 +127,7 @@ object IndexComponentMapping {
     case IndexComponent.TERM      => "TERM_DICT"
     case IndexComponent.FASTFIELD => "FAST_FIELD"
     case IndexComponent.POSTINGS  => "POSTINGS"
+    case IndexComponent.POSITIONS => "POSITIONS"
     case IndexComponent.FIELDNORM => "FIELD_NORM"
     case IndexComponent.STORE     => "DOC_STORE"
     case other                    => other.name()

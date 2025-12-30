@@ -50,10 +50,11 @@ import org.slf4j.LoggerFactory
  *   - TERM_DICT / TERM_DICTIONARY -> IndexComponent.TERM
  *   - FAST_FIELD / FASTFIELD -> IndexComponent.FASTFIELD
  *   - POSTINGS / POSTING_LISTS -> IndexComponent.POSTINGS
+ *   - POSITIONS / POSITION_LISTS -> IndexComponent.POSITIONS
  *   - FIELD_NORM / FIELDNORM -> IndexComponent.FIELDNORM
  *   - DOC_STORE / STORE -> IndexComponent.STORE
  *
- * Default segments (when not specified): TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM (excludes DOC_STORE)
+ * Default segments (when not specified): TERM_DICT, POSTINGS, POSITIONS (minimal set for query operations)
  * Default fields: All fields in the index
  * Default parallelism: 2 splits per task
  *
@@ -97,7 +98,7 @@ case class PrewarmCacheCommand(
 
     // Resolve segment aliases to IndexComponent set
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
-      logger.info("Using default segments: TERM, FASTFIELD, POSTINGS, FIELDNORM")
+      logger.info("Using default segments: TERM, POSTINGS, POSITIONS")
       IndexComponentMapping.defaultComponents
     } else {
       val resolved = segments.map { seg =>
@@ -374,13 +375,20 @@ case class PrewarmCacheCommand(
       val cacheConfig  = ConfigUtils.createSplitCacheConfig(config, Some(task.tablePath))
       val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
 
-      var skippedFields: scala.collection.mutable.Set[String] = scala.collection.mutable.Set.empty
-      var prewarmedCount = 0
+      val skippedFields = scala.collection.mutable.Set.empty[String]
 
-      task.addActions.foreach { addAction =>
+      // Phase 1: Prepare all splits and launch all preload futures in parallel
+      case class PrewarmWork(
+        addAction: io.indextables.spark.transaction.AddAction,
+        actualPath: String,
+        splitSearcher: io.indextables.tantivy4java.split.SplitSearcher,
+        futures: Seq[java.util.concurrent.CompletableFuture[Void]],
+        invalidFields: Seq[String]
+      )
+
+      val preparedWork: Seq[PrewarmWork] = task.addActions.flatMap { addAction =>
         try {
           // Normalize path for tantivy4java compatibility
-          // Check if path is already a full URL (S3 or Azure) or a relative path
           val fullPath = if (ProtocolNormalizer.isS3Path(addAction.path) || ProtocolNormalizer.isAzurePath(addAction.path)) {
             addAction.path
           } else {
@@ -394,78 +402,107 @@ case class PrewarmCacheCommand(
           // Create split searcher
           val splitSearcher = cacheManager.createSplitSearcher(actualPath, splitMetadata)
 
-          try {
-            task.fields match {
-              case Some(requestedFields) =>
-                // Field-specific preloading
-                val availableFields = extractFieldsFromMetadata(addAction)
+          val (futures, invalidFields): (Seq[java.util.concurrent.CompletableFuture[Void]], Seq[String]) = task.fields match {
+            case Some(requestedFields) =>
+              // Field-specific preloading
+              val availableFields = extractFieldsFromMetadata(addAction)
 
-                val (validFields, invalidFields) = if (availableFields.nonEmpty) {
-                  requestedFields.partition(f => availableFields.contains(f.toLowerCase))
-                } else {
-                  // Can't validate - assume all fields are valid
-                  (requestedFields, Seq.empty[String])
+              val (validFields, invalid) = if (availableFields.nonEmpty) {
+                requestedFields.partition(f => availableFields.contains(f.toLowerCase))
+              } else {
+                // Can't validate - assume all fields are valid
+                (requestedFields, Seq.empty[String])
+              }
+
+              // Handle invalid fields based on failOnMissingField setting
+              if (invalid.nonEmpty && task.failOnMissingField) {
+                splitSearcher.close()
+                throw new IllegalArgumentException(
+                  s"Field(s) not found in split ${addAction.path}: ${invalid.mkString(", ")}. " +
+                    s"Available fields: ${availableFields.mkString(", ")}"
+                )
+              }
+
+              if (validFields.nonEmpty) {
+                // Launch all segment preloads in parallel for this split
+                val futs = task.segments.toSeq.map { component =>
+                  taskLogger.debug(s"Launching async preload of ${component.name()} for fields ${validFields.mkString(",")} in split $actualPath")
+                  splitSearcher.preloadFields(component, validFields: _*)
                 }
+                (futs, invalid)
+              } else {
+                (Seq.empty, invalid)
+              }
 
-                // Handle invalid fields based on failOnMissingField setting
-                if (invalidFields.nonEmpty) {
-                  if (task.failOnMissingField) {
-                    throw new IllegalArgumentException(
-                      s"Field(s) not found in split ${addAction.path}: ${invalidFields.mkString(", ")}. " +
-                        s"Available fields: ${availableFields.mkString(", ")}"
-                    )
-                  } else {
-                    taskLogger.warn(s"Skipping missing fields for split ${addAction.path}: ${invalidFields.mkString(", ")}")
-                    skippedFields ++= invalidFields
-                  }
-                }
+            case None =>
+              // Full component preloading (all fields) - launch single async call
+              val componentsArray = task.segments.toArray
+              taskLogger.debug(s"Launching async preload of components ${componentsArray.map(_.name()).mkString(",")} for all fields in split $actualPath")
+              val fut = splitSearcher.preloadComponents(componentsArray: _*)
+              (Seq(fut), Seq.empty)
+          }
 
-                if (validFields.nonEmpty) {
-                  // Preload each component for the valid fields using preloadFields()
-                  task.segments.foreach { component =>
-                    taskLogger.debug(s"Preloading ${component.name()} for fields ${validFields.mkString(",")} in split $actualPath")
-                    val future = splitSearcher.preloadFields(component, validFields: _*)
-                    future.join()
-                  }
-                }
-
-              case None =>
-                // Full component preloading (all fields)
-                val componentsArray = task.segments.toArray
-                taskLogger.debug(s"Preloading components ${componentsArray.map(_.name()).mkString(",")} for all fields in split $actualPath")
-                val prewarmFuture = splitSearcher.preloadComponents(componentsArray: _*)
-                prewarmFuture.join()
-            }
-
-            prewarmedCount += 1
-
-            // Record prewarm completion for catch-up tracking
-            DriverSplitLocalityManager.recordPrewarmCompletion(
-              addAction.path,
-              actualHostname,
-              task.segments,
-              task.fields.map(_.toSet)
-            )
-
-          } finally
-            splitSearcher.close()
+          Some(PrewarmWork(addAction, actualPath, splitSearcher, futures, invalidFields))
 
         } catch {
           case e: IllegalArgumentException if task.failOnMissingField =>
-            // Re-throw field validation errors in fail-fast mode
             throw e
           case e: Exception =>
-            taskLogger.warn(s"Failed to prewarm split ${addAction.path}: ${e.getMessage}")
+            taskLogger.warn(s"Failed to prepare split ${addAction.path} for prewarm: ${e.getMessage}")
+            None
+        }
+      }
+
+      taskLogger.info(s"Launched ${preparedWork.map(_.futures.size).sum} async preload operations for ${preparedWork.size} splits")
+
+      // Phase 2: Wait for all futures to complete (parallel execution happening now)
+      var prewarmedCount = 0
+      val failedSplits = scala.collection.mutable.ArrayBuffer.empty[String]
+
+      preparedWork.foreach { work =>
+        try {
+          // Join all futures for this split
+          work.futures.foreach(_.join())
+          prewarmedCount += 1
+
+          // Track skipped fields
+          if (work.invalidFields.nonEmpty) {
+            taskLogger.warn(s"Skipping missing fields for split ${work.addAction.path}: ${work.invalidFields.mkString(", ")}")
+            skippedFields ++= work.invalidFields
+          }
+
+          // Record prewarm completion for catch-up tracking
+          DriverSplitLocalityManager.recordPrewarmCompletion(
+            work.addAction.path,
+            actualHostname,
+            task.segments,
+            task.fields.map(_.toSet)
+          )
+
+        } catch {
+          case e: Exception =>
+            taskLogger.warn(s"Failed to complete prewarm for split ${work.addAction.path}: ${e.getMessage}")
+            failedSplits += work.addAction.path
+        } finally {
+          // Always close the split searcher
+          try {
+            work.splitSearcher.close()
+          } catch {
+            case e: Exception =>
+              taskLogger.debug(s"Error closing split searcher for ${work.actualPath}: ${e.getMessage}")
+          }
         }
       }
 
       val duration = System.currentTimeMillis() - taskStartTime
-      val status   = if (skippedFields.isEmpty) "success" else "partial"
+      val status = if (failedSplits.nonEmpty) "partial" else if (skippedFields.nonEmpty) "partial" else "success"
+
+      taskLogger.info(s"Prewarm completed: ${prewarmedCount}/${preparedWork.size} splits in ${duration}ms")
 
       PrewarmTaskResult(
         hostname = actualHostname,
         assignedHost = task.hostname,
-        localityMatch = localityMatch,  // Uses the localityMatch computed at function start
+        localityMatch = localityMatch,
         splitsPrewarmed = prewarmedCount,
         segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
         fields = task.fields.map(_.mkString(",")).getOrElse("all"),
@@ -481,7 +518,7 @@ case class PrewarmCacheCommand(
         PrewarmTaskResult(
           hostname = actualHostname,
           assignedHost = task.hostname,
-          localityMatch = localityMatch,  // Uses the localityMatch computed at function start
+          localityMatch = localityMatch,
           splitsPrewarmed = 0,
           segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
           fields = task.fields.map(_.mkString(",")).getOrElse("all"),
