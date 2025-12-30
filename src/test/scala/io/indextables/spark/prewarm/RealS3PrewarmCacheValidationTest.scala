@@ -30,6 +30,7 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 
 import io.indextables.spark.RealS3TestBase
 import io.indextables.spark.storage.GlobalSplitCacheManager
+import io.indextables.tantivy4java.split.SplitCacheManager
 
 /**
  * Validates that prewarming ALL fields and ALL segments on S3 eliminates cache misses.
@@ -274,6 +275,10 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     val statsAfterPrewarm = getDiskCacheStats()
     println(s"📊 Cache stats after prewarm: $statsAfterPrewarm")
 
+    // Record S3 bytes fetched after prewarm (before queries)
+    val s3BytesFetchedAfterPrewarm = SplitCacheManager.getObjectStorageBytesFetched()
+    println(s"📊 S3 bytes fetched after prewarm: $s3BytesFetchedAfterPrewarm")
+
     // Step 5: Execute multiple queries that exercise different code paths
     println("\nStep 5: Executing queries that should all hit cache...")
 
@@ -319,6 +324,20 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
 
     val statsAfterQueries = getDiskCacheStats()
     println(s"📊 Cache stats after queries: $statsAfterQueries")
+
+    // Verify no S3 access occurred during queries
+    val s3BytesFetchedAfterQueries = SplitCacheManager.getObjectStorageBytesFetched()
+    val s3BytesDelta = s3BytesFetchedAfterQueries - s3BytesFetchedAfterPrewarm
+    println(s"📊 S3 bytes fetched after queries: $s3BytesFetchedAfterQueries (delta: $s3BytesDelta)")
+
+    // Key assertion: after full prewarm, queries should NOT access S3 at all
+    assert(
+      s3BytesDelta == 0,
+      s"After full prewarm, queries should NOT access S3. " +
+        s"S3 bytes fetched increased by $s3BytesDelta bytes during queries. " +
+        s"Before queries: $s3BytesFetchedAfterPrewarm, After queries: $s3BytesFetchedAfterQueries"
+    )
+    println("✅ VERIFIED: No S3 access during queries after full prewarm")
 
     (statsAfterPrewarm, statsAfterQueries) match {
       case (Some((bytesAfterPrewarm, componentsAfterPrewarm)), Some((bytesAfterQueries, componentsAfterQueries))) =>
@@ -486,6 +505,197 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     assert(reportedDuration >= 0, "Reported duration should be non-negative")
 
     println("✅ Prewarm duration test passed")
+  }
+
+  test("queries WITHOUT prewarm should increment S3 bytes fetched counter") {
+    assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
+
+    val (accessKey, secretKey) = awsCredentials.get
+    val testPath               = s"$testBasePath/no-prewarm-counter-test"
+
+    // Enable disk cache
+    spark.conf.set("spark.indextables.cache.disk.enabled", "true")
+    spark.conf.set("spark.indextables.cache.disk.path", diskCachePath)
+
+    val ss = spark
+    import ss.implicits._
+
+    // Create test data
+    val testData = (1 until 301).map { i =>
+      (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5)
+    }.toDF("id", "title", "category", "score")
+
+    testData
+      .coalesce(1)
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .option("spark.indextables.indexWriter.batchSize", "100")
+      .option("spark.indextables.indexing.fastfields", "score")
+      .mode("overwrite")
+      .save(testPath)
+
+    println(s"✅ Created test data at $testPath")
+
+    // Flush all caches to ensure clean state
+    spark.sql("FLUSH INDEXTABLES DISK CACHE").collect()
+    GlobalSplitCacheManager.flushAllCaches()
+    Thread.sleep(500)
+
+    // Record S3 bytes BEFORE any queries (no prewarm)
+    val s3BytesBeforeQueries = SplitCacheManager.getObjectStorageBytesFetched()
+    println(s"📊 S3 bytes fetched before queries (no prewarm): $s3BytesBeforeQueries")
+
+    // Execute queries WITHOUT prewarm - these should access S3
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(testPath)
+
+    // Query 1: Equality filter
+    val count1 = df.filter(col("category") === "category_5").count()
+    println(s"  Query 1 (equality filter): $count1 records")
+
+    // Query 2: Range filter
+    val count2 = df.filter(col("score") > 100.0 && col("score") < 300.0).count()
+    println(s"  Query 2 (range filter): $count2 records")
+
+    // Query 3: Aggregation
+    val aggResult = df.agg(count("*").as("cnt"), sum("score").as("total")).collect()
+    println(s"  Query 3 (aggregation): count=${aggResult.head.getAs[Long]("cnt")}")
+
+    // Record S3 bytes AFTER queries
+    val s3BytesAfterQueries = SplitCacheManager.getObjectStorageBytesFetched()
+    val s3BytesDelta = s3BytesAfterQueries - s3BytesBeforeQueries
+    println(s"📊 S3 bytes fetched after queries: $s3BytesAfterQueries (delta: $s3BytesDelta)")
+
+    // Key assertion: WITHOUT prewarm, queries SHOULD access S3
+    assert(
+      s3BytesDelta > 0,
+      s"Without prewarm, queries SHOULD access S3. " +
+        s"S3 bytes fetched did not increase during queries. " +
+        s"Before: $s3BytesBeforeQueries, After: $s3BytesAfterQueries"
+    )
+    println(s"✅ VERIFIED: Queries without prewarm accessed S3 ($s3BytesDelta bytes fetched)")
+  }
+
+  test("prewarm all segments should enable zero-S3 aggregations") {
+    assume(awsCredentials.isDefined, "AWS credentials required for S3 tests")
+
+    val (accessKey, secretKey) = awsCredentials.get
+    val testPath               = s"$testBasePath/partial-prewarm-agg-test"
+
+    // Enable disk cache
+    spark.conf.set("spark.indextables.cache.disk.enabled", "true")
+    spark.conf.set("spark.indextables.cache.disk.path", diskCachePath)
+
+    val ss = spark
+    import ss.implicits._
+
+    // Create test data with fast fields for aggregation
+    val testData = (1 until 501).map { i =>
+      (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5, i % 100)
+    }.toDF("id", "title", "category", "score", "value")
+
+    testData
+      .coalesce(1)
+      .write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .option("spark.indextables.indexWriter.batchSize", "100")
+      .option("spark.indextables.indexing.fastfields", "score,value,id")
+      .mode("overwrite")
+      .save(testPath)
+
+    println(s"✅ Created test data at $testPath")
+
+    // Flush all caches to ensure clean state
+    spark.sql("FLUSH INDEXTABLES DISK CACHE").collect()
+    GlobalSplitCacheManager.flushAllCaches()
+    Thread.sleep(500)
+
+    // Record S3 bytes BEFORE prewarm
+    val s3BytesBeforePrewarm = SplitCacheManager.getObjectStorageBytesFetched()
+    println(s"📊 S3 bytes fetched before prewarm: $s3BytesBeforePrewarm")
+
+    // Prewarm all segments needed for aggregations
+    // Note: DOC_STORE is also needed for schema resolution and some aggregation paths
+    val prewarmResult = spark.sql(
+      s"PREWARM INDEXTABLES CACHE '$testPath' FOR SEGMENTS (FAST_FIELD, TERM_DICT, POSTINGS, FIELD_NORM, DOC_STORE)"
+    )
+    val prewarmRows = prewarmResult.collect()
+
+    println(s"✅ Prewarm result: ${prewarmRows.map(_.toString()).mkString(", ")}")
+    assert(prewarmRows.nonEmpty, "Prewarm should return results")
+
+    val splitsPrewarmed = prewarmRows.head.getAs[Int]("splits_prewarmed")
+    assert(splitsPrewarmed > 0, "Should prewarm at least one split")
+
+    // Record S3 bytes AFTER prewarm
+    val s3BytesAfterPrewarm = SplitCacheManager.getObjectStorageBytesFetched()
+    val prewarmS3BytesDelta = s3BytesAfterPrewarm - s3BytesBeforePrewarm
+    println(s"📊 S3 bytes fetched after prewarm: $s3BytesAfterPrewarm (delta: $prewarmS3BytesDelta)")
+
+    // Verify prewarm DID access S3
+    assert(
+      prewarmS3BytesDelta > 0,
+      s"Prewarm SHOULD access S3 to fetch index segments. " +
+        s"Before: $s3BytesBeforePrewarm, After: $s3BytesAfterPrewarm"
+    )
+    println(s"✅ VERIFIED: Prewarm accessed S3 ($prewarmS3BytesDelta bytes fetched)")
+
+    // Now run aggregations - these should NOT access S3
+    // Use a single DataFrame and run pushed-down aggregations
+    val df = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.aws.accessKey", accessKey)
+      .option("spark.indextables.aws.secretKey", secretKey)
+      .option("spark.indextables.aws.region", S3_REGION)
+      .load(testPath)
+
+    // Aggregation 1: Simple count (pushed down to tantivy)
+    val count1 = df.count()
+    println(s"  Aggregation 1 (count): $count1")
+
+    // Aggregation 2: Multiple aggregates on fast fields (pushed down)
+    val multiAgg = df.agg(
+      count("*").as("cnt"),
+      sum("score").as("total_score"),
+      avg("value").as("avg_value"),
+      min("id").as("min_id"),
+      max("id").as("max_id")
+    ).collect().head
+    println(s"  Aggregation 2 (multi): count=${multiAgg.getLong(0)}, sum=${multiAgg.getDouble(1)}")
+
+    // Aggregation 3: Filtered count (uses term dict for filter)
+    val filteredCount = df.filter(col("category") === "category_5").count()
+    println(s"  Aggregation 3 (filtered count): $filteredCount")
+
+    // Aggregation 4: Filtered aggregation with fast fields
+    val filteredAgg = df.filter(col("category") === "category_5")
+      .agg(count("*").as("cnt"), sum("score").as("total"))
+      .collect().head
+    println(s"  Aggregation 4 (filtered multi-agg): count=${filteredAgg.getLong(0)}")
+
+    // Record S3 bytes AFTER aggregations
+    val s3BytesAfterAggregations = SplitCacheManager.getObjectStorageBytesFetched()
+    val aggS3BytesDelta = s3BytesAfterAggregations - s3BytesAfterPrewarm
+    println(s"📊 S3 bytes fetched after aggregations: $s3BytesAfterAggregations (delta: $aggS3BytesDelta)")
+
+    // Key assertion: After prewarming all segments, aggregations should NOT access S3
+    assert(
+      aggS3BytesDelta == 0,
+      s"After prewarming all segments, aggregations should NOT access S3. " +
+        s"S3 bytes increased by $aggS3BytesDelta bytes during aggregations. " +
+        s"After prewarm: $s3BytesAfterPrewarm, After aggregations: $s3BytesAfterAggregations"
+    )
+    println("✅ VERIFIED: Aggregations after full prewarm did NOT access S3")
   }
 
   /** Load AWS credentials from ~/.aws/credentials file. */

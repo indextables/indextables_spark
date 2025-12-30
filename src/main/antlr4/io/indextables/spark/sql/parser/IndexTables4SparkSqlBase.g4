@@ -62,6 +62,7 @@ statement
     | DESCRIBE indexTablesKeyword TRANSACTION LOG (path=STRING | table=qualifiedName)
         (INCLUDE ALL)?                                          #describeTransactionLog
     | DESCRIBE indexTablesKeyword DISK CACHE                    #describeDiskCache
+    | DESCRIBE indexTablesKeyword STORAGE STATS                 #describeStorageStats
     | PREWARM indexTablesKeyword CACHE (path=STRING | table=qualifiedName)
         (FOR SEGMENTS '(' segmentList=identifierList ')')?
         (ON FIELDS '(' fieldList=identifierList ')')?
@@ -104,7 +105,7 @@ nonReserved
     : CACHE | SEARCHER | TANTIVY4SPARK | INDEXTABLES | INDEXTABLE | FOR | TRANSACTION | LOG | MAX | GROUPS
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
-    | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON
+    | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     ;
 
 // Keywords (case-insensitive)
@@ -153,6 +154,8 @@ PERWORKER: [Pp][Ee][Rr][Ww][Oo][Rr][Kk][Ee][Rr];
 PARALLELISM: [Pp][Aa][Rr][Aa][Ll][Ll][Ee][Ll][Ii][Ss][Mm];
 OF: [Oo][Ff];
 ON: [Oo][Nn];
+STORAGE: [Ss][Tt][Oo][Rr][Aa][Gg][Ee];
+STATS: [Ss][Tt][Aa][Tt][Ss];
 
 // Literals
 STRING

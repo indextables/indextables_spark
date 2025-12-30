@@ -554,6 +554,29 @@ DESCRIBE TANTIVY4SPARK DISK CACHE;  -- alternate syntax
 - Use to monitor cache utilization and tune `maxSize` setting
 - To disable auto-detection, set `spark.indextables.cache.disk.enabled=false`
 
+### Describe Storage Stats
+```sql
+-- View object storage (S3/Azure) access statistics across all executors
+DESCRIBE INDEXTABLES STORAGE STATS;
+DESCRIBE TANTIVY4SPARK STORAGE STATS;  -- alternate syntax
+
+-- Example output:
+-- +-----------+-------------------+-------------+--------+
+-- |executor_id|host               |bytes_fetched|requests|
+-- +-----------+-------------------+-------------+--------+
+-- |driver     |10.0.0.1:44444     |     64838000|    1250|
+-- |executor-0 |10.0.0.2:33333     |     52480000|    1100|
+-- |executor-1 |10.0.0.3:33333     |     48320000|    1050|
+-- +-----------+-------------------+-------------+--------+
+```
+
+**Key points:**
+- Shows cumulative bytes fetched and request counts from object storage (S3/Azure/etc)
+- Counters are cumulative since JVM startup
+- Each executor maintains its own independent counters
+- Useful for monitoring S3 costs and validating cache effectiveness
+- After a full prewarm, `bytes_fetched` should not increase during subsequent queries
+
 ### Flush Disk Cache
 ```sql
 -- Flush disk cache across all executors (clears cached data and locality state)

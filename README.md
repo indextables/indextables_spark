@@ -1871,6 +1871,29 @@ DESCRIBE INDEXTABLES DISK CACHE;
 
 Each executor maintains its own independent disk cache. This command aggregates statistics from all active executors in the cluster. The `host` column shows the IP:port to identify which executor reported each row.
 
+##### Monitoring Object Storage Access
+
+Use the `DESCRIBE INDEXTABLES STORAGE STATS` SQL command to view object storage (S3/Azure) access statistics:
+
+```sql
+-- View object storage access stats across driver and all executors
+DESCRIBE INDEXTABLES STORAGE STATS;
+
+-- Example output:
+-- +-----------+-------------------+-------------+--------+
+-- |executor_id|host               |bytes_fetched|requests|
+-- +-----------+-------------------+-------------+--------+
+-- |driver     |10.0.0.1:44444     |     64838000|    1250|
+-- |executor-0 |10.0.0.2:33333     |     52480000|    1100|
+-- |executor-1 |10.0.0.3:33333     |     48320000|    1050|
+-- +-----------+-------------------+-------------+--------+
+```
+
+This command shows cumulative bytes fetched and request counts from object storage since JVM startup. Use it to:
+- Monitor S3/Azure access patterns and costs
+- Validate that prewarm eliminates subsequent S3 access (bytes_fetched should not increase after prewarm)
+- Debug performance issues related to object storage latency
+
 #### Cache Prewarming
 
 IndexTables4Spark supports comprehensive cache prewarming to load index segments into the L2 disk cache before query execution. This eliminates cold-start latency and ensures consistent query performance from the first request.
