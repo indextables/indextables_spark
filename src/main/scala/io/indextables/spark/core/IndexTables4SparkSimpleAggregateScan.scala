@@ -389,8 +389,15 @@ class IndexTables4SparkSimpleAggregateReader(
 
       logger.debug(s"PATH DEBUG: resolvedPath = '$resolvedPath'")
 
-      // Normalize s3a:// to s3:// for tantivy4java compatibility
-      val splitPath = resolvedPath.replace("s3a://", "s3://")
+      // Normalize path for tantivy4java compatibility (handles S3, Azure, etc.)
+      val optionsMap = {
+        import scala.jdk.CollectionConverters._
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
+      }
+      val hadoopConf = new org.apache.hadoop.conf.Configuration()
+      val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
+        resolvedPath, optionsMap, hadoopConf
+      )
 
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")
       logger.debug(s"PATH DEBUG: final splitPath = '$splitPath'")

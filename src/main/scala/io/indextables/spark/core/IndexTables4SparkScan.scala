@@ -30,9 +30,9 @@ import org.apache.spark.sql.types.{DateType, DoubleType, FloatType, IntegerType,
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.prewarm.PreWarmManager
+import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
 import io.indextables.spark.storage.DriverSplitLocalityManager
-import io.indextables.spark.transaction.{AddAction, PartitionPruning, TransactionLog}
+import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLog}
 import io.indextables.spark.util.TimestampUtils
 // Removed unused imports
 import org.slf4j.LoggerFactory
@@ -108,33 +108,103 @@ class IndexTables4SparkScan(
     val filteredActions = applyDataSkipping(addActions, pushedFilters)
     logger.debug(s"PLAN PARTITIONS: After data skipping: ${filteredActions.length} splits remaining (started with ${addActions.length})")
 
-    // Check if pre-warm is enabled
-    val isPreWarmEnabled = config.getOrElse("spark.indextables.cache.prewarm.enabled", "false").toBoolean
+    // Check if pre-warm is enabled (supports both old and new config paths)
+    val isPreWarmEnabled = config.getOrElse("spark.indextables.prewarm.enabled",
+      config.getOrElse("spark.indextables.cache.prewarm.enabled", "false")).toBoolean
 
     // Execute pre-warm phase if enabled
     if (isPreWarmEnabled && filteredActions.nonEmpty) {
       try {
         val sparkContext = sparkSession.sparkContext
-        logger.info(s"🔥 Pre-warm enabled: initiating cache warming for ${filteredActions.length} splits")
+        logger.info(s"Prewarm enabled: initiating cache warming for ${filteredActions.length} splits")
 
-        // Combine regular filters with IndexQuery filters for pre-warming
-        val allFilters = pushedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
+        // Parse segment configuration
+        val segmentConfig = config.getOrElse("spark.indextables.prewarm.segments", "")
+        val segments = if (segmentConfig.isEmpty) {
+          IndexComponentMapping.defaultComponents
+        } else {
+          IndexComponentMapping.parseSegments(segmentConfig)
+        }
 
-        val preWarmResult = PreWarmManager.executePreWarm(
+        // Parse field configuration (empty = all fields)
+        val fieldConfig = config.getOrElse("spark.indextables.prewarm.fields", "")
+        val fields = if (fieldConfig.isEmpty) None else Some(fieldConfig.split(",").map(_.trim).toSeq)
+
+        // Parse parallelism (splits per task)
+        val splitsPerTask = config.getOrElse("spark.indextables.prewarm.splitsPerTask", "2").toInt
+
+        // Apply partition filter for prewarm if specified
+        val partitionFilterConfig = config.getOrElse("spark.indextables.prewarm.partitionFilter", "")
+        val prewarmActions = if (partitionFilterConfig.nonEmpty) {
+          try {
+            val metadata = transactionLog.getMetadata()
+            val partitionSchema = StructType(metadata.partitionColumns.map(name =>
+              org.apache.spark.sql.types.StructField(name, org.apache.spark.sql.types.StringType, nullable = true)))
+
+            if (partitionSchema.nonEmpty) {
+              val predicates = Seq(partitionFilterConfig)
+              val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(
+                predicates, partitionSchema, sparkSession)
+              val filtered = PartitionPredicateUtils.filterAddActionsByPredicates(
+                filteredActions, partitionSchema, parsedPredicates)
+              logger.info(s"Prewarm partition filter applied: ${filtered.length} of ${filteredActions.length} splits match '$partitionFilterConfig'")
+              filtered
+            } else {
+              logger.warn("Prewarm partition filter specified but table has no partition columns")
+              filteredActions
+            }
+          } catch {
+            case ex: Exception =>
+              logger.warn(s"Failed to apply prewarm partition filter '$partitionFilterConfig': ${ex.getMessage}")
+              filteredActions
+          }
+        } else {
+          filteredActions
+        }
+
+        logger.info(s"Prewarm config: segments=${segments.map(_.name()).mkString(",")}, fields=${fields.getOrElse("all")}, splitsPerTask=$splitsPerTask")
+
+        // Use enhanced prewarm with component selection
+        val preWarmResult = PreWarmManager.executePreWarmWithComponents(
           sparkContext,
-          filteredActions,
-          readSchema,
-          allFilters,
-          config,
-          isPreWarmEnabled
+          prewarmActions,
+          segments,
+          fields,
+          splitsPerTask,
+          config
         )
 
         if (preWarmResult.warmupInitiated) {
-          logger.info(s"Pre-warm completed: ${preWarmResult.totalWarmupsCreated} warmup tasks across ${preWarmResult.warmupAssignments.size} hosts")
+          logger.info(s"Prewarm completed: ${preWarmResult.totalWarmupsCreated} warmup tasks across ${preWarmResult.warmupAssignments.size} hosts")
+
+          // Check for catch-up behavior for new hosts/splits
+          val catchUpEnabled = config.getOrElse("spark.indextables.prewarm.catchUpNewHosts", "false").toBoolean
+          if (catchUpEnabled) {
+            val catchUpSplits = DriverSplitLocalityManager.getSplitsNeedingCatchUp(availableHosts, segments)
+            if (catchUpSplits.nonEmpty) {
+              val totalCatchUpSplits = catchUpSplits.values.map(_.size).sum
+              logger.info(s"Catch-up prewarm needed for $totalCatchUpSplits splits across ${catchUpSplits.size} hosts")
+              // Convert to AddActions for prewarm (respect partition filter)
+              val catchUpAddActions = catchUpSplits.values.flatten.flatMap { splitPath =>
+                prewarmActions.find(_.path == splitPath)
+              }.toSeq
+              if (catchUpAddActions.nonEmpty) {
+                PreWarmManager.executePreWarmWithComponents(
+                  sparkContext,
+                  catchUpAddActions,
+                  segments,
+                  fields,
+                  splitsPerTask,
+                  config
+                )
+                logger.info(s"Catch-up prewarm initiated for ${catchUpAddActions.size} splits")
+              }
+            }
+          }
         }
       } catch {
         case ex: Exception =>
-          logger.warn(s"Pre-warm failed but continuing with query execution: ${ex.getMessage}", ex)
+          logger.warn(s"Prewarm failed but continuing with query execution: ${ex.getMessage}", ex)
       }
     }
 

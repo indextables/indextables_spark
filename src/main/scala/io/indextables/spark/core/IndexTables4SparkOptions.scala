@@ -21,11 +21,12 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 /** Configuration for field indexing behavior. */
 case class FieldIndexingConfig(
-  fieldType: Option[String] = None,        // "string", "text", or "json"
-  isFast: Boolean = false,                 // Whether to enable fast fields
-  isStoreOnly: Boolean = false,            // Store but don't index
-  isIndexOnly: Boolean = false,            // Index but don't store
-  tokenizerOverride: Option[String] = None // Custom tokenizer for text fields
+  fieldType: Option[String] = None,         // "string", "text", or "json"
+  isFast: Boolean = false,                  // Whether to enable fast fields
+  isStoreOnly: Boolean = false,             // Store but don't index
+  isIndexOnly: Boolean = false,             // Index but don't store
+  tokenizerOverride: Option[String] = None, // Custom tokenizer for text fields
+  indexRecordOption: Option[String] = None  // "basic", "freq", or "position" for text fields
 )
 
 /** Utilities for handling IndexTables4Spark write and read options. Similar to Delta Lake's DeltaOptions. */
@@ -98,6 +99,33 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .map { case (key, value) => key.substring(prefix.length) -> value }
   }
 
+  /**
+   * Get the default index record option for text fields.
+   * Controls what information is stored in the inverted index for text fields.
+   * Options: "basic" (doc IDs only), "freq" (doc IDs + term frequency), "position" (doc IDs + freq + positions)
+   * Default: "position" (required for phrase queries and exact phrase matching)
+   */
+  def getDefaultIndexRecordOption: String =
+    Option(options.get("spark.indextables.indexing.text.indexRecordOption"))
+      .map(_.toLowerCase)
+      .getOrElse("position")
+
+  /**
+   * Get per-field index record option overrides.
+   * Maps field names to their record options: "basic", "freq", or "position".
+   * Use spark.indextables.indexing.indexrecordoption.<fieldname> = "position" to enable phrase queries on that field.
+   */
+  def getIndexRecordOptionOverrides: Map[String, String] = {
+    import scala.jdk.CollectionConverters._
+    val prefix = "spark.indextables.indexing.indexrecordoption."
+    options
+      .asCaseSensitiveMap()
+      .asScala
+      .toMap
+      .filter { case (key, _) => key.startsWith(prefix) }
+      .map { case (key, value) => key.substring(prefix.length).toLowerCase -> value.toLowerCase }
+  }
+
   // ===== Batch Optimization Configuration =====
 
   /** Whether to enable batch retrieval optimization (reduces S3 requests by 90-95%). */
@@ -162,11 +190,13 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
   /** Get indexing configuration for a specific field. */
   def getFieldIndexingConfig(fieldName: String): FieldIndexingConfig = {
-    val fieldTypeMapping   = getFieldTypeMapping
-    val fastFields         = getFastFields
-    val storeOnlyFields    = getStoreOnlyFields
-    val indexOnlyFields    = getIndexOnlyFields
-    val tokenizerOverrides = getTokenizerOverrides
+    val fieldTypeMapping         = getFieldTypeMapping
+    val fastFields               = getFastFields
+    val storeOnlyFields          = getStoreOnlyFields
+    val indexOnlyFields          = getIndexOnlyFields
+    val tokenizerOverrides       = getTokenizerOverrides
+    val indexRecordOverrides     = getIndexRecordOptionOverrides
+    val defaultIndexRecordOption = getDefaultIndexRecordOption
 
     // DEBUG: Log what we're checking
     import org.slf4j.LoggerFactory
@@ -175,12 +205,16 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     logger.debug(s"getFieldIndexingConfig DEBUG: fastFields=${fastFields.mkString(", ")}")
     logger.debug(s"getFieldIndexingConfig DEBUG: fastFields.contains($fieldName)=${fastFields.contains(fieldName)}")
 
+    // Get index record option: per-field override, or default
+    val indexRecord = indexRecordOverrides.get(fieldName.toLowerCase).orElse(Some(defaultIndexRecordOption))
+
     FieldIndexingConfig(
       fieldType = fieldTypeMapping.get(fieldName),
       isFast = fastFields.contains(fieldName),
       isStoreOnly = storeOnlyFields.contains(fieldName),
       isIndexOnly = indexOnlyFields.contains(fieldName),
-      tokenizerOverride = tokenizerOverrides.get(fieldName)
+      tokenizerOverride = tokenizerOverrides.get(fieldName),
+      indexRecordOption = indexRecord
     )
   }
 

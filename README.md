@@ -108,12 +108,15 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
   - [Bucket Aggregations](#bucket-aggregations)
   - [String Pattern Filter Pushdown](#string-pattern-filter-pushdown)
   - [Merge-On-Write Configuration](#merge-on-write-configuration)
+  - [Purge-On-Write Configuration](#purge-on-write-configuration)
   - [S3 Upload Configuration](#s3-upload-configuration)
   - [Transaction Log Configuration](#transaction-log-configuration)
   - [IndexWriter Performance Configuration](#indexwriter-performance-configuration)
   - [AWS Configuration](#aws-configuration)
   - [Split Cache Configuration](#split-cache-configuration)
   - [L2 Disk Cache (Persistent NVMe Caching)](#l2-disk-cache-persistent-nvme-caching)
+  - [Cache Prewarming](#cache-prewarming)
+  - [Flushing Disk Cache](#flushing-disk-cache)
   - [IndexQuery and IndexQueryAll Operators](#indexquery-and-indexqueryall-operators)
   - [Split Optimization with MERGE SPLITS](#split-optimization-with-merge-splits)
 - [File Format](#file-format)
@@ -145,6 +148,8 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🔐 **Flexible Cloud Authentication**: AWS (instance profiles, credentials, custom providers) and Azure (account keys, OAuth Service Principal) fully supported
 - ⚡ **Batch Retrieval Optimization**: Automatic consolidation of S3 requests reduces GET operations by 90-95% and improves read latency by 2-3x (enabled by default)
 - 💾 **L2 Disk Cache**: Persistent NVMe caching layer reduces S3/Azure latency from 50-200ms to 1-5ms with LZ4/ZSTD compression and LRU eviction (auto-enabled on Databricks/EMR)
+- 🔥 **Cache Prewarming**: SQL command (`PREWARM INDEXTABLES CACHE`) and read-time configuration to eliminate cold-start latency by preloading index segments
+- 🧹 **Automatic Table Hygiene**: Merge-on-write and purge-on-write options for automatic split consolidation and orphan cleanup during writes
 
 ---
 
@@ -1319,6 +1324,64 @@ df.write
 
 **Note**: Merge-on-write uses local disk for staging before uploading merged splits to cloud storage. Ensure executor nodes have sufficient free disk space (as specified by `minDiskSpaceGB`) for optimal performance.
 
+#### Purge-On-Write Configuration
+
+Purge-on-write automatically cleans up orphaned split files and old transaction logs during write operations, maintaining table health without manual intervention.
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.purgeOnWrite.enabled` | `false` | Enable automatic purge during writes |
+| `spark.indextables.purgeOnWrite.triggerAfterMerge` | `true` | Run purge after merge-on-write completes |
+| `spark.indextables.purgeOnWrite.triggerAfterWrites` | `0` | Run purge after N write operations (0 = disabled) |
+| `spark.indextables.purgeOnWrite.splitRetentionHours` | `168` | Retention period for orphaned splits (7 days) |
+| `spark.indextables.purgeOnWrite.txLogRetentionHours` | `720` | Retention period for old transaction logs (30 days) |
+
+**Usage Example:**
+
+```scala
+// Enable purge after merge-on-write completes
+df.write
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+  .save("s3://bucket/path")
+
+// Enable purge after every 10 write operations
+df.write
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "10")
+  .option("spark.indextables.purgeOnWrite.splitRetentionHours", "168")
+  .save("s3://bucket/path")
+
+// Complete automatic table hygiene (merge + purge)
+df.write
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .mode("append")
+  .option("spark.indextables.mergeOnWrite.enabled", "true")
+  .option("spark.indextables.mergeOnWrite.targetSize", "4G")
+  .option("spark.indextables.purgeOnWrite.enabled", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterMerge", "true")
+  .option("spark.indextables.purgeOnWrite.triggerAfterWrites", "20")
+  .save("s3://bucket/path")
+```
+
+**When to Use:**
+- High-frequency write workloads that generate many small splits
+- Tables with frequent merge operations
+- Long-running Spark applications with periodic writes
+- Development/testing environments with rapid iteration
+
+**Features:**
+- **Disabled by default**: Must be explicitly enabled
+- **Two trigger modes**: After merge-on-write or after N writes
+- **Automatic credential propagation**: Write options passed to purge executor
+- **Per-session counters**: Transaction counts tracked per table path
+- **Graceful failure handling**: Purge failures don't fail writes
+
 #### S3 Upload Configuration
 
 | Configuration | Default | Description |
@@ -1807,6 +1870,184 @@ DESCRIBE INDEXTABLES DISK CACHE;
 ```
 
 Each executor maintains its own independent disk cache. This command aggregates statistics from all active executors in the cluster. The `host` column shows the IP:port to identify which executor reported each row.
+
+##### Monitoring Object Storage Access
+
+Use the `DESCRIBE INDEXTABLES STORAGE STATS` SQL command to view object storage (S3/Azure) access statistics:
+
+```sql
+-- View object storage access stats across driver and all executors
+DESCRIBE INDEXTABLES STORAGE STATS;
+
+-- Example output:
+-- +-----------+-------------------+-------------+--------+
+-- |executor_id|host               |bytes_fetched|requests|
+-- +-----------+-------------------+-------------+--------+
+-- |driver     |10.0.0.1:44444     |     64838000|    1250|
+-- |executor-0 |10.0.0.2:33333     |     52480000|    1100|
+-- |executor-1 |10.0.0.3:33333     |     48320000|    1050|
+-- +-----------+-------------------+-------------+--------+
+```
+
+This command shows cumulative bytes fetched and request counts from object storage since JVM startup. Use it to:
+- Monitor S3/Azure access patterns and costs
+- Validate that prewarm eliminates subsequent S3 access (bytes_fetched should not increase after prewarm)
+- Debug performance issues related to object storage latency
+
+#### Cache Prewarming
+
+IndexTables4Spark supports comprehensive cache prewarming to load index segments into the L2 disk cache before query execution. This eliminates cold-start latency and ensures consistent query performance from the first request.
+
+**Two Approaches:**
+1. **SQL Command (PREWARM CACHE)**: Explicit prewarming with fine-grained control
+2. **Read-Time Configuration**: Automatic prewarming when reading data
+
+##### PREWARM CACHE SQL Command
+
+```sql
+-- Register IndexTables4Spark extensions for SQL parsing
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Basic prewarm - loads default segments (TERM_DICT, POSTINGS)
+PREWARM INDEXTABLES CACHE 's3://bucket/path';
+
+-- Prewarm specific segments
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  FOR SEGMENTS (TERM_DICT, FAST_FIELD, POSTINGS);
+
+-- Prewarm specific fields only
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  ON FIELDS (title, content, score);
+
+-- Prewarm with per-worker parallelism (splits per Spark task)
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  WITH PERWORKER PARALLELISM OF 4;
+
+-- Prewarm specific partitions only
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  WHERE date = '2024-01-01';
+
+-- Complete example with all options
+PREWARM INDEXTABLES CACHE 's3://bucket/path'
+  FOR SEGMENTS (TERM_DICT, FAST_FIELD, POSTINGS, FIELD_NORM, DOC_STORE)
+  ON FIELDS (id, title, content, score)
+  WITH PERWORKER PARALLELISM OF 4
+  WHERE date >= '2024-01-01';
+```
+
+**Segment Types:**
+
+| SQL Name | Description | Default |
+|----------|-------------|---------|
+| `TERM_DICT` / `TERM_DICTIONARY` | Term dictionary for text search | Yes |
+| `FAST_FIELD` / `FASTFIELD` | Fast fields for aggregations/sorting | No |
+| `POSTINGS` / `POSTING_LISTS` | Posting lists for term lookups | Yes |
+| `POSITIONS` / `POSITION_LISTS` | Term positions within documents | No |
+| `FIELD_NORM` / `FIELDNORM` | Field norms for scoring | No |
+| `DOC_STORE` / `STORE` | Document store for retrieval | No (large) |
+
+**Output Schema:**
+
+```
++-----------+-----------------+----------+--------+-----------+--------+--------------+
+|host       |splits_prewarmed |segments  |fields  |duration_ms|status  |skipped_fields|
++-----------+-----------------+----------+--------+-----------+--------+--------------+
+|10.0.0.1   |              25 |TERM,...  |all     |       1250|success |              |
+|10.0.0.2   |              25 |TERM,...  |all     |       1180|success |              |
++-----------+-----------------+----------+--------+-----------+--------+--------------+
+```
+
+##### Read-Time Prewarming Configuration
+
+Enable automatic prewarming when reading data:
+
+| Configuration | Default | Description |
+|---------------|---------|-------------|
+| `spark.indextables.prewarm.enabled` | `false` | Enable prewarm on read |
+| `spark.indextables.prewarm.segments` | `TERM_DICT,POSTINGS` | Segments to prewarm (comma-separated) |
+| `spark.indextables.prewarm.fields` | (empty = all) | Fields to prewarm (comma-separated) |
+| `spark.indextables.prewarm.splitsPerTask` | `2` | Splits per Spark task (controls parallelism) |
+| `spark.indextables.prewarm.partitionFilter` | (empty) | WHERE clause for partition filtering |
+| `spark.indextables.prewarm.failOnMissingField` | `true` | Fail if requested field doesn't exist |
+| `spark.indextables.prewarm.catchUpNewHosts` | `false` | Prewarm splits on newly added hosts |
+
+**Usage Example:**
+
+```scala
+// Enable prewarm on read with custom segments
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.prewarm.enabled", "true")
+  .option("spark.indextables.prewarm.segments", "TERM_DICT,FAST_FIELD")
+  .option("spark.indextables.prewarm.splitsPerTask", "4")
+  .load("s3://bucket/path")
+
+// Session-level configuration
+spark.conf.set("spark.indextables.prewarm.enabled", "true")
+spark.conf.set("spark.indextables.prewarm.segments", "TERM_DICT,POSTINGS,FAST_FIELD")
+
+val df = spark.read
+  .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://bucket/path")
+```
+
+**When to Use:**
+- Interactive query sessions requiring consistent low latency
+- Dashboard applications with predictable query patterns
+- After cluster restarts when disk cache is cold
+- Before running batch jobs with tight SLAs
+
+#### Flushing Disk Cache
+
+Use the `FLUSH INDEXTABLES DISK CACHE` command to clear all disk caches across the cluster. This is useful for testing, debugging, or reclaiming disk space.
+
+##### SQL Syntax
+
+```sql
+-- Register IndexTables4Spark extensions
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Flush all disk caches across driver and executors
+FLUSH INDEXTABLES DISK CACHE;
+
+-- Alternative syntax
+FLUSH TANTIVY4SPARK DISK CACHE;
+```
+
+##### Output Schema
+
+```
++-----------+----------------+--------+------------+--------------+------------------+
+|executor_id|cache_type      |status  |bytes_freed |files_deleted |message           |
++-----------+----------------+--------+------------+--------------+------------------+
+|driver     |split_cache     |success |           0|             0|Cache cleared     |
+|driver     |locality_manager|success |           0|             0|Cleared 0 splits  |
+|driver     |disk_cache_files|success |  5242880000|           125|Deleted 125 files |
+|executor-0 |disk_cache_files|success |  5242880000|           125|Deleted 125 files |
+|executor-1 |disk_cache_files|success |  4831838208|           118|Deleted 118 files |
++-----------+----------------+--------+------------+--------------+------------------+
+```
+
+**What Gets Cleared:**
+- **split_cache**: In-memory split cache manager state
+- **locality_manager**: Driver-side split locality tracking
+- **disk_cache_files**: Physical files in the L2 disk cache directory
+
+**Usage Example:**
+
+```scala
+// Clear all caches
+spark.sql("FLUSH INDEXTABLES DISK CACHE").show()
+
+// Verify caches are empty
+spark.sql("DESCRIBE INDEXTABLES DISK CACHE").show()
+```
+
+**When to Use:**
+- Testing cache behavior with cold starts
+- Debugging cache-related issues
+- Reclaiming disk space on executors
+- Before performance benchmarking
 
 #### IndexQuery and IndexQueryAll Operators
 
