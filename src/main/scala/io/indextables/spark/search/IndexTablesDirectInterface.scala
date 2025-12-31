@@ -242,7 +242,8 @@ object TantivyDirectInterface {
                   builder.addStringField(fieldName, stored, indexed, fast)
                 case "text" =>
                   val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
-                  builder.addTextField(fieldName, stored, fast, tokenizer, "position")
+                  val recordOption = indexingConfig.indexRecordOption.getOrElse("position")
+                  builder.addTextField(fieldName, stored, fast, tokenizer, recordOption)
                 case other =>
                   throw new IllegalArgumentException(
                     s"Unsupported field type override for field $fieldName: $other. Supported types: string, text"

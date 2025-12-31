@@ -159,6 +159,21 @@ spark.indextables.indexing.typemap.<field>: "text"
 spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 ```
 
+### Index Record Options (for text fields)
+Controls what information is stored in the inverted index for text fields:
+- `basic` - Document IDs only (smallest index)
+- `freq` - Document IDs + term frequency (enables TF-IDF scoring)
+- `position` - Document IDs + frequency + positions (enables phrase queries, default)
+
+```scala
+// Default for all text fields (default: "position")
+spark.indextables.indexing.text.indexRecordOption: "position"
+
+// Per-field override (e.g., reduce index size for fields not needing phrase queries)
+spark.indextables.indexing.indexrecordoption.logs: "basic"
+spark.indextables.indexing.indexrecordoption.metrics: "freq"
+```
+
 ### Fast Fields (for aggregations)
 ```scala
 spark.indextables.indexing.fastfields: "score,value,timestamp"
@@ -366,7 +381,7 @@ Pre-warm index caches across all executors for optimal query performance.
 -- Register extensions
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Basic prewarm (preloads default segments: TERM, POSTINGS, POSITIONS)
+-- Basic prewarm (preloads default segments: TERM, POSTINGS)
 PREWARM INDEXTABLES CACHE 's3://bucket/path';
 
 -- Prewarm specific segments
@@ -399,7 +414,7 @@ PREWARM INDEXTABLES CACHE 's3://bucket/path'
 | FIELD_NORM, FIELDNORM | Field norms for scoring |
 | DOC_STORE, STORE | Document storage |
 
-**Default segments**: TERM_DICT, POSTINGS, POSITIONS (minimal set for query operations)
+**Default segments**: TERM_DICT, POSTINGS (minimal set for query operations)
 
 **Read-time prewarm configuration:**
 ```scala
@@ -407,7 +422,7 @@ PREWARM INDEXTABLES CACHE 's3://bucket/path'
 spark.indextables.prewarm.enabled: false (default)
 
 // Segment selection (comma-separated)
-spark.indextables.prewarm.segments: "TERM_DICT,POSTINGS,POSITIONS"
+spark.indextables.prewarm.segments: "TERM_DICT,POSTINGS"
 
 // Field selection (comma-separated, empty = all fields)
 spark.indextables.prewarm.fields: ""

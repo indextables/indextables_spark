@@ -54,7 +54,7 @@ import org.slf4j.LoggerFactory
  *   - FIELD_NORM / FIELDNORM -> IndexComponent.FIELDNORM
  *   - DOC_STORE / STORE -> IndexComponent.STORE
  *
- * Default segments (when not specified): TERM_DICT, POSTINGS, POSITIONS (minimal set for query operations)
+ * Default segments (when not specified): TERM_DICT, POSTINGS (minimal set for query operations)
  * Default fields: All fields in the index
  * Default parallelism: 2 splits per task
  *
@@ -98,7 +98,7 @@ case class PrewarmCacheCommand(
 
     // Resolve segment aliases to IndexComponent set
     val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
-      logger.info("Using default segments: TERM, POSTINGS, POSITIONS")
+      logger.info("Using default segments: TERM, POSTINGS")
       IndexComponentMapping.defaultComponents
     } else {
       val resolved = segments.map { seg =>

@@ -267,14 +267,14 @@ class PrewarmCacheParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   test("IndexComponentMapping should have correct default components") {
     val defaults = IndexComponentMapping.defaultComponents
 
-    // Default is now minimal set: TERM, POSTINGS, and POSITIONS
+    // Default is now minimal set: TERM and POSTINGS only
     assert(defaults.contains(IndexComponent.TERM))
     assert(defaults.contains(IndexComponent.POSTINGS))
-    assert(defaults.contains(IndexComponent.POSITIONS))
+    assert(!defaults.contains(IndexComponent.POSITIONS), "POSITIONS should not be in defaults")
     assert(!defaults.contains(IndexComponent.FASTFIELD), "FASTFIELD should not be in defaults")
     assert(!defaults.contains(IndexComponent.FIELDNORM), "FIELDNORM should not be in defaults")
     assert(!defaults.contains(IndexComponent.STORE), "DOC_STORE should not be in defaults")
-    assert(defaults.size == 3)
+    assert(defaults.size == 2)
   }
 
   test("IndexComponentMapping.parseSegments should handle comma-separated input") {

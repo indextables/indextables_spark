@@ -33,7 +33,7 @@ import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
  * | FIELD_NORM, FIELDNORM | FIELDNORM |
  * | DOC_STORE, STORE | STORE |
  *
- * Default components (when no segments specified): TERM, POSTINGS, POSITIONS
+ * Default components (when no segments specified): TERM, POSTINGS
  * Note: DOC_STORE, FASTFIELD, and FIELDNORM are excluded from defaults as they can be expensive
  * and are not required for basic query operations. Add them explicitly if needed for aggregations.
  */
@@ -67,13 +67,12 @@ object IndexComponentMapping {
 
   /**
    * Default components to prewarm when no segments are specified.
-   * Includes TERM, POSTINGS, and POSITIONS which are essential for query operations.
-   * Add FASTFIELD, FIELDNORM, or STORE explicitly if needed for aggregations or scoring.
+   * Includes TERM and POSTINGS which are essential for query operations.
+   * Add POSITIONS, FASTFIELD, FIELDNORM, or STORE explicitly if needed.
    */
   val defaultComponents: Set[IndexComponent] = Set(
     IndexComponent.TERM,
-    IndexComponent.POSTINGS,
-    IndexComponent.POSITIONS
+    IndexComponent.POSTINGS
   )
 
   /**

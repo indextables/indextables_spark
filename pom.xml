@@ -168,7 +168,7 @@
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.26.9</version>
+            <version>0.26.11</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
