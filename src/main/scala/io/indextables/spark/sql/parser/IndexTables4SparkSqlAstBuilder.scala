@@ -117,21 +117,39 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         None
       }
 
-      // Extract MAX GROUPS
-      val maxGroups = if (ctx.maxGroups != null) {
-        logger.debug(s"Found MAX GROUPS: ${ctx.maxGroups.getText}")
+      // Extract MAX DEST SPLITS (formerly MAX GROUPS)
+      val maxDestSplits = if (ctx.maxDestSplits != null) {
+        logger.debug(s"Found MAX DEST SPLITS: ${ctx.maxDestSplits.getText}")
         try {
-          val maxGroupsValue = parseAlphanumericInt(ctx.maxGroups.getText)
-          if (maxGroupsValue <= 0) {
-            throw new IllegalArgumentException(s"MAX GROUPS must be positive, got: $maxGroupsValue")
+          val maxDestSplitsValue = parseAlphanumericInt(ctx.maxDestSplits.getText)
+          if (maxDestSplitsValue <= 0) {
+            throw new IllegalArgumentException(s"MAX DEST SPLITS must be positive, got: $maxDestSplitsValue")
           }
-          Some(maxGroupsValue)
+          Some(maxDestSplitsValue)
         } catch {
           case _: NumberFormatException =>
-            throw new NumberFormatException(s"Invalid MAX GROUPS value: ${ctx.maxGroups.getText}")
+            throw new NumberFormatException(s"Invalid MAX DEST SPLITS value: ${ctx.maxDestSplits.getText}")
         }
       } else {
-        logger.debug("No MAX GROUPS")
+        logger.debug("No MAX DEST SPLITS")
+        None
+      }
+
+      // Extract MAX SOURCE SPLITS PER MERGE
+      val maxSourceSplitsPerMerge = if (ctx.maxSourceSplitsPerMerge != null) {
+        logger.debug(s"Found MAX SOURCE SPLITS PER MERGE: ${ctx.maxSourceSplitsPerMerge.getText}")
+        try {
+          val maxSourceSplitsValue = parseAlphanumericInt(ctx.maxSourceSplitsPerMerge.getText)
+          if (maxSourceSplitsValue < 2) {
+            throw new IllegalArgumentException(s"MAX SOURCE SPLITS PER MERGE must be at least 2, got: $maxSourceSplitsValue")
+          }
+          Some(maxSourceSplitsValue)
+        } catch {
+          case _: NumberFormatException =>
+            throw new NumberFormatException(s"Invalid MAX SOURCE SPLITS PER MERGE value: ${ctx.maxSourceSplitsPerMerge.getText}")
+        }
+      } else {
+        logger.debug("No MAX SOURCE SPLITS PER MERGE")
         None
       }
 
@@ -141,14 +159,15 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
       // Create command
       logger.debug(
-        s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, maxGroups=$maxGroups"
+        s"Creating MergeSplitsCommand with pathOption=$pathOption, tableIdOption=$tableIdOption, maxDestSplits=$maxDestSplits, maxSourceSplitsPerMerge=$maxSourceSplitsPerMerge"
       )
       val result = MergeSplitsCommand.apply(
         pathOption,
         tableIdOption,
         wherePredicates,
         targetSize,
-        maxGroups,
+        maxDestSplits,
+        maxSourceSplitsPerMerge,
         preCommit
       )
       logger.debug(s"Created MergeSplitsCommand: $result")

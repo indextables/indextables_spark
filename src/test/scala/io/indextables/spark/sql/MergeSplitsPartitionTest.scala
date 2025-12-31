@@ -279,7 +279,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       new Path(tempTablePath),
       Seq.empty,
       5L * 1024L * 1024L * 1024L, // 5GB
-      None,
+      None, // maxDestSplits
+      None, // maxSourceSplitsPerMerge
       false
     )
 
@@ -287,14 +288,16 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     val findMergeableGroupsMethod = classOf[MergeSplitsExecutor].getDeclaredMethod(
       "findMergeableGroups",
       classOf[Map[String, String]],
-      classOf[Seq[AddAction]]
+      classOf[Seq[AddAction]],
+      classOf[Int]
     )
     findMergeableGroupsMethod.setAccessible(true)
 
     // Test 1: Valid case - all files from same partition
     logger.info("Test 1: Valid case - all files from same partition")
+    val defaultMaxSourceSplitsPerMerge: java.lang.Integer = 1000
     val validGroups = findMergeableGroupsMethod
-      .invoke(executor, partition2023Q1, filesPartition1)
+      .invoke(executor, partition2023Q1, filesPartition1, defaultMaxSourceSplitsPerMerge)
       .asInstanceOf[Seq[MergeGroup]]
 
     assert(validGroups.nonEmpty, "Should create merge groups for same-partition files")
@@ -306,7 +309,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     val mixedFiles = filesPartition1 ++ filesPartition2 // Mix files from different partitions
 
     val exception = intercept[java.lang.reflect.InvocationTargetException] {
-      findMergeableGroupsMethod.invoke(executor, partition2023Q1, mixedFiles)
+      findMergeableGroupsMethod.invoke(executor, partition2023Q1, mixedFiles, defaultMaxSourceSplitsPerMerge)
     }
 
     val cause = exception.getCause
@@ -323,7 +326,7 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
     // Test 3: Edge case - single file (should not create groups)
     logger.info("Test 3: Edge case - single file")
     val singleFileGroups = findMergeableGroupsMethod
-      .invoke(executor, partition2023Q2, filesPartition2)
+      .invoke(executor, partition2023Q2, filesPartition2, defaultMaxSourceSplitsPerMerge)
       .asInstanceOf[Seq[MergeGroup]]
 
     assert(singleFileGroups.isEmpty, "Should not create groups for single file")

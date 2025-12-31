@@ -417,7 +417,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
     // The debug logs from MergeSplitsCommand show the detailed bin packing behavior
   }
 
-  test("MAX GROUPS parameter should limit the number of merge groups created") {
+  test("MAX DEST SPLITS parameter should limit the number of merge groups created") {
     // Create many small files that would normally create multiple merge groups
     // Use a scenario where we can clearly validate the group limit behavior
 
@@ -427,7 +427,7 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
         .range((i - 1) * 30 + 1, i * 30 + 1)
         .select(
           col("id"),
-          concat(lit("max_groups_test_"), col("id")).as("content")
+          concat(lit("max_dest_splits_test_"), col("id")).as("content")
         )
 
       data
@@ -441,24 +441,24 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
     // Record initial state
     val initialFiles = transactionLog.listFiles()
-    logger.info(s"Created ${initialFiles.length} files for MAX GROUPS test")
+    logger.info(s"Created ${initialFiles.length} files for MAX DEST SPLITS test")
 
     // Log file sizes to understand the data distribution
     initialFiles.foreach(file => logger.info(s"Initial file: ${file.path} (${file.size} bytes)"))
 
     // Use a small target size that would normally create many groups, but limit to 3 groups
-    val targetSize = 1024 * 1024 // 1MB - this would normally allow many small files to merge
-    val maxGroups  = 3
+    val targetSize    = 1024 * 1024 // 1MB - this would normally allow many small files to merge
+    val maxDestSplits = 3
 
-    logger.info(s"Executing MERGE SPLITS with $targetSize byte target size and MAX GROUPS $maxGroups...")
-    spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $targetSize MAX GROUPS $maxGroups")
+    logger.info(s"Executing MERGE SPLITS with $targetSize byte target size and MAX DEST SPLITS $maxDestSplits...")
+    spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE $targetSize MAX DEST SPLITS $maxDestSplits")
 
     // CRITICAL: Refresh transaction log to see the latest state after merge
     transactionLog.invalidateCache()
 
     // Validate transaction log changes
     val finalFiles = transactionLog.listFiles()
-    logger.info(s"After merge with MAX GROUPS $maxGroups: ${finalFiles.length} files remain")
+    logger.info(s"After merge with MAX DEST SPLITS $maxDestSplits: ${finalFiles.length} files remain")
 
     // Should have fewer files than original (proves merging occurred)
     assert(
@@ -466,19 +466,19 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
       s"Should have fewer files after merge: ${finalFiles.length} vs ${initialFiles.length}"
     )
 
-    // CRITICAL: The number of files should reflect the MAX GROUPS constraint
-    // With MAX GROUPS = 3, we should have at most:
+    // CRITICAL: The number of files should reflect the MAX DEST SPLITS constraint
+    // With MAX DEST SPLITS = 3, we should have at most:
     // - 3 merged files (from the 3 allowed merge groups)
     // - Plus any remaining files that couldn't be merged due to the limit
-    // So finalFiles.length should be >= maxGroups and < initialFiles.length
+    // So finalFiles.length should be >= maxDestSplits and < initialFiles.length
 
     val _mergedFileCount =
       finalFiles.count(file => file.path.contains("merged") || finalFiles.length < initialFiles.length)
 
-    logger.info(s"Files after MAX GROUPS constraint: ${finalFiles.length} total")
+    logger.info(s"Files after MAX DEST SPLITS constraint: ${finalFiles.length} total")
     logger.info(s"Original files: ${initialFiles.length}")
 
-    // The key validation: we should have created no more than maxGroups merge operations
+    // The key validation: we should have created no more than maxDestSplits merge operations
     // This is validated by the fact that merge happened (fewer files) but was constrained
     val reductionInFiles = initialFiles.length - finalFiles.length
     logger.info(s"File reduction: $reductionInFiles files merged")

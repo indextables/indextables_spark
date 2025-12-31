@@ -456,9 +456,17 @@ spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4S
 
 -- Merge operations
 MERGE SPLITS 's3://bucket/path' TARGET SIZE 100M;
-MERGE SPLITS 's3://bucket/path' MAX GROUPS 10;
+MERGE SPLITS 's3://bucket/path' MAX DEST SPLITS 10;  -- Limit to 10 destination (merged) splits
+MERGE SPLITS 's3://bucket/path' MAX SOURCE SPLITS PER MERGE 500;  -- Limit source splits per merge
 MERGE SPLITS 's3://bucket/path' WHERE date = '2024-01-01' TARGET SIZE 100M;
+MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G MAX DEST SPLITS 5 MAX SOURCE SPLITS PER MERGE 100;
 ```
+
+**Merge Splits Configuration**:
+- `TARGET SIZE`: Maximum size of merged splits (default: 5GB)
+- `MAX DEST SPLITS`: Limits the number of destination (merged) splits to process (oldest first)
+- `MAX SOURCE SPLITS PER MERGE`: Maximum number of source splits that can be merged into a single destination split (default: 1000)
+  - Configuration: `spark.indextables.merge.maxSourceSplitsPerMerge: 1000`
 
 ### Purge IndexTable
 ```sql

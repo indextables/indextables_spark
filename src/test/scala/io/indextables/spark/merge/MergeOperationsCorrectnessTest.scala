@@ -249,11 +249,11 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
   }
 
   // ============================================================================
-  // MAX GROUPS TESTS
+  // MAX DEST SPLITS TESTS
   // ============================================================================
 
-  test("should respect MAX GROUPS limit") {
-    val tablePath = s"file://$tempDir/test_max_groups"
+  test("should respect MAX DEST SPLITS limit") {
+    val tablePath = s"file://$tempDir/test_max_dest_splits"
 
     // Create data with many partitions
     val df = spark.range(0, 500).repartition(20).selectExpr("id", "CAST(id AS STRING) as text")
@@ -262,8 +262,8 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
       .mode("overwrite")
       .save(tablePath)
 
-    // Execute merge with MAX GROUPS limit
-    spark.sql(s"MERGE SPLITS '$tablePath' MAX GROUPS 3")
+    // Execute merge with MAX DEST SPLITS limit
+    spark.sql(s"MERGE SPLITS '$tablePath' MAX DEST SPLITS 3")
 
     // Verify data intact
     val result = spark.read
@@ -272,7 +272,7 @@ class MergeOperationsCorrectnessTest extends TestBase with BeforeAndAfterEach {
 
     result.count() shouldBe 500
 
-    logger.info("MAX GROUPS limit test passed")
+    logger.info("MAX DEST SPLITS limit test passed")
   }
 
   // ============================================================================

@@ -99,7 +99,8 @@ case class MergeSplitsCommand(
   override val child: LogicalPlan,
   userPartitionPredicates: Seq[String],
   targetSize: Option[Long],
-  maxGroups: Option[Int],
+  maxDestSplits: Option[Int],
+  maxSourceSplitsPerMerge: Option[Int],
   preCommitMerge: Boolean = false)
     extends MergeSplitsCommandBase
     with UnaryNode {
@@ -182,7 +183,8 @@ case class MergeSplitsCommand(
         tablePath,
         userPartitionPredicates,
         actualTargetSize,
-        maxGroups,
+        maxDestSplits,
+        maxSourceSplitsPerMerge,
         preCommitMerge
       ).merge()
     } finally
@@ -264,11 +266,12 @@ object MergeSplitsCommand {
     tableIdentifier: Option[org.apache.spark.sql.catalyst.TableIdentifier],
     userPartitionPredicates: Seq[String],
     targetSize: Option[Long],
-    maxGroups: Option[Int],
+    maxDestSplits: Option[Int],
+    maxSourceSplitsPerMerge: Option[Int],
     preCommitMerge: Boolean
   ): MergeSplitsCommand = {
     val plan = UnresolvedDeltaPathOrIdentifier(path, tableIdentifier, "MERGE SPLITS")
-    MergeSplitsCommand(plan, userPartitionPredicates, targetSize, maxGroups, preCommitMerge)
+    MergeSplitsCommand(plan, userPartitionPredicates, targetSize, maxDestSplits, maxSourceSplitsPerMerge, preCommitMerge)
   }
 
   /**
@@ -425,7 +428,8 @@ class MergeSplitsExecutor(
   tablePath: Path,
   partitionPredicates: Seq[String],
   targetSize: Long,
-  maxGroups: Option[Int],
+  maxDestSplits: Option[Int],
+  maxSourceSplitsPerMerge: Option[Int],
   preCommitMerge: Boolean = false,
   overrideOptions: Option[Map[String, String]] = None) {
 
@@ -660,13 +664,22 @@ class MergeSplitsExecutor(
       partitionsToMerge
     }
 
+    // Get effective maxSourceSplitsPerMerge (from parameter or config default)
+    val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge.orElse {
+      sparkSession.conf.getOption(
+        io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
+      ).map(_.toInt)
+    }.getOrElse(io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT)
+
+    logger.info(s"Using MAX SOURCE SPLITS PER MERGE: $effectiveMaxSourceSplitsPerMerge")
+
     // Find mergeable splits within each partition
     val mergeGroups = filteredPartitions.flatMap {
       case (partitionValues, files) =>
         logger.info(s"Processing partition $partitionValues with ${files.length} files:")
         files.foreach(file => logger.info(s"  File: ${file.path} (${file.size} bytes)"))
 
-        val groups = findMergeableGroups(partitionValues, files)
+        val groups = findMergeableGroups(partitionValues, files, effectiveMaxSourceSplitsPerMerge)
         logger.info(s"Found ${groups.length} potential merge groups in partition $partitionValues")
 
         // Double-check: filter out any single-file groups that might have slipped through
@@ -694,10 +707,10 @@ class MergeSplitsExecutor(
 
     logger.info(s"Found ${mergeGroups.length} merge groups containing ${mergeGroups.map(_.files.length).sum} files")
 
-    // Apply MAX GROUPS limit if specified
-    val limitedMergeGroups = maxGroups match {
+    // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
+    val limitedMergeGroups = maxDestSplits match {
       case Some(maxLimit) if mergeGroups.length > maxLimit =>
-        logger.info(s"Limiting merge operation to $maxLimit oldest merge groups (out of ${mergeGroups.length} total)")
+        logger.info(s"Limiting merge operation to $maxLimit oldest dest splits (out of ${mergeGroups.length} total)")
 
         // Sort merge groups by the oldest file in each group to get the N oldest groups
         val sortedGroups  = mergeGroups.sortBy(_.files.map(_.modificationTime).min)
@@ -706,15 +719,15 @@ class MergeSplitsExecutor(
         val limitedFilesCount = limitedGroups.map(_.files.length).sum
         val totalFilesCount   = mergeGroups.map(_.files.length).sum
         logger.info(
-          s"MAX GROUPS limit applied: processing $limitedFilesCount files from $maxLimit oldest groups (skipping ${totalFilesCount - limitedFilesCount} files from ${mergeGroups.length - maxLimit} newer groups)"
+          s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit oldest groups (skipping ${totalFilesCount - limitedFilesCount} files from ${mergeGroups.length - maxLimit} newer groups)"
         )
 
         limitedGroups
       case Some(maxLimit) =>
-        logger.info(s"MAX GROUPS limit of $maxLimit not reached (found ${mergeGroups.length} groups)")
+        logger.info(s"MAX DEST SPLITS limit of $maxLimit not reached (found ${mergeGroups.length} groups)")
         mergeGroups
       case None =>
-        logger.debug("No MAX GROUPS limit specified")
+        logger.debug("No MAX DEST SPLITS limit specified")
         mergeGroups
     }
 
@@ -1164,10 +1177,15 @@ class MergeSplitsExecutor(
    * Find groups of files that should be merged within a partition. Follows bin packing approach similar to Delta Lake's
    * OPTIMIZE. Only creates groups with 2+ files to satisfy tantivy4java merge requirements. CRITICAL: Ensures all files
    * in each group have identical partition values.
+   *
+   * @param partitionValues partition values for the files in this group
+   * @param files files to group for merging
+   * @param maxSourceSplitsPerMerge maximum number of source splits that can be merged in a single merge operation
    */
   private def findMergeableGroups(
     partitionValues: Map[String, String],
-    files: Seq[AddAction]
+    files: Seq[AddAction],
+    maxSourceSplitsPerMerge: Int
   ): Seq[MergeGroup] = {
 
     val groups           = ArrayBuffer[MergeGroup]()
@@ -1208,9 +1226,16 @@ class MergeSplitsExecutor(
         s"MERGE DEBUG: Processing file ${index + 1}/${mergeableFiles.length}: ${file.path} (${file.size} bytes)"
       )
 
-      // Check if adding this file would exceed target size
-      if (currentGroupSize > 0 && currentGroupSize + file.size > targetSize) {
-        logger.debug(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
+      // Check if adding this file would exceed target size OR max source splits per merge
+      val wouldExceedTargetSize = currentGroupSize > 0 && currentGroupSize + file.size > targetSize
+      val wouldExceedMaxSplits = currentGroup.length >= maxSourceSplitsPerMerge
+
+      if (wouldExceedTargetSize || wouldExceedMaxSplits) {
+        if (wouldExceedMaxSplits) {
+          logger.debug(s"MERGE DEBUG: Adding ${file.path} would exceed max source splits per merge ($maxSourceSplitsPerMerge)")
+        } else {
+          logger.debug(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
+        }
 
         // Current group is full, save it if it has multiple files
         logger.debug(s"MERGE DEBUG: Current group has ${currentGroup.length} files before saving")
@@ -1324,10 +1349,17 @@ class MergeSplitsExecutor(
         partitionsToMerge
       }
 
+      // Get effective maxSourceSplitsPerMerge for counting
+      val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge.orElse {
+        sparkSession.conf.getOption(
+          io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
+        ).map(_.toInt)
+      }.getOrElse(io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT)
+
       // Count merge groups in each partition
       val totalGroups = filteredPartitions.map {
         case (partitionValues, files) =>
-          val groups = findMergeableGroups(partitionValues, files)
+          val groups = findMergeableGroups(partitionValues, files, effectiveMaxSourceSplitsPerMerge)
           // Filter to valid groups (>= 2 files)
           groups.count(_.files.length >= 2)
       }.sum

@@ -45,7 +45,8 @@ statement
     : MERGE SPLITS (path=STRING | table=qualifiedName)?
         (WHERE whereClause=predicateToken)?
         (TARGET SIZE targetSize=alphanumericValue)?
-        (MAX GROUPS maxGroups=alphanumericValue)?
+        (MAX DEST SPLITS maxDestSplits=alphanumericValue)?
+        (MAX SOURCE SPLITS PER MERGE maxSourceSplitsPerMerge=alphanumericValue)?
         PRECOMMIT?                                              #mergeSplitsTable
     | PURGE INDEXTABLE (path=STRING | table=qualifiedName)
         (OLDER THAN retentionNumber=INTEGER_VALUE retentionUnit=(DAYS | HOURS))?
@@ -106,6 +107,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
+    | DEST | SOURCE | PER
     ;
 
 // Keywords (case-insensitive)
@@ -156,6 +158,9 @@ OF: [Oo][Ff];
 ON: [Oo][Nn];
 STORAGE: [Ss][Tt][Oo][Rr][Aa][Gg][Ee];
 STATS: [Ss][Tt][Aa][Tt][Ss];
+DEST: [Dd][Ee][Ss][Tt];
+SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
+PER: [Pp][Ee][Rr];
 
 // Literals
 STRING
