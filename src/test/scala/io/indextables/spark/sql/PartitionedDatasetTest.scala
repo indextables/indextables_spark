@@ -229,7 +229,7 @@ class PartitionedDatasetTest extends TestBase {
     spark.sql(s"""
       MERGE SPLITS '$testDataPath'
       TARGET SIZE 5M
-      MAX GROUPS 10
+      MAX DEST SPLITS 10
     """)
 
     // Validate global merge
