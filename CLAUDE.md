@@ -601,6 +601,53 @@ DESCRIBE TANTIVY4SPARK STORAGE STATS;  -- alternate syntax
 - Useful for monitoring S3 costs and validating cache effectiveness
 - After a full prewarm, `bytes_fetched` should not increase during subsequent queries
 
+### Describe Environment
+```sql
+-- View Spark and Hadoop configuration properties across all executors
+DESCRIBE INDEXTABLES ENVIRONMENT;
+DESCRIBE TANTIVY4SPARK ENVIRONMENT;  -- alternate syntax
+
+-- Example output:
+-- +----------------+------+-------------+---------------------------------+----------------+
+-- |host            |role  |property_type|property_name                    |property_value  |
+-- +----------------+------+-------------+---------------------------------+----------------+
+-- |10.0.0.1:44444  |driver|spark        |spark.app.name                   |MyApp           |
+-- |10.0.0.1:44444  |driver|spark        |spark.master                     |local[4]        |
+-- |10.0.0.1:44444  |driver|spark        |spark.indextables.aws.secretKey  |***REDACTED***  |
+-- |10.0.0.1:44444  |driver|hadoop       |fs.defaultFS                     |file:///        |
+-- |10.0.0.2:33333  |worker|spark        |spark.app.name                   |MyApp           |
+-- |10.0.0.2:33333  |worker|hadoop       |fs.defaultFS                     |file:///        |
+-- +----------------+------+-------------+---------------------------------+----------------+
+```
+
+**Output schema:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `host` | String | Host address (ip:port) of the node |
+| `role` | String | "driver" or "worker" |
+| `property_type` | String | "spark" or "hadoop" |
+| `property_name` | String | Configuration property name |
+| `property_value` | String | Property value (sensitive values redacted) |
+
+**Key points:**
+- Collects Spark and Hadoop properties from driver and all worker nodes
+- Sensitive values containing "secret", "key", "password", "token", "credential", or "session" are automatically redacted as `***REDACTED***`
+- Useful for debugging configuration issues across the cluster
+- Results can be filtered using SQL after registering as a temp view
+
+**Example usage:**
+```scala
+// View all environment properties
+spark.sql("DESCRIBE INDEXTABLES ENVIRONMENT").show(false)
+
+// Filter to specific properties
+spark.sql("DESCRIBE INDEXTABLES ENVIRONMENT").createOrReplaceTempView("env_props")
+spark.sql("SELECT * FROM env_props WHERE property_name LIKE 'spark.indextables%'").show()
+
+// Compare driver vs worker configuration
+spark.sql("SELECT property_name, role, property_value FROM env_props WHERE property_type = 'spark' ORDER BY property_name, role").show()
+```
+
 ### Flush Disk Cache
 ```sql
 -- Flush disk cache across all executors (clears cached data and locality state)
@@ -752,6 +799,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - ✅ **PURGE INDEXTABLE**: 40/40 tests passing (integration, parsing, error handling, transaction log cleanup)
 - ✅ **Purge-on-write**: 8/8 tests passing (local/Hadoop integration)
   - Real S3/Azure purge-on-write tests available but require credentials
+- ✅ **DESCRIBE ENVIRONMENT**: 10/10 tests passing (parsing, schema, redaction, queryability)
 
 ## Important Notes
 - **DataSource API**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations
