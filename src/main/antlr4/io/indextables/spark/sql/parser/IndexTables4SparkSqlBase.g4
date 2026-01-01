@@ -64,6 +64,7 @@ statement
         (INCLUDE ALL)?                                          #describeTransactionLog
     | DESCRIBE indexTablesKeyword DISK CACHE                    #describeDiskCache
     | DESCRIBE indexTablesKeyword STORAGE STATS                 #describeStorageStats
+    | DESCRIBE indexTablesKeyword ENVIRONMENT                   #describeEnvironment
     | PREWARM indexTablesKeyword CACHE (path=STRING | table=qualifiedName)
         (FOR SEGMENTS '(' segmentList=identifierList ')')?
         (ON FIELDS '(' fieldList=identifierList ')')?
@@ -107,7 +108,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
-    | DEST | SOURCE | PER
+    | DEST | SOURCE | PER | ENVIRONMENT
     ;
 
 // Keywords (case-insensitive)
@@ -161,6 +162,7 @@ STATS: [Ss][Tt][Aa][Tt][Ss];
 DEST: [Dd][Ee][Ss][Tt];
 SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
 PER: [Pp][Ee][Rr];
+ENVIRONMENT: [Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt];
 
 // Literals
 STRING
