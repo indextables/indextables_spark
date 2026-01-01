@@ -25,6 +25,7 @@ import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
   DescribeDiskCacheCommand,
+  DescribeEnvironmentCommand,
   DescribeStorageStatsCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
@@ -419,6 +420,13 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     logger.debug("visitDescribeStorageStats called")
     val result = DescribeStorageStatsCommand()
     logger.debug(s"Created DescribeStorageStatsCommand: $result")
+    result
+  }
+
+  override def visitDescribeEnvironment(ctx: DescribeEnvironmentContext): LogicalPlan = {
+    logger.debug("visitDescribeEnvironment called")
+    val result = DescribeEnvironmentCommand()
+    logger.debug(s"Created DescribeEnvironmentCommand: $result")
     result
   }
 
