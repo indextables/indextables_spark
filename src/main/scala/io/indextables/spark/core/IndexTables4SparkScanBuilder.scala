@@ -282,6 +282,8 @@ class IndexTables4SparkScanBuilder(
       )
     } else {
       // Regular GROUP BY scan using tantivy aggregations
+      // Pass partition columns for optimization - avoid Tantivy aggregation on partition columns
+      val partitionCols = getPartitionColumns()
       new IndexTables4SparkGroupByAggregateScan(
         sparkSession,
         transactionLog,
@@ -291,7 +293,9 @@ class IndexTables4SparkScanBuilder(
         config,
         aggregation,
         groupByColumns,
-        extractedIndexQueryFilters
+        extractedIndexQueryFilters,
+        bucketConfig = None,
+        partitionColumns = partitionCols
       )
     }
   }
@@ -326,6 +330,8 @@ class IndexTables4SparkScanBuilder(
 
     logger.debug(s"BUCKET SCAN: Creating bucket aggregate scan for field '${bucketConfig.fieldName}' with config: ${bucketConfig.description}")
 
+    // Pass partition columns for optimization (bucket aggregations typically don't use partition columns in GROUP BY)
+    val partitionCols = getPartitionColumns()
     new IndexTables4SparkGroupByAggregateScan(
       sparkSession,
       transactionLog,
@@ -336,7 +342,8 @@ class IndexTables4SparkScanBuilder(
       aggregation,
       groupByColumns,
       extractedIndexQueryFilters,
-      Some(bucketConfig)
+      bucketConfig = Some(bucketConfig),
+      partitionColumns = partitionCols
     )
   }
 
