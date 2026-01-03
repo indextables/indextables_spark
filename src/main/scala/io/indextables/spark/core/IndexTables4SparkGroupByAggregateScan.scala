@@ -69,10 +69,19 @@ class IndexTables4SparkGroupByAggregateScan(
   aggregation: Aggregation,
   groupByColumns: Array[String],
   indexQueryFilters: Array[Any] = Array.empty,
-  bucketConfig: Option[BucketAggregationConfig] = None)
+  bucketConfig: Option[BucketAggregationConfig] = None,
+  partitionColumns: Set[String] = Set.empty) // Partition columns for optimization
     extends Scan {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateScan])
+
+  // Separate GROUP BY columns into partition columns (values from split metadata) and data columns (need Tantivy)
+  private val (partitionGroupByColumns, dataGroupByColumns) = {
+    val (partCols, dataCols) = groupByColumns.partition(partitionColumns.contains)
+    logger.info(s"GROUP BY OPTIMIZATION: Partition columns in GROUP BY: ${partCols.mkString(", ")}")
+    logger.info(s"GROUP BY OPTIMIZATION: Data columns in GROUP BY (need Tantivy): ${dataCols.mkString(", ")}")
+    (partCols, dataCols)
+  }
 
   logger.debug(s"GROUP BY AGGREGATE SCAN: Created with ${pushedFilters.length} filters and ${indexQueryFilters.length} IndexQuery filters")
   pushedFilters.foreach(f => logger.debug(s"GROUP BY AGGREGATE SCAN: Filter: $f"))
@@ -98,7 +107,8 @@ class IndexTables4SparkGroupByAggregateScan(
       aggregation,
       groupByColumns,
       indexQueryFilters,
-      bucketConfig
+      bucketConfig,
+      partitionColumns
     )
 
   override def description(): String = {
@@ -247,7 +257,8 @@ class IndexTables4SparkGroupByAggregateBatch(
   aggregation: Aggregation,
   groupByColumns: Array[String],
   indexQueryFilters: Array[Any] = Array.empty,
-  bucketConfig: Option[BucketAggregationConfig] = None)
+  bucketConfig: Option[BucketAggregationConfig] = None,
+  partitionColumns: Set[String] = Set.empty) // Partition columns for optimization
     extends Batch {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregateBatch])
@@ -290,6 +301,8 @@ class IndexTables4SparkGroupByAggregateBatch(
     // Create one partition per filtered split for distributed GROUP BY processing
     filteredSplits.map { split =>
       val preferredHost = assignments.get(split.path)
+      // Extract partition values from split's partitionValues field
+      val splitPartitionValues = Option(split.partitionValues).getOrElse(Map.empty[String, String])
       new IndexTables4SparkGroupByAggregatePartition(
         split,
         pushedFilters,
@@ -300,7 +313,9 @@ class IndexTables4SparkGroupByAggregateBatch(
         schema,
         indexQueryFilters,
         preferredHost,
-        bucketConfig
+        bucketConfig,
+        partitionColumns,
+        splitPartitionValues
       )
     }.toArray
   }
@@ -332,7 +347,9 @@ class IndexTables4SparkGroupByAggregatePartition(
   val schema: StructType,
   val indexQueryFilters: Array[Any] = Array.empty,
   val preferredHost: Option[String] = None,
-  val bucketConfig: Option[BucketAggregationConfig] = None)
+  val bucketConfig: Option[BucketAggregationConfig] = None,
+  val partitionColumns: Set[String] = Set.empty, // Partition columns for optimization
+  val splitPartitionValues: Map[String, String] = Map.empty) // Partition values from split metadata
     extends InputPartition {
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkGroupByAggregatePartition])
@@ -513,9 +530,34 @@ class IndexTables4SparkGroupByAggregateReader(
   ): Array[org.apache.spark.sql.catalyst.InternalRow] = {
     import io.indextables.tantivy4java.aggregation.TermsAggregation
 
+    // Separate GROUP BY columns into partition columns (values from split metadata) and data columns (need Tantivy)
+    val partitionColumns = partition.partitionColumns
+    val allGroupByColumns = partition.groupByColumns
+    val (partitionGroupByCols, dataGroupByCols) = allGroupByColumns.partition(partitionColumns.contains)
+
+    if (partitionGroupByCols.nonEmpty) {
+      logger.info(s"GROUP BY OPTIMIZATION: Partition columns in GROUP BY: ${partitionGroupByCols.mkString(", ")}")
+      logger.info(s"GROUP BY OPTIMIZATION: Data columns requiring Tantivy aggregation: ${dataGroupByCols.mkString(", ")}")
+      logger.info(s"GROUP BY OPTIMIZATION: Split partition values: ${partition.splitPartitionValues}")
+    }
+
     // Support both single and multi-column GROUP BY
     if (partition.groupByColumns.length >= 1) {
-        val groupByColumns = partition.groupByColumns
+        // Use only data columns for Tantivy aggregation (optimization: skip partition columns)
+        val groupByColumns = if (dataGroupByCols.isEmpty) {
+          // All columns are partition columns - no Tantivy aggregation needed
+          // Just return count for this split with partition values
+          logger.info(s"GROUP BY OPTIMIZATION: All GROUP BY columns are partition columns - using simplified aggregation")
+          Array.empty[String]
+        } else {
+          dataGroupByCols
+        }
+
+        // Handle case where all GROUP BY columns are partition columns
+        if (groupByColumns.isEmpty) {
+          return executePartitionOnlyAggregation(searcher, splitSearchEngine, allGroupByColumns)
+        }
+
         logger.debug(s"GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
 
         val (termsAgg, isMultiDimensional) = if (groupByColumns.length == 1) {
@@ -716,12 +758,11 @@ class IndexTables4SparkGroupByAggregateReader(
               .map { multiBucket =>
                 try {
                   val fieldValues = multiBucket.getFieldValues()
-                  val groupByValues = fieldValues.zipWithIndex.map {
-                    case (value, idx) =>
-                      val fieldName = groupByColumns(idx)
-                      val fieldType = getFieldType(fieldName)
-                      convertStringValueToSpark(value, fieldType)
-                  }
+                  // Build full GROUP BY values with partition values injected
+                  val groupByValues = buildFullGroupByValues(
+                    allGroupByColumns, groupByColumns, partitionGroupByCols,
+                    fieldValues, partition.splitPartitionValues
+                  )
                   val aggregationValues =
                     calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
 
@@ -761,14 +802,20 @@ class IndexTables4SparkGroupByAggregateReader(
               .filter(_ != null)
               .map { bucket =>
                 try {
-                  val groupByValue      = convertBucketKeyToSpark(bucket, groupByColumns(0))
+                  val bucketKeyValue = convertBucketKeyToSpark(bucket, groupByColumns(0))
+                  // Build full GROUP BY values with partition values injected
+                  val groupByValues = buildFullGroupByValues(
+                    allGroupByColumns, groupByColumns, partitionGroupByCols,
+                    Array(if (bucketKeyValue == null) "" else bucketKeyValue.toString),
+                    partition.splitPartitionValues
+                  )
                   val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
 
                   val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
                   logger.debug(s"GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
 
                   // Combine GROUP BY value with aggregation results
-                  InternalRow.fromSeq(Seq(groupByValue) ++ aggregationValues)
+                  InternalRow.fromSeq(groupByValues ++ aggregationValues)
                 } catch {
                   case e: Exception =>
                     logger.warn(s"GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
@@ -1785,4 +1832,145 @@ class IndexTables4SparkGroupByAggregateReader(
       }
       fieldName
     }
+
+  /**
+   * Build full GROUP BY values array by combining partition values from split metadata
+   * with data values from Tantivy aggregation results. This maintains the correct
+   * column order as expected by Spark.
+   *
+   * @param allGroupByColumns All GROUP BY columns in original order
+   * @param dataGroupByCols Data columns (non-partition) that were aggregated by Tantivy
+   * @param partitionGroupByCols Partition columns whose values come from split metadata
+   * @param dataFieldValues Values from Tantivy bucket for data columns
+   * @param splitPartitionValues Partition values from split metadata
+   * @return Array of Spark-compatible values in the correct column order
+   */
+  private def buildFullGroupByValues(
+    allGroupByColumns: Array[String],
+    dataGroupByCols: Array[String],
+    partitionGroupByCols: Array[String],
+    dataFieldValues: Array[String],
+    splitPartitionValues: Map[String, String]
+  ): Array[Any] = {
+    var dataColIndex = 0
+    allGroupByColumns.map { colName =>
+      val fieldType = getFieldType(colName)
+      if (partitionGroupByCols.contains(colName)) {
+        // Get value from split metadata for partition columns
+        val valueStr = splitPartitionValues.getOrElse(colName, "")
+        logger.debug(s"GROUP BY OPTIMIZATION: Injecting partition value '$valueStr' for column '$colName'")
+        convertStringValueToSpark(valueStr, fieldType)
+      } else {
+        // Get value from Tantivy bucket for data columns
+        val valueStr = if (dataColIndex < dataFieldValues.length) dataFieldValues(dataColIndex) else ""
+        dataColIndex += 1
+        convertStringValueToSpark(valueStr, fieldType)
+      }
+    }
+  }
+
+  /**
+   * Execute aggregation when all GROUP BY columns are partition columns.
+   * In this case, we don't need Tantivy terms aggregation - just count documents
+   * and return a single row with partition values from split metadata.
+   */
+  private def executePartitionOnlyAggregation(
+    searcher: io.indextables.tantivy4java.split.SplitSearcher,
+    splitSearchEngine: io.indextables.spark.search.SplitSearchEngine,
+    allGroupByColumns: Array[String]
+  ): Array[org.apache.spark.sql.catalyst.InternalRow] = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    logger.info(s"GROUP BY OPTIMIZATION: Executing partition-only aggregation for split ${partition.split.path}")
+
+    // Build filter query to count matching documents
+    val query = buildFilterQuery(splitSearchEngine)
+
+    // Execute a simple count aggregation to get document count matching filters
+    val countAgg = new io.indextables.tantivy4java.aggregation.CountAggregation("count_agg")
+    val result = searcher.search(query, 0, "count_agg", countAgg)
+
+    val docCount = if (result.hasAggregations()) {
+      val countResult = result.getAggregation("count_agg")
+      if (countResult != null) {
+        countResult.asInstanceOf[io.indextables.tantivy4java.aggregation.CountResult].getCount
+      } else {
+        // Fallback to hits size if count aggregation not available
+        Option(result.getHits).map(_.size.toLong).getOrElse(0L)
+      }
+    } else {
+      // Fallback to hits size if no aggregations
+      Option(result.getHits).map(_.size.toLong).getOrElse(0L)
+    }
+
+    logger.info(s"GROUP BY OPTIMIZATION: Split has $docCount documents matching filters")
+
+    // Build GROUP BY values from partition metadata
+    val groupByValues = allGroupByColumns.map { colName =>
+      val fieldType = getFieldType(colName)
+      val valueStr = partition.splitPartitionValues.getOrElse(colName, "")
+      convertStringValueToSpark(valueStr, fieldType)
+    }
+
+    // Calculate aggregation values - for partition-only, we can compute simpler aggregations
+    val aggregationValues = partition.aggregation.aggregateExpressions.zipWithIndex.map {
+      case (aggExpr, index) =>
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            docCount.toLong
+
+          case sum: Sum =>
+            // For SUM on partition-only aggregation, we need to run a SUM aggregation
+            val fieldName = getFieldName(sum.column)
+            try {
+              val sumAgg = new io.indextables.tantivy4java.aggregation.SumAggregation("sum_agg", fieldName)
+              val sumResult = searcher.search(query, 0, "sum_agg", sumAgg)
+              if (sumResult.hasAggregations()) {
+                val agg = sumResult.getAggregation("sum_agg")
+                if (agg != null) {
+                  val sumValue = agg.asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult].getSum
+                  val fieldType = getFieldType(fieldName)
+                  fieldType match {
+                    case IntegerType | LongType => java.lang.Long.valueOf(Math.round(sumValue))
+                    case _ => java.lang.Double.valueOf(sumValue)
+                  }
+                } else 0L
+              } else 0L
+            } catch { case _: Exception => 0L }
+
+          case min: Min =>
+            val fieldName = getFieldName(min.column)
+            try {
+              val minAgg = new io.indextables.tantivy4java.aggregation.MinAggregation("min_agg", fieldName)
+              val minResult = searcher.search(query, 0, "min_agg", minAgg)
+              if (minResult.hasAggregations()) {
+                val agg = minResult.getAggregation("min_agg")
+                if (agg != null) {
+                  val minValue = agg.asInstanceOf[io.indextables.tantivy4java.aggregation.MinResult].getMin
+                  convertMinMaxValue(minValue, min)
+                } else 0.0
+              } else 0.0
+            } catch { case _: Exception => 0.0 }
+
+          case max: Max =>
+            val fieldName = getFieldName(max.column)
+            try {
+              val maxAgg = new io.indextables.tantivy4java.aggregation.MaxAggregation("max_agg", fieldName)
+              val maxResult = searcher.search(query, 0, "max_agg", maxAgg)
+              if (maxResult.hasAggregations()) {
+                val agg = maxResult.getAggregation("max_agg")
+                if (agg != null) {
+                  val maxValue = agg.asInstanceOf[io.indextables.tantivy4java.aggregation.MaxResult].getMax
+                  convertMinMaxValue(maxValue, max)
+                } else 0.0
+              } else 0.0
+            } catch { case _: Exception => 0.0 }
+
+          case _ => 0L
+        }
+    }
+
+    // Return single row with partition values and aggregation results
+    Array(InternalRow.fromSeq(groupByValues ++ aggregationValues))
+  }
 }
