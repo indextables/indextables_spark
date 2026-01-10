@@ -33,8 +33,92 @@ object PartitionUtils {
   private val logger = LoggerFactory.getLogger(PartitionUtils.getClass)
 
   /**
+   * Precomputed partition column information for efficient extraction. This avoids creating a schema field map on every
+   * row by caching the column indices and data types once.
+   *
+   * @param columns
+   *   Array of (columnName, schemaIndex, dataType) tuples for partition columns
+   */
+  case class PartitionColumnInfo(columns: Array[(String, Int, DataType)]) {
+    def isEmpty: Boolean  = columns.isEmpty
+    def nonEmpty: Boolean = columns.nonEmpty
+  }
+
+  /**
+   * Precompute partition column indices and types from schema. Call this once per task/writer, then reuse the result
+   * for all rows. This provides O(1) per-row extraction instead of O(schema.size).
+   *
+   * @param schema
+   *   The data schema
+   * @param partitionColumns
+   *   Partition column names
+   * @return
+   *   Precomputed partition column info for use with extractPartitionValuesFast
+   */
+  def precomputePartitionInfo(
+    schema: StructType,
+    partitionColumns: Seq[String]
+  ): PartitionColumnInfo = {
+    if (partitionColumns.isEmpty) {
+      return PartitionColumnInfo(Array.empty)
+    }
+
+    // Build field map once
+    val fieldMap = schema.fields.zipWithIndex.map { case (field, idx) => field.name -> ((field, idx)) }.toMap
+
+    val columns = partitionColumns.map { partitionCol =>
+      fieldMap.get(partitionCol) match {
+        case Some((field, index)) =>
+          (partitionCol, index, field.dataType)
+        case None =>
+          throw new IllegalArgumentException(
+            s"Partition column '$partitionCol' not found in schema. " +
+              s"Available columns: ${schema.fieldNames.mkString(", ")}"
+          )
+      }
+    }.toArray
+
+    PartitionColumnInfo(columns)
+  }
+
+  /**
+   * Fast extraction of partition values using precomputed column info. This is O(partitionColumns.size) per row instead
+   * of O(schema.size).
+   *
+   * @param row
+   *   The data row
+   * @param partitionInfo
+   *   Precomputed partition column info from precomputePartitionInfo
+   * @return
+   *   Map of partition column names to string values
+   */
+  def extractPartitionValuesFast(
+    row: InternalRow,
+    partitionInfo: PartitionColumnInfo
+  ): Map[String, String] = {
+    if (partitionInfo.isEmpty) {
+      return Map.empty
+    }
+
+    val partitionValues = mutable.Map[String, String]()
+    val columns         = partitionInfo.columns
+    var i               = 0
+    while (i < columns.length) {
+      val (colName, index, dataType) = columns(i)
+      val value                      = convertPartitionValue(row, index, dataType)
+      partitionValues(colName) = value
+      i += 1
+    }
+
+    partitionValues.toMap
+  }
+
+  /**
    * Extract partition values from a data row based on partition column indices. Returns a map of partition column names
    * to their string representations.
+   *
+   * NOTE: For high-performance scenarios (many rows), prefer precomputePartitionInfo + extractPartitionValuesFast to
+   * avoid rebuilding the schema field map on every row.
    */
   def extractPartitionValues(
     row: InternalRow,
@@ -45,22 +129,10 @@ object PartitionUtils {
       return Map.empty
     }
 
-    val partitionValues = mutable.Map[String, String]()
-    val fieldMap        = schema.fields.zipWithIndex.map { case (field, idx) => field.name -> ((field, idx)) }.toMap
-
-    for (partitionCol <- partitionColumns)
-      fieldMap.get(partitionCol) match {
-        case Some((field, index)) =>
-          val value = convertPartitionValue(row, index, field.dataType)
-          partitionValues(partitionCol) = value
-        case None =>
-          throw new IllegalArgumentException(
-            s"Partition column '$partitionCol' not found in schema. " +
-              s"Available columns: ${schema.fieldNames.mkString(", ")}"
-          )
-      }
-
-    partitionValues.toMap
+    // Delegate to fast path by building partition info
+    // Note: For single calls this is fine; for loops, use precomputePartitionInfo
+    val partitionInfo = precomputePartitionInfo(schema, partitionColumns)
+    extractPartitionValuesFast(row, partitionInfo)
   }
 
   /**

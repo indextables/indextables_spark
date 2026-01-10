@@ -471,6 +471,11 @@ class TantivyDirectInterface(
     getConfigValueSize("spark.indextables.indexWriter.maxBatchBufferSize", 90L * 1024 * 1024)
   private val useBatch = getConfigValue("spark.indextables.indexWriter.useBatch", "true").toBoolean // Use batch by default
 
+  // Precompute schema fields with indices once to avoid repeated zipWithIndex allocations per row
+  // This is critical for wide schemas (400+ columns) where the allocation overhead is significant
+  private val schemaFieldsWithIndex: Array[(org.apache.spark.sql.types.StructField, Int)] =
+    schema.fields.zipWithIndex
+
   logger.info(s"Index writer configuration: heapSize=$heapSize bytes, threadCount=$threadCount, batchSize=$batchSize, maxBatchBufferSize=$maxBatchBufferSize bytes, useBatch=$useBatch")
 
   // Create appropriate index and schema based on whether this is a restored index or new one
@@ -624,26 +629,29 @@ class TantivyDirectInterface(
 
     try {
       // Convert InternalRow directly to Document without JSON - protect against field processing errors
-      logger.debug(s"Adding document with ${schema.fields.length} Spark schema fields")
-      schema.fields.zipWithIndex.foreach {
-        case (field, index) =>
-          try {
-            val value = row.get(index, field.dataType)
-            if (value != null) {
-              logger.debug(s"Adding field ${field.name} (type: ${field.dataType}) with value: $value")
-              addFieldToDocument(document, field.name, value, field.dataType)
-            } else {
-              logger.debug(s"Skipping null field ${field.name}")
-            }
-          } catch {
-            case ex: Exception =>
-              logger.error(
-                s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}"
-              )
-              logger.error(s"Document created from tantivy schema, Spark schema has ${schema.fields.length} fields")
-              logger.error(s"Available tantivy schema: $tantivySchema")
-              throw ex
+      // Uses precomputed schemaFieldsWithIndex to avoid zipWithIndex allocation per row
+      logger.debug(s"Adding document with ${schemaFieldsWithIndex.length} Spark schema fields")
+      var i = 0
+      while (i < schemaFieldsWithIndex.length) {
+        val (field, index) = schemaFieldsWithIndex(i)
+        try {
+          val value = row.get(index, field.dataType)
+          if (value != null) {
+            logger.debug(s"Adding field ${field.name} (type: ${field.dataType}) with value: $value")
+            addFieldToDocument(document, field.name, value, field.dataType)
+          } else {
+            logger.debug(s"Skipping null field ${field.name}")
           }
+        } catch {
+          case ex: Exception =>
+            logger.error(
+              s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}"
+            )
+            logger.error(s"Document created from tantivy schema, Spark schema has ${schema.fields.length} fields")
+            logger.error(s"Available tantivy schema: $tantivySchema")
+            throw ex
+        }
+        i += 1
       }
 
       val writer = getOrCreateWriter()
@@ -667,21 +675,24 @@ class TantivyDirectInterface(
     try {
       val batchDocument = new BatchDocument()
 
-      // Convert InternalRow to BatchDocument
-      schema.fields.zipWithIndex.foreach {
-        case (field, index) =>
-          try {
-            val value = row.get(index, field.dataType)
-            if (value != null) {
-              addFieldToBatchDocument(batchDocument, field.name, value, field.dataType)
-            }
-          } catch {
-            case ex: Exception =>
-              logger.error(
-                s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}"
-              )
-              throw ex
+      // Convert InternalRow to BatchDocument using precomputed schemaFieldsWithIndex
+      // to avoid zipWithIndex allocation per row (critical for wide schemas)
+      var i = 0
+      while (i < schemaFieldsWithIndex.length) {
+        val (field, index) = schemaFieldsWithIndex(i)
+        try {
+          val value = row.get(index, field.dataType)
+          if (value != null) {
+            addFieldToBatchDocument(batchDocument, field.name, value, field.dataType)
           }
+        } catch {
+          case ex: Exception =>
+            logger.error(
+              s"Failed to add field ${field.name} (type: ${field.dataType}) at index $index: ${ex.getMessage}"
+            )
+            throw ex
+        }
+        i += 1
       }
 
       val batch = getOrCreateBatch()

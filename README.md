@@ -923,6 +923,7 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.indexWriter.maxBatchBufferSize` | `90M` | Maximum batch buffer size before flushing (90MB default, prevents native 100MB limit errors with large documents) |
 | `spark.indextables.indexWriter.useBatch` | `true` | Enable batch writing for better performance (enabled by default) |
 | `spark.indextables.indexWriter.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for index creation (auto-detects optimal location) |
+| `spark.indextables.splitConversion.maxParallelism` | `max(1, availableProcessors / 4)` | Maximum concurrent split conversions per executor (controls parallelism of tantivy index → quickwit split conversion) |
 | `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
 | `spark.indextables.merge.batchSize` | `defaultParallelism` | Number of merge groups per batch (defaults to Spark's defaultParallelism) |
 | `spark.indextables.merge.maxConcurrentBatches` | `2` | Maximum number of batches to process concurrently |

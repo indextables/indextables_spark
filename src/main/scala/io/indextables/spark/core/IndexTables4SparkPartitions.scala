@@ -801,6 +801,11 @@ class IndexTables4SparkDataWriter(
       )
     else None
 
+  // Precomputed partition column info for O(1) per-row extraction instead of O(schema.size)
+  // This is critical for wide schemas (400+ columns) where building field map per row is expensive
+  private val partitionInfo: PartitionUtils.PartitionColumnInfo =
+    PartitionUtils.precomputePartitionInfo(writeSchema, partitionColumns)
+
   // Debug: log partition columns being used
   logger.info(
     s"DataWriter initialized for partition $partitionId with partitionColumns: ${partitionColumns.mkString("[", ", ", "]")}"
@@ -814,8 +819,8 @@ class IndexTables4SparkDataWriter(
       stats.updateRow(record)
       singleWriter = Some((engine, stats, count + 1))
     } else {
-      // Partitioned write - extract partition values and route to appropriate writer
-      val partitionValues = PartitionUtils.extractPartitionValues(record, writeSchema, partitionColumns)
+      // Partitioned write - extract partition values using precomputed indices (O(1) vs O(schema.size))
+      val partitionValues = PartitionUtils.extractPartitionValuesFast(record, partitionInfo)
       val partitionKey    = PartitionUtils.createPartitionPath(partitionValues, partitionColumns)
 
       // Get or create writer for this partition value combination
