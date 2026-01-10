@@ -532,4 +532,494 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     // Reset config
     spark.conf.unset("spark.indextables.merge.skipSplitThreshold")
   }
+
+  test("MAX DEST SPLITS should prioritize groups with most source splits") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    // This test validates that when MAX DEST SPLITS limits the number of groups processed,
+    // groups with the most source splits are selected first, with ties broken by oldest modification time
+
+    // Create mock AddAction files with different modification times
+    def createMockFile(path: String, modTime: Long): AddAction = {
+      AddAction(
+        path = path,
+        partitionValues = Map.empty,
+        size = 1000L,
+        modificationTime = modTime,
+        dataChange = true,
+        stats = None,
+        tags = None,
+        numRecords = Some(10L)
+      )
+    }
+
+    // Create merge groups with varying source split counts and modification times
+    // Group A: 10 files, oldest time 1000
+    val groupA = MergeGroup(Map.empty, (1 to 10).map(i => createMockFile(s"a$i.split", 1000L + i)))
+    // Group B: 5 files, oldest time 500 (older than A)
+    val groupB = MergeGroup(Map.empty, (1 to 5).map(i => createMockFile(s"b$i.split", 500L + i)))
+    // Group C: 10 files, oldest time 2000 (same count as A, but newer)
+    val groupC = MergeGroup(Map.empty, (1 to 10).map(i => createMockFile(s"c$i.split", 2000L + i)))
+    // Group D: 3 files, oldest time 100 (oldest, but fewest files)
+    val groupD = MergeGroup(Map.empty, (1 to 3).map(i => createMockFile(s"d$i.split", 100L + i)))
+    // Group E: 8 files, oldest time 1500
+    val groupE = MergeGroup(Map.empty, (1 to 8).map(i => createMockFile(s"e$i.split", 1500L + i)))
+
+    val allGroups = Seq(groupA, groupB, groupC, groupD, groupE)
+
+    // Sort using the same logic as MergeSplitsExecutor
+    val prioritizedGroups = allGroups.sortBy { g =>
+      val sourceCount = -g.files.length // Negative for descending order
+      val oldestTime = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
+      (sourceCount, oldestTime)
+    }
+
+    // Verify sorting order:
+    // 1. Group A (10 files, oldest=1001) and Group C (10 files, oldest=2001) - A first (older)
+    // 2. Group E (8 files)
+    // 3. Group B (5 files)
+    // 4. Group D (3 files)
+    val expectedOrder = Seq(groupA, groupC, groupE, groupB, groupD)
+    val actualCounts = prioritizedGroups.map(_.files.length)
+    val expectedCounts = expectedOrder.map(_.files.length)
+
+    assert(actualCounts == expectedCounts,
+      s"Expected order by count: $expectedCounts, got: $actualCounts")
+
+    // Verify tie-breaking: A (10 files, oldest=1001) should come before C (10 files, oldest=2001)
+    assert(prioritizedGroups(0).files.head.path.startsWith("a"),
+      s"First group should be A (10 files, older), got: ${prioritizedGroups(0).files.head.path}")
+    assert(prioritizedGroups(1).files.head.path.startsWith("c"),
+      s"Second group should be C (10 files, newer), got: ${prioritizedGroups(1).files.head.path}")
+
+    // Simulate MAX DEST SPLITS = 2 (should select A and C, the two groups with 10 files each)
+    val limitedGroups = prioritizedGroups.take(2)
+    assert(limitedGroups.length == 2, "Should have exactly 2 groups after limit")
+    assert(limitedGroups.forall(_.files.length == 10),
+      s"Both limited groups should have 10 files, got: ${limitedGroups.map(_.files.length)}")
+
+    // Simulate MAX DEST SPLITS = 3 (should select A, C, and E)
+    val limitedGroups3 = prioritizedGroups.take(3)
+    assert(limitedGroups3.map(_.files.length) == Seq(10, 10, 8),
+      s"Top 3 groups should have 10, 10, 8 files, got: ${limitedGroups3.map(_.files.length)}")
+  }
+
+  test("MAX DEST SPLITS with real data should process highest-impact merges first") {
+    // Create multiple small writes to generate many small splits
+    val smallData = (1 to 50).map(i => (i, s"content $i"))
+    val df = spark.createDataFrame(smallData).toDF("id", "content")
+
+    // Write 6 separate small splits
+    for (i <- 1 to 6) {
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("append")
+        .save(tempTablePath)
+      // Small delay to ensure different modification times
+      Thread.sleep(50)
+    }
+
+    // Verify we have multiple splits
+    val initialDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tempTablePath)
+    val initialCount = initialDf.count()
+
+    // Run merge with MAX DEST SPLITS = 1 to force selection
+    // This should create 1 merged split from the available small splits
+    val result = spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE 100M MAX DEST SPLITS 1")
+    result.show(truncate = false)
+
+    val status = result.collect().head.getStruct(1).getString(0)
+    assert(status == "success" || status == "no_action",
+      s"Merge should complete successfully, got status: $status")
+
+    // Verify data integrity
+    val finalDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tempTablePath)
+    val finalCount = finalDf.count()
+    assert(finalCount == initialCount,
+      s"Data count should be preserved: expected $initialCount, got $finalCount")
+  }
+
+  // ============================================================================
+  // Unit Tests with Mock Inputs - skipSplitThreshold filtering
+  // ============================================================================
+
+  test("skipSplitThreshold filtering should exclude files above threshold") {
+    import io.indextables.spark.transaction.AddAction
+
+    // Create mock files with different sizes
+    def createMockFile(path: String, size: Long): AddAction = {
+      AddAction(
+        path = path,
+        partitionValues = Map.empty,
+        size = size,
+        modificationTime = System.currentTimeMillis(),
+        dataChange = true,
+        stats = None,
+        tags = None,
+        numRecords = Some(10L)
+      )
+    }
+
+    val targetSize = 1000000L // 1MB target
+    val skipThresholdPercent = 0.45 // 45%
+    val skipThreshold = (targetSize * skipThresholdPercent).toLong // 450KB
+
+    val files = Seq(
+      createMockFile("small1.split", 100000L),   // 100KB - below threshold
+      createMockFile("small2.split", 200000L),   // 200KB - below threshold
+      createMockFile("medium.split", 400000L),   // 400KB - below threshold
+      createMockFile("large1.split", 500000L),   // 500KB - ABOVE threshold (>= 450KB)
+      createMockFile("large2.split", 800000L),   // 800KB - ABOVE threshold
+      createMockFile("huge.split", 1000000L)     // 1MB - ABOVE threshold
+    )
+
+    // Apply the same filtering logic as MergeSplitsExecutor.findMergeableGroups
+    val mergeableFiles = files.filter(_.size < skipThreshold)
+
+    assert(mergeableFiles.length == 3, s"Should have 3 files below threshold, got ${mergeableFiles.length}")
+    assert(mergeableFiles.map(_.path) == Seq("small1.split", "small2.split", "medium.split"),
+      s"Should include only small files, got: ${mergeableFiles.map(_.path)}")
+
+    val skippedFiles = files.filter(_.size >= skipThreshold)
+    assert(skippedFiles.length == 3, s"Should skip 3 files above threshold, got ${skippedFiles.length}")
+  }
+
+  test("skipSplitThreshold with different percentages") {
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockFile(path: String, size: Long): AddAction = {
+      AddAction(path = path, partitionValues = Map.empty, size = size,
+        modificationTime = 0L, dataChange = true, stats = None, tags = None, numRecords = None)
+    }
+
+    val targetSize = 1000L
+
+    val files = Seq(
+      createMockFile("f1.split", 100L),  // 10%
+      createMockFile("f2.split", 300L),  // 30%
+      createMockFile("f3.split", 450L),  // 45%
+      createMockFile("f4.split", 500L),  // 50%
+      createMockFile("f5.split", 800L)   // 80%
+    )
+
+    // Test with 45% threshold (default)
+    val threshold45 = (targetSize * 0.45).toLong
+    val eligible45 = files.filter(_.size < threshold45)
+    assert(eligible45.length == 2, s"With 45% threshold, 2 files should be eligible, got ${eligible45.length}")
+
+    // Test with 30% threshold (more aggressive)
+    val threshold30 = (targetSize * 0.30).toLong
+    val eligible30 = files.filter(_.size < threshold30)
+    assert(eligible30.length == 1, s"With 30% threshold, 1 file should be eligible, got ${eligible30.length}")
+
+    // Test with 80% threshold (less aggressive)
+    val threshold80 = (targetSize * 0.80).toLong
+    val eligible80 = files.filter(_.size < threshold80)
+    assert(eligible80.length == 4, s"With 80% threshold, 4 files should be eligible, got ${eligible80.length}")
+
+    // Test with 100% threshold (include all below target)
+    val threshold100 = (targetSize * 1.0).toLong
+    val eligible100 = files.filter(_.size < threshold100)
+    assert(eligible100.length == 5, s"With 100% threshold, all 5 files should be eligible, got ${eligible100.length}")
+  }
+
+  // ============================================================================
+  // Unit Tests with Mock Inputs - Batch creation logic
+  // ============================================================================
+
+  test("batch creation should split groups correctly based on batch size") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockGroup(id: String, fileCount: Int): MergeGroup = {
+      val files = (1 to fileCount).map(i => AddAction(
+        path = s"$id-$i.split", partitionValues = Map.empty, size = 1000L,
+        modificationTime = 0L, dataChange = true, stats = None, tags = None, numRecords = None
+      ))
+      MergeGroup(Map.empty, files)
+    }
+
+    // Create 10 merge groups
+    val groups = (1 to 10).map(i => createMockGroup(s"group$i", i + 1))
+
+    // Test batch size = 3
+    val batches3 = groups.grouped(3).toSeq
+    assert(batches3.length == 4, s"10 groups with batch size 3 should create 4 batches, got ${batches3.length}")
+    assert(batches3(0).length == 3, "First batch should have 3 groups")
+    assert(batches3(1).length == 3, "Second batch should have 3 groups")
+    assert(batches3(2).length == 3, "Third batch should have 3 groups")
+    assert(batches3(3).length == 1, "Fourth batch should have 1 group")
+
+    // Test batch size = 5
+    val batches5 = groups.grouped(5).toSeq
+    assert(batches5.length == 2, s"10 groups with batch size 5 should create 2 batches, got ${batches5.length}")
+    assert(batches5(0).length == 5, "First batch should have 5 groups")
+    assert(batches5(1).length == 5, "Second batch should have 5 groups")
+
+    // Test batch size = 10 (single batch)
+    val batches10 = groups.grouped(10).toSeq
+    assert(batches10.length == 1, s"10 groups with batch size 10 should create 1 batch, got ${batches10.length}")
+    assert(batches10(0).length == 10, "Single batch should have all 10 groups")
+
+    // Test batch size larger than group count
+    val batches20 = groups.grouped(20).toSeq
+    assert(batches20.length == 1, s"10 groups with batch size 20 should create 1 batch, got ${batches20.length}")
+  }
+
+  test("batch creation should preserve prioritization order") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockGroup(id: String, fileCount: Int, oldestTime: Long): MergeGroup = {
+      val files = (1 to fileCount).map(i => AddAction(
+        path = s"$id-$i.split", partitionValues = Map.empty, size = 1000L,
+        modificationTime = oldestTime + i, dataChange = true, stats = None, tags = None, numRecords = None
+      ))
+      MergeGroup(Map.empty, files)
+    }
+
+    // Create groups with varying counts (unsorted order)
+    val groups = Seq(
+      createMockGroup("g3", 3, 300L),
+      createMockGroup("g10", 10, 100L),
+      createMockGroup("g5", 5, 200L),
+      createMockGroup("g10b", 10, 150L),
+      createMockGroup("g7", 7, 400L),
+      createMockGroup("g2", 2, 50L)
+    )
+
+    // Sort by source count descending, oldest first for ties
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+
+    // Verify prioritization
+    val expectedCounts = Seq(10, 10, 7, 5, 3, 2)
+    assert(prioritized.map(_.files.length) == expectedCounts,
+      s"Expected counts $expectedCounts, got ${prioritized.map(_.files.length)}")
+
+    // Create batches of size 2
+    val batches = prioritized.grouped(2).toSeq
+
+    // First batch should have the two 10-file groups
+    assert(batches(0).map(_.files.length) == Seq(10, 10),
+      s"First batch should have groups with 10, 10 files, got ${batches(0).map(_.files.length)}")
+
+    // Second batch should have 7-file and 5-file groups
+    assert(batches(1).map(_.files.length) == Seq(7, 5),
+      s"Second batch should have groups with 7, 5 files, got ${batches(1).map(_.files.length)}")
+
+    // Third batch should have 3-file and 2-file groups
+    assert(batches(2).map(_.files.length) == Seq(3, 2),
+      s"Third batch should have groups with 3, 2 files, got ${batches(2).map(_.files.length)}")
+  }
+
+  // ============================================================================
+  // Unit Tests with Mock Inputs - Edge cases
+  // ============================================================================
+
+  test("edge case: empty merge groups list") {
+    import io.indextables.spark.sql.MergeGroup
+
+    val emptyGroups = Seq.empty[MergeGroup]
+
+    // Sorting empty list should not fail
+    val prioritized = emptyGroups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+    assert(prioritized.isEmpty, "Sorted empty list should be empty")
+
+    // Batching empty list should produce empty sequence
+    val batches = prioritized.grouped(10).toSeq
+    assert(batches.isEmpty, "Batching empty list should produce empty sequence")
+
+    // MAX DEST SPLITS on empty list
+    val limited = prioritized.take(5)
+    assert(limited.isEmpty, "Taking from empty list should produce empty result")
+  }
+
+  test("edge case: single merge group") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    val singleGroup = MergeGroup(
+      Map.empty,
+      Seq(
+        AddAction("f1.split", Map.empty, 1000L, 100L, true, None, None, None),
+        AddAction("f2.split", Map.empty, 1000L, 200L, true, None, None, None)
+      )
+    )
+
+    val groups = Seq(singleGroup)
+
+    // Sorting single group should work
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+    assert(prioritized.length == 1, "Should have single group")
+    assert(prioritized.head.files.length == 2, "Group should have 2 files")
+
+    // Batching single group
+    val batches = prioritized.grouped(10).toSeq
+    assert(batches.length == 1, "Should have single batch")
+    assert(batches.head.length == 1, "Batch should contain single group")
+  }
+
+  test("edge case: all groups have same file count (tie-breaking by oldest)") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockGroup(id: String, oldestTime: Long): MergeGroup = {
+      val files = (1 to 5).map(i => AddAction(
+        path = s"$id-$i.split", partitionValues = Map.empty, size = 1000L,
+        modificationTime = oldestTime + i, dataChange = true, stats = None, tags = None, numRecords = None
+      ))
+      MergeGroup(Map.empty, files)
+    }
+
+    // All groups have 5 files, different oldest times
+    val groups = Seq(
+      createMockGroup("newest", 1000L),
+      createMockGroup("oldest", 100L),
+      createMockGroup("middle", 500L)
+    )
+
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+
+    // All have same count, so should be ordered by oldest first
+    assert(prioritized(0).files.head.path.startsWith("oldest"),
+      s"First should be oldest, got ${prioritized(0).files.head.path}")
+    assert(prioritized(1).files.head.path.startsWith("middle"),
+      s"Second should be middle, got ${prioritized(1).files.head.path}")
+    assert(prioritized(2).files.head.path.startsWith("newest"),
+      s"Third should be newest, got ${prioritized(2).files.head.path}")
+  }
+
+  test("edge case: all groups have same file count and same oldest time") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockGroup(id: String): MergeGroup = {
+      val files = (1 to 5).map(i => AddAction(
+        path = s"$id-$i.split", partitionValues = Map.empty, size = 1000L,
+        modificationTime = 100L, // Same for all
+        dataChange = true, stats = None, tags = None, numRecords = None
+      ))
+      MergeGroup(Map.empty, files)
+    }
+
+    val groups = Seq(
+      createMockGroup("groupA"),
+      createMockGroup("groupB"),
+      createMockGroup("groupC")
+    )
+
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+
+    // All are equivalent, so order should be stable (original order preserved)
+    assert(prioritized.length == 3, "Should have 3 groups")
+    // Stable sort means original order is preserved for equal elements
+    assert(prioritized.map(_.files.head.path.take(6)) == Seq("groupA", "groupB", "groupC"),
+      s"Order should be stable, got ${prioritized.map(_.files.head.path.take(6))}")
+  }
+
+  test("edge case: groups with exactly 2 files (minimum for merge)") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMinimalGroup(id: String, oldestTime: Long): MergeGroup = {
+      MergeGroup(Map.empty, Seq(
+        AddAction(s"$id-1.split", Map.empty, 1000L, oldestTime, true, None, None, None),
+        AddAction(s"$id-2.split", Map.empty, 1000L, oldestTime + 1, true, None, None, None)
+      ))
+    }
+
+    // Multiple groups all with exactly 2 files
+    val groups = Seq(
+      createMinimalGroup("g1", 100L),
+      createMinimalGroup("g2", 200L),
+      createMinimalGroup("g3", 50L)
+    )
+
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+
+    // All have 2 files, so ordered by oldest
+    assert(prioritized(0).files.head.path.startsWith("g3"), "g3 should be first (oldest)")
+    assert(prioritized(1).files.head.path.startsWith("g1"), "g1 should be second")
+    assert(prioritized(2).files.head.path.startsWith("g2"), "g2 should be third (newest)")
+  }
+
+  test("edge case: very large number of groups with MAX DEST SPLITS") {
+    import io.indextables.spark.sql.MergeGroup
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockGroup(id: Int): MergeGroup = {
+      val fileCount = (id % 100) + 2 // 2-101 files per group
+      val files = (1 to fileCount).map(i => AddAction(
+        path = s"g$id-$i.split", partitionValues = Map.empty, size = 1000L,
+        modificationTime = id.toLong, dataChange = true, stats = None, tags = None, numRecords = None
+      ))
+      MergeGroup(Map.empty, files)
+    }
+
+    // Simulate 1600 groups (like user's scenario)
+    val groups = (1 to 1600).map(createMockGroup)
+
+    val prioritized = groups.sortBy { g =>
+      (-g.files.length, g.files.map(_.modificationTime).min)
+    }
+
+    // Verify highest file counts are first
+    val top10Counts = prioritized.take(10).map(_.files.length)
+    assert(top10Counts.head == 101, s"First group should have 101 files, got ${top10Counts.head}")
+    assert(top10Counts.forall(_ >= 92), s"Top 10 should all have >= 92 files, got $top10Counts")
+
+    // Apply MAX DEST SPLITS = 32
+    val limited = prioritized.take(32)
+    assert(limited.length == 32, "Should have exactly 32 groups")
+
+    // Verify all selected groups have high file counts
+    val minSelectedCount = limited.map(_.files.length).min
+    assert(minSelectedCount >= 70, s"All selected groups should have >= 70 files, min was $minSelectedCount")
+
+    // Verify we're NOT just taking the oldest (which would have low file counts)
+    val wouldBeOldestFirst = groups.sortBy(_.files.map(_.modificationTime).min).take(32)
+    val oldestFirstCounts = wouldBeOldestFirst.map(_.files.length)
+    assert(limited.map(_.files.length).sum > oldestFirstCounts.sum,
+      "Prioritized selection should have more total files than oldest-first selection")
+  }
+
+  test("edge case: files with zero size") {
+    import io.indextables.spark.transaction.AddAction
+
+    def createMockFile(path: String, size: Long): AddAction = {
+      AddAction(path = path, partitionValues = Map.empty, size = size,
+        modificationTime = 0L, dataChange = true, stats = None, tags = None, numRecords = None)
+    }
+
+    val targetSize = 1000L
+    val threshold = (targetSize * 0.45).toLong
+
+    val files = Seq(
+      createMockFile("zero.split", 0L),
+      createMockFile("tiny.split", 1L),
+      createMockFile("normal.split", 400L),
+      createMockFile("large.split", 500L)
+    )
+
+    val eligible = files.filter(_.size < threshold)
+    assert(eligible.length == 3, s"Zero and tiny files should be eligible, got ${eligible.length}")
+    assert(eligible.map(_.path).contains("zero.split"), "Zero-size file should be eligible")
+  }
 }

@@ -721,28 +721,46 @@ class MergeSplitsExecutor(
 
     logger.info(s"Found ${mergeGroups.length} merge groups containing ${mergeGroups.map(_.files.length).sum} files")
 
-    // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
-    val limitedMergeGroups = maxDestSplits match {
-      case Some(maxLimit) if mergeGroups.length > maxLimit =>
-        logger.info(s"Limiting merge operation to $maxLimit oldest dest splits (out of ${mergeGroups.length} total)")
+    // Sort ALL merge groups by:
+    // 1. Primary: source split count (descending) - prioritize high-impact merges
+    // 2. Secondary: oldest modification time (ascending) - tie-break with oldest first
+    val prioritizedMergeGroups = mergeGroups.sortBy { g =>
+      val sourceCount = -g.files.length // Negative for descending order
+      val oldestTime = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
+      (sourceCount, oldestTime)
+    }
+    logger.info(s"Prioritized merge groups by source split count (ties broken by oldest): ${prioritizedMergeGroups.map(_.files.length).take(10).mkString(", ")}${if (prioritizedMergeGroups.length > 10) "..." else ""}")
 
-        // Sort merge groups by the oldest file in each group to get the N oldest groups
-        val sortedGroups  = mergeGroups.sortBy(_.files.map(_.modificationTime).min)
-        val limitedGroups = sortedGroups.take(maxLimit)
+    // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
+    // Now takes the top N groups by source split count (highest impact merges first)
+    val limitedMergeGroups = maxDestSplits match {
+      case Some(maxLimit) if prioritizedMergeGroups.length > maxLimit =>
+        logger.info(s"Limiting merge operation to $maxLimit highest-impact dest splits (out of ${prioritizedMergeGroups.length} total)")
+
+        // Take the top N groups (already sorted by source split count descending, oldest first for ties)
+        val limitedGroups = prioritizedMergeGroups.take(maxLimit)
 
         val limitedFilesCount = limitedGroups.map(_.files.length).sum
-        val totalFilesCount   = mergeGroups.map(_.files.length).sum
+        val totalFilesCount   = prioritizedMergeGroups.map(_.files.length).sum
+        val skippedGroups = prioritizedMergeGroups.drop(maxLimit)
         logger.info(
-          s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit oldest groups (skipping ${totalFilesCount - limitedFilesCount} files from ${mergeGroups.length - maxLimit} newer groups)"
+          s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit highest-impact groups " +
+          s"(source splits range: ${limitedGroups.map(_.files.length).min}-${limitedGroups.map(_.files.length).max})"
         )
+        if (skippedGroups.nonEmpty) {
+          logger.info(
+            s"Skipping ${skippedGroups.length} lower-impact groups with ${skippedGroups.map(_.files.length).sum} files " +
+            s"(source splits range: ${skippedGroups.map(_.files.length).min}-${skippedGroups.map(_.files.length).max})"
+          )
+        }
 
         limitedGroups
       case Some(maxLimit) =>
-        logger.info(s"MAX DEST SPLITS limit of $maxLimit not reached (found ${mergeGroups.length} groups)")
-        mergeGroups
+        logger.info(s"MAX DEST SPLITS limit of $maxLimit not reached (found ${prioritizedMergeGroups.length} groups)")
+        prioritizedMergeGroups
       case None =>
         logger.debug("No MAX DEST SPLITS limit specified")
-        mergeGroups
+        prioritizedMergeGroups
     }
 
     // Final safety check: ensure no single-file groups exist
@@ -785,14 +803,10 @@ class MergeSplitsExecutor(
 
     logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
 
-    // Sort merge groups by number of source splits (largest first) to prioritize high-impact merges
-    // Example: 1000->1 merges are processed before 2->1 merges
-    val sortedMergeGroups = limitedMergeGroups.sortBy(_.files.length)(Ordering[Int].reverse)
-    logger.info(s"Sorted merge groups by source split count: ${sortedMergeGroups.map(_.files.length).mkString(", ")}")
-
+    // limitedMergeGroups is already sorted by source split count (descending), oldest first for ties
     // Split merge groups into batches based on batch size
-    val batches = sortedMergeGroups.grouped(batchSize).toSeq
-    logger.info(s"Split ${sortedMergeGroups.length} merge groups into ${batches.length} batches")
+    val batches = limitedMergeGroups.grouped(batchSize).toSeq
+    logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
 
     batches.zipWithIndex.foreach {
       case (batch, idx) =>
