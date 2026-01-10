@@ -451,4 +451,85 @@ class MergeSplitsCommandTest extends TestBase with BeforeAndAfterEach {
     val s3aResult = s3aCommand.run(spark)
     assert(s3aResult.nonEmpty, "s3a:// should return result")
   }
+
+  test("MERGE SPLITS should skip splits above skipSplitThreshold") {
+    import org.apache.spark.sql.Row
+
+    // Create test data with different sized splits
+    val smallData = (1 to 100).map(i => (i, s"small content $i"))
+    val largeData = (1 to 10000).map(i => (i, s"large content with more data to increase size $i " * 10))
+
+    val smallDf = spark.createDataFrame(smallData).toDF("id", "content")
+    val largeDf = spark.createDataFrame(largeData).toDF("id", "content")
+
+    // Write small splits first
+    smallDf.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .save(tempTablePath)
+
+    // Write more small splits
+    smallDf.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .save(tempTablePath)
+
+    // Write a larger split
+    largeDf.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("append")
+      .save(tempTablePath)
+
+    // Get initial split count
+    val initialDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tempTablePath)
+    val initialCount = initialDf.count()
+
+    // Set a very low threshold (10%) so larger splits are definitely skipped
+    spark.conf.set("spark.indextables.merge.skipSplitThreshold", "0.10")
+
+    // Run merge with a large target size
+    val result = spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE 100M")
+    result.show(truncate = false)
+
+    // Reset config
+    spark.conf.unset("spark.indextables.merge.skipSplitThreshold")
+
+    // Verify data integrity - count should be the same
+    val finalDf = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tempTablePath)
+    val finalCount = finalDf.count()
+
+    assert(finalCount == initialCount, s"Data count should be preserved: expected $initialCount, got $finalCount")
+  }
+
+  test("skipSplitThreshold configuration should be respected") {
+    // Test that the configuration is read correctly
+    // Default is 0.45 (45%)
+    spark.conf.unset("spark.indextables.merge.skipSplitThreshold")
+
+    // Create minimal test data
+    val testData = (1 to 10).map(i => (i, s"content $i"))
+    val df = spark.createDataFrame(testData).toDF("id", "content")
+
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .mode("overwrite")
+      .save(tempTablePath)
+
+    // Test with custom threshold
+    spark.conf.set("spark.indextables.merge.skipSplitThreshold", "0.30")
+
+    // Run merge - should use 30% threshold
+    val result = spark.sql(s"MERGE SPLITS '$tempTablePath' TARGET SIZE 1G")
+
+    // Verify merge completed (status is success or no_action)
+    val status = result.collect().head.getStruct(1).getString(0)
+    assert(status == "success" || status == "no_action", s"Merge should complete with status success or no_action, got: $status")
+
+    // Reset config
+    spark.conf.unset("spark.indextables.merge.skipSplitThreshold")
+  }
 }

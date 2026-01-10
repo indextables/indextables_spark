@@ -2286,6 +2286,9 @@ spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `spark.indextables.merge.maxSourceSplitsPerMerge` | 1000 | Maximum number of source splits that can be merged into a single destination split |
+| `spark.indextables.merge.skipSplitThreshold` | 0.45 | Splits >= this percentage of target size are skipped from merge (0.0 to 1.0) |
+
+**Skip Split Threshold**: Splits that are already close to the target size are excluded from merge consideration. With the default 0.45 (45%), a merge with TARGET SIZE 5G will skip any splits >= 2.25GB. This prevents wasting resources merging already-large splits.
 
 #### Dropping Partitions with DROP INDEXTABLES PARTITIONS
 
