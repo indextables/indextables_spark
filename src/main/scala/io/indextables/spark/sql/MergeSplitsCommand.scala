@@ -436,6 +436,20 @@ class MergeSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
   /**
+   * Threshold for skipping already-large splits from merge consideration.
+   * Splits >= this size are excluded from merge groups to avoid merging files that are already close to target.
+   * Default: 45% of target size. Configurable via spark.indextables.merge.skipSplitThreshold (0.0 to 1.0).
+   */
+  private val skipSplitThresholdPercent: Double = sparkSession.conf
+    .getOption("spark.indextables.merge.skipSplitThreshold")
+    .map(_.toDouble)
+    .getOrElse(0.45)
+
+  private val skipSplitThreshold: Long = (targetSize * skipSplitThresholdPercent).toLong
+
+  logger.info(s"Skip split threshold: $skipSplitThreshold bytes (${(skipSplitThresholdPercent * 100).toInt}% of target size $targetSize)")
+
+  /**
    * Extract AWS configuration from SparkSession for tantivy4java merge operations. Uses same pattern as
    * TantivySearchEngine for consistency. Returns a serializable wrapper that can be broadcast across executors.
    */
@@ -771,9 +785,14 @@ class MergeSplitsExecutor(
 
     logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
 
+    // Sort merge groups by number of source splits (largest first) to prioritize high-impact merges
+    // Example: 1000->1 merges are processed before 2->1 merges
+    val sortedMergeGroups = limitedMergeGroups.sortBy(_.files.length)(Ordering[Int].reverse)
+    logger.info(s"Sorted merge groups by source split count: ${sortedMergeGroups.map(_.files.length).mkString(", ")}")
+
     // Split merge groups into batches based on batch size
-    val batches = limitedMergeGroups.grouped(batchSize).toSeq
-    logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
+    val batches = sortedMergeGroups.grouped(batchSize).toSeq
+    logger.info(s"Split ${sortedMergeGroups.length} merge groups into ${batches.length} batches")
 
     batches.zipWithIndex.foreach {
       case (batch, idx) =>
@@ -1203,17 +1222,22 @@ class MergeSplitsExecutor(
 
     logger.debug(s"✅ Partition validation passed: All ${files.length} input files belong to partition $partitionValues")
 
-    // Filter out files that are already at or above target size
+    // Filter out files that are already at or above the skip threshold
+    // Default: 45% of target size - prevents merging already-large splits
     val mergeableFiles = files.filter { file =>
-      if (file.size >= targetSize) {
-        logger.debug(s"Skipping file ${file.path} (size: ${file.size}) - already at target size")
+      if (file.size >= skipSplitThreshold) {
+        logger.debug(s"Skipping file ${file.path} (size: ${file.size} bytes) - already at or above skip threshold ($skipSplitThreshold bytes, ${(skipSplitThresholdPercent * 100).toInt}% of target)")
         false
       } else {
         true
       }
     }
 
-    logger.debug(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $targetSize bytes)")
+    val skippedCount = files.length - mergeableFiles.length
+    if (skippedCount > 0) {
+      logger.info(s"Skipped $skippedCount files already at or above skip threshold ($skipSplitThreshold bytes)")
+    }
+    logger.debug(s"MERGE DEBUG: Found ${mergeableFiles.length} files eligible for merging (< $skipSplitThreshold bytes)")
 
     // If we have fewer than 2 mergeable files, no groups can be created
     if (mergeableFiles.length < 2) {

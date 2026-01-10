@@ -467,6 +467,10 @@ MERGE SPLITS 's3://bucket/path' TARGET SIZE 1G MAX DEST SPLITS 5 MAX SOURCE SPLI
 - `MAX DEST SPLITS`: Limits the number of destination (merged) splits to process (oldest first)
 - `MAX SOURCE SPLITS PER MERGE`: Maximum number of source splits that can be merged into a single destination split (default: 1000)
   - Configuration: `spark.indextables.merge.maxSourceSplitsPerMerge: 1000`
+- **Skip Split Threshold**: Splits already at or above this size are excluded from merge consideration
+  - Configuration: `spark.indextables.merge.skipSplitThreshold: 0.45` (default: 45% of target size)
+  - Range: 0.0 to 1.0 (percentage of target size)
+  - Example: With 5GB target and 0.45 threshold, splits >= 2.25GB are skipped
 
 ### Purge IndexTable
 ```sql
