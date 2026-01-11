@@ -331,8 +331,11 @@ object ConfigUtils {
       hadoopConf.set(key, value)
     }
 
+    // Normalize s3a:// to s3:// for credential providers (Unity Catalog expects s3://)
+    val normalizedPath = tablePath.replaceFirst("^s3a://", "s3://")
+
     // Parse the table path as URI
-    val uri = new URI(tablePath)
+    val uri = new URI(normalizedPath)
 
     // Load the provider class
     val providerClass = Class.forName(providerClassName)
