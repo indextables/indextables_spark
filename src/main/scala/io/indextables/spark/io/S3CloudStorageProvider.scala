@@ -357,48 +357,52 @@ class S3CloudStorageProvider(
         .delimiter(if (recursive || isS3Mock) null else "/") // For S3Mock, always list recursively since we flatten paths
         .build()
 
-      val response = s3Client.listObjectsV2(request)
+      // CRITICAL FIX: Use pagination to handle >1000 files
+      // S3 listObjectsV2 returns max 1000 objects per request.
+      // Without pagination, large directories would only return partial results.
+      val filesBuilder = Seq.newBuilder[CloudFileInfo]
+      val directoriesBuilder = Seq.newBuilder[CloudFileInfo]
+      var pageCount = 0
 
-      val files = response
-        .contents()
-        .asScala
-        .map { s3Object =>
+      val paginator = s3Client.listObjectsV2Paginator(request)
+      paginator.forEach { response =>
+        pageCount += 1
+
+        response.contents().asScala.foreach { s3Object =>
           // Transform the path back to the original format for the caller
           val originalKey = s3Object.key()
           val displayKey  = unflattenPathFromS3Mock(originalKey)
 
           logger.debug(s"S3 LIST ITEM - Original key: $originalKey, Display key: $displayKey")
 
-          CloudFileInfo(
+          filesBuilder += CloudFileInfo(
             path = s"s3://$bucket/$displayKey",
             size = s3Object.size(),
             modificationTime = s3Object.lastModified().toEpochMilli,
             isDirectory = false
           )
         }
-        .toSeq
 
-      // For S3Mock with flattened paths, we don't have real directories
-      val directories = if (!recursive && !isS3Mock) {
-        response
-          .commonPrefixes()
-          .asScala
-          .map { commonPrefix =>
+        // For S3Mock with flattened paths, we don't have real directories
+        if (!recursive && !isS3Mock) {
+          response.commonPrefixes().asScala.foreach { commonPrefix =>
             val displayPrefix = unflattenPathFromS3Mock(commonPrefix.prefix())
 
-            CloudFileInfo(
+            directoriesBuilder += CloudFileInfo(
               path = s"s3://$bucket/$displayPrefix",
               size = 0L,
               modificationTime = 0L,
               isDirectory = true
             )
           }
-          .toSeq
-      } else Seq.empty
+        }
+      }
 
+      val files = filesBuilder.result()
+      val directories = directoriesBuilder.result()
       val allResults = files ++ directories
       logger.info(
-        s"S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix'"
+        s"S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix' (${pageCount} pages)"
       )
       files.foreach(f => logger.debug(s"  File: ${f.path}"))
       allResults

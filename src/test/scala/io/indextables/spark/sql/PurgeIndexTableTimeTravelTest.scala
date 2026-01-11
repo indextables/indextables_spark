@@ -290,7 +290,7 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     val dryRunResult =
       spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS DRY RUN").collect()
     val dryRunMetrics       = dryRunResult(0).getStruct(1)
-    val dryRunOrphanedFound = dryRunMetrics.getLong(1)
+    val dryRunOrphanedFound = dryRunMetrics.getLong(1)  // orphanedFilesFound (before retention filter)
     val dryRunStatus        = dryRunMetrics.getString(0)
 
     assert(dryRunStatus == "DRY_RUN", "Status should be DRY_RUN")
@@ -309,14 +309,16 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
     val actualResult =
       spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
     val actualMetrics         = actualResult(0).getStruct(1)
-    val actualOrphanedDeleted = actualMetrics.getLong(2)
+    val actualOrphanedFound   = actualMetrics.getLong(1)  // orphanedFilesFound (before retention filter)
+    val actualOrphanedDeleted = actualMetrics.getLong(2)  // orphanedFilesDeleted (after retention filter)
 
-    println(s"Actual PURGE deleted $actualOrphanedDeleted orphaned files")
+    println(s"Actual PURGE found $actualOrphanedFound orphaned files, deleted $actualOrphanedDeleted")
 
-    // DRY RUN count should match actual deletion count
+    // Compare orphanedFilesFound (both before retention filter) - these should match
+    // Note: orphanedFilesDeleted may differ from orphanedFilesFound due to retention filtering
     assert(
-      dryRunOrphanedFound == actualOrphanedDeleted,
-      s"DRY RUN preview ($dryRunOrphanedFound) should match actual deletions ($actualOrphanedDeleted)"
+      dryRunOrphanedFound == actualOrphanedFound,
+      s"DRY RUN orphanedFound ($dryRunOrphanedFound) should match actual orphanedFound ($actualOrphanedFound)"
     )
 
     // Verify we deleted at least the orphaned files we created

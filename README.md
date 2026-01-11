@@ -2362,7 +2362,7 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
 
-#### Cleaning Up Orphaned Files with PURGE ORPHANED SPLITS
+#### Cleaning Up Orphaned Files with PURGE INDEXTABLE
 
 IndexTables4Spark provides SQL-based cleanup to remove orphaned `.split` files and old transaction log files. This helps reclaim storage space and maintain table health.
 
@@ -2394,36 +2394,42 @@ Orphaned split files can occur due to:
 -- Register IndexTables4Spark extensions for SQL parsing
 spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
 
--- Basic purge with minimum retention (24 hours)
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS;
-
--- With longer retention for extra safety (7 days)
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS;
-
 -- DRY RUN mode - preview what would be deleted without actually deleting
-PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN;
+PURGE INDEXTABLE 's3://bucket/path' DRY RUN;
+
+-- Basic purge with retention period (7 days)
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS;
+
+-- With retention in hours (168 hours = 7 days)
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 168 HOURS;
+
+-- Preview with custom retention period
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 14 DAYS DRY RUN;
+
+-- Purge with separate transaction log retention (keeps logs longer than splits)
+PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS TRANSACTION LOG RETENTION 30 DAYS;
 
 -- Works with all storage systems
-PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS;
-PURGE ORPHANED SPLITS '/local/path' OLDER THAN 24 HOURS;
+PURGE INDEXTABLE 'abfss://container/path' OLDER THAN 7 DAYS;
+PURGE INDEXTABLE '/local/path' OLDER THAN 7 DAYS;
 ```
 
 ##### Scala/DataFrame API
 
 ```scala
-// Basic purge operation with 24-hour retention
-val result = spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS")
-result.show()  // Shows metrics: orphaned files found, deleted, size reclaimed
-
 // DRY RUN to preview deletions
-val preview = spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN")
+val preview = spark.sql("PURGE INDEXTABLE 's3://bucket/path' DRY RUN")
 preview.show()  // Shows what would be deleted without actually deleting
 
-// With longer retention for extra safety
-spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 168 HOURS")
+// Basic purge operation with 7-day retention
+val result = spark.sql("PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS")
+result.show()  // Shows metrics: orphaned files found, deleted, size reclaimed
+
+// With transaction log cleanup (30-day retention for logs)
+spark.sql("PURGE INDEXTABLE 's3://bucket/path' OLDER THAN 7 DAYS TRANSACTION LOG RETENTION 30 DAYS")
 
 // Azure Blob Storage
-spark.sql("PURGE ORPHANED SPLITS 'abfss://container/path' OLDER THAN 24 HOURS")
+spark.sql("PURGE INDEXTABLE 'abfss://container/path' OLDER THAN 7 DAYS")
 ```
 
 ##### Configuration Options
@@ -2460,13 +2466,13 @@ The command returns a DataFrame with the following metrics:
 
 1. **Always start with DRY RUN**: Preview deletions before executing
    ```scala
-   spark.sql("PURGE ORPHANED SPLITS 's3://bucket/path' OLDER THAN 24 HOURS DRY RUN")
+   spark.sql("PURGE INDEXTABLE 's3://bucket/path' DRY RUN")
    ```
 
 2. **Use appropriate retention periods**:
    - Minimum: 24 hours (enforced by the system)
-   - Recommended: 48-72 hours for production tables with frequent writes
-   - Safe for old tables: 168 hours (7 days)
+   - Recommended: 2-3 days for production tables with frequent writes
+   - Safe for old tables: 7 days (default)
 
 3. **Monitor metrics**: Check the returned DataFrame for deletion statistics
 
@@ -2482,16 +2488,16 @@ spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4S
 
 // Step 2: DRY RUN to preview
 val preview = spark.sql("""
-  PURGE ORPHANED SPLITS 's3://my-bucket/production-table'
-  OLDER THAN 48 HOURS
+  PURGE INDEXTABLE 's3://my-bucket/production-table'
+  OLDER THAN 7 DAYS
   DRY RUN
 """)
 preview.show()
 
 // Step 3: Review output, then execute if safe
 val result = spark.sql("""
-  PURGE ORPHANED SPLITS 's3://my-bucket/production-table'
-  OLDER THAN 48 HOURS
+  PURGE INDEXTABLE 's3://my-bucket/production-table'
+  OLDER THAN 7 DAYS
 """)
 result.show()
 

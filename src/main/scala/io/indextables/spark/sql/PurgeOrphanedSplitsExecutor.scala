@@ -81,17 +81,29 @@ class PurgeOrphanedSplitsExecutor(
     val versionsToKeep        = versionsBeforeCleanup.filterNot(versionsToDelete.contains)
     logger.info(s"Transaction log versions: ${versionsBeforeCleanup.size} total, ${versionsToDelete.size} to delete, ${versionsToKeep.size} to keep")
 
-    // Step 3: Clean up old transaction log files
-    // In DRY RUN mode, this reports what WOULD be deleted without actually deleting.
-    val transactionLogsDeleted = cleanupOldTransactionLogFiles(txLog)
+    // Step 3: Get ALL files referenced in ANY retained transaction file or checkpoint
+    // CRITICAL FIX: For time travel support, we must preserve files from:
+    //   1. All retained checkpoints (not just the latest)
+    //   2. All retained version files (those not being deleted)
+    //
+    // A file should NOT be deleted if it appears in ANY transaction file or
+    // checkpoint that still exists after the purge operation.
+    val allRetainedFiles = getAllFilesFromRetainedState(txLog, versionsToKeep)
+    logger.info(s"Files referenced in retained transaction state: ${allRetainedFiles.size}")
+
+    // Step 4: Clean up old transaction log files AFTER getting current state
+    // This prevents race condition where we delete tx logs and then try to read them.
+    // Use pre-computed versionsToDelete to ensure consistency.
+    val transactionLogsDeleted = cleanupOldTransactionLogFilesWithVersions(txLog, versionsToDelete)
     logger.info(s"Transaction log cleanup: deleted $transactionLogsDeleted old log files")
 
-    // Step 4: Get ALL files referenced in ANY transaction log version that will REMAIN
-    // CRITICAL: We must consider files from ALL remaining transaction log versions (not just current state)
-    // to support time travel queries. A file is only orphaned if it's NOT referenced in
-    // any transaction log version that remains after cleanup.
-    val allFiles = getAllFilesFromVersions(txLog, versionsToKeep)
-    logger.info(s"Files referenced in remaining transaction log versions: ${allFiles.size}")
+    // Step 5: Clean up old checkpoint files
+    // Checkpoints older than retention period are safe to delete (except the most recent one)
+    val checkpointsDeleted = cleanupOldCheckpointFiles(txLog)
+    logger.info(s"Checkpoint cleanup: deleted $checkpointsDeleted old checkpoint files")
+
+    // Use all retained files as the valid files set
+    val allFiles = allRetainedFiles
 
     // Step 2: List all .split and .crc files from filesystem (distributed)
     val allSplitFiles        = listAllSplitFiles(tablePath)
@@ -175,118 +187,201 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * Clean up old transaction log files based on checkpoint and retention policy. This is called BEFORE purging orphaned
-   * splits.
+   * Clean up old transaction log files using a pre-computed set of versions to delete.
+   * This eliminates the race condition by not recalculating which versions to delete.
    *
-   * @return
-   *   Number of transaction log files deleted (or would be deleted in DRY RUN)
+   * CRITICAL FIX: The original cleanupOldTransactionLogFiles() independently recalculated
+   * which versions to delete, which could differ from getTransactionLogVersionsToDelete()
+   * if time passed between the two calls (files aging past retention boundary).
+   *
+   * This method accepts the pre-computed versionsToDelete set to ensure consistency.
+   *
+   * @param txLog The transaction log instance
+   * @param versionsToDelete Pre-computed set of versions to delete (from getTransactionLogVersionsToDelete)
+   * @return Number of transaction log files deleted (or would be deleted in DRY RUN)
    */
-  private def cleanupOldTransactionLogFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
+  private def cleanupOldTransactionLogFilesWithVersions(
+    txLog: io.indextables.spark.transaction.TransactionLog,
+    versionsToDelete: Set[Long]
+  ): Long =
     try {
-      logger.info(s"Cleaning up old transaction log files (dryRun=$dryRun)...")
+      if (versionsToDelete.isEmpty) {
+        logger.info("No transaction log versions to delete")
+        return 0L
+      }
 
-      // Get checkpoint version using public API
-      val checkpointVersionOpt = txLog.getLastCheckpointVersion()
+      logger.info(s"Cleaning up ${versionsToDelete.size} old transaction log files (dryRun=$dryRun)...")
 
-      checkpointVersionOpt match {
-        case Some(checkpointVersion) =>
-          // Get retention configuration - use explicit parameter if provided, otherwise fall back to config
-          val logRetentionDuration = txLogRetentionDuration.getOrElse {
-            spark.conf
-              .getOption("spark.indextables.logRetention.duration")
-              .map(_.toLong)
-              .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
-          }
+      val transactionLogPath = new Path(tablePath, "_transaction_log")
 
-          val currentTime        = System.currentTimeMillis()
-          val transactionLogPath = new Path(tablePath, "_transaction_log")
+      // Use CloudStorageProvider for multi-cloud support with credentials
+      val cloudConfigs = extractCloudStorageConfigs()
+      val optionsMap   = new java.util.HashMap[String, String]()
+      cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+      val configOptions = new CaseInsensitiveStringMap(optionsMap)
 
-          // Use CloudStorageProvider for multi-cloud support with credentials
-          val cloudConfigs = extractCloudStorageConfigs()
-          val optionsMap   = new java.util.HashMap[String, String]()
-          cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
-          val configOptions = new CaseInsensitiveStringMap(optionsMap)
+      val provider = CloudStorageProviderFactory.createProvider(
+        transactionLogPath.toString,
+        configOptions,
+        spark.sparkContext.hadoopConfiguration
+      )
 
-          val provider = CloudStorageProviderFactory.createProvider(
-            transactionLogPath.toString,
-            configOptions,
-            spark.sparkContext.hadoopConfiguration
-          )
+      try {
+        var deletedCount = 0L
+
+        // Use the PRE-COMPUTED set - no recalculation!
+        versionsToDelete.toSeq.sorted.foreach { version =>
+          val versionFileName = f"$version%020d.json"
+          val versionFilePath = new Path(transactionLogPath, versionFileName).toString
 
           try {
-            // List all transaction log files and determine current version
-            val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
-
-            // Extract version numbers from .json files (excluding checkpoints)
-            val versions = allFiles
-              .map(f => new Path(f.path).getName)
-              .filter(_.endsWith(".json"))
-              .filterNot(_.contains("checkpoint"))
-              .filterNot(_.startsWith("_"))
-              .map(_.replace(".json", "").toLong)
-
-            val currentVersion = if (versions.nonEmpty) versions.max else 0L
-
-            logger.info(
-              s"Cleanup: checkpoint=$checkpointVersion, current=$currentVersion, retention=${logRetentionDuration}ms"
-            )
-
-            // Only cleanup versions older than checkpoint
-            val versionsToCheck = (0L until currentVersion).filter(_ < checkpointVersion)
-
-            var deletedCount = 0L
-
-            versionsToCheck.foreach { version =>
-              val versionFileName = f"$version%020d.json"
-
-              allFiles.find(f => new Path(f.path).getName == versionFileName) match {
-                case Some(fileInfo) =>
-                  val fileAge = currentTime - fileInfo.modificationTime
-
-                  if (fileAge > logRetentionDuration) {
-                    if (dryRun) {
-                      logger.info(
-                        s"DRY RUN: Would delete transaction log file: $versionFileName (age: ${fileAge / 1000}s)"
-                      )
-                      deletedCount += 1
-                    } else {
-                      if (provider.deleteFile(fileInfo.path)) {
-                        deletedCount += 1
-                        logger.info(s"Deleted transaction log file: $versionFileName (age: ${fileAge / 1000}s)")
-                      }
-                    }
-                  } else {
-                    logger.debug(
-                      s"Skipping transaction log file $versionFileName (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
-                    )
-                  }
-                case None =>
-                  // File doesn't exist, skip
-                  ()
+            if (dryRun) {
+              logger.info(s"DRY RUN: Would delete transaction log file: $versionFileName")
+              deletedCount += 1
+            } else {
+              if (provider.deleteFile(versionFilePath)) {
+                deletedCount += 1
+                logger.debug(s"Deleted transaction log file: $versionFileName")
               }
             }
+          } catch {
+            case _: java.io.FileNotFoundException =>
+              // Already deleted, continue
+              logger.debug(s"Transaction log file already deleted: $versionFileName")
+            case e: Exception =>
+              logger.warn(s"Failed to delete transaction log file $versionFileName: ${e.getMessage}")
+          }
+        }
 
-            if (deletedCount > 0) {
-              val action = if (dryRun) "Would delete" else "Deleted"
-              logger.info(
-                s"$action $deletedCount old transaction log files (retention: ${logRetentionDuration / 1000}s)"
-              )
-            } else {
-              logger.info("No old transaction log files to delete")
-            }
+        if (deletedCount > 0) {
+          val action = if (dryRun) "Would delete" else "Deleted"
+          logger.info(s"$action $deletedCount old transaction log files")
+        }
 
-            deletedCount
-          } finally
-            provider.close()
+        deletedCount
+      } finally
+        provider.close()
 
-        case None =>
-          logger.info("No checkpoint available - skipping transaction log cleanup")
-          0L
-      }
     } catch {
       case e: Exception =>
         // Don't fail the entire purge operation if transaction log cleanup fails
         logger.warn(s"Failed to clean up old transaction log files: ${e.getMessage}", e)
+        0L
+    }
+
+  /**
+   * Clean up old checkpoint files based on retention policy.
+   *
+   * Checkpoints older than the transaction log retention period are safe to delete,
+   * EXCEPT the most recent checkpoint which must always be preserved for table recovery.
+   *
+   * @param txLog The transaction log instance
+   * @return Number of checkpoint files deleted (or would be deleted in DRY RUN)
+   */
+  private def cleanupOldCheckpointFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
+    try {
+      val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+      // Get retention configuration - use explicit parameter if provided, otherwise fall back to config
+      val logRetentionDuration = txLogRetentionDuration.getOrElse {
+        spark.conf
+          .getOption("spark.indextables.logRetention.duration")
+          .map(_.toLong)
+          .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+      }
+
+      val currentTime = System.currentTimeMillis()
+
+      // Get the latest checkpoint version to preserve
+      val latestCheckpointVersion = txLog.getLastCheckpointVersion()
+
+      if (latestCheckpointVersion.isEmpty) {
+        logger.info("No checkpoint available - skipping checkpoint cleanup")
+        return 0L
+      }
+
+      val latestVersion = latestCheckpointVersion.get
+      logger.info(s"Cleaning up old checkpoint files (preserving latest checkpoint at v$latestVersion, dryRun=$dryRun)...")
+
+      // Use CloudStorageProvider for multi-cloud support with credentials
+      val cloudConfigs = extractCloudStorageConfigs()
+      val optionsMap   = new java.util.HashMap[String, String]()
+      cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+      val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+      val provider = CloudStorageProviderFactory.createProvider(
+        transactionLogPath.toString,
+        configOptions,
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        // List all checkpoint files
+        val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+        val checkpointFiles = allFiles.filter { f =>
+          val fileName = new Path(f.path).getName
+          fileName.endsWith(".checkpoint.json")
+        }
+
+        logger.info(s"Found ${checkpointFiles.size} checkpoint files")
+
+        var deletedCount = 0L
+
+        checkpointFiles.foreach { checkpointFile =>
+          val fileName = new Path(checkpointFile.path).getName
+          val fileAge = currentTime - checkpointFile.modificationTime
+
+          // Extract version number from checkpoint filename (format: 00000000000000000050.checkpoint.json)
+          val versionStr = fileName.replace(".checkpoint.json", "")
+          val checkpointVersion = try {
+            versionStr.toLong
+          } catch {
+            case _: NumberFormatException =>
+              logger.warn(s"Skipping checkpoint file with unparseable name: $fileName")
+              -1L
+          }
+
+          // Never delete the latest checkpoint, even if it's old
+          if (checkpointVersion == latestVersion) {
+            logger.debug(s"Preserving latest checkpoint: $fileName (v$checkpointVersion)")
+          } else if (checkpointVersion >= 0 && fileAge > logRetentionDuration) {
+            // Delete old checkpoints that are not the latest
+            if (dryRun) {
+              logger.info(s"DRY RUN: Would delete old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)")
+              deletedCount += 1
+            } else {
+              try {
+                if (provider.deleteFile(checkpointFile.path)) {
+                  deletedCount += 1
+                  logger.debug(s"Deleted old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)")
+                }
+              } catch {
+                case _: java.io.FileNotFoundException =>
+                  logger.debug(s"Checkpoint file already deleted: $fileName")
+                case e: Exception =>
+                  logger.warn(s"Failed to delete checkpoint file $fileName: ${e.getMessage}")
+              }
+            }
+          } else {
+            logger.debug(s"Keeping checkpoint: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)")
+          }
+        }
+
+        if (deletedCount > 0) {
+          val action = if (dryRun) "Would delete" else "Deleted"
+          logger.info(s"$action $deletedCount old checkpoint files")
+        } else {
+          logger.info("No old checkpoint files to delete")
+        }
+
+        deletedCount
+      } finally
+        provider.close()
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the entire purge operation if checkpoint cleanup fails
+        logger.warn(s"Failed to clean up old checkpoint files: ${e.getMessage}", e)
         0L
     }
 
@@ -391,6 +486,181 @@ class PurgeOrphanedSplitsExecutor(
       s"Found ${allFilePaths.size} unique files referenced across ${versionsToScan.size} transaction log versions"
     )
     filePathToAction.values.toSeq
+  }
+
+  /**
+   * Get ALL files referenced in ANY retained transaction file or checkpoint.
+   *
+   * For time travel support, we must preserve files from:
+   *   1. All retained checkpoints (those not being deleted)
+   *   2. All retained version files (those in versionsToKeep)
+   *
+   * A file should NOT be deleted if it appears in ANY transaction file or
+   * checkpoint that still exists after the purge operation.
+   *
+   * @param txLog The transaction log instance
+   * @param versionsToKeep The version numbers that will be retained (not deleted)
+   * @return All AddActions from retained state
+   */
+  private def getAllFilesFromRetainedState(
+    txLog: io.indextables.spark.transaction.TransactionLog,
+    versionsToKeep: Seq[Long]
+  ): Seq[AddAction] = {
+    val allFilePaths = scala.collection.mutable.Set[String]()
+    val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
+
+    // Step 1: Get files from ALL retained checkpoints
+    val checkpointFiles = getFilesFromRetainedCheckpoints(txLog)
+    checkpointFiles.foreach { add =>
+      allFilePaths += add.path
+      filePathToAction(add.path) = add
+    }
+    logger.info(s"Found ${checkpointFiles.size} files from retained checkpoints")
+
+    // Step 2: Get AddActions from ALL retained version files
+    val versionFiles = getAllFilesFromVersions(txLog, versionsToKeep)
+    versionFiles.foreach { add =>
+      allFilePaths += add.path
+      // Keep the most recent AddAction for each path (for metadata like size)
+      filePathToAction(add.path) = add
+    }
+    logger.info(s"Found ${versionFiles.size} files from retained version files")
+
+    logger.info(s"Total unique files in retained transaction state: ${allFilePaths.size}")
+    filePathToAction.values.toSeq
+  }
+
+  /**
+   * Get files from ALL retained checkpoints.
+   *
+   * A checkpoint is retained if:
+   *   1. It's the latest checkpoint (always preserved), OR
+   *   2. It's newer than the retention period
+   *
+   * @param txLog The transaction log instance
+   * @return All AddActions from retained checkpoints
+   */
+  private def getFilesFromRetainedCheckpoints(
+    txLog: io.indextables.spark.transaction.TransactionLog
+  ): Seq[AddAction] = {
+    val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+    // Get retention configuration
+    val logRetentionDuration = txLogRetentionDuration.getOrElse {
+      spark.conf
+        .getOption("spark.indextables.logRetention.duration")
+        .map(_.toLong)
+        .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+    }
+
+    val currentTime = System.currentTimeMillis()
+    val latestCheckpointVersion = txLog.getLastCheckpointVersion()
+
+    // Use CloudStorageProvider for multi-cloud support
+    val cloudConfigs = extractCloudStorageConfigs()
+    val optionsMap = new java.util.HashMap[String, String]()
+    cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+    val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+    val provider = CloudStorageProviderFactory.createProvider(
+      transactionLogPath.toString,
+      configOptions,
+      spark.sparkContext.hadoopConfiguration
+    )
+
+    try {
+      // List all checkpoint files
+      val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+      val checkpointFiles = allFiles.filter { f =>
+        val fileName = new Path(f.path).getName
+        fileName.endsWith(".checkpoint.json")
+      }
+
+      logger.info(s"Found ${checkpointFiles.size} checkpoint files in transaction log")
+
+      val allFilePaths = scala.collection.mutable.Set[String]()
+      val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
+
+      checkpointFiles.foreach { checkpointFile =>
+        val fileName = new Path(checkpointFile.path).getName
+        val fileAge = currentTime - checkpointFile.modificationTime
+
+        // Extract version number from checkpoint filename
+        val versionStr = fileName.replace(".checkpoint.json", "")
+        val checkpointVersion = try {
+          versionStr.toLong
+        } catch {
+          case _: NumberFormatException =>
+            logger.warn(s"Skipping checkpoint file with unparseable name: $fileName")
+            -1L
+        }
+
+        // Determine if this checkpoint is retained
+        val isLatestCheckpoint = latestCheckpointVersion.contains(checkpointVersion)
+        val isWithinRetention = fileAge <= logRetentionDuration
+        val isRetained = isLatestCheckpoint || isWithinRetention
+
+        if (checkpointVersion >= 0 && isRetained) {
+          logger.debug(s"Reading retained checkpoint: $fileName (latest=$isLatestCheckpoint, withinRetention=$isWithinRetention)")
+
+          // Read the checkpoint file and extract AddActions
+          try {
+            val checkpointActions = readCheckpointFile(provider, checkpointFile.path)
+            checkpointActions.foreach {
+              case add: AddAction =>
+                allFilePaths += add.path
+                filePathToAction(add.path) = add
+              case _ => // Ignore other action types
+            }
+            logger.debug(s"Read ${checkpointActions.count(_.isInstanceOf[AddAction])} AddActions from checkpoint v$checkpointVersion")
+          } catch {
+            case e: Exception =>
+              logger.warn(s"Failed to read checkpoint file $fileName: ${e.getMessage}")
+          }
+        } else if (checkpointVersion >= 0) {
+          logger.debug(s"Skipping old checkpoint that will be deleted: $fileName (age: ${fileAge / 1000}s)")
+        }
+      }
+
+      filePathToAction.values.toSeq
+    } finally {
+      provider.close()
+    }
+  }
+
+  /**
+   * Read actions from a checkpoint file.
+   */
+  private def readCheckpointFile(provider: CloudStorageProvider, checkpointPath: String): Seq[Action] = {
+    import io.indextables.spark.transaction.compression.CompressionUtils
+    import io.indextables.spark.util.JsonUtil
+
+    val rawBytes = provider.readFile(checkpointPath)
+    val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+    val content = new String(decompressedBytes, "UTF-8")
+
+    content.split("\n").filter(_.nonEmpty).map { line =>
+      val jsonNode = JsonUtil.mapper.readTree(line)
+
+      if (jsonNode.has("protocol")) {
+        val protocolNode = jsonNode.get("protocol")
+        JsonUtil.mapper.readValue(protocolNode.toString, classOf[ProtocolAction])
+      } else if (jsonNode.has("metaData")) {
+        val metadataNode = jsonNode.get("metaData")
+        JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
+      } else if (jsonNode.has("add")) {
+        val addNode = jsonNode.get("add")
+        JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
+      } else if (jsonNode.has("remove")) {
+        val removeNode = jsonNode.get("remove")
+        JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
+      } else if (jsonNode.has("mergeskip")) {
+        val skipNode = jsonNode.get("mergeskip")
+        JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction])
+      } else {
+        throw new IllegalArgumentException(s"Unknown action type in line: $line")
+      }
+    }.toSeq
   }
 
   /**
