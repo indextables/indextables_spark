@@ -29,7 +29,7 @@ import io.indextables.spark.TestBase
  * Tests for split conversion throttling functionality.
  *
  * The throttle limits the parallelism of tantivy index -> quickwit split conversions to prevent resource exhaustion.
- * Default: max(1, availableProcessors / 4)
+ * Default: max(1, availableProcessors)
  */
 class SplitConversionThrottleTest extends TestBase {
 
@@ -55,7 +55,7 @@ class SplitConversionThrottleTest extends TestBase {
     readDf.count() shouldBe 1000
 
     // Verify throttle was initialized
-    val expectedMaxParallelism = Math.max(1, Runtime.getRuntime.availableProcessors() / 4)
+    val expectedMaxParallelism = Math.max(1, Runtime.getRuntime.availableProcessors())
     println(s"✅ V2 write completed with auto-configured throttle (expected: $expectedMaxParallelism based on ${Runtime.getRuntime.availableProcessors()} processors)")
   }
 
@@ -205,9 +205,9 @@ class SplitConversionThrottleTest extends TestBase {
     println(s"✅ Created ${splitFiles.length} split files with maxParallelism=1 throttling")
   }
 
-  test("Default calculation should use availableProcessors/4") {
+  test("Default calculation should use availableProcessors") {
     val availableProcessors = Runtime.getRuntime.availableProcessors()
-    val expectedDefault     = Math.max(1, availableProcessors / 4)
+    val expectedDefault     = Math.max(1, availableProcessors)
 
     println(s"Available processors: $availableProcessors")
     println(s"Expected default throttle: $expectedDefault")
@@ -258,7 +258,7 @@ class SplitConversionThrottleTest extends TestBase {
 
     readDf.count() shouldBe 1000
 
-    val expectedMaxParallelism = Math.max(1, Runtime.getRuntime.availableProcessors() / 4)
+    val expectedMaxParallelism = Math.max(1, Runtime.getRuntime.availableProcessors())
     println(s"✅ BatchWrite completed with auto-configured throttle (expected: $expectedMaxParallelism)")
   }
 
