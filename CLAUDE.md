@@ -188,10 +188,12 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
 ```
 
 **Key features:**
+- **Driver-side resolution:** Credentials resolved on driver, executors use pre-resolved credentials directly (no network calls to Databricks from workers)
 - **Multi-user caching:** Credentials cached per API token + path, so different users get separate credentials
 - **Automatic fallback:** If READ_WRITE fails (403), automatically falls back to READ credentials
 - **Expiration-aware:** Refreshes credentials 40 minutes before expiration (configurable)
 - **No SDK dependency:** Uses HTTP API directly, no Databricks SDK required
+- **Credential priority:** Explicit credentials always take precedence over provider class (enables driver-side resolution)
 
 ## Field Indexing
 

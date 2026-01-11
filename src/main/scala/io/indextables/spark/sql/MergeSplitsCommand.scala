@@ -354,9 +354,11 @@ case class SerializableAwsConfig(
 
   /** Convert to tantivy4java AwsConfig instance. Uses pre-resolved credentials if available. */
   def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
-    // If we have credentials, use them directly
-    // The provider class is cleared by extractAwsConfig when credentials are resolved on driver
-    if (accessKey.nonEmpty && secretKey.nonEmpty && credentialsProviderClass.isEmpty) {
+    // Priority 1: If we have explicit credentials, use them directly.
+    // This takes precedence over provider class because the driver may have already
+    // resolved credentials from the provider and passed them here.
+    if (accessKey.nonEmpty && secretKey.nonEmpty) {
+      System.out.println(s"✅ [EXECUTOR] Using pre-resolved credentials (accessKey: ${accessKey.take(4)}...)")
       return new QuickwitSplit.AwsConfig(
         accessKey,
         secretKey,
@@ -367,10 +369,11 @@ case class SerializableAwsConfig(
       )
     }
 
-    // Fall back to provider-based resolution
+    // Priority 2: Fall back to provider-based resolution only if no explicit credentials
     credentialsProviderClass match {
       case Some(providerClassName) =>
         try {
+          System.out.println(s"🔑 [EXECUTOR] No explicit credentials, resolving via provider: $providerClassName")
           // Resolve credentials using custom credential provider
           val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) =
             resolveCredentialsFromProvider(providerClassName, tablePath)
@@ -384,26 +387,26 @@ case class SerializableAwsConfig(
           )
         } catch {
           case ex: Exception =>
-            // Fall back to explicit credentials if provider fails
             System.err.println(
               s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}"
             )
-            System.err.println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
+            // Return null config - no fallback available since we have no explicit credentials
             new QuickwitSplit.AwsConfig(
-              accessKey,
-              secretKey,
-              sessionToken.orNull,
+              null,
+              null,
+              null,
               region,
               endpoint.orNull,
               pathStyleAccess
             )
         }
       case None =>
-        // Use explicit credentials
+        // Priority 3: No explicit credentials and no provider - use empty config
+        System.out.println(s"⚠️ [EXECUTOR] No credentials configured")
         new QuickwitSplit.AwsConfig(
-          accessKey,
-          secretKey,
-          sessionToken.orNull,
+          null,
+          null,
+          null,
           region,
           endpoint.orNull,
           pathStyleAccess
