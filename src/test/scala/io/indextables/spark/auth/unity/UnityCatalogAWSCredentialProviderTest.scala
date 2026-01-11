@@ -409,8 +409,7 @@ class UnityCatalogAWSCredentialProviderTest
       )
     }
 
-    assert(exception.getMessage.contains("workspace"))
-    assert(exception.getMessage.contains("workspaceUrl") || exception.getMessage.contains("DATABRICKS_HOST"))
+    assert(exception.getMessage.contains("workspaceUrl"))
   }
 
   test("fails with clear error when token not configured") {
@@ -424,8 +423,7 @@ class UnityCatalogAWSCredentialProviderTest
       )
     }
 
-    assert(exception.getMessage.contains("token"))
-    assert(exception.getMessage.contains("databricks.token") || exception.getMessage.contains("DATABRICKS_TOKEN"))
+    assert(exception.getMessage.contains("databricks.token"))
   }
 
   // ==================== Path Handling Tests ====================

@@ -187,12 +187,6 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .save("s3://bucket/path")
 ```
 
-**Environment variable support:**
-```bash
-export DATABRICKS_HOST="https://myworkspace.cloud.databricks.com"
-export DATABRICKS_TOKEN="dapi..."
-```
-
 **Key features:**
 - **Multi-user caching:** Credentials cached per API token + path, so different users get separate credentials
 - **Automatic fallback:** If READ_WRITE fails (403), automatically falls back to READ credentials

@@ -29,7 +29,7 @@ import org.apache.hadoop.conf.Configuration
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
-import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, EnvironmentConfigSource, HadoopConfigSource}
+import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, HadoopConfigSource}
 import org.slf4j.LoggerFactory
 
 /**
@@ -323,35 +323,28 @@ object UnityCatalogAWSCredentialProvider {
   private val initLock                                                           = new Object
 
   /**
-   * Resolve Databricks configuration from multiple sources.
-   *
-   * Priority: Hadoop config (spark.indextables.databricks.*) > Environment variables
+   * Resolve Databricks configuration from Hadoop/Spark configuration.
    */
   private def resolveConfig(conf: Configuration): (String, String) = {
     val sources: Seq[ConfigSource] = Seq(
       HadoopConfigSource(conf, "spark.indextables.databricks"),
-      HadoopConfigSource(conf),
-      EnvironmentConfigSource()
+      HadoopConfigSource(conf)
     )
 
     val workspaceUrl = ConfigurationResolver
       .resolveString(WorkspaceUrlKey, sources)
-      .orElse(ConfigurationResolver.resolveString("DATABRICKS_HOST", Seq(EnvironmentConfigSource())))
       .map(url => if (url.endsWith("/")) url.dropRight(1) else url) // Remove trailing slash
       .getOrElse(
         throw new IllegalStateException(
-          "Databricks workspace URL not configured. " +
-            "Set spark.indextables.databricks.workspaceUrl or DATABRICKS_HOST environment variable"
+          "Databricks workspace URL not configured. Set spark.indextables.databricks.workspaceUrl"
         )
       )
 
     val token = ConfigurationResolver
       .resolveString(TokenKey, sources, logMask = true)
-      .orElse(ConfigurationResolver.resolveString("DATABRICKS_TOKEN", Seq(EnvironmentConfigSource())))
       .getOrElse(
         throw new IllegalStateException(
-          "Databricks API token not configured. " +
-            "Set spark.indextables.databricks.token or DATABRICKS_TOKEN environment variable"
+          "Databricks API token not configured. Set spark.indextables.databricks.token"
         )
       )
 
