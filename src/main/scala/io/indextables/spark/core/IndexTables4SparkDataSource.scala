@@ -205,6 +205,18 @@ class IndexTables4SparkTable(
       enrichedHadoopConf.set(key, value)
     }
 
+    // If credentials were resolved from a provider, clear the provider class from config
+    // This prevents executors from trying to re-instantiate the provider (which would fail
+    // for providers like UnityCatalogAWSCredentialProvider that need driver-only resources)
+    val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
+    val credentialsWereResolved = resolvedConfigs.get("spark.indextables.aws.accessKey").isDefined &&
+                                  !finalTantivyConfigs.get("spark.indextables.aws.accessKey").isDefined
+    if (credentialsWereResolved) {
+      enrichedHadoopConf.unset(providerClassKey)
+      enrichedHadoopConf.unset(providerClassKey.toLowerCase)
+      logger.info("V2 Write: Cleared credentialsProviderClass after driver-side credential resolution - executors will use pre-resolved credentials")
+    }
+
     // Inject partition information into write options for V2 compatibility
     val enhancedOptions = if (tablePartitioning.nonEmpty) {
       // Extract partition column names from Transform objects

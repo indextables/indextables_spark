@@ -338,11 +338,28 @@ case class SerializableAwsConfig(
   heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
   debugEnabled: Boolean = false,                                  // Enable debug logging in merge operations
   // All spark.indextables.* configs for credential provider (includes databricks keys)
-  allIndextablesConfigs: Map[String, String] = Map.empty
+  allIndextablesConfigs: Map[String, String] = Map.empty,
+  // Flag indicating credentials were already resolved on driver - skip re-resolution on executors
+  credentialsAlreadyResolved: Boolean = false
 ) extends Serializable {
 
-  /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
-  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig =
+  /** Convert to tantivy4java AwsConfig instance. Uses pre-resolved credentials if available. */
+  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
+    // If credentials were already resolved on driver, use them directly
+    // This prevents executors from trying to re-instantiate credential providers
+    // (which would fail for providers like UnityCatalogAWSCredentialProvider that need driver-only resources)
+    if (credentialsAlreadyResolved && accessKey.nonEmpty && secretKey.nonEmpty) {
+      return new QuickwitSplit.AwsConfig(
+        accessKey,
+        secretKey,
+        sessionToken.orNull,
+        region,
+        endpoint.orNull,
+        pathStyleAccess
+      )
+    }
+
+    // Fall back to provider-based resolution (legacy path for non-resolved credentials)
     credentialsProviderClass match {
       case Some(providerClassName) =>
         try {
@@ -384,6 +401,7 @@ case class SerializableAwsConfig(
           pathStyleAccess
         )
     }
+  }
 
   /**
    * Resolve AWS credentials from a custom credential provider class.
@@ -553,12 +571,19 @@ class MergeSplitsExecutor(
 
       // Resolve credentials from custom provider on driver if configured
       // This fetches actual AWS credentials so workers don't need to run the provider
-      val resolvedConfigs = credentialsProviderClass match {
+      val (resolvedConfigs, wasResolvedFromProvider) = credentialsProviderClass match {
         case Some(providerClass) if providerClass.nonEmpty =>
           logger.info(s"Resolving credentials from provider $providerClass for merge operation")
-          ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+          val resolved = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+          // Check if credentials were actually resolved (accessKey is now present but wasn't before)
+          val credentialsWereResolved = resolved.get("spark.indextables.aws.accessKey").isDefined &&
+                                        !accessKey.isDefined
+          if (credentialsWereResolved) {
+            logger.info(s"✅ Credentials successfully resolved from provider $providerClass on driver")
+          }
+          (resolved, credentialsWereResolved)
         case _ =>
-          mergedConfigs
+          (mergedConfigs, false)
       }
 
       // Re-extract credentials from resolved configs (may have been updated by provider)
@@ -576,6 +601,9 @@ class MergeSplitsExecutor(
         val databricksKeys = resolvedConfigs.keys.filter(_.contains("databricks"))
         logger.info(s"Databricks configs included: ${databricksKeys.mkString(", ")}")
       }
+      if (wasResolvedFromProvider) {
+        logger.info(s"✅ Credentials were resolved on driver - executors will use pre-resolved credentials")
+      }
 
       SerializableAwsConfig(
         resolvedAccessKey.getOrElse(""),
@@ -588,7 +616,8 @@ class MergeSplitsExecutor(
         credentialsProviderClass, // Custom credential provider class name
         heapSize,                 // Heap size for merge operations
         debugEnabled,             // Debug logging for merge operations
-        resolvedConfigs           // All spark.indextables.* configs for credential provider
+        resolvedConfigs,          // All spark.indextables.* configs for credential provider
+        wasResolvedFromProvider   // Flag indicating credentials were resolved on driver
       )
     } catch {
       case ex: Exception =>
