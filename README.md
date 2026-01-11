@@ -219,11 +219,20 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 
 5. **Upgrade Java (Databricks 15.4)**: Set environment variable `JNAME=zulu17-ca-amd64` to use Java 17
 
-6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider: *NOTE THAT THIS HAS NOT BEEN VALIDATED YET, PLEASE LET ME KNOW IF IT WORKS FOR YOU*
+6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider:
 
 ```scala
+// Required: Databricks workspace URL and API token
+spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
+spark.conf.set("spark.indextables.databricks.token", dbutils.secrets.get("scope", "token")) // or use PAT directly
+
+// Enable Unity Catalog credential provider
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "io.indextables.spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
+
+// Optional settings
+spark.conf.set("spark.indextables.databricks.credential.refreshBuffer.minutes", "40") // refresh 40 min before expiration
+spark.conf.set("spark.indextables.databricks.fallback.enabled", "true") // fallback to READ if READ_WRITE fails
 ```
 
 *Note*: Photon does not directly accelerate indextables, so it is not necessary to enable it.
@@ -1463,11 +1472,13 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save
 Configure AWS credentials for S3 operations:
 
 ```scala
-// Recommended: Use custom credential provider (e.g., Unity Catalog)
+// Recommended: Use Unity Catalog credential provider (Databricks)
+spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
+spark.conf.set("spark.indextables.databricks.token", "<your-token>")
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "io.indextables.spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
 
-df.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 
 // Alternative: Explicit AWS credentials
 spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")

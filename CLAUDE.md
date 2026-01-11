@@ -143,6 +143,62 @@ spark.indextables.azure.clientSecret: <secret>
 // Uses ~/.azure/credentials file or environment variables
 ```
 
+### Unity Catalog Integration (Databricks)
+Access Unity Catalog-managed S3 paths using temporary credentials from the Databricks API.
+
+**Provider class:** `io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider`
+
+#### Configuration Properties
+| Property | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `spark.indextables.databricks.workspaceUrl` | Yes | - | Databricks workspace URL |
+| `spark.indextables.databricks.token` | Yes | - | Databricks API token (PAT or OAuth) |
+| `spark.indextables.databricks.credential.refreshBuffer.minutes` | No | 40 | Minutes before expiration to refresh |
+| `spark.indextables.databricks.cache.maxSize` | No | 100 | Maximum cached credential entries |
+| `spark.indextables.databricks.fallback.enabled` | No | true | Fallback to READ if READ_WRITE fails |
+| `spark.indextables.databricks.retry.attempts` | No | 3 | Retry attempts on API failure |
+
+#### Usage Examples
+
+**Session-level configuration:**
+```scala
+// Configure Databricks credentials
+spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
+spark.conf.set("spark.indextables.databricks.token", sys.env("DATABRICKS_TOKEN"))
+spark.conf.set("spark.indextables.aws.credentialsProviderClass",
+  "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
+
+// Read from Unity Catalog-managed path
+val df = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .load("s3://unity-catalog-bucket/path")
+
+// Write to Unity Catalog-managed path
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .save("s3://unity-catalog-bucket/new-path")
+```
+
+**Per-operation configuration:**
+```scala
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+  .option("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
+  .option("spark.indextables.databricks.token", token)
+  .option("spark.indextables.aws.credentialsProviderClass",
+    "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
+  .save("s3://bucket/path")
+```
+
+**Environment variable support:**
+```bash
+export DATABRICKS_HOST="https://myworkspace.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi..."
+```
+
+**Key features:**
+- **Multi-user caching:** Credentials cached per API token + path, so different users get separate credentials
+- **Automatic fallback:** If READ_WRITE fails (403), automatically falls back to READ credentials
+- **Expiration-aware:** Refreshes credentials 40 minutes before expiration (configurable)
+- **No SDK dependency:** Uses HTTP API directly, no Databricks SDK required
+
 ## Field Indexing
 
 ### Field Types
