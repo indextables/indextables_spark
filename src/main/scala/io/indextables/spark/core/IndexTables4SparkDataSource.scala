@@ -86,10 +86,17 @@ class IndexTables4SparkTable(
     val readTantivyConfigs = io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromOptions(options)
 
     // Merge with proper precedence: Hadoop < Spark config < read options
-    val tantivyConfigs = io.indextables.spark.util.ConfigNormalization.mergeWithPrecedence(
+    val mergedConfigs = io.indextables.spark.util.ConfigNormalization.mergeWithPrecedence(
       hadoopTantivyConfigs,
       sparkTantivyConfigs,
       readTantivyConfigs
+    )
+
+    // Resolve credentials from custom provider on driver if configured
+    // This fetches actual AWS credentials so workers don't need to run the provider
+    val tantivyConfigs = io.indextables.spark.util.ConfigUtils.resolveCredentialsFromProviderOnDriver(
+      mergedConfigs,
+      path
     )
 
     // Validate numeric configuration values early to provide better error messages
@@ -185,6 +192,17 @@ class IndexTables4SparkTable(
         val displayValue =
           if (key.contains("secret") || key.contains("Secret") || key.contains("session")) "***" else value
         logger.info(s"  $key = $displayValue")
+    }
+
+    // Resolve credentials from custom provider on driver if configured
+    // This fetches actual AWS credentials so workers don't need to run the provider
+    val resolvedConfigs = io.indextables.spark.util.ConfigUtils.resolveCredentialsFromProviderOnDriver(
+      finalTantivyConfigs,
+      path
+    )
+    // Apply resolved credentials to Hadoop config
+    resolvedConfigs.foreach { case (key, value) =>
+      enrichedHadoopConf.set(key, value)
     }
 
     // Inject partition information into write options for V2 compatibility

@@ -32,7 +32,7 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
-import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -551,18 +551,36 @@ class MergeSplitsExecutor(
         }
       }
 
+      // Resolve credentials from custom provider on driver if configured
+      // This fetches actual AWS credentials so workers don't need to run the provider
+      val resolvedConfigs = credentialsProviderClass match {
+        case Some(providerClass) if providerClass.nonEmpty =>
+          logger.info(s"Resolving credentials from provider $providerClass for merge operation")
+          ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+        case _ =>
+          mergedConfigs
+      }
+
+      // Re-extract credentials from resolved configs (may have been updated by provider)
+      val resolvedAccessKey = resolvedConfigs.get("spark.indextables.aws.accessKey")
+        .orElse(accessKey)
+      val resolvedSecretKey = resolvedConfigs.get("spark.indextables.aws.secretKey")
+        .orElse(secretKey)
+      val resolvedSessionToken = resolvedConfigs.get("spark.indextables.aws.sessionToken")
+        .orElse(sessionToken)
+
       // Create SerializableAwsConfig with the extracted credentials and temp directory
       // Include ALL spark.indextables.* configs for credential providers (e.g., databricks keys)
-      logger.info(s"Including ${mergedConfigs.size} spark.indextables.* configs for credential provider")
-      if (mergedConfigs.keys.exists(_.contains("databricks"))) {
-        val databricksKeys = mergedConfigs.keys.filter(_.contains("databricks"))
+      logger.info(s"Including ${resolvedConfigs.size} spark.indextables.* configs for credential provider")
+      if (resolvedConfigs.keys.exists(_.contains("databricks"))) {
+        val databricksKeys = resolvedConfigs.keys.filter(_.contains("databricks"))
         logger.info(s"Databricks configs included: ${databricksKeys.mkString(", ")}")
       }
 
       SerializableAwsConfig(
-        accessKey.getOrElse(""),
-        secretKey.getOrElse(""),
-        sessionToken, // Can be None for permanent credentials
+        resolvedAccessKey.getOrElse(""),
+        resolvedSecretKey.getOrElse(""),
+        resolvedSessionToken, // Can be None for permanent credentials
         region.getOrElse("us-east-1"),
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
@@ -570,7 +588,7 @@ class MergeSplitsExecutor(
         credentialsProviderClass, // Custom credential provider class name
         heapSize,                 // Heap size for merge operations
         debugEnabled,             // Debug logging for merge operations
-        mergedConfigs             // All spark.indextables.* configs for credential provider
+        resolvedConfigs           // All spark.indextables.* configs for credential provider
       )
     } catch {
       case ex: Exception =>
@@ -843,8 +861,8 @@ class MergeSplitsExecutor(
     // Execute batches concurrently with controlled parallelism
     logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
 
-    // Broadcast AWS and Azure configuration to executors
-    val broadcastAwsConfig   = sparkSession.sparkContext.broadcast(awsConfig)
+    // Broadcast Azure configuration and table path (these don't expire)
+    // AWS config is refreshed per-batch to get fresh credentials from provider
     val broadcastAzureConfig = sparkSession.sparkContext.broadcast(azureConfig)
     val broadcastTablePath   = sparkSession.sparkContext.broadcast(tablePath.toString)
 
@@ -871,6 +889,12 @@ class MergeSplitsExecutor(
               val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
 
               logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, $totalSizeGB%.2f GB")
+
+              // Refresh AWS credentials for this batch (credentials may have expired)
+              // This calls the credential provider on the driver to get fresh credentials
+              logger.info(s"Refreshing AWS credentials for batch $batchNum")
+              val batchAwsConfig = extractAwsConfig()
+              val broadcastAwsConfig = sparkSession.sparkContext.broadcast(batchAwsConfig)
 
               // Set descriptive names for Spark UI
               val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
@@ -899,8 +923,17 @@ class MergeSplitsExecutor(
                     )
                     .setName(s"Merge Results Batch $batchNum")
                     .collect()
-                } finally
+                } finally {
                   sparkSession.sparkContext.clearJobGroup()
+                  // Clean up per-batch broadcast to free memory
+                  try {
+                    broadcastAwsConfig.destroy()
+                    logger.debug(s"Cleaned up AWS config broadcast for batch $batchNum")
+                  } catch {
+                    case ex: Exception =>
+                      logger.warn(s"Failed to destroy AWS config broadcast for batch $batchNum: ${ex.getMessage}")
+                  }
+                }
 
               val batchElapsed = System.currentTimeMillis() - batchStartTime
               logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")
