@@ -336,7 +336,9 @@ case class SerializableAwsConfig(
   tempDirectoryPath: Option[String] = None,
   credentialsProviderClass: Option[String] = None,                // Custom credential provider class name
   heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
-  debugEnabled: Boolean = false                                   // Enable debug logging in merge operations
+  debugEnabled: Boolean = false,                                  // Enable debug logging in merge operations
+  // All spark.indextables.* configs for credential provider (includes databricks keys)
+  allIndextablesConfigs: Map[String, String] = Map.empty
 ) extends Serializable {
 
   /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
@@ -383,7 +385,13 @@ case class SerializableAwsConfig(
         )
     }
 
-  /** Resolve AWS credentials from a custom credential provider class. Returns (accessKey, secretKey, sessionToken). */
+  /**
+   * Resolve AWS credentials from a custom credential provider class.
+   * Returns (accessKey, secretKey, sessionToken).
+   *
+   * Populates the Hadoop Configuration with all spark.indextables.* configs (including databricks keys)
+   * so credential providers like UnityCatalogAWSCredentialProvider can find their configuration.
+   */
   private def resolveCredentialsFromProvider(providerClassName: String, tablePath: String)
     : (String, String, Option[String]) = {
     import java.net.URI
@@ -393,6 +401,17 @@ case class SerializableAwsConfig(
     // Use the provided table path for the credential provider constructor
     val tableUri   = new URI(tablePath)
     val hadoopConf = new Configuration()
+
+    // CRITICAL: Populate Hadoop config with all spark.indextables.* configs
+    // This includes databricks keys needed by UnityCatalogAWSCredentialProvider:
+    //   - spark.indextables.databricks.workspaceUrl
+    //   - spark.indextables.databricks.apiToken
+    //   - etc.
+    allIndextablesConfigs.foreach { case (key, value) =>
+      hadoopConf.set(key, value)
+    }
+
+    System.err.println(s"[EXECUTOR] Resolving credentials from provider $providerClassName with ${allIndextablesConfigs.size} config keys")
 
     // Use CredentialProviderFactory to instantiate and extract credentials
     val provider         = CredentialProviderFactory.createCredentialProvider(providerClassName, tableUri, hadoopConf)
@@ -533,6 +552,13 @@ class MergeSplitsExecutor(
       }
 
       // Create SerializableAwsConfig with the extracted credentials and temp directory
+      // Include ALL spark.indextables.* configs for credential providers (e.g., databricks keys)
+      logger.info(s"Including ${mergedConfigs.size} spark.indextables.* configs for credential provider")
+      if (mergedConfigs.keys.exists(_.contains("databricks"))) {
+        val databricksKeys = mergedConfigs.keys.filter(_.contains("databricks"))
+        logger.info(s"Databricks configs included: ${databricksKeys.mkString(", ")}")
+      }
+
       SerializableAwsConfig(
         accessKey.getOrElse(""),
         secretKey.getOrElse(""),
@@ -543,7 +569,8 @@ class MergeSplitsExecutor(
         tempDirectoryPath,        // Custom temp directory path for merge operations
         credentialsProviderClass, // Custom credential provider class name
         heapSize,                 // Heap size for merge operations
-        debugEnabled              // Debug logging for merge operations
+        debugEnabled,             // Debug logging for merge operations
+        mergedConfigs             // All spark.indextables.* configs for credential provider
       )
     } catch {
       case ex: Exception =>

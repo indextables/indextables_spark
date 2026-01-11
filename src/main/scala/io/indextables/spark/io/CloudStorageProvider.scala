@@ -209,85 +209,51 @@ object CloudStorageProviderFactory {
     }
   }
 
-  /** Enrich Hadoop configuration with Spark configuration values */
+  /**
+   * Enrich Hadoop configuration with Spark configuration values.
+   *
+   * Uses ConfigNormalization to dynamically extract ALL spark.indextables.* keys from
+   * the Spark session, including databricks keys for Unity Catalog integration:
+   * - spark.indextables.databricks.workspaceUrl
+   * - spark.indextables.databricks.apiToken
+   * - spark.indextables.databricks.credential.refreshBuffer.minutes
+   * - etc.
+   */
   private def enrichHadoopConfWithSparkConf(hadoopConf: Configuration): Configuration =
     try {
-      // Try to get the active Spark session and copy relevant configurations
       import org.apache.spark.sql.SparkSession
-      val spark = SparkSession.getActiveSession
+      import io.indextables.spark.util.ConfigNormalization
 
-      spark match {
+      SparkSession.getActiveSession match {
         case Some(session) =>
-          val enriched  = new Configuration(hadoopConf)
-          val sparkConf = session.conf
+          val enriched = new Configuration(hadoopConf)
 
-          // Copy IndexTables4Spark specific configurations
-          // String configurations - check both prefixes
-          val stringConfigs = Seq(
-            "spark.indextables.aws.accessKey",
-            "spark.indextables.aws.secretKey",
-            "spark.indextables.aws.sessionToken",
-            "spark.indextables.aws.region",
-            "spark.indextables.s3.endpoint",
-            "spark.indextables.aws.credentialsProviderClass",
-            "spark.indextables.aws.accessKey",
-            "spark.indextables.aws.secretKey",
-            "spark.indextables.aws.sessionToken",
-            "spark.indextables.aws.region",
-            "spark.indextables.s3.endpoint",
-            "spark.indextables.aws.credentialsProviderClass"
-          )
+          // Use ConfigNormalization to extract ALL spark.indextables.* keys dynamically
+          // This includes databricks keys, aws keys, azure keys, etc.
+          val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(session)
 
-          // Boolean configurations
-          val booleanConfigs = Seq(
-            "spark.indextables.s3.pathStyleAccess",
-            "spark.indextables.s3.pathStyleAccess"
-          )
+          logger.info(s"Enriching Hadoop config with ${sparkConfigs.size} spark.indextables.* keys from Spark session")
 
-          // Copy string configurations - only if they exist
-          stringConfigs.foreach { key =>
+          // Copy all extracted configurations to Hadoop config
+          sparkConfigs.foreach { case (key, value) =>
             try {
-              // Try to get the config with a unique default value to detect if it exists
-              val defaultValue = s"__NOT_SET__${key}__"
-              val value        = sparkConf.get(key, defaultValue)
-              if (value != defaultValue) {
-                enriched.set(key, value)
-                val maskedValue = io.indextables.spark.util.CredentialRedaction.redactValue(key, value)
-                logger.debug(s"Copied string Spark config to Hadoop conf: $key = $maskedValue")
-                logger.info(s"✅ Copied string Spark config to Hadoop conf: $key = $maskedValue")
-              } else {
-                // Configuration doesn't exist - this is normal for optional configs like sessionToken
-                logger.debug(s"🔧 Spark config key $key not set (optional)")
-              }
+              enriched.set(key, value)
+              val maskedValue = io.indextables.spark.util.CredentialRedaction.redactValue(key, value)
+              logger.debug(s"Copied Spark config to Hadoop conf: $key = $maskedValue")
             } catch {
               case ex: Exception =>
-                logger.warn(s"Failed to copy string Spark config key $key: ${ex.getMessage}")
-                logger.info(s"❌ Failed to copy string Spark config key $key: ${ex.getMessage}")
+                logger.warn(s"Failed to copy Spark config key $key: ${ex.getMessage}")
             }
           }
 
-          // Copy boolean configurations - only if they exist
-          booleanConfigs.foreach { key =>
-            try {
-              // Try to get the config with a unique default value to detect if it exists
-              val defaultValue = s"__NOT_SET__${key}__"
-              val value        = sparkConf.get(key, defaultValue)
-              if (value != defaultValue) {
-                enriched.setBoolean(key, value.toBoolean)
-                logger.debug(s"Copied boolean Spark config to Hadoop conf: $key = $value")
-                logger.info(s"✅ Copied boolean Spark config to Hadoop conf: $key = $value")
-              } else {
-                // Configuration doesn't exist - this is normal for optional configs
-                logger.debug(s"🔧 Spark config key $key not set (optional)")
-              }
-            } catch {
-              case ex: Exception =>
-                logger.warn(s"Failed to copy boolean Spark config key $key: ${ex.getMessage}")
-                logger.info(s"❌ Failed to copy boolean Spark config key $key: ${ex.getMessage}")
-            }
-          }
+          // Log summary of key config categories copied
+          val databricksKeys = sparkConfigs.keys.count(_.contains("databricks"))
+          val awsKeys        = sparkConfigs.keys.count(_.contains("aws"))
+          val azureKeys      = sparkConfigs.keys.count(_.contains("azure"))
+          logger.info(s"Config enrichment complete: $databricksKeys databricks, $awsKeys aws, $azureKeys azure keys")
 
           enriched
+
         case None =>
           logger.debug("No active Spark session found, using original Hadoop conf")
           hadoopConf
