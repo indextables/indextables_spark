@@ -61,11 +61,11 @@ class IndexTables4SparkWriteBuilder(
     var serializedOptions = options.entrySet().asScala.map(entry => entry.getKey -> entry.getValue).toMap
 
     // Set split conversion max parallelism if not already configured
-    // Default: max(1, availableProcessors / 4)
+    // Default: max(1, availableProcessors)
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     if (!serializedOptions.contains(configKey)) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
-      val maxParallelism      = Math.max(1, availableProcessors / 4)
+      val maxParallelism      = Math.max(1, availableProcessors)
       logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
       serializedOptions = serializedOptions + (configKey -> maxParallelism.toString)
     }

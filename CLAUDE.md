@@ -44,7 +44,7 @@ spark.indextables.indexWriter.maxBatchBufferSize: "90M" (default: 90MB, prevents
 spark.indextables.indexWriter.threads: 2
 
 // Split Conversion (controls parallelism of tantivy index -> quickwit split conversion)
-spark.indextables.splitConversion.maxParallelism: <auto> (default: max(1, availableProcessors / 4))
+spark.indextables.splitConversion.maxParallelism: <auto> (default: max(1, availableProcessors))
 
 // Transaction Log
 spark.indextables.checkpoint.enabled: true

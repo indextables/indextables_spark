@@ -44,11 +44,11 @@ class IndexTables4SparkBatchWrite(
     logger.info(s"Creating batch writer factory for ${info.numPartitions} partitions")
 
     // Set split conversion max parallelism if not already configured
-    // Default: max(1, availableProcessors / 4)
+    // Default: max(1, availableProcessors)
     val configKey = io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_SPLIT_CONVERSION_MAX_PARALLELISM
     val computedMaxParallelism = if (options.get(configKey) == null) {
       val availableProcessors = Runtime.getRuntime.availableProcessors()
-      val maxParallelism      = Math.max(1, availableProcessors / 4)
+      val maxParallelism      = Math.max(1, availableProcessors)
       logger.info(s"Auto-configuring split conversion max parallelism: $maxParallelism (from availableProcessors=$availableProcessors)")
       Some(maxParallelism)
     } else {
