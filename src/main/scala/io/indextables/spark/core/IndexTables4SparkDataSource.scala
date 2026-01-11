@@ -217,6 +217,27 @@ class IndexTables4SparkTable(
       logger.info("V2 Write: Cleared credentialsProviderClass after driver-side credential resolution - executors will use pre-resolved credentials")
     }
 
+    // Start with base options map, removing provider class if credentials were resolved
+    // This is CRITICAL: If we resolved credentials on the driver, we must NOT pass the
+    // credentialsProviderClass to executors - they would try to re-instantiate the provider
+    // which fails for providers that need driver-only resources (like UnityCatalogAWSCredentialProvider)
+    import scala.jdk.CollectionConverters._
+    val baseOptionsMap = {
+      var optMap = options.asScala.toMap
+      if (credentialsWereResolved) {
+        // Remove provider class from options - executors will use pre-resolved credentials
+        optMap = optMap - providerClassKey - providerClassKey.toLowerCase
+        // Also add the resolved credentials to options so they're available on executors
+        optMap = optMap ++ resolvedConfigs.filter { case (k, _) =>
+          k.startsWith("spark.indextables.aws.accessKey") ||
+          k.startsWith("spark.indextables.aws.secretKey") ||
+          k.startsWith("spark.indextables.aws.sessionToken")
+        }
+        logger.info("V2 Write: Removed credentialsProviderClass and added resolved credentials to serialized options")
+      }
+      optMap
+    }
+
     // Inject partition information into write options for V2 compatibility
     val enhancedOptions = if (tablePartitioning.nonEmpty) {
       // Extract partition column names from Transform objects
@@ -250,17 +271,13 @@ class IndexTables4SparkTable(
 
       logger.info(s"V2 Write: Injecting partition columns into options: ${partitionColumnNames.mkString(", ")}")
 
-      // Create enhanced options with partition information
-      import scala.jdk.CollectionConverters._
-      val optionsMap = options.asScala.toMap
-
       // Serialize partition columns as JSON array
       val partitionColumnsJson = io.indextables.spark.util.JsonUtil.toJson(partitionColumnNames.toArray)
 
-      val enhancedOptionsMap = optionsMap + ("__partition_columns" -> partitionColumnsJson)
+      val enhancedOptionsMap = baseOptionsMap + ("__partition_columns" -> partitionColumnsJson)
       new org.apache.spark.sql.util.CaseInsensitiveStringMap(enhancedOptionsMap.asJava)
     } else {
-      options
+      new org.apache.spark.sql.util.CaseInsensitiveStringMap(baseOptionsMap.asJava)
     }
 
     new IndexTables4SparkWriteBuilder(transactionLog, tablePath, info, enhancedOptions, enrichedHadoopConf)

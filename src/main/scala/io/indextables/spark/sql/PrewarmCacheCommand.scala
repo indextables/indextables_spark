@@ -122,11 +122,12 @@ case class PrewarmCacheCommand(
     // This fetches actual AWS credentials so workers don't need to run the provider
     val sessionConfig = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfig, tablePath)
 
-    // Create transaction log to read splits
+    // Create transaction log to read splits - use resolved credentials
+    import scala.jdk.CollectionConverters._
     val transactionLog = TransactionLogFactory.create(
       new Path(tablePath),
       sparkSession,
-      new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      new CaseInsensitiveStringMap(sessionConfig.asJava)
     )
 
     try {

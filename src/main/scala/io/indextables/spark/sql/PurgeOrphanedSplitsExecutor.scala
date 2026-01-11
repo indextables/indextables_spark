@@ -70,9 +70,10 @@ class PurgeOrphanedSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
   def purge(): PurgeResult = {
-    // Step 1: Get transaction log
-    val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val txLog    = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
+    // Step 1: Get transaction log with resolved credentials
+    val cloudConfigs = extractCloudStorageConfigs()
+    import scala.jdk.CollectionConverters._
+    val txLog = TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
 
     // Step 2: Determine which transaction log files will be deleted
     // Get the list of versions that will remain after cleanup (for time travel support)
