@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory
  *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
- *   - spark.indextables.databricks.token: Databricks API token (required)
+ *   - spark.indextables.databricks.apiToken: Databricks API token (required)
  *   - spark.indextables.databricks.credential.refreshBuffer.minutes: Minutes before expiration to refresh (default: 40)
  *   - spark.indextables.databricks.cache.maxSize: Maximum cached entries (default: 100)
  *   - spark.indextables.databricks.fallback.enabled: Enable READ fallback (default: true)
@@ -50,7 +50,7 @@ import org.slf4j.LoggerFactory
  * Usage:
  * {{{
  * spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
- * spark.conf.set("spark.indextables.databricks.token", "<your-token>")
+ * spark.conf.set("spark.indextables.databricks.apiToken", "<your-token>")
  * spark.conf.set("spark.indextables.aws.credentialsProviderClass",
  *   "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
  * }}}
@@ -295,7 +295,7 @@ object UnityCatalogAWSCredentialProvider {
 
   // Configuration keys - Databricks connection
   private val WorkspaceUrlKey = "workspaceUrl"
-  private val TokenKey        = "token"
+  private val TokenKey        = "apiToken"
 
   // Configuration keys - Databricks behavior
   private val RefreshBufferKey   = "spark.indextables.databricks.credential.refreshBuffer.minutes"
@@ -344,7 +344,7 @@ object UnityCatalogAWSCredentialProvider {
       .resolveString(TokenKey, sources, logMask = true)
       .getOrElse(
         throw new IllegalStateException(
-          "Databricks API token not configured. Set spark.indextables.databricks.token"
+          "Databricks API token not configured. Set spark.indextables.databricks.apiToken"
         )
       )
 

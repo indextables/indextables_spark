@@ -152,7 +152,7 @@ Access Unity Catalog-managed S3 paths using temporary credentials from the Datab
 | Property | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `spark.indextables.databricks.workspaceUrl` | Yes | - | Databricks workspace URL |
-| `spark.indextables.databricks.token` | Yes | - | Databricks API token (PAT or OAuth) |
+| `spark.indextables.databricks.apiToken` | Yes | - | Databricks API token (PAT or OAuth) |
 | `spark.indextables.databricks.credential.refreshBuffer.minutes` | No | 40 | Minutes before expiration to refresh |
 | `spark.indextables.databricks.cache.maxSize` | No | 100 | Maximum cached credential entries |
 | `spark.indextables.databricks.fallback.enabled` | No | true | Fallback to READ if READ_WRITE fails |
@@ -164,7 +164,7 @@ Access Unity Catalog-managed S3 paths using temporary credentials from the Datab
 ```scala
 // Configure Databricks credentials
 spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
-spark.conf.set("spark.indextables.databricks.token", sys.env("DATABRICKS_TOKEN"))
+spark.conf.set("spark.indextables.databricks.apiToken", sys.env("DATABRICKS_TOKEN"))
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
   "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
 
@@ -181,7 +181,7 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
 ```scala
 df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider")
   .option("spark.indextables.databricks.workspaceUrl", "https://myworkspace.cloud.databricks.com")
-  .option("spark.indextables.databricks.token", token)
+  .option("spark.indextables.databricks.apiToken", token)
   .option("spark.indextables.aws.credentialsProviderClass",
     "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
   .save("s3://bucket/path")

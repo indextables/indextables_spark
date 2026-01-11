@@ -65,7 +65,7 @@ class UnityCatalogAWSCredentialProviderTest
     super.beforeEach()
     hadoopConf = new Configuration()
     hadoopConf.set("spark.indextables.databricks.workspaceUrl", s"http://localhost:$serverPort")
-    hadoopConf.set("spark.indextables.databricks.token", "test-token-12345")
+    hadoopConf.set("spark.indextables.databricks.apiToken", "test-token-12345")
     requestLog.clear()
     UnityCatalogAWSCredentialProvider.clearCache()
     // Remove any existing handlers (ignore errors if not present)
@@ -227,7 +227,7 @@ class UnityCatalogAWSCredentialProviderTest
     assert(requestLog.size == 1)
 
     // Change to token B with different response
-    hadoopConf.set("spark.indextables.databricks.token", "different-token-67890")
+    hadoopConf.set("spark.indextables.databricks.apiToken", "different-token-67890")
     setupMockHandler(200, successResponse(accessKeyId = "KEY_FOR_TOKEN_B"))
 
     val provider2 = new UnityCatalogAWSCredentialProvider(
@@ -400,7 +400,7 @@ class UnityCatalogAWSCredentialProviderTest
 
   test("fails with clear error when workspace URL not configured") {
     val emptyConf = new Configuration()
-    emptyConf.set("spark.indextables.databricks.token", "some-token")
+    emptyConf.set("spark.indextables.databricks.apiToken", "some-token")
 
     val exception = intercept[IllegalStateException] {
       new UnityCatalogAWSCredentialProvider(
@@ -423,7 +423,7 @@ class UnityCatalogAWSCredentialProviderTest
       )
     }
 
-    assert(exception.getMessage.contains("databricks.token"))
+    assert(exception.getMessage.contains("databricks.apiToken"))
   }
 
   // ==================== Path Handling Tests ====================

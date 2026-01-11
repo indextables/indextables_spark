@@ -224,7 +224,7 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 ```scala
 // Required: Databricks workspace URL and API token
 spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
-spark.conf.set("spark.indextables.databricks.token", dbutils.secrets.get("scope", "token")) // or use PAT directly
+spark.conf.set("spark.indextables.databricks.apiToken", dbutils.secrets.get("scope", "token")) // or use PAT directly
 
 // Enable Unity Catalog credential provider
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
@@ -1474,7 +1474,7 @@ Configure AWS credentials for S3 operations:
 ```scala
 // Recommended: Use Unity Catalog credential provider (Databricks)
 spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
-spark.conf.set("spark.indextables.databricks.token", "<your-token>")
+spark.conf.set("spark.indextables.databricks.apiToken", "<your-token>")
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
   "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
 
