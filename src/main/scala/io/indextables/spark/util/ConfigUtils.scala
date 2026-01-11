@@ -332,7 +332,7 @@ object ConfigUtils {
     }
 
     // Normalize s3a:// to s3:// for credential providers (Unity Catalog expects s3://)
-    val normalizedPath = tablePath.replaceFirst("^s3a://", "s3://")
+    val normalizedPath = ProtocolNormalizer.normalizeS3Protocol(tablePath)
 
     // Parse the table path as URI
     val uri = new URI(normalizedPath)
