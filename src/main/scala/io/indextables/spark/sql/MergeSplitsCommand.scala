@@ -582,12 +582,24 @@ class MergeSplitsExecutor(
 
       // Resolve credentials from custom provider on driver if configured
       // This fetches actual AWS credentials so workers don't need to run the provider
+      // CRITICAL: Merge overrideOptions with mergedConfigs to include write options
+      // This ensures Databricks configs (workspaceUrl, apiToken) are available for
+      // Unity Catalog credential resolution when set via write options
+      val configForResolution = overrideOptions match {
+        case Some(overrides) =>
+          val merged = mergedConfigs ++ overrides
+          logger.info(s"Merged ${overrides.size} override options with ${mergedConfigs.size} session configs for credential resolution")
+          merged
+        case None =>
+          mergedConfigs
+      }
+
       val resolvedConfigs = credentialsProviderClass match {
         case Some(providerClass) if providerClass.nonEmpty =>
           logger.info(s"Resolving credentials from provider $providerClass for merge operation")
-          ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+          ConfigUtils.resolveCredentialsFromProviderOnDriver(configForResolution, tablePath.toString)
         case _ =>
-          mergedConfigs
+          configForResolution
       }
 
       // Re-extract credentials from resolved configs (may have been updated by provider)
