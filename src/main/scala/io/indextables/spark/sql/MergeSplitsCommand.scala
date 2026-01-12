@@ -354,11 +354,24 @@ case class SerializableAwsConfig(
 
   /** Convert to tantivy4java AwsConfig instance. Uses pre-resolved credentials if available. */
   def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
+    // DEBUG: Log what credentials were received on executor (WARN level via stderr for visibility)
+    System.err.println(s"🔧 [EXECUTOR] toQuickwitSplitAwsConfig called with:")
+    System.err.println(s"🔧   accessKey: ${if (accessKey == null) "NULL" else if (accessKey.isEmpty) "EMPTY" else accessKey.take(8) + "..."}")
+    System.err.println(s"🔧   secretKey: ${if (secretKey == null) "NULL" else if (secretKey.isEmpty) "EMPTY" else "***"}")
+    System.err.println(s"🔧   sessionToken: ${sessionToken.map(_ => "present").getOrElse("None")}")
+    System.err.println(s"🔧   region: $region")
+    System.err.println(s"🔧   credentialsProviderClass: ${credentialsProviderClass.getOrElse("None")}")
+    System.err.println(s"🔧   allIndextablesConfigs has ${allIndextablesConfigs.size} keys")
+    if (allIndextablesConfigs.nonEmpty) {
+      val databricksKeys = allIndextablesConfigs.keys.filter(_.contains("databricks")).toSeq
+      System.err.println(s"🔧   databricks keys: ${databricksKeys.mkString(", ")}")
+    }
+
     // Priority 1: If we have explicit credentials, use them directly.
     // This takes precedence over provider class because the driver may have already
     // resolved credentials from the provider and passed them here.
     if (accessKey.nonEmpty && secretKey.nonEmpty) {
-      System.out.println(s"✅ [EXECUTOR] Using pre-resolved credentials (accessKey: ${accessKey.take(4)}...)")
+      System.err.println(s"✅ [EXECUTOR] Using pre-resolved credentials (accessKey: ${accessKey.take(4)}...)")
       return new QuickwitSplit.AwsConfig(
         accessKey,
         secretKey,
@@ -373,7 +386,7 @@ case class SerializableAwsConfig(
     credentialsProviderClass match {
       case Some(providerClassName) =>
         try {
-          System.out.println(s"🔑 [EXECUTOR] No explicit credentials, resolving via provider: $providerClassName")
+          System.err.println(s"🔑 [EXECUTOR] No explicit credentials, resolving via provider: $providerClassName")
           // Resolve credentials using custom credential provider
           val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) =
             resolveCredentialsFromProvider(providerClassName, tablePath)
@@ -402,7 +415,7 @@ case class SerializableAwsConfig(
         }
       case None =>
         // Priority 3: No explicit credentials and no provider - use empty config
-        System.out.println(s"⚠️ [EXECUTOR] No credentials configured")
+        System.err.println(s"⚠️ [EXECUTOR] No credentials configured - accessKey=${if (accessKey == null) "NULL" else if (accessKey.isEmpty) "EMPTY" else "present"}")
         new QuickwitSplit.AwsConfig(
           null,
           null,
