@@ -507,18 +507,15 @@ class TransactionLogCheckpoint(
     lines.map { line =>
       val jsonNode = JsonUtil.mapper.readTree(line)
 
+      // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes
       if (jsonNode.has("protocol")) {
-        val protocolNode = jsonNode.get("protocol")
-        JsonUtil.mapper.readValue(protocolNode.toString, classOf[ProtocolAction])
+        JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
       } else if (jsonNode.has("metaData")) {
-        val metadataNode = jsonNode.get("metaData")
-        JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
+        JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
       } else if (jsonNode.has("add")) {
-        val addNode = jsonNode.get("add")
-        JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
+        JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
       } else if (jsonNode.has("remove")) {
-        val removeNode = jsonNode.get("remove")
-        JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
+        JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
       } else {
         throw new IllegalArgumentException(s"Unknown action type in line: $line")
       }

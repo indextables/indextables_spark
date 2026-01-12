@@ -333,6 +333,7 @@ class ParallelTransactionLogOperations(
     }.getOrElse(Seq.empty)
   }
 
+  // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
   private def parseActionsFromContent(content: String): Seq[Action] =
     content
       .split("\n")
@@ -342,17 +343,13 @@ class ParallelTransactionLogOperations(
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           if (jsonNode.has("metaData")) {
-            val metadataNode = jsonNode.get("metaData")
-            Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
           } else if (jsonNode.has("add")) {
-            val addNode = jsonNode.get("add")
-            Some(JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
           } else if (jsonNode.has("remove")) {
-            val removeNode = jsonNode.get("remove")
-            Some(JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
           } else if (jsonNode.has("mergeskip")) {
-            val skipNode = jsonNode.get("mergeskip")
-            Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
           } else {
             None
           }

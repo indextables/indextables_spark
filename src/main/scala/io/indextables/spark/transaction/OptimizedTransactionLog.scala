@@ -761,22 +761,18 @@ class OptimizedTransactionLog(
       .flatten
       .toSeq
 
+  // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
   private def parseAction(jsonNode: com.fasterxml.jackson.databind.JsonNode): Option[Action] =
     if (jsonNode.has("protocol")) {
-      val protocolNode = jsonNode.get("protocol")
-      Some(JsonUtil.mapper.readValue(protocolNode.toString, classOf[ProtocolAction]))
+      Some(JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction]))
     } else if (jsonNode.has("metaData")) {
-      val metadataNode = jsonNode.get("metaData")
-      Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
+      Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
     } else if (jsonNode.has("add")) {
-      val addNode = jsonNode.get("add")
-      Some(JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction]))
+      Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
     } else if (jsonNode.has("remove")) {
-      val removeNode = jsonNode.get("remove")
-      Some(JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction]))
+      Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
     } else if (jsonNode.has("mergeskip")) {
-      val skipNode = jsonNode.get("mergeskip")
-      Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
+      Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
     } else {
       None
     }
