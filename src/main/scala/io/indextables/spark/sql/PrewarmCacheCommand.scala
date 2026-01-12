@@ -116,13 +116,18 @@ case class PrewarmCacheCommand(
     // Get session config for credentials and cache settings
     val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(sparkSession.sparkContext.hadoopConfiguration)
-    val sessionConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Create transaction log to read splits
+    // Resolve credentials from custom provider on driver if configured
+    // This fetches actual AWS credentials so workers don't need to run the provider
+    val sessionConfig = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfig, tablePath)
+
+    // Create transaction log to read splits - use resolved credentials
+    import scala.jdk.CollectionConverters._
     val transactionLog = TransactionLogFactory.create(
       new Path(tablePath),
       sparkSession,
-      new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+      new CaseInsensitiveStringMap(sessionConfig.asJava)
     )
 
     try {

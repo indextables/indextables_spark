@@ -32,7 +32,7 @@ import org.apache.spark.unsafe.types.UTF8String
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
-import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -144,9 +144,20 @@ case class MergeSplitsCommand(
           return Seq(Row(pathStr, Row("error", null, null, null, null, "Table or path does not exist"), null, null))
       }
 
-    // Create transaction log
+    // Extract and merge configuration with proper precedence for transaction log access
+    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val txLogMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Resolve credentials from custom provider on driver if configured
+    // This is needed for transaction log operations (reading metadata, listing files)
+    val txLogResolvedConfigs = ConfigUtils.resolveCredentialsFromProviderOnDriver(txLogMergedConfigs, tablePath.toString)
+
+    // Create transaction log with resolved credentials
+    import scala.jdk.CollectionConverters._
     val transactionLog =
-      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
+      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(txLogResolvedConfigs.asJava))
 
     try {
       // Check if transaction log is initialized
@@ -336,14 +347,33 @@ case class SerializableAwsConfig(
   tempDirectoryPath: Option[String] = None,
   credentialsProviderClass: Option[String] = None,                // Custom credential provider class name
   heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
-  debugEnabled: Boolean = false                                   // Enable debug logging in merge operations
+  debugEnabled: Boolean = false,                                  // Enable debug logging in merge operations
+  // All spark.indextables.* configs for credential provider (includes databricks keys)
+  allIndextablesConfigs: Map[String, String] = Map.empty
 ) extends Serializable {
 
-  /** Convert to tantivy4java AwsConfig instance. Resolves custom credential providers if specified. */
-  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig =
+  /** Convert to tantivy4java AwsConfig instance. Uses pre-resolved credentials if available. */
+  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
+    // Priority 1: If we have explicit credentials, use them directly.
+    // This takes precedence over provider class because the driver may have already
+    // resolved credentials from the provider and passed them here.
+    if (accessKey.nonEmpty && secretKey.nonEmpty) {
+      System.out.println(s"✅ [EXECUTOR] Using pre-resolved credentials (accessKey: ${accessKey.take(4)}...)")
+      return new QuickwitSplit.AwsConfig(
+        accessKey,
+        secretKey,
+        sessionToken.orNull,
+        region,
+        endpoint.orNull,
+        pathStyleAccess
+      )
+    }
+
+    // Priority 2: Fall back to provider-based resolution only if no explicit credentials
     credentialsProviderClass match {
       case Some(providerClassName) =>
         try {
+          System.out.println(s"🔑 [EXECUTOR] No explicit credentials, resolving via provider: $providerClassName")
           // Resolve credentials using custom credential provider
           val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) =
             resolveCredentialsFromProvider(providerClassName, tablePath)
@@ -357,33 +387,40 @@ case class SerializableAwsConfig(
           )
         } catch {
           case ex: Exception =>
-            // Fall back to explicit credentials if provider fails
             System.err.println(
               s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}"
             )
-            System.err.println(s"⚠️ [EXECUTOR] Falling back to explicit credentials")
+            // Return null config - no fallback available since we have no explicit credentials
             new QuickwitSplit.AwsConfig(
-              accessKey,
-              secretKey,
-              sessionToken.orNull,
+              null,
+              null,
+              null,
               region,
               endpoint.orNull,
               pathStyleAccess
             )
         }
       case None =>
-        // Use explicit credentials
+        // Priority 3: No explicit credentials and no provider - use empty config
+        System.out.println(s"⚠️ [EXECUTOR] No credentials configured")
         new QuickwitSplit.AwsConfig(
-          accessKey,
-          secretKey,
-          sessionToken.orNull,
+          null,
+          null,
+          null,
           region,
           endpoint.orNull,
           pathStyleAccess
         )
     }
+  }
 
-  /** Resolve AWS credentials from a custom credential provider class. Returns (accessKey, secretKey, sessionToken). */
+  /**
+   * Resolve AWS credentials from a custom credential provider class.
+   * Returns (accessKey, secretKey, sessionToken).
+   *
+   * Populates the Hadoop Configuration with all spark.indextables.* configs (including databricks keys)
+   * so credential providers like UnityCatalogAWSCredentialProvider can find their configuration.
+   */
   private def resolveCredentialsFromProvider(providerClassName: String, tablePath: String)
     : (String, String, Option[String]) = {
     import java.net.URI
@@ -393,6 +430,17 @@ case class SerializableAwsConfig(
     // Use the provided table path for the credential provider constructor
     val tableUri   = new URI(tablePath)
     val hadoopConf = new Configuration()
+
+    // CRITICAL: Populate Hadoop config with all spark.indextables.* configs
+    // This includes databricks keys needed by UnityCatalogAWSCredentialProvider:
+    //   - spark.indextables.databricks.workspaceUrl
+    //   - spark.indextables.databricks.apiToken
+    //   - etc.
+    allIndextablesConfigs.foreach { case (key, value) =>
+      hadoopConf.set(key, value)
+    }
+
+    System.err.println(s"[EXECUTOR] Resolving credentials from provider $providerClassName with ${allIndextablesConfigs.size} config keys")
 
     // Use CredentialProviderFactory to instantiate and extract credentials
     val provider         = CredentialProviderFactory.createCredentialProvider(providerClassName, tableUri, hadoopConf)
@@ -532,18 +580,54 @@ class MergeSplitsExecutor(
         }
       }
 
+      // Resolve credentials from custom provider on driver if configured
+      // This fetches actual AWS credentials so workers don't need to run the provider
+      val resolvedConfigs = credentialsProviderClass match {
+        case Some(providerClass) if providerClass.nonEmpty =>
+          logger.info(s"Resolving credentials from provider $providerClass for merge operation")
+          ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+        case _ =>
+          mergedConfigs
+      }
+
+      // Re-extract credentials from resolved configs (may have been updated by provider)
+      val resolvedAccessKey = resolvedConfigs.get("spark.indextables.aws.accessKey")
+        .orElse(accessKey)
+      val resolvedSecretKey = resolvedConfigs.get("spark.indextables.aws.secretKey")
+        .orElse(secretKey)
+      val resolvedSessionToken = resolvedConfigs.get("spark.indextables.aws.sessionToken")
+        .orElse(sessionToken)
+
       // Create SerializableAwsConfig with the extracted credentials and temp directory
+      // Include ALL spark.indextables.* configs for credential providers (e.g., databricks keys)
+      logger.info(s"Including ${resolvedConfigs.size} spark.indextables.* configs for credential provider")
+      if (resolvedConfigs.keys.exists(_.contains("databricks"))) {
+        val databricksKeys = resolvedConfigs.keys.filter(_.contains("databricks"))
+        logger.info(s"Databricks configs included: ${databricksKeys.mkString(", ")}")
+      }
+
+      // CRITICAL: If credentials were resolved on driver, clear the provider class
+      // This prevents executors from trying to re-instantiate the provider
+      val credentialsResolved = resolvedAccessKey.isDefined && !accessKey.isDefined
+      val effectiveProviderClass = if (credentialsResolved) {
+        logger.info(s"Credentials resolved on driver - clearing providerClass to prevent executor re-instantiation")
+        None
+      } else {
+        credentialsProviderClass
+      }
+
       SerializableAwsConfig(
-        accessKey.getOrElse(""),
-        secretKey.getOrElse(""),
-        sessionToken, // Can be None for permanent credentials
+        resolvedAccessKey.getOrElse(""),
+        resolvedSecretKey.getOrElse(""),
+        resolvedSessionToken, // Can be None for permanent credentials
         region.getOrElse("us-east-1"),
         endpoint, // Can be None for default AWS endpoint
         pathStyleAccess,
-        tempDirectoryPath,        // Custom temp directory path for merge operations
-        credentialsProviderClass, // Custom credential provider class name
-        heapSize,                 // Heap size for merge operations
-        debugEnabled              // Debug logging for merge operations
+        tempDirectoryPath,         // Custom temp directory path for merge operations
+        effectiveProviderClass,    // Cleared if credentials were resolved on driver
+        heapSize,                  // Heap size for merge operations
+        debugEnabled,              // Debug logging for merge operations
+        resolvedConfigs            // All spark.indextables.* configs for credential provider
       )
     } catch {
       case ex: Exception =>
@@ -816,8 +900,8 @@ class MergeSplitsExecutor(
     // Execute batches concurrently with controlled parallelism
     logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
 
-    // Broadcast AWS and Azure configuration to executors
-    val broadcastAwsConfig   = sparkSession.sparkContext.broadcast(awsConfig)
+    // Broadcast Azure configuration and table path (these don't expire)
+    // AWS config is refreshed per-batch to get fresh credentials from provider
     val broadcastAzureConfig = sparkSession.sparkContext.broadcast(azureConfig)
     val broadcastTablePath   = sparkSession.sparkContext.broadcast(tablePath.toString)
 
@@ -844,6 +928,12 @@ class MergeSplitsExecutor(
               val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
 
               logger.info(s"Starting batch $batchNum/${batches.length}: ${batch.length} merge groups, $totalSplits splits, $totalSizeGB%.2f GB")
+
+              // Refresh AWS credentials for this batch (credentials may have expired)
+              // This calls the credential provider on the driver to get fresh credentials
+              logger.info(s"Refreshing AWS credentials for batch $batchNum")
+              val batchAwsConfig = extractAwsConfig()
+              val broadcastAwsConfig = sparkSession.sparkContext.broadcast(batchAwsConfig)
 
               // Set descriptive names for Spark UI
               val jobGroup = s"tantivy4spark-merge-splits-batch-$batchNum"
@@ -872,8 +962,17 @@ class MergeSplitsExecutor(
                     )
                     .setName(s"Merge Results Batch $batchNum")
                     .collect()
-                } finally
+                } finally {
                   sparkSession.sparkContext.clearJobGroup()
+                  // Clean up per-batch broadcast to free memory
+                  try {
+                    broadcastAwsConfig.destroy()
+                    logger.debug(s"Cleaned up AWS config broadcast for batch $batchNum")
+                  } catch {
+                    case ex: Exception =>
+                      logger.warn(s"Failed to destroy AWS config broadcast for batch $batchNum: ${ex.getMessage}")
+                  }
+                }
 
               val batchElapsed = System.currentTimeMillis() - batchStartTime
               logger.info(s"Batch $batchNum/${batches.length} physical merge completed in ${batchElapsed}ms")

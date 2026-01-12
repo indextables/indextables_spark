@@ -1,0 +1,493 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package io.indextables.spark.auth.unity
+
+import java.net.{InetSocketAddress, URI}
+import java.util.concurrent.atomic.AtomicInteger
+
+import scala.collection.mutable.ArrayBuffer
+
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
+import org.apache.hadoop.conf.Configuration
+import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.matchers.should.Matchers
+
+/**
+ * Unit tests for UnityCatalogAWSCredentialProvider using a mock HTTP server.
+ * Does not require Spark - purely tests the HTTP credential fetching logic.
+ */
+class UnityCatalogAWSCredentialProviderTest
+    extends AnyFunSuite
+    with Matchers
+    with BeforeAndAfterAll
+    with BeforeAndAfterEach {
+
+  private var mockServer: HttpServer     = _
+  private var serverPort: Int            = _
+  private var hadoopConf: Configuration  = _
+  private val requestLog: ArrayBuffer[MockRequest] = ArrayBuffer.empty
+
+  case class MockRequest(method: String, path: String, body: String, headers: Map[String, String])
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Start mock HTTP server on random available port
+    mockServer = HttpServer.create(new InetSocketAddress(0), 0)
+    serverPort = mockServer.getAddress.getPort
+    mockServer.setExecutor(null)
+    mockServer.start()
+  }
+
+  override def afterAll(): Unit = {
+    if (mockServer != null) {
+      mockServer.stop(0)
+    }
+    super.afterAll()
+  }
+
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+    hadoopConf = new Configuration()
+    hadoopConf.set("spark.indextables.databricks.workspaceUrl", s"http://localhost:$serverPort")
+    hadoopConf.set("spark.indextables.databricks.apiToken", "test-token-12345")
+    requestLog.clear()
+    UnityCatalogAWSCredentialProvider.clearCache()
+    // Remove any existing handlers (ignore errors if not present)
+    try {
+      mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
+    } catch {
+      case _: IllegalArgumentException => // Context doesn't exist, ignore
+    }
+  }
+
+  override def afterEach(): Unit = {
+    UnityCatalogAWSCredentialProvider.clearCache()
+    super.afterEach()
+  }
+
+  private def setupMockHandler(responseCode: Int, responseBody: String): Unit = {
+    // Remove existing handler first
+    try {
+      mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
+    } catch {
+      case _: IllegalArgumentException => // Context doesn't exist, ignore
+    }
+
+    val handler = new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        val method  = exchange.getRequestMethod
+        val path    = exchange.getRequestURI.getPath
+        val body    = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters.mapAsScalaMapConverter(exchange.getRequestHeaders).asScala
+          .map { case (k, v) => k -> v.get(0) }.toMap
+
+        requestLog += MockRequest(method, path, body, headers)
+
+        exchange.sendResponseHeaders(responseCode, responseBody.length)
+        val os = exchange.getResponseBody
+        os.write(responseBody.getBytes)
+        os.close()
+      }
+    }
+    mockServer.createContext("/api/2.1/unity-catalog/temporary-path-credentials", handler)
+  }
+
+  private def setupMockHandlerWithCallback(callback: MockRequest => (Int, String)): Unit = {
+    // Remove existing handler first
+    try {
+      mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
+    } catch {
+      case _: IllegalArgumentException => // Context doesn't exist, ignore
+    }
+
+    val handler = new HttpHandler {
+      override def handle(exchange: HttpExchange): Unit = {
+        val method  = exchange.getRequestMethod
+        val path    = exchange.getRequestURI.getPath
+        val body    = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters.mapAsScalaMapConverter(exchange.getRequestHeaders).asScala
+          .map { case (k, v) => k -> v.get(0) }.toMap
+
+        val request = MockRequest(method, path, body, headers)
+        requestLog += request
+
+        val (responseCode, responseBody) = callback(request)
+        exchange.sendResponseHeaders(responseCode, responseBody.length)
+        val os = exchange.getResponseBody
+        os.write(responseBody.getBytes)
+        os.close()
+      }
+    }
+    mockServer.createContext("/api/2.1/unity-catalog/temporary-path-credentials", handler)
+  }
+
+  private def successResponse(
+    accessKeyId: String = "AKIAIOSFODNN7EXAMPLE",
+    secretAccessKey: String = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    sessionToken: String = "FwoGZXIvYXdzEBY...",
+    expirationTime: Long = System.currentTimeMillis() + 3600000 // 1 hour from now
+  ): String =
+    s"""{
+       |  "aws_temp_credentials": {
+       |    "access_key_id": "$accessKeyId",
+       |    "secret_access_key": "$secretAccessKey",
+       |    "session_token": "$sessionToken"
+       |  },
+       |  "expiration_time": $expirationTime
+       |}""".stripMargin
+
+  // ==================== Basic Functionality Tests ====================
+
+  test("successfully fetches credentials from mock API") {
+    setupMockHandler(200, successResponse())
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val credentials = provider.getCredentials()
+
+    assert(credentials != null)
+    assert(credentials.getAWSAccessKeyId == "AKIAIOSFODNN7EXAMPLE")
+    assert(credentials.getAWSSecretKey == "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+
+    // Verify request details
+    assert(requestLog.size == 1)
+    assert(requestLog.head.method == "POST")
+    assert(requestLog.head.headers.get("Authorization").contains("Bearer test-token-12345"))
+    assert(requestLog.head.body.contains("PATH_READ_WRITE"))
+    assert(requestLog.head.body.contains("s3://test-bucket/path"))
+  }
+
+  test("returns session credentials when session token is provided") {
+    setupMockHandler(200, successResponse())
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val credentials = provider.getCredentials()
+
+    assert(credentials.isInstanceOf[com.amazonaws.auth.BasicSessionCredentials])
+    val sessionCreds = credentials.asInstanceOf[com.amazonaws.auth.BasicSessionCredentials]
+    assert(sessionCreds.getSessionToken == "FwoGZXIvYXdzEBY...")
+  }
+
+  // ==================== Caching Tests ====================
+
+  test("caches credentials and does not make duplicate API calls") {
+    setupMockHandler(200, successResponse())
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    // First call - should hit API
+    provider.getCredentials()
+    assert(requestLog.size == 1)
+
+    // Second call - should use cache
+    provider.getCredentials()
+    assert(requestLog.size == 1, "Should not make another API call due to caching")
+
+    // Third call - still cached
+    provider.getCredentials()
+    assert(requestLog.size == 1)
+  }
+
+  test("different tokens get separate cache entries") {
+    setupMockHandler(200, successResponse(accessKeyId = "KEY_FOR_TOKEN_A"))
+
+    // Provider with token A
+    val provider1 = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+    val creds1 = provider1.getCredentials()
+    assert(creds1.getAWSAccessKeyId == "KEY_FOR_TOKEN_A")
+    assert(requestLog.size == 1)
+
+    // Change to token B with different response
+    hadoopConf.set("spark.indextables.databricks.apiToken", "different-token-67890")
+    setupMockHandler(200, successResponse(accessKeyId = "KEY_FOR_TOKEN_B"))
+
+    val provider2 = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+    val creds2 = provider2.getCredentials()
+
+    // Should have made a new API call (different token = different cache key)
+    assert(requestLog.size == 2)
+    assert(creds2.getAWSAccessKeyId == "KEY_FOR_TOKEN_B")
+  }
+
+  test("different paths get separate cache entries") {
+    val callCount = new AtomicInteger(0)
+
+    setupMockHandlerWithCallback { request =>
+      val pathNum = callCount.incrementAndGet()
+      (200, successResponse(accessKeyId = s"KEY_FOR_PATH_$pathNum"))
+    }
+
+    val provider1 = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://bucket/path1"),
+      hadoopConf
+    )
+    val creds1 = provider1.getCredentials()
+    assert(creds1.getAWSAccessKeyId == "KEY_FOR_PATH_1")
+
+    val provider2 = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://bucket/path2"),
+      hadoopConf
+    )
+    val creds2 = provider2.getCredentials()
+    assert(creds2.getAWSAccessKeyId == "KEY_FOR_PATH_2")
+
+    // Both should have triggered API calls
+    assert(requestLog.size == 2)
+  }
+
+  // ==================== Expiration Tests ====================
+
+  test("refreshes credentials when near expiration") {
+    // Set short refresh buffer for testing
+    hadoopConf.setInt("spark.indextables.databricks.credential.refreshBuffer.minutes", 60) // 60 min buffer
+
+    val callCount = new AtomicInteger(0)
+    setupMockHandlerWithCallback { _ =>
+      val num = callCount.incrementAndGet()
+      // First call: expires in 30 minutes (within 60 min buffer, should trigger refresh)
+      // Second call: expires in 2 hours (outside buffer)
+      val expirationTime = if (num == 1) {
+        System.currentTimeMillis() + (30 * 60 * 1000) // 30 min from now
+      } else {
+        System.currentTimeMillis() + (2 * 60 * 60 * 1000) // 2 hours from now
+      }
+      (200, successResponse(accessKeyId = s"KEY_$num", expirationTime = expirationTime))
+    }
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    // First call
+    val creds1 = provider.getCredentials()
+    assert(creds1.getAWSAccessKeyId == "KEY_1")
+    assert(requestLog.size == 1)
+
+    // Second call - should refresh because first credentials expire within buffer
+    val creds2 = provider.getCredentials()
+    assert(creds2.getAWSAccessKeyId == "KEY_2")
+    assert(requestLog.size == 2, "Should have refreshed due to near-expiration")
+  }
+
+  // ==================== Fallback Tests ====================
+
+  test("falls back to READ when READ_WRITE fails with 403") {
+    // Disable retries for this test to focus on fallback behavior
+    hadoopConf.setInt("spark.indextables.databricks.retry.attempts", 1)
+
+    setupMockHandlerWithCallback { request =>
+      if (request.body.contains("PATH_READ_WRITE")) {
+        (403, """{"error": "Permission denied for READ_WRITE"}""")
+      } else if (request.body.contains("PATH_READ")) {
+        (200, successResponse(accessKeyId = "READ_ONLY_KEY"))
+      } else {
+        (400, """{"error": "Unknown operation"}""")
+      }
+    }
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val credentials = provider.getCredentials()
+
+    assert(credentials.getAWSAccessKeyId == "READ_ONLY_KEY")
+    assert(requestLog.size == 2) // First READ_WRITE, then READ
+    assert(requestLog(0).body.contains("PATH_READ_WRITE"))
+    assert(requestLog(1).body.contains("PATH_READ"))
+  }
+
+  test("throws exception when both READ_WRITE and READ fail") {
+    setupMockHandler(403, """{"error": "Permission denied"}""")
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val exception = intercept[RuntimeException] {
+      provider.getCredentials()
+    }
+
+    assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
+    // Should have tried both READ_WRITE and READ
+    assert(requestLog.count(_.body.contains("PATH_READ_WRITE")) >= 1)
+    assert(requestLog.count(_.body.contains("PATH_READ")) >= 1)
+  }
+
+  test("fallback disabled throws on first failure") {
+    hadoopConf.setBoolean("spark.indextables.databricks.fallback.enabled", false)
+
+    setupMockHandler(403, """{"error": "Permission denied for READ_WRITE"}""")
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val exception = intercept[RuntimeException] {
+      provider.getCredentials()
+    }
+
+    assert(exception.getMessage.contains("Failed to obtain Unity Catalog credentials"))
+    // Should only have tried READ_WRITE (no fallback)
+    assert(requestLog.forall(_.body.contains("PATH_READ_WRITE")))
+  }
+
+  // ==================== Retry Tests ====================
+
+  test("retries on transient failures") {
+    val callCount = new AtomicInteger(0)
+
+    setupMockHandlerWithCallback { _ =>
+      val num = callCount.incrementAndGet()
+      if (num < 3) {
+        (500, """{"error": "Internal server error"}""")
+      } else {
+        (200, successResponse())
+      }
+    }
+
+    hadoopConf.setInt("spark.indextables.databricks.retry.attempts", 3)
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    val credentials = provider.getCredentials()
+
+    assert(credentials != null)
+    assert(credentials.getAWSAccessKeyId == "AKIAIOSFODNN7EXAMPLE")
+    assert(callCount.get() == 3) // 2 failures + 1 success
+  }
+
+  // ==================== Configuration Tests ====================
+
+  test("fails with clear error when workspace URL not configured") {
+    val emptyConf = new Configuration()
+    emptyConf.set("spark.indextables.databricks.apiToken", "some-token")
+
+    val exception = intercept[IllegalStateException] {
+      new UnityCatalogAWSCredentialProvider(
+        new URI("s3://test-bucket/path"),
+        emptyConf
+      )
+    }
+
+    assert(exception.getMessage.contains("workspaceUrl"))
+  }
+
+  test("fails with clear error when token not configured") {
+    val emptyConf = new Configuration()
+    emptyConf.set("spark.indextables.databricks.workspaceUrl", "https://example.com")
+
+    val exception = intercept[IllegalStateException] {
+      new UnityCatalogAWSCredentialProvider(
+        new URI("s3://test-bucket/path"),
+        emptyConf
+      )
+    }
+
+    assert(exception.getMessage.contains("databricks.apiToken"))
+  }
+
+  // ==================== Path Handling Tests ====================
+
+  test("handles various S3 URI formats") {
+    setupMockHandler(200, successResponse())
+
+    val testUris = Seq(
+      "s3://bucket/path",
+      "s3://bucket/path/to/table",
+      "s3a://bucket/path",
+      "s3n://bucket/path"
+    )
+
+    for (uriStr <- testUris) {
+      requestLog.clear()
+      UnityCatalogAWSCredentialProvider.clearCache()
+
+      val provider = new UnityCatalogAWSCredentialProvider(
+        new URI(uriStr),
+        hadoopConf
+      )
+
+      val credentials = provider.getCredentials()
+      assert(credentials != null, s"Should handle URI: $uriStr")
+      assert(requestLog.head.body.contains(uriStr.replace("s3a://", "s3a://").replace("s3n://", "s3n://")))
+    }
+  }
+
+  test("strips trailing slash from path") {
+    setupMockHandler(200, successResponse())
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://bucket/path/"),
+      hadoopConf
+    )
+
+    provider.getCredentials()
+
+    // Path in request should not have trailing slash
+    assert(requestLog.head.body.contains("s3://bucket/path"))
+    assert(!requestLog.head.body.contains("s3://bucket/path/\""))
+  }
+
+  // ==================== Refresh Tests ====================
+
+  test("refresh() forces new API call bypassing cache") {
+    setupMockHandler(200, successResponse())
+
+    val provider = new UnityCatalogAWSCredentialProvider(
+      new URI("s3://test-bucket/path"),
+      hadoopConf
+    )
+
+    // First call
+    provider.getCredentials()
+    assert(requestLog.size == 1)
+
+    // Second call - should use cache
+    provider.getCredentials()
+    assert(requestLog.size == 1)
+
+    // Force refresh
+    provider.refresh()
+    assert(requestLog.size == 2, "refresh() should force a new API call")
+  }
+}

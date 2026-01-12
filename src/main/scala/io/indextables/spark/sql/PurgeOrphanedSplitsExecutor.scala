@@ -70,9 +70,10 @@ class PurgeOrphanedSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[PurgeOrphanedSplitsExecutor])
 
   def purge(): PurgeResult = {
-    // Step 1: Get transaction log
-    val emptyMap = new CaseInsensitiveStringMap(java.util.Collections.emptyMap())
-    val txLog    = TransactionLogFactory.create(new Path(tablePath), spark, emptyMap)
+    // Step 1: Get transaction log with resolved credentials
+    val cloudConfigs = extractCloudStorageConfigs()
+    import scala.jdk.CollectionConverters._
+    val txLog = TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
 
     // Step 2: Determine which transaction log files will be deleted
     // Get the list of versions that will remain after cleanup (for time travel support)
@@ -671,11 +672,13 @@ class PurgeOrphanedSplitsExecutor(
    *   1. overrideOptions (from write options) 2. Spark session configuration
    */
   private def extractCloudStorageConfigs(): Map[String, String] = {
+    import io.indextables.spark.util.ConfigUtils
+
     // Get configs from Spark session
     val sparkConfigs = spark.conf.getAll.filter { case (key, _) => key.startsWith("spark.indextables.") }.toMap
 
     // Merge with override options (override takes precedence)
-    val configs = overrideOptions match {
+    val mergedConfigs = overrideOptions match {
       case Some(overrides) =>
         val merged = sparkConfigs ++ overrides.filter { case (key, _) => key.startsWith("spark.indextables.") }
         logger.info(s"Extracted ${merged.size} spark.indextables.* configuration keys (${sparkConfigs.size} from Spark session, ${overrides.size} from override options)")
@@ -685,7 +688,9 @@ class PurgeOrphanedSplitsExecutor(
         sparkConfigs
     }
 
-    configs
+    // Resolve credentials from custom provider on driver if configured
+    // This fetches actual AWS credentials so workers don't need to run the provider
+    ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
   }
 
   /**

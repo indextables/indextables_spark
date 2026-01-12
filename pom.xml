@@ -242,12 +242,6 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Databricks SDK for Unity Catalog integration (included and shaded) -->
-        <dependency>
-            <groupId>com.databricks</groupId>
-            <artifactId>databricks-sdk-java</artifactId>
-            <version>0.65.0</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -528,15 +522,8 @@
                                     <include>com.thoughtworks.paranamer:paranamer</include>
                                     <include>org.reactivestreams:reactive-streams</include>
                                     <include>software.amazon.eventstream:eventstream</include>
-                                    <include>com.databricks:databricks-sdk-java</include>
                                 </includes>
                             </artifactSet>
-                            <relocations>
-                                <relocation>
-                                    <pattern>com.databricks</pattern>
-                                    <shadedPattern>shaded.indextables.com.databricks</shadedPattern>
-                                </relocation>
-                            </relocations>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>

@@ -219,12 +219,27 @@ spark.sql.extensions=io.indextables.extensions.IndexTablesSparkExtensions
 
 5. **Upgrade Java (Databricks 15.4)**: Set environment variable `JNAME=zulu17-ca-amd64` to use Java 17
 
-6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider: *NOTE THAT THIS HAS NOT BEEN VALIDATED YET, PLEASE LET ME KNOW IF IT WORKS FOR YOU*
+6. **Configure Unity Catalog credentials (optional)**: If using Unity Catalog External Locations to access S3 data, configure the Unity Catalog credential provider:
 
 ```scala
+// Required: Databricks workspace URL and API token
+spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
+spark.conf.set("spark.indextables.databricks.apiToken", dbutils.secrets.get("scope", "token")) // or use PAT directly
+
+// Enable Unity Catalog credential provider
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "io.indextables.spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
+
+// Optional settings
+spark.conf.set("spark.indextables.databricks.credential.refreshBuffer.minutes", "40") // refresh 40 min before expiration
+spark.conf.set("spark.indextables.databricks.fallback.enabled", "true") // fallback to READ if READ_WRITE fails
 ```
+
+**How it works:**
+- Credentials are resolved **on the driver only** - no network calls from executors to Databricks
+- Resolved AWS credentials (accessKey/secretKey/sessionToken) are broadcast to executors
+- Executors use pre-resolved credentials directly, ignoring the provider class
+- Credentials are cached per API token + path, refreshed before expiration
 
 *Note*: Photon does not directly accelerate indextables, so it is not necessary to enable it.
 
@@ -932,7 +947,7 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |
 | `spark.indextables.aws.region` | - | AWS region for S3 split access |
 | `spark.indextables.aws.endpoint` | - | Custom AWS S3 endpoint |
-| `spark.indextables.aws.credentialsProviderClass` | - | Fully qualified class name of custom AWS credential provider |
+| `spark.indextables.aws.credentialsProviderClass` | - | Fully qualified class name of custom AWS credential provider. Note: Provider is only instantiated on the driver; executors use pre-resolved credentials. |
 | `spark.indextables.s3.endpoint` | - | S3 endpoint URL (alternative to aws.endpoint) |
 | `spark.indextables.s3.pathStyleAccess` | `false` | Use path-style access for S3 (required for some S3-compatible services) |
 
@@ -1463,11 +1478,13 @@ df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save
 Configure AWS credentials for S3 operations:
 
 ```scala
-// Recommended: Use custom credential provider (e.g., Unity Catalog)
+// Recommended: Use Unity Catalog credential provider (Databricks)
+spark.conf.set("spark.indextables.databricks.workspaceUrl", "https://<workspace>.cloud.databricks.com")
+spark.conf.set("spark.indextables.databricks.apiToken", "<your-token>")
 spark.conf.set("spark.indextables.aws.credentialsProviderClass",
-  "io.indextables.spark.auth.unity.UnityCredentialProvider")
+  "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider")
 
-df.write.format("io.indextables.provider.IndexTablesProvider").save("s3://bucket/path")
+df.write.format("io.indextables.spark.core.IndexTables4SparkTableProvider").save("s3://bucket/path")
 
 // Alternative: Explicit AWS credentials
 spark.conf.set("spark.indextables.aws.accessKey", "your-access-key")
@@ -2683,7 +2700,7 @@ A: V2 API (`io.indextables.spark.core.IndexTables4SparkTableProvider`) is recomm
 A: String fields use raw tokenization for exact matching (pushed to data source). Text fields use tokenization for full-text search with IndexQuery operators (best-effort filtering).
 
 **Q: How do I use custom AWS credential providers?**
-A: Set `spark.indextables.aws.credentialsProviderClass` to your provider class name. The provider must implement AWS SDK v1 or v2 credential interfaces with a specific constructor signature.
+A: Set `spark.indextables.aws.credentialsProviderClass` to your provider class name. The provider must implement AWS SDK v1 or v2 credential interfaces with a specific constructor signature. **Important:** Credentials are resolved on the driver and broadcast to executors - the provider class itself is only instantiated on the driver. Explicit credentials (accessKey/secretKey) always take precedence over the provider class, which enables this driver-side resolution pattern.
 
 ### Operational Questions
 

@@ -168,28 +168,28 @@ class S3CloudStorageProvider(
       }
     }
 
-    // Helper method for fallback credential configuration
-    def createFallbackCredentialsProvider() =
-      (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
-        case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
-          logger.info(s"Using AWS session credentials with access key: ${accessKey.take(4)}...")
-          val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
-          StaticCredentialsProvider.create(credentials)
-        case (Some(accessKey), Some(secretKey), None) =>
-          logger.info(s"Using AWS basic credentials with access key: ${accessKey.take(4)}...")
-          val credentials = AwsBasicCredentials.create(accessKey, secretKey)
-          StaticCredentialsProvider.create(credentials)
-        case _ =>
-          logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
-          DefaultCredentialsProvider.create()
-      }
-
     // Configure credentials with the following priority:
-    // 1. Custom provider (if configured)
-    // 2. Explicit credentials (access key/secret key in config)
+    // 1. Explicit credentials (access key/secret key in config) - takes precedence because
+    //    the driver may have already resolved credentials from a provider and passed them here
+    // 2. Custom provider (if configured and explicit credentials not present)
     // 3. Default provider chain
-    val credentialsProvider = config.awsCredentialsProviderClass match {
-      case Some(providerClassName) =>
+    val credentialsProvider = (config.awsAccessKey, config.awsSecretKey) match {
+      // Priority 1: Use explicit credentials if present (driver already resolved them)
+      case (Some(accessKey), Some(secretKey)) =>
+        config.awsSessionToken match {
+          case Some(sessionToken) =>
+            logger.info(s"Using pre-resolved AWS session credentials with access key: ${accessKey.take(4)}...")
+            val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+            StaticCredentialsProvider.create(credentials)
+          case None =>
+            logger.info(s"Using pre-resolved AWS basic credentials with access key: ${accessKey.take(4)}...")
+            val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+            StaticCredentialsProvider.create(credentials)
+        }
+
+      // Priority 2: Use custom provider if configured and no explicit credentials
+      case _ if config.awsCredentialsProviderClass.isDefined =>
+        val providerClassName = config.awsCredentialsProviderClass.get
         logger.info(s"Using custom AWS credentials provider: $providerClassName")
         try {
           // Create custom credential provider using reflection
@@ -225,12 +225,14 @@ class S3CloudStorageProvider(
         } catch {
           case ex: Exception =>
             logger.error(s"Failed to create custom credential provider: $providerClassName", ex)
-            logger.warn("Falling back to explicit credentials or default provider chain")
-            createFallbackCredentialsProvider()
+            logger.warn("Falling back to default provider chain")
+            DefaultCredentialsProvider.create()
         }
 
-      case None =>
-        createFallbackCredentialsProvider()
+      // Priority 3: Default provider chain
+      case _ =>
+        logger.info("No AWS credentials configured, using DefaultCredentialsProvider")
+        DefaultCredentialsProvider.create()
     }
 
     builder.credentialsProvider(credentialsProvider).build()
@@ -271,9 +273,27 @@ class S3CloudStorageProvider(
       }
     }
 
-    // Use same credentials provider as sync client
-    val credentialsProvider = config.awsCredentialsProviderClass match {
-      case Some(providerClassName) =>
+    // Use same credential priority as sync client:
+    // 1. Explicit credentials (if present - driver already resolved them)
+    // 2. Custom provider (if configured)
+    // 3. Default provider chain
+    val credentialsProvider = (config.awsAccessKey, config.awsSecretKey) match {
+      // Priority 1: Use explicit credentials if present
+      case (Some(accessKey), Some(secretKey)) =>
+        config.awsSessionToken match {
+          case Some(sessionToken) =>
+            logger.info(s"Async client using pre-resolved session credentials: ${accessKey.take(4)}...")
+            val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+            StaticCredentialsProvider.create(credentials)
+          case None =>
+            logger.info(s"Async client using pre-resolved basic credentials: ${accessKey.take(4)}...")
+            val credentials = AwsBasicCredentials.create(accessKey, secretKey)
+            StaticCredentialsProvider.create(credentials)
+        }
+
+      // Priority 2: Use custom provider if configured
+      case _ if config.awsCredentialsProviderClass.isDefined =>
+        val providerClassName = config.awsCredentialsProviderClass.get
         try {
           val normalizedTablePathForAsync = normalizeToTablePath(tablePath)
           val customProvider = CredentialProviderFactory.createCredentialProvider(
@@ -300,30 +320,13 @@ class S3CloudStorageProvider(
           }
         } catch {
           case ex: Exception =>
-            logger.warn("Async client falling back to explicit credentials or default provider chain")
-            (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
-              case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
-                val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
-                StaticCredentialsProvider.create(credentials)
-              case (Some(accessKey), Some(secretKey), None) =>
-                val credentials = AwsBasicCredentials.create(accessKey, secretKey)
-                StaticCredentialsProvider.create(credentials)
-              case _ =>
-                DefaultCredentialsProvider.create()
-            }
-        }
-
-      case None =>
-        (config.awsAccessKey, config.awsSecretKey, config.awsSessionToken) match {
-          case (Some(accessKey), Some(secretKey), Some(sessionToken)) =>
-            val credentials = AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
-            StaticCredentialsProvider.create(credentials)
-          case (Some(accessKey), Some(secretKey), None) =>
-            val credentials = AwsBasicCredentials.create(accessKey, secretKey)
-            StaticCredentialsProvider.create(credentials)
-          case _ =>
+            logger.warn("Async client falling back to default provider chain")
             DefaultCredentialsProvider.create()
         }
+
+      // Priority 3: Default provider chain
+      case _ =>
+        DefaultCredentialsProvider.create()
     }
 
     builder.credentialsProvider(credentialsProvider).build()

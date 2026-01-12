@@ -27,6 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.transaction.{PartitionPredicateUtils, RemoveAction, TransactionLogFactory}
+import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import org.slf4j.LoggerFactory
 
 /**
@@ -98,9 +99,20 @@ case class DropPartitionsCommand(
           return Seq(Row(pathStr, "error", null, null, null, s"Table or path does not exist: ${e.getMessage}"))
       }
 
-    // Create transaction log
+    // Extract and merge configuration with proper precedence
+    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Resolve credentials from custom provider on driver if configured
+    // This fetches actual AWS credentials so transaction log operations work
+    val resolvedConfigs = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
+
+    // Create transaction log with resolved credentials
+    import scala.jdk.CollectionConverters._
     val transactionLog =
-      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(java.util.Collections.emptyMap()))
+      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(resolvedConfigs.asJava))
 
     try {
       // Check if transaction log is initialized
