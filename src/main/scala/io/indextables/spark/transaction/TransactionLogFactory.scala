@@ -162,6 +162,9 @@ class TransactionLogAdapter(
   override def getLastCheckpointVersion(): Option[Long] =
     optimizedLog.getLastCheckpointVersion()
 
+  override def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
+    optimizedLog.getLastCheckpointInfo()
+
   override def getProtocol(): ProtocolAction =
     optimizedLog.getProtocol()
 

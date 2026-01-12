@@ -71,4 +71,12 @@ class GzipCompressionCodec(level: Int = 6) extends CompressionCodec {
     } finally
       gzipIn.close()
   }
+
+  override def createCompressingOutputStream(output: OutputStream): OutputStream =
+    new GZIPOutputStream(output) {
+      `def`.setLevel(level)
+    }
+
+  override def createDecompressingInputStream(input: InputStream): InputStream =
+    new GZIPInputStream(input)
 }

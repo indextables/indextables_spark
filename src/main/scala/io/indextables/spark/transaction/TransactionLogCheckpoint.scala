@@ -35,14 +35,42 @@ case class CheckpointInfo(
   size: Long, // Number of actions in checkpoint
   sizeInBytes: Long,
   numFiles: Long, // Number of AddActions
-  createdTime: Long)
+  createdTime: Long,
+  parts: Option[Int] = None, // Number of parts for multi-part checkpoint (None = single file)
+  checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
+)
 
 case class LastCheckpointInfo(
   version: Long,
   size: Long,
   sizeInBytes: Long,
   numFiles: Long,
-  createdTime: Long)
+  createdTime: Long,
+  parts: Option[Int] = None, // Number of parts for multi-part checkpoint (None = single file)
+  checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
+)
+
+/**
+ * Manifest for multi-part checkpoints.
+ *
+ * This file is written last (with ifNotExists) to "commit" the checkpoint.
+ * It contains the list of part files that make up the complete checkpoint.
+ *
+ * The format field allows for future extensibility to support different checkpoint
+ * file formats (parquet, avro, etc.) without breaking backward compatibility.
+ *
+ * PURGE operations should:
+ *   1. Keep manifest files for retained checkpoints
+ *   2. Keep all part files referenced by retained manifests
+ *   3. Delete orphaned part files (parts from failed checkpoint attempts not referenced by any manifest)
+ */
+case class MultiPartCheckpointManifest(
+  version: Long,
+  checkpointId: String,
+  parts: Seq[String], // List of part filenames
+  createdTime: Long,
+  format: String = "json" // File format: "json", "parquet", "avro" (future)
+)
 
 class TransactionLogCheckpoint(
   transactionLogPath: Path,
@@ -81,6 +109,10 @@ class TransactionLogCheckpoint(
         None
     }
 
+  // Multi-part checkpoint configuration
+  private val multiPartEnabled = options.getBoolean("spark.indextables.checkpoint.multiPart.enabled", true)
+  private val actionsPerPart = options.getInt("spark.indextables.checkpoint.actionsPerPart", 100000)
+
   private val executor                      = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
   implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
@@ -108,44 +140,48 @@ class TransactionLogCheckpoint(
     logger.info(s"Creating checkpoint for version $currentVersion with ${allActions.length} actions")
 
     try {
-      val checkpointPath    = new Path(transactionLogPath, f"$currentVersion%020d.checkpoint.json")
-      val checkpointPathStr = checkpointPath.toString
+      // Apply schema deduplication to reduce checkpoint size
+      // This replaces docMappingJson with docMappingRef in AddActions
+      val deduplicatedActions = applySchemaDeduplication(allActions)
 
-      val content = new StringBuilder()
-      allActions.foreach { action =>
-        val wrappedAction = action match {
-          case protocol: ProtocolAction => Map("protocol" -> protocol)
-          case metadata: MetadataAction => Map("metaData" -> metadata)
-          case add: AddAction           => Map("add" -> add)
-          case remove: RemoveAction     => Map("remove" -> remove)
-          case skip: SkipAction         => Map("mergeskip" -> skip)
-        }
+      // Determine if we should use multi-part checkpoint
+      val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
 
-        val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
-        content.append(actionJson).append("\n")
+      // Check if V3 features are being used (schema deduplication or multi-part)
+      val usesSchemaDedup = deduplicatedActions.exists {
+        case add: AddAction => add.docMappingRef.isDefined
+        case _              => false
+      }
+      val usesV3Features = usesSchemaDedup || shouldUseMultiPart
+
+      // Upgrade protocol to V3 if using V3 features
+      val finalActions = if (usesV3Features) {
+        upgradeProtocolForV3Features(deduplicatedActions)
+      } else {
+        deduplicatedActions
       }
 
-      // Apply compression if enabled
-      val jsonBytes       = content.toString.getBytes("UTF-8")
-      val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
       val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+      val numFiles        = allActions.count(_.isInstanceOf[AddAction])
+      val estimatedSize   = StreamingActionWriter.estimateSerializedSize(allActions)
 
-      cloudProvider.writeFile(checkpointPathStr, bytesToWrite)
+      val checkpointInfoOpt = if (shouldUseMultiPart) {
+        createMultiPartCheckpoint(currentVersion, finalActions, compressionInfo)
+      } else {
+        Some(createSinglePartCheckpoint(currentVersion, finalActions, compressionInfo))
+      }
 
-      val numFiles = allActions.count(_.isInstanceOf[AddAction])
-      val checkpointInfo = CheckpointInfo(
-        version = currentVersion,
-        size = allActions.length,
-        sizeInBytes = content.length,
-        numFiles = numFiles,
-        createdTime = System.currentTimeMillis()
-      )
-
-      writeLastCheckpointFile(checkpointInfo)
-
-      logger.info(
-        s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$compressionInfo"
-      )
+      checkpointInfoOpt match {
+        case Some(checkpointInfo) =>
+          writeLastCheckpointFile(checkpointInfo.copy(numFiles = numFiles, sizeInBytes = estimatedSize))
+          val partInfo = checkpointInfo.parts.map(p => s" ($p parts)").getOrElse("")
+          logger.info(
+            s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$partInfo$compressionInfo"
+          )
+        case None =>
+          // Another writer completed the checkpoint first (for multi-part only)
+          logger.info(s"Checkpoint for version $currentVersion was created by another writer")
+      }
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint for version $currentVersion", e)
@@ -153,29 +189,264 @@ class TransactionLogCheckpoint(
     }
   }
 
+  /**
+   * Create a single-file checkpoint (traditional format).
+   */
+  private def createSinglePartCheckpoint(
+    currentVersion: Long,
+    actions: Seq[Action],
+    compressionInfo: String
+  ): CheckpointInfo = {
+    val checkpointPath    = new Path(transactionLogPath, f"$currentVersion%020d.checkpoint.json")
+    val checkpointPathStr = checkpointPath.toString
+
+    logger.debug(s"Writing single-part checkpoint using streaming approach$compressionInfo")
+
+    StreamingActionWriter.writeActionsStreaming(
+      actions = actions,
+      cloudProvider = cloudProvider,
+      path = checkpointPathStr,
+      codec = codec,
+      ifNotExists = false
+    )
+
+    CheckpointInfo(
+      version = currentVersion,
+      size = actions.length,
+      sizeInBytes = 0L, // Will be updated by caller
+      numFiles = 0L,    // Will be updated by caller
+      createdTime = System.currentTimeMillis(),
+      parts = None
+    )
+  }
+
+  /**
+   * Create a multi-part checkpoint for large tables.
+   *
+   * Architecture for race condition safety:
+   *   1. Generate a unique checkpoint ID (UUID) for this attempt
+   *   2. Write all parts with UUID in filename: `<version>.checkpoint.<uuid>.<partNum>.json`
+   *   3. Write manifest file using ifNotExists: `<version>.checkpoint.json`
+   *   4. First writer to successfully write manifest wins
+   *   5. Orphaned parts from failed attempts are cleaned up by PURGE operations
+   *
+   * Part 1 contains: ProtocolAction + MetadataAction + first batch of AddActions
+   * Parts 2+ contain: AddActions only
+   *
+   * @return
+   *   Some(CheckpointInfo) if checkpoint was created, None if another writer completed first
+   */
+  private def createMultiPartCheckpoint(
+    currentVersion: Long,
+    actions: Seq[Action],
+    compressionInfo: String
+  ): Option[CheckpointInfo] = {
+    // Generate unique ID for this checkpoint attempt
+    val checkpointId = java.util.UUID.randomUUID().toString.replace("-", "").take(12)
+
+    // Separate protocol/metadata from add actions
+    val protocolAction = actions.collectFirst { case p: ProtocolAction => p }
+    val metadataAction = actions.collectFirst { case m: MetadataAction => m }
+    val addActions     = actions.collect { case a: AddAction => a }
+    val otherActions   = actions.filter {
+      case _: ProtocolAction => false
+      case _: MetadataAction => false
+      case _: AddAction      => false
+      case _                 => true
+    }
+
+    // Calculate number of parts needed
+    val headerActions      = protocolAction.toSeq ++ metadataAction.toSeq ++ otherActions
+    val addsForFirstPart   = math.max(0, actionsPerPart - headerActions.length)
+    val remainingAdds      = if (addsForFirstPart >= addActions.length) Seq.empty else addActions.drop(addsForFirstPart)
+    val additionalParts    = if (remainingAdds.isEmpty) 0 else math.ceil(remainingAdds.length.toDouble / actionsPerPart).toInt
+    val totalParts         = 1 + additionalParts
+
+    logger.info(s"Creating multi-part checkpoint (id=$checkpointId) with $totalParts parts for ${actions.length} actions")
+
+    // Write all parts with checkpoint ID in filename
+    val partFiles = scala.collection.mutable.ListBuffer[String]()
+
+    // Write part 1: header + first batch of adds
+    val part1Actions = headerActions ++ addActions.take(addsForFirstPart)
+    val part1File = writeCheckpointPartWithId(currentVersion, checkpointId, 1, part1Actions)
+    partFiles += part1File
+
+    // Write remaining parts
+    var partNum      = 2
+    var remainingIdx = 0
+    while (remainingIdx < remainingAdds.length) {
+      val partActions = remainingAdds.slice(remainingIdx, remainingIdx + actionsPerPart)
+      val partFile = writeCheckpointPartWithId(currentVersion, checkpointId, partNum, partActions)
+      partFiles += partFile
+      remainingIdx += actionsPerPart
+      partNum += 1
+    }
+
+    // Write manifest file with ifNotExists - first writer wins
+    val manifestWritten = writeCheckpointManifest(currentVersion, checkpointId, partFiles.toSeq)
+
+    if (manifestWritten) {
+      logger.info(s"Successfully created multi-part checkpoint manifest for version $currentVersion (id=$checkpointId)")
+      Some(CheckpointInfo(
+        version = currentVersion,
+        size = actions.length,
+        sizeInBytes = 0L,
+        numFiles = 0L,
+        createdTime = System.currentTimeMillis(),
+        parts = Some(totalParts),
+        checkpointId = Some(checkpointId)
+      ))
+    } else {
+      // Another writer completed the checkpoint first - our parts become orphans (cleaned up by PURGE)
+      logger.info(s"Another writer completed checkpoint for version $currentVersion first, " +
+        s"orphaned parts (id=$checkpointId) will be cleaned up by PURGE")
+      None
+    }
+  }
+
+  /**
+   * Write a single part of a multi-part checkpoint with unique ID.
+   *
+   * @return
+   *   The filename of the written part
+   */
+  private def writeCheckpointPartWithId(version: Long, checkpointId: String, partNum: Int, actions: Seq[Action]): String = {
+    val fileName    = f"$version%020d.checkpoint.$checkpointId.$partNum%05d.json"
+    val partPath    = new Path(transactionLogPath, fileName)
+    val partPathStr = partPath.toString
+
+    logger.debug(s"Writing checkpoint part $partNum (id=$checkpointId) with ${actions.length} actions to $partPathStr")
+
+    StreamingActionWriter.writeActionsStreaming(
+      actions = actions,
+      cloudProvider = cloudProvider,
+      path = partPathStr,
+      codec = codec,
+      ifNotExists = false // Parts are unique per checkpoint ID, no conflict possible
+    )
+
+    fileName
+  }
+
+  /**
+   * Write the checkpoint manifest file.
+   *
+   * The manifest contains metadata about the checkpoint and lists all part files.
+   * Uses ifNotExists to ensure only one writer succeeds for a given version.
+   *
+   * @return
+   *   true if manifest was written, false if another writer completed first
+   */
+  private def writeCheckpointManifest(version: Long, checkpointId: String, partFiles: Seq[String]): Boolean = {
+    val manifestPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
+    val manifestPathStr = manifestPath.toString
+
+    val manifest = MultiPartCheckpointManifest(
+      version = version,
+      checkpointId = checkpointId,
+      parts = partFiles,
+      createdTime = System.currentTimeMillis()
+    )
+
+    val manifestJson = JsonUtil.mapper.writeValueAsString(manifest)
+
+    // Use ifNotExists - first writer to complete wins
+    cloudProvider.writeFileIfNotExists(manifestPathStr, manifestJson.getBytes("UTF-8"))
+  }
+
   def getActionsFromCheckpoint(): Option[Seq[Action]] =
     getLastCheckpointInfo().flatMap { info =>
       Try {
-        val checkpointPath    = new Path(transactionLogPath, f"${info.version}%020d.checkpoint.json")
-        val checkpointPathStr = checkpointPath.toString
-
-        if (!cloudProvider.exists(checkpointPathStr)) {
-          logger.warn(s"Checkpoint file does not exist: $checkpointPathStr")
-          return None
+        val actions = info.checkpointId match {
+          case Some(_) =>
+            // New format: manifest-based multi-part checkpoint
+            readMultiPartCheckpointFromManifest(info.version)
+          case None =>
+            // Legacy format: single-file checkpoint (actions directly in file)
+            readLegacySingleFileCheckpoint(info.version)
         }
 
-        // Read raw bytes and decompress if needed
-        val rawBytes          = cloudProvider.readFile(checkpointPathStr)
-        val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-        val content           = new String(decompressedBytes, "UTF-8")
-        parseActionsFromContent(content)
+        // Validate protocol version before proceeding
+        validateProtocolVersion(actions)
+
+        // Restore schemas from registry (handles both legacy and deduplicated checkpoints)
+        restoreSchemas(actions)
       } match {
         case Success(actions) => Some(actions)
+        case Failure(e: ProtocolVersionException) =>
+          // Re-throw protocol version exceptions to the caller
+          throw e
         case Failure(e) =>
           logger.error("Failed to read checkpoint file", e)
           None
       }
     }
+
+  /**
+   * Read a legacy single-file checkpoint (actions directly in file).
+   */
+  private def readLegacySingleFileCheckpoint(version: Long): Seq[Action] = {
+    val checkpointPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
+    val checkpointPathStr = checkpointPath.toString
+
+    if (!cloudProvider.exists(checkpointPathStr)) {
+      throw new java.io.FileNotFoundException(s"Checkpoint file does not exist: $checkpointPathStr")
+    }
+
+    // Read raw bytes and decompress if needed
+    val rawBytes          = cloudProvider.readFile(checkpointPathStr)
+    val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+    val content           = new String(decompressedBytes, "UTF-8")
+    parseActionsFromContent(content)
+  }
+
+  /**
+   * Read a multi-part checkpoint using the manifest file.
+   *
+   * The manifest file (`<version>.checkpoint.json`) contains the list of part files.
+   * Each part file is named `<version>.checkpoint.<checkpointId>.<partNum>.json`.
+   */
+  private def readMultiPartCheckpointFromManifest(version: Long): Seq[Action] = {
+    val manifestPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
+    val manifestPathStr = manifestPath.toString
+
+    if (!cloudProvider.exists(manifestPathStr)) {
+      throw new java.io.FileNotFoundException(s"Checkpoint manifest does not exist: $manifestPathStr")
+    }
+
+    // Read and parse manifest
+    val manifestBytes = cloudProvider.readFile(manifestPathStr)
+    val manifestContent = new String(manifestBytes, "UTF-8")
+    val manifest = JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
+
+    logger.debug(s"Reading multi-part checkpoint version $version (id=${manifest.checkpointId}) with ${manifest.parts.size} parts")
+
+    // Read all parts listed in manifest
+    val allActions = scala.collection.mutable.ListBuffer[Action]()
+
+    for (partFile <- manifest.parts) {
+      val partPath    = new Path(transactionLogPath, partFile)
+      val partPathStr = partPath.toString
+
+      if (!cloudProvider.exists(partPathStr)) {
+        throw new java.io.FileNotFoundException(
+          s"Checkpoint part does not exist: $partPathStr (referenced in manifest)"
+        )
+      }
+
+      val rawBytes          = cloudProvider.readFile(partPathStr)
+      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
+      val content           = new String(decompressedBytes, "UTF-8")
+      val partActions       = parseActionsFromContent(content)
+
+      logger.debug(s"Read ${partActions.length} actions from checkpoint part $partFile")
+      allActions ++= partActions
+    }
+
+    logger.debug(s"Total actions from multi-part checkpoint: ${allActions.length}")
+    allActions.toSeq
+  }
 
   def readVersionsInParallel(versions: Seq[Long]): Map[Long, Seq[Action]] = {
     logger.debug(s"Reading ${versions.length} versions in parallel with parallelism=$parallelism")
@@ -260,7 +531,9 @@ class TransactionLogCheckpoint(
       size = checkpointInfo.size,
       sizeInBytes = checkpointInfo.sizeInBytes,
       numFiles = checkpointInfo.numFiles,
-      createdTime = checkpointInfo.createdTime
+      createdTime = checkpointInfo.createdTime,
+      parts = checkpointInfo.parts,
+      checkpointId = checkpointInfo.checkpointId
     )
 
     val json = JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
@@ -367,4 +640,176 @@ class TransactionLogCheckpoint(
       case e: Exception =>
         logger.warn("Failed during checkpoint cleanup", e)
     }
+
+  /**
+   * Apply schema deduplication to checkpoint actions.
+   *
+   * This replaces docMappingJson with docMappingRef in AddActions and stores the schema registry in
+   * MetadataAction.configuration. This can reduce checkpoint size by up to 99% for tables with large schemas.
+   */
+  private def applySchemaDeduplication(actions: Seq[Action]): Seq[Action] = {
+    // Find the MetadataAction (should be present in checkpoint)
+    val metadataOpt = actions.collectFirst { case m: MetadataAction => m }
+
+    metadataOpt match {
+      case Some(metadata) =>
+        // Get existing schema registry from metadata configuration
+        val existingRegistry = metadata.configuration
+
+        // Deduplicate schemas in actions
+        val (deduplicatedActions, newSchemaRegistry) =
+          SchemaDeduplication.deduplicateSchemas(actions, existingRegistry)
+
+        // If new schemas were found, update MetadataAction with merged registry
+        if (newSchemaRegistry.nonEmpty) {
+          val originalSize = actions.collect { case a: AddAction => a }.flatMap(_.docMappingJson).map(_.length).sum
+          val uniqueSchemaSize = newSchemaRegistry.values.map(_.length).sum
+          logger.info(
+            s"Schema deduplication: ${newSchemaRegistry.size} unique schemas, " +
+              s"original size ~${originalSize / 1024}KB, deduplicated size ~${uniqueSchemaSize / 1024}KB"
+          )
+
+          // Merge new schemas into existing configuration
+          val updatedConfiguration =
+            SchemaDeduplication.mergeIntoConfiguration(metadata.configuration, newSchemaRegistry)
+
+          // Replace MetadataAction with updated configuration
+          deduplicatedActions.map {
+            case _: MetadataAction => metadata.copy(configuration = updatedConfiguration)
+            case other             => other
+          }
+        } else {
+          // No schemas to deduplicate, return original actions
+          actions
+        }
+
+      case None =>
+        // No MetadataAction found (shouldn't happen in valid checkpoint)
+        logger.warn("No MetadataAction found in checkpoint actions, skipping schema deduplication")
+        actions
+    }
+  }
+
+  /**
+   * Restore schemas in checkpoint actions from the schema registry.
+   *
+   * This replaces docMappingRef with docMappingJson in AddActions using the schema registry stored in
+   * MetadataAction.configuration.
+   *
+   * @throws IllegalStateException
+   *   if schema restoration fails
+   */
+  private def restoreSchemas(actions: Seq[Action]): Seq[Action] = {
+    // Check if there are any schema references to restore
+    val hasSchemaRefs = actions.exists {
+      case add: AddAction => add.docMappingRef.isDefined && add.docMappingJson.isEmpty
+      case _              => false
+    }
+
+    if (!hasSchemaRefs) {
+      // No schema refs to restore (legacy checkpoint or no schemas)
+      return actions
+    }
+
+    // Find the MetadataAction to get schema registry
+    val metadataOpt = actions.collectFirst { case m: MetadataAction => m }
+
+    metadataOpt match {
+      case Some(metadata) =>
+        // Extract schema registry from configuration
+        val schemaRegistry = metadata.configuration
+
+        // Check if registry has any schemas
+        if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
+          throw new IllegalStateException(
+            "Checkpoint has AddActions with docMappingRef but no schema registry found in MetadataAction.configuration. " +
+              "This indicates a corrupted checkpoint file."
+          )
+        }
+
+        logger.debug(s"Restoring schemas from registry with ${schemaRegistry.count(_._1.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))} entries")
+        val restored = SchemaDeduplication.restoreSchemas(actions, schemaRegistry)
+
+        // Verify all schemas were restored
+        val unresolvedRefs = restored.collect {
+          case add: AddAction if add.docMappingRef.isDefined && add.docMappingJson.isEmpty => add
+        }
+        if (unresolvedRefs.nonEmpty) {
+          val missingHashes = unresolvedRefs.flatMap(_.docMappingRef).distinct.mkString(", ")
+          throw new IllegalStateException(
+            s"Failed to restore schemas for ${unresolvedRefs.size} AddActions in checkpoint. " +
+              s"Missing schema hashes: $missingHashes"
+          )
+        }
+
+        restored
+
+      case None =>
+        throw new IllegalStateException(
+          "Checkpoint has AddActions with docMappingRef but no MetadataAction found. " +
+            "This indicates a corrupted checkpoint file."
+        )
+    }
+  }
+
+  /**
+   * Validate that the current system can read a checkpoint with the given protocol.
+   *
+   * @param actions
+   *   The checkpoint actions containing ProtocolAction
+   * @throws ProtocolVersionException
+   *   if the checkpoint requires a newer reader version
+   */
+  private def validateProtocolVersion(actions: Seq[Action]): Unit = {
+    val protocolOpt = actions.collectFirst { case p: ProtocolAction => p }
+    protocolOpt.foreach { protocol =>
+      ProtocolVersion.validateReaderVersion(protocol)
+      logger.debug(s"Checkpoint protocol version validated: reader=${protocol.minReaderVersion}, writer=${protocol.minWriterVersion}")
+    }
+  }
+
+  /**
+   * Upgrade protocol to V3 if V3 features are being used.
+   *
+   * V3 features include:
+   *   - Multi-part checkpoints (multiPartCheckpoint)
+   *   - Schema deduplication with docMappingRef (schemaDeduplication)
+   *
+   * If the existing protocol is already V3+, this method does nothing. If the existing protocol is V2 or below, it
+   * upgrades to V3.
+   *
+   * @param actions
+   *   The checkpoint actions containing ProtocolAction
+   * @return
+   *   Actions with ProtocolAction upgraded to V3 if necessary
+   */
+  private def upgradeProtocolForV3Features(actions: Seq[Action]): Seq[Action] = {
+    val existingProtocol = actions.collectFirst { case p: ProtocolAction => p }
+
+    existingProtocol match {
+      case Some(protocol) if protocol.minReaderVersion >= 3 =>
+        // Already V3+, no upgrade needed
+        actions
+
+      case Some(protocol) =>
+        // Upgrade to V3
+        val upgradedProtocol = ProtocolAction(
+          minReaderVersion = ProtocolVersion.CURRENT_READER_VERSION,
+          minWriterVersion = ProtocolVersion.CURRENT_WRITER_VERSION
+        )
+        logger.info(
+          s"Upgrading protocol from V${protocol.minReaderVersion} to V${upgradedProtocol.minReaderVersion} " +
+            "due to V3 features (schema deduplication or multi-part checkpoint)"
+        )
+        actions.map {
+          case _: ProtocolAction => upgradedProtocol
+          case other             => other
+        }
+
+      case None =>
+        // No protocol found, add V3 protocol
+        logger.info("Adding V3 protocol for checkpoint with V3 features")
+        ProtocolVersion.defaultProtocol() +: actions
+    }
+  }
 }

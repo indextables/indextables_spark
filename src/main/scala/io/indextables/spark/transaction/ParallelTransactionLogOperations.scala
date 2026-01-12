@@ -199,17 +199,27 @@ class ParallelTransactionLogOperations(
       val parts          = actions.grouped(partSize).toSeq
 
       if (parts.length == 1) {
-        // Single part - write directly
-        val content = serializeActions(actions)
-        cloudProvider.writeFile(checkpointPath.toString, content.getBytes("UTF-8"))
+        // Single part - use streaming write to avoid OOM
+        StreamingActionWriter.writeActionsStreaming(
+          actions = actions,
+          cloudProvider = cloudProvider,
+          path = checkpointPath.toString,
+          codec = None, // Parallel ops don't use compression currently
+          ifNotExists = false
+        )
       } else {
-        // Multi-part checkpoint for large tables
+        // Multi-part checkpoint for large tables - use streaming write for each part
         val partFutures = parts.zipWithIndex.map {
           case (part, index) =>
             Future {
               val partPath = new Path(transactionLogPath, f"$version%020d.checkpoint.part.$index%05d.json")
-              val content  = serializeActions(part)
-              cloudProvider.writeFile(partPath.toString, content.getBytes("UTF-8"))
+              StreamingActionWriter.writeActionsStreaming(
+                actions = part,
+                cloudProvider = cloudProvider,
+                path = partPath.toString,
+                codec = None,
+                ifNotExists = false
+              )
             }(commitEc)
         }
 
@@ -224,7 +234,7 @@ class ParallelTransactionLogOperations(
       CheckpointInfo(
         version = version,
         size = actions.length,
-        sizeInBytes = 0, // Will be calculated
+        sizeInBytes = StreamingActionWriter.estimateSerializedSize(actions),
         numFiles = actions.count(_.isInstanceOf[AddAction]),
         createdTime = System.currentTimeMillis()
       )
@@ -350,21 +360,6 @@ class ParallelTransactionLogOperations(
       }
       .flatten
       .toSeq
-
-  private def serializeActions(actions: Seq[Action]): String = {
-    val content = new StringBuilder()
-    actions.foreach { action =>
-      val wrappedAction = action match {
-        case protocol: ProtocolAction => Map("protocol" -> protocol)
-        case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction           => Map("add" -> add)
-        case remove: RemoveAction     => Map("remove" -> remove)
-        case skip: SkipAction         => Map("mergeskip" -> skip)
-      }
-      content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
-    }
-    content.toString
-  }
 
   private def parseTransactionFile(path: String): Option[TransactionFile] = {
     val fileName = new Path(path).getName

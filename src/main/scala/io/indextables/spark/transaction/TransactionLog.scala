@@ -288,11 +288,60 @@ class TransactionLog(
         }
 
         val result = files.toSeq
+        // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
+        val restoredResult = restoreSchemasInAddActions(result)
         // Cache the result
-        cache.foreach(_.cacheFiles(result))
-        logger.debug(s"Computed and cached files list: ${result.length} files")
-        result
+        cache.foreach(_.cacheFiles(restoredResult))
+        logger.debug(s"Computed and cached files list: ${restoredResult.length} files")
+        restoredResult
     }
+  }
+
+  /**
+   * Restore schemas in AddActions if they use schema references (docMappingRef).
+   *
+   * This handles schema deduplication by replacing docMappingRef with docMappingJson using the schema registry stored in
+   * MetadataAction.configuration.
+   *
+   * @throws IllegalStateException
+   *   if schema restoration fails
+   */
+  private def restoreSchemasInAddActions(addActions: Seq[AddAction]): Seq[AddAction] = {
+    // Check if any AddActions have schema references that need restoration
+    val hasSchemaRefs = addActions.exists(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
+
+    if (!hasSchemaRefs) {
+      // No schema refs to restore (legacy format or no schemas)
+      return addActions
+    }
+
+    // Get MetadataAction which contains the schema registry
+    val metadata = getMetadata()
+    val schemaRegistry = metadata.configuration
+
+    // Check if registry has any schemas
+    if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
+      throw new IllegalStateException(
+        "AddActions have docMappingRef but no schema registry found in MetadataAction.configuration. " +
+          "This indicates a corrupted transaction log or checkpoint."
+      )
+    }
+
+    // Restore schemas
+    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions")
+    val restored = SchemaDeduplication.restoreSchemas(addActions, schemaRegistry).collect { case a: AddAction => a }
+
+    // Verify all schemas were restored
+    val unresolvedRefs = restored.filter(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
+    if (unresolvedRefs.nonEmpty) {
+      val missingHashes = unresolvedRefs.flatMap(_.docMappingRef).distinct.mkString(", ")
+      throw new IllegalStateException(
+        s"Failed to restore schemas for ${unresolvedRefs.size} AddActions. " +
+          s"Missing schema hashes: $missingHashes"
+      )
+    }
+
+    restored
   }
 
   /** Get the total row count across all active files. */
@@ -410,30 +459,20 @@ class TransactionLog(
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
-    val content = new StringBuilder()
-    actions.foreach { action =>
-      // Wrap actions in the appropriate delta log format
-      val wrappedAction = action match {
-        case protocol: ProtocolAction => Map("protocol" -> protocol)
-        case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction           => Map("add" -> add)
-        case remove: RemoveAction     => Map("remove" -> remove)
-        case skip: SkipAction         => Map("mergeskip" -> skip)
-      }
-
-      val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
-      content.append(actionJson).append("\n")
-    }
-
-    // Apply compression if enabled - evaluate codec lazily to pick up write-time options
-    val jsonBytes       = content.toString.getBytes("UTF-8")
+    // Use streaming write to avoid OOM for large transaction log versions
+    // This prevents StringBuilder exceeding JVM's ~2GB array size limit
     val codec           = getCompressionCodec()
-    val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
     val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
 
-    // CRITICAL: Use conditional write to prevent overwriting transaction log files
+    // CRITICAL: Use conditional write (ifNotExists=true) to prevent overwriting transaction log files
     // Transaction log files are immutable and should never be overwritten
-    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, bytesToWrite)
+    val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+      actions = actions,
+      cloudProvider = cloudProvider,
+      path = versionFilePath,
+      codec = codec,
+      ifNotExists = true // Conditional write for transaction log integrity
+    )
 
     if (!writeSucceeded) {
       throw new IllegalStateException(
@@ -972,6 +1011,10 @@ class TransactionLog(
   /** Get the current checkpoint version for debugging. */
   def getLastCheckpointVersion(): Option[Long] =
     checkpoint.flatMap(_.getLastCheckpointVersion())
+
+  /** Get the full checkpoint info (including multi-part checkpoint details). */
+  def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
+    checkpoint.flatMap(_.getLastCheckpointInfo())
 
   /**
    * Prewarm the transaction log cache for faster subsequent reads. Default implementation is a no-op; optimized

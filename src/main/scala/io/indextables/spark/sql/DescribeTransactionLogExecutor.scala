@@ -488,10 +488,25 @@ class DescribeTransactionLogExecutor(
     versionFile.toString
   }
 
-  /** Get the full path to a checkpoint file. */
+  /**
+   * Get the full path to a checkpoint file.
+   *
+   * For multi-part checkpoints (V3), this returns the manifest path with a note indicating the number of parts. For
+   * legacy single-file checkpoints, this returns the checkpoint file path.
+   */
   private def getCheckpointFilePath(txLog: TransactionLog, version: Long): String = {
-    val txLogPath      = new Path(txLog.getTablePath(), "_transaction_log")
-    val checkpointFile = new Path(txLogPath, f"$version%020d.checkpoint.json")
-    checkpointFile.toString
+    val txLogPath       = new Path(txLog.getTablePath(), "_transaction_log")
+    val checkpointFile  = new Path(txLogPath, f"$version%020d.checkpoint.json")
+    val basePath        = checkpointFile.toString
+
+    // Check if this is a multi-part checkpoint
+    txLog.getLastCheckpointInfo() match {
+      case Some(info) if info.version == version && info.parts.isDefined =>
+        val numParts = info.parts.get
+        val checkpointId = info.checkpointId.getOrElse("unknown")
+        s"$basePath (multi-part: $numParts parts, id=$checkpointId)"
+      case _ =>
+        basePath
+    }
   }
 }
