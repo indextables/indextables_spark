@@ -149,19 +149,9 @@ class TransactionLogCheckpoint(
       // Determine if we should use multi-part checkpoint
       val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
 
-      // Check if V3 features are being used (schema deduplication or multi-part)
-      val usesSchemaDedup = deduplicatedActions.exists {
-        case add: AddAction => add.docMappingRef.isDefined
-        case _              => false
-      }
-      val usesV3Features = usesSchemaDedup || shouldUseMultiPart
-
-      // Upgrade protocol to V3 if using V3 features
-      val finalActions = if (usesV3Features) {
-        upgradeProtocolForV3Features(deduplicatedActions)
-      } else {
-        deduplicatedActions
-      }
+      // Always upgrade to V3 protocol for new checkpoints
+      // This ensures consistent behavior and enables V3 features (schema deduplication, multi-part)
+      val finalActions = upgradeProtocolForV3Features(deduplicatedActions)
 
       val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
       val numFiles        = allActions.count(_.isInstanceOf[AddAction])
