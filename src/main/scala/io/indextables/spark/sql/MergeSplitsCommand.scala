@@ -510,6 +510,28 @@ class MergeSplitsExecutor(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
+      // DEBUG: Log config extraction summary (WARN level to ensure visibility in tests)
+      logger.warn(s"🔧 MERGE extractAwsConfig: Extracted ${sparkConfigs.size} Spark configs, ${hadoopConfigs.size} Hadoop configs, ${mergedConfigs.size} merged configs")
+      logger.warn(s"🔧 MERGE extractAwsConfig: overrideOptions has ${overrideOptions.map(_.size).getOrElse(0)} entries")
+
+      // DEBUG: Log credential-related configs
+      val credentialKeys = Seq(
+        "spark.indextables.aws.accessKey",
+        "spark.indextables.aws.secretKey",
+        "spark.indextables.aws.sessionToken",
+        "spark.indextables.aws.credentialsProviderClass",
+        "spark.indextables.databricks.workspaceUrl",
+        "spark.indextables.databricks.apiToken"
+      )
+      logger.warn(s"🔧 MERGE extractAwsConfig: Credential config sources:")
+      credentialKeys.foreach { key =>
+        val inSpark = sparkConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
+        val inHadoop = hadoopConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
+        val inMerged = mergedConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
+        val inOverride = overrideOptions.flatMap(_.get(key)).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
+        logger.warn(s"🔧   $key: spark=${inSpark.getOrElse("None")}, hadoop=${inHadoop.getOrElse("None")}, merged=${inMerged.getOrElse("None")}, override=${inOverride.getOrElse("None")}")
+      }
+
       // Helper function to get config with priority: overrideOptions > mergedConfigs
       // CASE-INSENSITIVE lookup to handle write options (lowercase) vs expected keys (camelCase)
       def getConfigWithFallback(sparkKey: String): Option[String] = {
@@ -588,17 +610,37 @@ class MergeSplitsExecutor(
       val configForResolution = overrideOptions match {
         case Some(overrides) =>
           val merged = mergedConfigs ++ overrides
-          logger.info(s"Merged ${overrides.size} override options with ${mergedConfigs.size} session configs for credential resolution")
+          logger.warn(s"🔧 MERGE extractAwsConfig: Merged ${overrides.size} override options with ${mergedConfigs.size} session configs for credential resolution")
           merged
         case None =>
+          logger.warn(s"🔧 MERGE extractAwsConfig: No override options, using ${mergedConfigs.size} merged configs")
           mergedConfigs
+      }
+
+      // DEBUG: Log configForResolution contents for credential-related keys
+      logger.warn(s"🔧 MERGE extractAwsConfig: configForResolution has ${configForResolution.size} entries")
+      credentialKeys.foreach { key =>
+        val value = configForResolution.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(50))
+        logger.warn(s"🔧   configForResolution[$key] = ${value.getOrElse("None")}")
       }
 
       val resolvedConfigs = credentialsProviderClass match {
         case Some(providerClass) if providerClass.nonEmpty =>
-          logger.info(s"Resolving credentials from provider $providerClass for merge operation")
-          ConfigUtils.resolveCredentialsFromProviderOnDriver(configForResolution, tablePath.toString)
+          logger.warn(s"🔧 MERGE extractAwsConfig: Resolving credentials from provider: $providerClass")
+          logger.warn(s"🔧 MERGE extractAwsConfig: Table path for resolution: $tablePath")
+          try {
+            val resolved = ConfigUtils.resolveCredentialsFromProviderOnDriver(configForResolution, tablePath.toString)
+            logger.warn(s"🔧 MERGE extractAwsConfig: Credential resolution SUCCEEDED")
+            logger.warn(s"🔧   Resolved accessKey: ${resolved.get("spark.indextables.aws.accessKey").map(_.take(8) + "...").getOrElse("None")}")
+            logger.warn(s"🔧   Resolved sessionToken: ${resolved.get("spark.indextables.aws.sessionToken").map(_ => "present").getOrElse("None")}")
+            resolved
+          } catch {
+            case ex: Exception =>
+              logger.error(s"🔧 MERGE extractAwsConfig: Credential resolution FAILED: ${ex.getMessage}", ex)
+              throw ex
+          }
         case _ =>
+          logger.warn(s"🔧 MERGE extractAwsConfig: No credential provider class configured, using existing configs")
           configForResolution
       }
 
@@ -610,23 +652,40 @@ class MergeSplitsExecutor(
       val resolvedSessionToken = resolvedConfigs.get("spark.indextables.aws.sessionToken")
         .orElse(sessionToken)
 
+      // DEBUG: Log final credential values
+      logger.warn(s"🔧 MERGE extractAwsConfig: Final credentials:")
+      logger.warn(s"🔧   accessKey (from getConfigWithFallback): ${accessKey.map(_.take(8) + "...").getOrElse("None")}")
+      logger.warn(s"🔧   resolvedAccessKey (final): ${resolvedAccessKey.map(_.take(8) + "...").getOrElse("None")}")
+      logger.warn(s"🔧   resolvedSecretKey (final): ${resolvedSecretKey.map(_ => "***").getOrElse("None")}")
+      logger.warn(s"🔧   resolvedSessionToken (final): ${resolvedSessionToken.map(_ => "present").getOrElse("None")}")
+
       // Create SerializableAwsConfig with the extracted credentials and temp directory
       // Include ALL spark.indextables.* configs for credential providers (e.g., databricks keys)
-      logger.info(s"Including ${resolvedConfigs.size} spark.indextables.* configs for credential provider")
+      logger.warn(s"🔧 MERGE extractAwsConfig: Including ${resolvedConfigs.size} spark.indextables.* configs")
       if (resolvedConfigs.keys.exists(_.contains("databricks"))) {
         val databricksKeys = resolvedConfigs.keys.filter(_.contains("databricks"))
-        logger.info(s"Databricks configs included: ${databricksKeys.mkString(", ")}")
+        logger.warn(s"🔧 MERGE extractAwsConfig: Databricks configs included: ${databricksKeys.mkString(", ")}")
       }
 
       // CRITICAL: If credentials were resolved on driver, clear the provider class
       // This prevents executors from trying to re-instantiate the provider
       val credentialsResolved = resolvedAccessKey.isDefined && !accessKey.isDefined
+      logger.warn(s"🔧 MERGE extractAwsConfig: credentialsResolved=$credentialsResolved (resolvedAccessKey.isDefined=${resolvedAccessKey.isDefined}, accessKey.isDefined=${accessKey.isDefined})")
       val effectiveProviderClass = if (credentialsResolved) {
-        logger.info(s"Credentials resolved on driver - clearing providerClass to prevent executor re-instantiation")
+        logger.warn(s"🔧 MERGE extractAwsConfig: Credentials resolved on driver - clearing providerClass to prevent executor re-instantiation")
         None
       } else {
+        logger.warn(s"🔧 MERGE extractAwsConfig: Keeping providerClass=${credentialsProviderClass.getOrElse("None")} for executor fallback")
         credentialsProviderClass
       }
+
+      // Log what's being passed to SerializableAwsConfig
+      logger.warn(s"🔧 MERGE extractAwsConfig: Creating SerializableAwsConfig with:")
+      logger.warn(s"🔧   accessKey: ${resolvedAccessKey.map(_.take(8) + "...").getOrElse("EMPTY")}")
+      logger.warn(s"🔧   secretKey: ${resolvedSecretKey.map(_ => "***").getOrElse("EMPTY")}")
+      logger.warn(s"🔧   sessionToken: ${resolvedSessionToken.map(_ => "present").getOrElse("None")}")
+      logger.warn(s"🔧   region: ${region.getOrElse("us-east-1")}")
+      logger.warn(s"🔧   providerClass: ${effectiveProviderClass.getOrElse("None")}")
 
       SerializableAwsConfig(
         resolvedAccessKey.getOrElse(""),
