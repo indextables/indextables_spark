@@ -17,6 +17,7 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, InputStreamReader}
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable.ListBuffer
@@ -30,6 +31,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.compression.CompressionUtils
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -199,17 +201,27 @@ class ParallelTransactionLogOperations(
       val parts          = actions.grouped(partSize).toSeq
 
       if (parts.length == 1) {
-        // Single part - write directly
-        val content = serializeActions(actions)
-        cloudProvider.writeFile(checkpointPath.toString, content.getBytes("UTF-8"))
+        // Single part - use streaming write to avoid OOM
+        StreamingActionWriter.writeActionsStreaming(
+          actions = actions,
+          cloudProvider = cloudProvider,
+          path = checkpointPath.toString,
+          codec = None, // Parallel ops don't use compression currently
+          ifNotExists = false
+        )
       } else {
-        // Multi-part checkpoint for large tables
+        // Multi-part checkpoint for large tables - use streaming write for each part
         val partFutures = parts.zipWithIndex.map {
           case (part, index) =>
             Future {
               val partPath = new Path(transactionLogPath, f"$version%020d.checkpoint.part.$index%05d.json")
-              val content  = serializeActions(part)
-              cloudProvider.writeFile(partPath.toString, content.getBytes("UTF-8"))
+              StreamingActionWriter.writeActionsStreaming(
+                actions = part,
+                cloudProvider = cloudProvider,
+                path = partPath.toString,
+                codec = None,
+                ifNotExists = false
+              )
             }(commitEc)
         }
 
@@ -224,7 +236,7 @@ class ParallelTransactionLogOperations(
       CheckpointInfo(
         version = version,
         size = actions.length,
-        sizeInBytes = 0, // Will be calculated
+        sizeInBytes = StreamingActionWriter.estimateSerializedSize(actions),
         numFiles = actions.count(_.isInstanceOf[AddAction]),
         createdTime = System.currentTimeMillis()
       )
@@ -318,11 +330,57 @@ class ParallelTransactionLogOperations(
     }
 
     Try {
-      val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-      parseActionsFromContent(content)
+      // Use full streaming: cloud storage -> decompression -> line parsing
+      // This avoids OOM for large version files (>1GB)
+      parseActionsFromStream(versionFilePath)
     }.getOrElse(Seq.empty)
   }
 
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          Try {
+            val jsonNode = JsonUtil.mapper.readTree(line)
+
+            // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
+            if (jsonNode.has("metaData")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
+            } else if (jsonNode.has("add")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
+            } else if (jsonNode.has("remove")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
+            } else if (jsonNode.has("mergeskip")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
+            } else {
+              None
+            }
+          }.toOption.flatten.foreach(actions += _)
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+    }
+  }
+
+  // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
   private def parseActionsFromContent(content: String): Seq[Action] =
     content
       .split("\n")
@@ -332,17 +390,13 @@ class ParallelTransactionLogOperations(
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           if (jsonNode.has("metaData")) {
-            val metadataNode = jsonNode.get("metaData")
-            Some(JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
           } else if (jsonNode.has("add")) {
-            val addNode = jsonNode.get("add")
-            Some(JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
           } else if (jsonNode.has("remove")) {
-            val removeNode = jsonNode.get("remove")
-            Some(JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
           } else if (jsonNode.has("mergeskip")) {
-            val skipNode = jsonNode.get("mergeskip")
-            Some(JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction]))
+            Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
           } else {
             None
           }
@@ -350,21 +404,6 @@ class ParallelTransactionLogOperations(
       }
       .flatten
       .toSeq
-
-  private def serializeActions(actions: Seq[Action]): String = {
-    val content = new StringBuilder()
-    actions.foreach { action =>
-      val wrappedAction = action match {
-        case protocol: ProtocolAction => Map("protocol" -> protocol)
-        case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction           => Map("add" -> add)
-        case remove: RemoveAction     => Map("remove" -> remove)
-        case skip: SkipAction         => Map("mergeskip" -> skip)
-      }
-      content.append(JsonUtil.mapper.writeValueAsString(wrappedAction)).append("\n")
-    }
-    content.toString
-  }
 
   private def parseTransactionFile(path: String): Option[TransactionFile] = {
     val fileName = new Path(path).getName

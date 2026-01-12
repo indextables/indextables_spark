@@ -24,6 +24,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.TableIdentifier
 
 import io.indextables.spark.sql.{
+  CheckpointCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
   DescribeStorageStatsCommand,
@@ -338,6 +339,29 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
 
     val result = InvalidateTransactionLogCacheCommand(pathOption)
     logger.debug(s"Created InvalidateTransactionLogCacheCommand: $result")
+    result
+  }
+
+  override def visitCheckpointIndexTable(ctx: CheckpointIndexTableContext): LogicalPlan = {
+    logger.debug(s"visitCheckpointIndexTable called with context: $ctx")
+
+    // Extract table path or identifier
+    val pathOption = if (ctx.path != null) {
+      logger.debug(s"Processing path: ${ctx.path.getText}")
+      val pathStr = ParserUtils.string(ctx.path)
+      logger.debug(s"Parsed path: $pathStr")
+      Some(pathStr)
+    } else if (ctx.table != null) {
+      logger.debug(s"Processing table: ${ctx.table.getText}")
+      val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+      logger.debug(s"Parsed table ID: $tableId")
+      Some(tableId.mkString("."))
+    } else {
+      throw new IllegalArgumentException("CHECKPOINT INDEXTABLES requires a path or table name")
+    }
+
+    val result = CheckpointCommand(pathOption.get)
+    logger.debug(s"Created CheckpointCommand: $result")
     result
   }
 

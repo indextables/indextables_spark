@@ -26,4 +26,28 @@ trait CompressionCodec {
 
   /** Decompress byte array */
   def decompress(data: Array[Byte]): Array[Byte]
+
+  /**
+   * Create a compressing output stream wrapper.
+   *
+   * Data written to the returned stream will be compressed before being written to the underlying output stream.
+   *
+   * @param output
+   *   The underlying output stream to write compressed data to
+   * @return
+   *   An OutputStream that compresses data before writing
+   */
+  def createCompressingOutputStream(output: OutputStream): OutputStream
+
+  /**
+   * Create a decompressing input stream wrapper.
+   *
+   * Data read from the returned stream will be decompressed from the underlying input stream.
+   *
+   * @param input
+   *   The underlying input stream containing compressed data
+   * @return
+   *   An InputStream that decompresses data while reading
+   */
+  def createDecompressingInputStream(input: InputStream): InputStream
 }

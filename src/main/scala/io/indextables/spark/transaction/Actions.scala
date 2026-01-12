@@ -82,6 +82,7 @@ case class AddAction(
   @JsonProperty("deleteOpstamp") deleteOpstamp: Option[Long] = None,
   @JsonProperty("numMergeOps") numMergeOps: Option[Int] = None,
   @JsonProperty("docMappingJson") docMappingJson: Option[String] = None,
+  @JsonProperty("docMappingRef") docMappingRef: Option[String] = None, // Schema hash reference for deduplication
   @JsonProperty("uncompressedSizeBytes") uncompressedSizeBytes: Option[Long] = None // SplitMetadata uncompressed size
 ) extends Action
 

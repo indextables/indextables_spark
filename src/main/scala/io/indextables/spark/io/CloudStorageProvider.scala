@@ -84,6 +84,44 @@ trait CloudStorageProvider extends Closeable {
     contentLength: Option[Long] = None
   ): Unit
 
+  /**
+   * Write content from an input stream ONLY if the file does not already exist (conditional write).
+   *
+   * This is critical for transaction log integrity - prevents accidental overwrites while supporting large files that
+   * don't fit in memory.
+   *
+   * Note: Some providers may need to buffer the content to implement conditional semantics, as cloud APIs often don't
+   * support truly streaming conditional writes.
+   *
+   * @param path
+   *   The file path
+   * @param inputStream
+   *   The content to write as an input stream
+   * @param contentLength
+   *   Optional content length (helps providers optimize buffering)
+   * @return
+   *   true if file was written, false if file already exists
+   * @throws RuntimeException
+   *   if write fails for reasons other than file already existing
+   */
+  def writeFileFromStreamIfNotExists(
+    path: String,
+    inputStream: InputStream,
+    contentLength: Option[Long] = None
+  ): Boolean = {
+    // Default implementation: buffer to byte array and use writeFileIfNotExists
+    // Providers can override with optimized implementations
+    import java.io.ByteArrayOutputStream
+    val baos = new ByteArrayOutputStream(contentLength.map(_.toInt).getOrElse(64 * 1024))
+    val buffer = new Array[Byte](8192)
+    var bytesRead = inputStream.read(buffer)
+    while (bytesRead != -1) {
+      baos.write(buffer, 0, bytesRead)
+      bytesRead = inputStream.read(buffer)
+    }
+    writeFileIfNotExists(path, baos.toByteArray)
+  }
+
   /** Delete a file */
   def deleteFile(path: String): Boolean
 

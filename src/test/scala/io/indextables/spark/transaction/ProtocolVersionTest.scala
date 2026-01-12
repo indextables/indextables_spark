@@ -27,7 +27,7 @@ import io.indextables.spark.TestBase
 
 class ProtocolVersionTest extends TestBase {
 
-  test("new table should have protocol version 2/2") {
+  test("new table should have protocol version 3/3") {
     withTempPath { tempPath =>
       val tablePath = new Path(tempPath)
       val txLog     = TransactionLogFactory.create(tablePath, spark)
@@ -37,8 +37,8 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 2
-        protocol.minWriterVersion shouldBe 2
+        protocol.minReaderVersion shouldBe 3
+        protocol.minWriterVersion shouldBe 3
       } finally
         txLog.close()
     }
@@ -61,8 +61,8 @@ class ProtocolVersionTest extends TestBase {
 
         val protocolAction = actions.collectFirst { case p: ProtocolAction => p }
         protocolAction shouldBe defined
-        protocolAction.get.minReaderVersion shouldBe 2
-        protocolAction.get.minWriterVersion shouldBe 2
+        protocolAction.get.minReaderVersion shouldBe 3
+        protocolAction.get.minWriterVersion shouldBe 3
       } finally
         txLog.close()
     }
@@ -171,7 +171,7 @@ class ProtocolVersionTest extends TestBase {
         val schema = getTestSchema()
         txLog.initialize(schema)
 
-        // Current version (2/2) should be able to read
+        // Current version (3/3) should be able to read
         val files = txLog.listFiles()
         files shouldBe empty
       } finally
@@ -189,22 +189,22 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val initialProtocol = txLog.getProtocol()
-        initialProtocol.minReaderVersion shouldBe 2
-        initialProtocol.minWriterVersion shouldBe 2
+        initialProtocol.minReaderVersion shouldBe 3
+        initialProtocol.minWriterVersion shouldBe 3
 
         // Try to downgrade (should not work)
         txLog.upgradeProtocol(1, 1)
 
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 2 // Should not downgrade
-        protocol.minWriterVersion shouldBe 2
+        protocol.minReaderVersion shouldBe 3 // Should not downgrade
+        protocol.minWriterVersion shouldBe 3
 
         // Upgrade to higher version
-        txLog.upgradeProtocol(3, 3)
+        txLog.upgradeProtocol(4, 4)
 
         val upgradedProtocol = txLog.getProtocol()
-        upgradedProtocol.minReaderVersion shouldBe 3 // Should upgrade
-        upgradedProtocol.minWriterVersion shouldBe 3
+        upgradedProtocol.minReaderVersion shouldBe 4 // Should upgrade
+        upgradedProtocol.minWriterVersion shouldBe 4
       } finally
         txLog.close()
     }
@@ -294,8 +294,8 @@ class ProtocolVersionTest extends TestBase {
 
         // Protocol should still be readable
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 2
-        protocol.minWriterVersion shouldBe 2
+        protocol.minReaderVersion shouldBe 3
+        protocol.minWriterVersion shouldBe 3
       } finally
         txLog.close()
     }
@@ -303,8 +303,8 @@ class ProtocolVersionTest extends TestBase {
 
   test("protocol serialization and deserialization") {
     val protocol = ProtocolAction(
-      minReaderVersion = 2,
-      minWriterVersion = 2,
+      minReaderVersion = 3,
+      minWriterVersion = 3,
       readerFeatures = Some(Set("feature1", "feature2")),
       writerFeatures = Some(Set("feature3", "feature4"))
     )
@@ -324,17 +324,19 @@ class ProtocolVersionTest extends TestBase {
 
     ProtocolVersion.isReaderVersionSupported(1) shouldBe true
     ProtocolVersion.isReaderVersionSupported(2) shouldBe true
+    ProtocolVersion.isReaderVersionSupported(3) shouldBe true
     ProtocolVersion.isReaderVersionSupported(999) shouldBe false
 
     ProtocolVersion.isWriterVersionSupported(1) shouldBe true
     ProtocolVersion.isWriterVersionSupported(2) shouldBe true
+    ProtocolVersion.isWriterVersionSupported(3) shouldBe true
     ProtocolVersion.isWriterVersionSupported(999) shouldBe false
   }
 
-  test("default protocol should be version 2/2") {
+  test("default protocol should be version 3/3") {
     val protocol = ProtocolVersion.defaultProtocol()
-    protocol.minReaderVersion shouldBe 2
-    protocol.minWriterVersion shouldBe 2
+    protocol.minReaderVersion shouldBe 3
+    protocol.minWriterVersion shouldBe 3
     protocol.readerFeatures shouldBe empty
     protocol.writerFeatures shouldBe empty
   }
@@ -362,16 +364,123 @@ class ProtocolVersionTest extends TestBase {
         txLog.initialize(schema)
 
         val initialProtocol = txLog.getProtocol()
-        initialProtocol.minReaderVersion shouldBe 2
-        initialProtocol.minWriterVersion shouldBe 2
+        initialProtocol.minReaderVersion shouldBe 3
+        initialProtocol.minWriterVersion shouldBe 3
 
         // Try to upgrade with auto-upgrade disabled
-        txLog.upgradeProtocol(3, 3)
+        txLog.upgradeProtocol(4, 4)
 
         // Protocol should remain unchanged
         val protocol = txLog.getProtocol()
-        protocol.minReaderVersion shouldBe 2
-        protocol.minWriterVersion shouldBe 2
+        protocol.minReaderVersion shouldBe 3
+        protocol.minWriterVersion shouldBe 3
+      } finally
+        txLog.close()
+    }
+  }
+
+  // V3-specific tests
+
+  test("V3 protocol features should be recognized") {
+    ProtocolVersion.FEATURE_MULTI_PART_CHECKPOINT shouldBe "multiPartCheckpoint"
+    ProtocolVersion.FEATURE_SCHEMA_DEDUPLICATION shouldBe "schemaDeduplication"
+
+    ProtocolVersion.requiresV3Reader("multiPartCheckpoint") shouldBe true
+    ProtocolVersion.requiresV3Reader("schemaDeduplication") shouldBe true
+    ProtocolVersion.requiresV3Reader("skippedFiles") shouldBe false
+    ProtocolVersion.requiresV3Reader("footerOffsets") shouldBe false
+  }
+
+  test("v2Protocol helper should return version 2/2") {
+    val protocol = ProtocolVersion.v2Protocol()
+    protocol.minReaderVersion shouldBe 2
+    protocol.minWriterVersion shouldBe 2
+  }
+
+  test("usesV3Features should correctly identify V3 protocol") {
+    ProtocolVersion.usesV3Features(ProtocolAction(1, 1)) shouldBe false
+    ProtocolVersion.usesV3Features(ProtocolAction(2, 2)) shouldBe false
+    ProtocolVersion.usesV3Features(ProtocolAction(3, 3)) shouldBe true
+    ProtocolVersion.usesV3Features(ProtocolAction(4, 4)) shouldBe true
+  }
+
+  test("getMinReaderVersionForFeatures should return correct version") {
+    // No V3 features
+    ProtocolVersion.getMinReaderVersionForFeatures(Set("skippedFiles")) shouldBe 2
+    ProtocolVersion.getMinReaderVersionForFeatures(Set("footerOffsets")) shouldBe 2
+    ProtocolVersion.getMinReaderVersionForFeatures(Set.empty) shouldBe 2
+
+    // V3 features
+    ProtocolVersion.getMinReaderVersionForFeatures(Set("multiPartCheckpoint")) shouldBe 3
+    ProtocolVersion.getMinReaderVersionForFeatures(Set("schemaDeduplication")) shouldBe 3
+    ProtocolVersion.getMinReaderVersionForFeatures(Set("skippedFiles", "multiPartCheckpoint")) shouldBe 3
+  }
+
+  test("validateReaderVersion should throw on unsupported version") {
+    // V3 reader should accept V1, V2, V3
+    ProtocolVersion.validateReaderVersion(ProtocolAction(1, 1))
+    ProtocolVersion.validateReaderVersion(ProtocolAction(2, 2))
+    ProtocolVersion.validateReaderVersion(ProtocolAction(3, 3))
+
+    // V3 reader should reject V4+
+    val exception = intercept[ProtocolVersionException] {
+      ProtocolVersion.validateReaderVersion(ProtocolAction(4, 4))
+    }
+    exception.getMessage should include("version 4")
+    exception.getMessage should include("upgrade")
+  }
+
+  test("validateWriterVersion should throw on unsupported version") {
+    // V3 writer should accept V1, V2, V3
+    ProtocolVersion.validateWriterVersion(ProtocolAction(1, 1))
+    ProtocolVersion.validateWriterVersion(ProtocolAction(2, 2))
+    ProtocolVersion.validateWriterVersion(ProtocolAction(3, 3))
+
+    // V3 writer should reject V4+
+    val exception = intercept[ProtocolVersionException] {
+      ProtocolVersion.validateWriterVersion(ProtocolAction(4, 4))
+    }
+    exception.getMessage should include("version 4")
+    exception.getMessage should include("upgrade")
+  }
+
+  test("checkpoint with schema deduplication should upgrade to V3") {
+    withTempPath { tempPath =>
+      val tablePath = new Path(tempPath)
+      val options = new CaseInsensitiveStringMap(
+        Map(
+          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.interval" -> "3"
+        ).asJava
+      )
+      val txLog = TransactionLogFactory.create(tablePath, spark, options)
+
+      try {
+        val schema = getTestSchema()
+        txLog.initialize(schema)
+
+        // Create AddActions with docMappingJson that will trigger schema deduplication
+        val largeSchema = """{"fields":[{"name":"field1","type":"text"}]}"""
+        for (i <- 1 to 5) {
+          val addAction = AddAction(
+            path = s"s3://bucket/file$i.split",
+            partitionValues = Map.empty,
+            size = 1000L * i,
+            modificationTime = System.currentTimeMillis(),
+            dataChange = true,
+            docMappingJson = Some(largeSchema)
+          )
+          txLog.addFiles(Seq(addAction))
+        }
+
+        // Checkpoint should have been created with V3 protocol
+        val checkpointVersion = txLog.getLastCheckpointVersion()
+        checkpointVersion shouldBe defined
+
+        // Protocol should be V3 due to schema deduplication
+        val protocol = txLog.getProtocol()
+        protocol.minReaderVersion shouldBe 3
+        protocol.minWriterVersion shouldBe 3
       } finally
         txLog.close()
     }

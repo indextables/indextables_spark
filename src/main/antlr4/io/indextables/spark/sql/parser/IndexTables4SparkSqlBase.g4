@@ -70,6 +70,7 @@ statement
         (ON FIELDS '(' fieldList=identifierList ')')?
         (WITH PERWORKER PARALLELISM OF parallelism=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?                     #prewarmCache
+    | CHECKPOINT indexTablesKeyword (path=STRING | table=qualifiedName)   #checkpointIndexTable
     | .*?                                                       #passThrough
     ;
 
@@ -108,7 +109,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
-    | DEST | SOURCE | PER | ENVIRONMENT
+    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT
     ;
 
 // Keywords (case-insensitive)
@@ -163,6 +164,7 @@ DEST: [Dd][Ee][Ss][Tt];
 SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
 PER: [Pp][Ee][Rr];
 ENVIRONMENT: [Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt];
+CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
 
 // Literals
 STRING

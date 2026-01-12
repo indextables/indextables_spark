@@ -17,6 +17,7 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, InputStreamReader}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.ListBuffer
@@ -288,11 +289,60 @@ class TransactionLog(
         }
 
         val result = files.toSeq
+        // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
+        val restoredResult = restoreSchemasInAddActions(result)
         // Cache the result
-        cache.foreach(_.cacheFiles(result))
-        logger.debug(s"Computed and cached files list: ${result.length} files")
-        result
+        cache.foreach(_.cacheFiles(restoredResult))
+        logger.debug(s"Computed and cached files list: ${restoredResult.length} files")
+        restoredResult
     }
+  }
+
+  /**
+   * Restore schemas in AddActions if they use schema references (docMappingRef).
+   *
+   * This handles schema deduplication by replacing docMappingRef with docMappingJson using the schema registry stored in
+   * MetadataAction.configuration.
+   *
+   * @throws IllegalStateException
+   *   if schema restoration fails
+   */
+  private def restoreSchemasInAddActions(addActions: Seq[AddAction]): Seq[AddAction] = {
+    // Check if any AddActions have schema references that need restoration
+    val hasSchemaRefs = addActions.exists(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
+
+    if (!hasSchemaRefs) {
+      // No schema refs to restore (legacy format or no schemas)
+      return addActions
+    }
+
+    // Get MetadataAction which contains the schema registry
+    val metadata = getMetadata()
+    val schemaRegistry = metadata.configuration
+
+    // Check if registry has any schemas
+    if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
+      throw new IllegalStateException(
+        "AddActions have docMappingRef but no schema registry found in MetadataAction.configuration. " +
+          "This indicates a corrupted transaction log or checkpoint."
+      )
+    }
+
+    // Restore schemas
+    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions")
+    val restored = SchemaDeduplication.restoreSchemas(addActions, schemaRegistry).collect { case a: AddAction => a }
+
+    // Verify all schemas were restored
+    val unresolvedRefs = restored.filter(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
+    if (unresolvedRefs.nonEmpty) {
+      val missingHashes = unresolvedRefs.flatMap(_.docMappingRef).distinct.mkString(", ")
+      throw new IllegalStateException(
+        s"Failed to restore schemas for ${unresolvedRefs.size} AddActions. " +
+          s"Missing schema hashes: $missingHashes"
+      )
+    }
+
+    restored
   }
 
   /** Get the total row count across all active files. */
@@ -410,30 +460,20 @@ class TransactionLog(
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
 
-    val content = new StringBuilder()
-    actions.foreach { action =>
-      // Wrap actions in the appropriate delta log format
-      val wrappedAction = action match {
-        case protocol: ProtocolAction => Map("protocol" -> protocol)
-        case metadata: MetadataAction => Map("metaData" -> metadata)
-        case add: AddAction           => Map("add" -> add)
-        case remove: RemoveAction     => Map("remove" -> remove)
-        case skip: SkipAction         => Map("mergeskip" -> skip)
-      }
-
-      val actionJson = JsonUtil.mapper.writeValueAsString(wrappedAction)
-      content.append(actionJson).append("\n")
-    }
-
-    // Apply compression if enabled - evaluate codec lazily to pick up write-time options
-    val jsonBytes       = content.toString.getBytes("UTF-8")
+    // Use streaming write to avoid OOM for large transaction log versions
+    // This prevents StringBuilder exceeding JVM's ~2GB array size limit
     val codec           = getCompressionCodec()
-    val bytesToWrite    = CompressionUtils.writeTransactionFile(jsonBytes, codec)
     val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
 
-    // CRITICAL: Use conditional write to prevent overwriting transaction log files
+    // CRITICAL: Use conditional write (ifNotExists=true) to prevent overwriting transaction log files
     // Transaction log files are immutable and should never be overwritten
-    val writeSucceeded = cloudProvider.writeFileIfNotExists(versionFilePath, bytesToWrite)
+    val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+      actions = actions,
+      cloudProvider = cloudProvider,
+      path = versionFilePath,
+      codec = codec,
+      ifNotExists = true // Conditional write for transaction log integrity
+    )
 
     if (!writeSucceeded) {
       throw new IllegalStateException(
@@ -863,34 +903,9 @@ class TransactionLog(
         }
 
         Try {
-          // Read raw bytes and decompress if needed
-          val rawBytes          = cloudProvider.readFile(versionFilePath)
-          val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-          val content           = new String(decompressedBytes, "UTF-8")
-          val lines             = content.split("\n").filter(_.nonEmpty)
-
-          lines.map { line =>
-            val jsonNode = JsonUtil.mapper.readTree(line)
-
-            if (jsonNode.has("protocol")) {
-              val protocolNode = jsonNode.get("protocol")
-              JsonUtil.mapper.readValue(protocolNode.toString, classOf[ProtocolAction])
-            } else if (jsonNode.has("metaData")) {
-              val metadataNode = jsonNode.get("metaData")
-              JsonUtil.mapper.readValue(metadataNode.toString, classOf[MetadataAction])
-            } else if (jsonNode.has("add")) {
-              val addNode = jsonNode.get("add")
-              JsonUtil.mapper.readValue(addNode.toString, classOf[AddAction])
-            } else if (jsonNode.has("remove")) {
-              val removeNode = jsonNode.get("remove")
-              JsonUtil.mapper.readValue(removeNode.toString, classOf[RemoveAction])
-            } else if (jsonNode.has("mergeskip")) {
-              val skipNode = jsonNode.get("mergeskip")
-              JsonUtil.mapper.readValue(skipNode.toString, classOf[SkipAction])
-            } else {
-              throw new IllegalArgumentException(s"Unknown action type in line: $line")
-            }
-          }.toSeq
+          // Use full streaming: cloud storage -> decompression -> line parsing
+          // This avoids OOM for large version files (>1GB)
+          parseActionsFromStream(versionFilePath)
         } match {
           case Success(actions) =>
             // Cache the result
@@ -972,6 +987,10 @@ class TransactionLog(
   /** Get the current checkpoint version for debugging. */
   def getLastCheckpointVersion(): Option[Long] =
     checkpoint.flatMap(_.getLastCheckpointVersion())
+
+  /** Get the full checkpoint info (including multi-part checkpoint details). */
+  def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
+    checkpoint.flatMap(_.getLastCheckpointInfo())
 
   /**
    * Prewarm the transaction log cache for faster subsequent reads. Default implementation is a no-op; optimized
@@ -1062,6 +1081,51 @@ class TransactionLog(
 
     logger.debug(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
     version
+  }
+
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          val jsonNode = JsonUtil.mapper.readTree(line)
+
+          // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
+          val action: Action = if (jsonNode.has("protocol")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
+          } else if (jsonNode.has("metaData")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+          } else if (jsonNode.has("add")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
+          } else if (jsonNode.has("remove")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+          } else if (jsonNode.has("mergeskip")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
+          } else {
+            throw new IllegalArgumentException(s"Unknown action type in line: $line")
+          }
+          actions += action
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+    }
   }
 
   /** Read all actions from all transaction log versions. */

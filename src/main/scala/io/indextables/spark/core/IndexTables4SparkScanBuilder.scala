@@ -542,9 +542,16 @@ class IndexTables4SparkScanBuilder(
   }
 
   override def pushLimit(limit: Int): Boolean = {
-    _limit = Some(limit)
-    logger.info(s"Pushed limit: $limit")
-    true // We support limit pushdown
+    // Databricks notebooks add LIMIT 10001 by default for display purposes.
+    // Ignore this artificial limit to avoid affecting query performance.
+    if (limit == 10001) {
+      logger.info(s"Ignoring Databricks default display limit: $limit")
+      false // Tell Spark we didn't accept this limit
+    } else {
+      _limit = Some(limit)
+      logger.info(s"Pushed limit: $limit")
+      true // We support limit pushdown
+    }
   }
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {

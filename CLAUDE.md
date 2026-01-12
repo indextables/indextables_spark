@@ -609,6 +609,47 @@ spark.sql("PURGE INDEXTABLE 's3://bucket/table' OLDER THAN 7 DAYS").show()
 - Fails if table has no partition columns defined
 - Returns no_action if no partitions match the predicates
 
+### Checkpoint IndexTable
+```sql
+-- Register extensions (same as above)
+spark.sparkSession.extensions.add("io.indextables.spark.extensions.IndexTables4SparkExtensions")
+
+-- Force a checkpoint on a table (creates V3 checkpoint, upgrades protocol)
+CHECKPOINT INDEXTABLES 's3://bucket/path';
+CHECKPOINT INDEXTABLES my_table;
+CHECKPOINT TANTIVY4SPARK 's3://bucket/path';  -- alternate syntax
+
+-- Example output:
+-- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
+-- |table_path          |status |checkpoint_version|num_actions|num_files|protocol_version|is_multi_part|
+-- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
+-- |s3://bucket/path    |SUCCESS|               42 |      1502 |     1500|               3|        false|
+-- +--------------------+-------+------------------+-----------+---------+----------------+-------------+
+```
+
+**Key features:**
+- **Protocol upgrade**: Always creates a V3 checkpoint with latest protocol features
+- **Schema deduplication**: V3 checkpoints use hash-based schema references to reduce checkpoint size
+- **Multi-part support**: Large checkpoints (>10K actions) are automatically split into parts
+- **Streaming write**: Uses streaming to avoid OOM for large tables
+
+**When to use:**
+- **Force V3 upgrade**: Upgrade existing V2 tables to V3 protocol
+- **After bulk operations**: Create checkpoint after large batch inserts or merges
+- **Performance optimization**: Checkpoints speed up table reads by consolidating transaction log state
+- **Before maintenance**: Create checkpoint before PURGE operations to ensure consistent state
+
+**Output schema:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_path` | String | Resolved table path |
+| `status` | String | "SUCCESS" or "ERROR: <message>" |
+| `checkpoint_version` | Long | Transaction version at checkpoint |
+| `num_actions` | Long | Total actions in checkpoint |
+| `num_files` | Long | Number of split files |
+| `protocol_version` | Long | Protocol version (3 for V3) |
+| `is_multi_part` | Boolean | True if checkpoint split into parts |
+
 ### Describe Disk Cache
 ```sql
 -- View disk cache statistics across all executors

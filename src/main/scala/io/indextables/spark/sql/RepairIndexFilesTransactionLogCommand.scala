@@ -242,22 +242,27 @@ case class RepairIndexFilesTransactionLogCommand(
               )
             }
 
-            // Write add actions as newline-delimited JSON
-            val version1Path      = new Path(targetLogPath, "00000000000000000001.json")
-            val addActionsContent = new StringBuilder()
-            addActionsWithTruncatedStats.foreach { action =>
-              val wrappedAction = Map("add" -> action)
-              val actionJson    = JsonUtil.mapper.writeValueAsString(wrappedAction)
-              addActionsContent.append(actionJson).append("\n")
+            // Write add actions using streaming to avoid OOM for large tables
+            val version1Path = new Path(targetLogPath, "00000000000000000001.json")
 
-              // Debug: Log partition values for partitioned tables
+            // Debug: Log partition values for partitioned tables
+            addActionsWithTruncatedStats.foreach { action =>
               if (action.partitionValues.nonEmpty) {
                 logger.debug(s"AddAction for ${action.path} has partitionValues: ${action.partitionValues}")
               }
             }
+
             logger.info(s"Writing $validSplits add actions to: $version1Path")
-            logger.debug(s"Add actions JSON length: ${addActionsContent.length} bytes")
-            targetCloudProvider.writeFile(version1Path.toString, addActionsContent.toString.getBytes("UTF-8"))
+
+            // Use streaming write to avoid OOM for large tables with many splits
+            // This prevents StringBuilder exceeding JVM's ~2GB array size limit
+            io.indextables.spark.transaction.StreamingActionWriter.writeActionsStreaming(
+              actions = addActionsWithTruncatedStats.asInstanceOf[Seq[io.indextables.spark.transaction.Action]],
+              cloudProvider = targetCloudProvider,
+              path = version1Path.toString,
+              codec = None, // Repair command doesn't compress
+              ifNotExists = false
+            )
             logger.info("Successfully wrote add actions file")
 
             // No checkpoint needed - the transaction log is already consolidated
