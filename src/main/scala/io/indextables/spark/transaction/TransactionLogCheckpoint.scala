@@ -17,8 +17,10 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, ByteArrayInputStream, InputStreamReader}
 import java.util.concurrent.{Executors, ThreadPoolExecutor}
 
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
@@ -385,6 +387,10 @@ class TransactionLogCheckpoint(
 
   /**
    * Read a legacy single-file checkpoint (actions directly in file).
+   *
+   * Uses full streaming from cloud storage through decompression to parsing.
+   * This avoids OOM for large checkpoint files (>1GB) by never loading the
+   * entire file into memory.
    */
   private def readLegacySingleFileCheckpoint(version: Long): Seq[Action] = {
     val checkpointPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
@@ -394,11 +400,9 @@ class TransactionLogCheckpoint(
       throw new java.io.FileNotFoundException(s"Checkpoint file does not exist: $checkpointPathStr")
     }
 
-    // Read raw bytes and decompress if needed
-    val rawBytes          = cloudProvider.readFile(checkpointPathStr)
-    val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-    val content           = new String(decompressedBytes, "UTF-8")
-    parseActionsFromContent(content)
+    // Use full streaming: cloud storage -> decompression -> line parsing
+    // Never loads entire file into memory
+    parseActionsFromStream(checkpointPathStr)
   }
 
   /**
@@ -435,10 +439,8 @@ class TransactionLogCheckpoint(
         )
       }
 
-      val rawBytes          = cloudProvider.readFile(partPathStr)
-      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-      val content           = new String(decompressedBytes, "UTF-8")
-      val partActions       = parseActionsFromContent(content)
+      // Use full streaming: cloud storage -> decompression -> line parsing
+      val partActions = parseActionsFromStream(partPathStr)
 
       logger.debug(s"Read ${partActions.length} actions from checkpoint part $partFile")
       allActions ++= partActions
@@ -481,11 +483,8 @@ class TransactionLogCheckpoint(
     var retries = 0
     while (retries <= maxRetries)
       try {
-        // Read raw bytes and decompress if needed
-        val rawBytes          = cloudProvider.readFile(versionFilePath)
-        val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-        val content           = new String(decompressedBytes, "UTF-8")
-        return parseActionsFromContent(content)
+        // Use full streaming: cloud storage -> decompression -> line parsing
+        return parseActionsFromStream(versionFilePath)
       } catch {
         case e: Exception =>
           retries += 1
@@ -499,6 +498,86 @@ class TransactionLogCheckpoint(
       }
 
     Seq.empty // Should never reach here
+  }
+
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          actions += parseActionLine(line)
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+      // Closing reader closes the underlying streams
+    }
+  }
+
+  /**
+   * Parse actions from a byte array using streaming line-by-line parsing.
+   *
+   * This method avoids OOM for large files (>1GB) by reading line-by-line instead of
+   * loading the entire content as a single String. Java Strings have a maximum size
+   * limit of ~1GB (UTF-16 encoding), so files larger than that would fail with
+   * "UTF16 String size is X, should be less than Y" error.
+   *
+   * Each line is small (typically a few KB), so parsing line-by-line allows GC to
+   * reclaim memory between lines.
+   */
+  private def parseActionsFromBytes(bytes: Array[Byte]): Seq[Action] = {
+    val reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes), "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          actions += parseActionLine(line)
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+    }
+  }
+
+  /**
+   * Parse a single action line.
+   *
+   * Uses treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes.
+   */
+  private def parseActionLine(line: String): Action = {
+    val jsonNode = JsonUtil.mapper.readTree(line)
+
+    if (jsonNode.has("protocol")) {
+      JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
+    } else if (jsonNode.has("metaData")) {
+      JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+    } else if (jsonNode.has("add")) {
+      JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
+    } else if (jsonNode.has("remove")) {
+      JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+    } else {
+      throw new IllegalArgumentException(s"Unknown action type in line: $line")
+    }
   }
 
   private def parseActionsFromContent(content: String): Seq[Action] = {

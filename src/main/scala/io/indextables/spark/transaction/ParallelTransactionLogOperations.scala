@@ -17,6 +17,7 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, InputStreamReader}
 import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable.ListBuffer
@@ -30,6 +31,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.compression.CompressionUtils
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -328,9 +330,54 @@ class ParallelTransactionLogOperations(
     }
 
     Try {
-      val content = new String(cloudProvider.readFile(versionFilePath), "UTF-8")
-      parseActionsFromContent(content)
+      // Use full streaming: cloud storage -> decompression -> line parsing
+      // This avoids OOM for large version files (>1GB)
+      parseActionsFromStream(versionFilePath)
     }.getOrElse(Seq.empty)
+  }
+
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          Try {
+            val jsonNode = JsonUtil.mapper.readTree(line)
+
+            // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
+            if (jsonNode.has("metaData")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction]))
+            } else if (jsonNode.has("add")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction]))
+            } else if (jsonNode.has("remove")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction]))
+            } else if (jsonNode.has("mergeskip")) {
+              Some(JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction]))
+            } else {
+              None
+            }
+          }.toOption.flatten.foreach(actions += _)
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+    }
   }
 
   // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)

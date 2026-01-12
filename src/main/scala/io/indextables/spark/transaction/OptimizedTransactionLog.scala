@@ -17,8 +17,10 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, InputStreamReader}
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
+import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 import scala.util.Try
 
@@ -734,17 +736,46 @@ class OptimizedTransactionLog(
     }
 
     Try {
-      val rawBytes = cloudProvider.readFile(versionFilePath)
-      // Decompress if needed (handles both compressed and uncompressed files)
-      val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-      val content           = new String(decompressedBytes, "UTF-8")
-      logger.debug(s" Read version $version content: '${content.take(100)}...' (${content.length} chars)")
-      val actions = parseActionsFromContent(content)
-      logger.debug(s" Parsed ${actions.size} actions from version $version")
+      // Use full streaming: cloud storage -> decompression -> line parsing
+      // This avoids OOM for large version files (>1GB)
+      val actions = parseActionsFromStream(versionFilePath)
+      logger.debug(s" Parsed ${actions.size} actions from version $version using streaming")
       actions
     }.getOrElse {
       logger.debug(s" Failed to read/parse version $version")
       Seq.empty
+    }
+  }
+
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          Try {
+            val jsonNode = JsonUtil.mapper.readTree(line)
+            parseAction(jsonNode)
+          }.toOption.flatten.foreach(actions += _)
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
     }
   }
 

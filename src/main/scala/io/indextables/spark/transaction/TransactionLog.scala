@@ -17,6 +17,7 @@
 
 package io.indextables.spark.transaction
 
+import java.io.{BufferedReader, InputStreamReader}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.ListBuffer
@@ -902,30 +903,9 @@ class TransactionLog(
         }
 
         Try {
-          // Read raw bytes and decompress if needed
-          val rawBytes          = cloudProvider.readFile(versionFilePath)
-          val decompressedBytes = CompressionUtils.readTransactionFile(rawBytes)
-          val content           = new String(decompressedBytes, "UTF-8")
-          val lines             = content.split("\n").filter(_.nonEmpty)
-
-          // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
-          lines.map { line =>
-            val jsonNode = JsonUtil.mapper.readTree(line)
-
-            if (jsonNode.has("protocol")) {
-              JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
-            } else if (jsonNode.has("metaData")) {
-              JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
-            } else if (jsonNode.has("add")) {
-              JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
-            } else if (jsonNode.has("remove")) {
-              JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
-            } else if (jsonNode.has("mergeskip")) {
-              JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
-            } else {
-              throw new IllegalArgumentException(s"Unknown action type in line: $line")
-            }
-          }.toSeq
+          // Use full streaming: cloud storage -> decompression -> line parsing
+          // This avoids OOM for large version files (>1GB)
+          parseActionsFromStream(versionFilePath)
         } match {
           case Success(actions) =>
             // Cache the result
@@ -1101,6 +1081,51 @@ class TransactionLog(
 
     logger.debug(s"Recorded skipped file with custom timestamp: $filePath (reason: $reason, skip count: $skipCount, retry after: ${java.time.Instant.ofEpochMilli(retryAfter)})")
     version
+  }
+
+  /**
+   * Parse actions directly from a cloud storage file using full streaming.
+   *
+   * This method provides the most memory-efficient parsing by streaming data from
+   * cloud storage directly through decompression and into line-by-line parsing,
+   * without ever loading the entire file into memory.
+   *
+   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   */
+  private def parseActionsFromStream(filePath: String): Seq[Action] = {
+    val rawStream = cloudProvider.openInputStream(filePath)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions = ListBuffer[Action]()
+
+    try {
+      var line = reader.readLine()
+      while (line != null) {
+        if (line.nonEmpty) {
+          val jsonNode = JsonUtil.mapper.readTree(line)
+
+          // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
+          val action: Action = if (jsonNode.has("protocol")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
+          } else if (jsonNode.has("metaData")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+          } else if (jsonNode.has("add")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
+          } else if (jsonNode.has("remove")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+          } else if (jsonNode.has("mergeskip")) {
+            JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
+          } else {
+            throw new IllegalArgumentException(s"Unknown action type in line: $line")
+          }
+          actions += action
+        }
+        line = reader.readLine()
+      }
+      actions.toSeq
+    } finally {
+      reader.close()
+    }
   }
 
   /** Read all actions from all transaction log versions. */
