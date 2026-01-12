@@ -11,14 +11,18 @@ sealed trait ConfigSource {
 }
 
 case class OptionsConfigSource(options: java.util.Map[String, String]) extends ConfigSource {
-  override def get(key: String): Option[String] = Option(options.get(key))
-  override def name: String                     = "DataFrame options"
+  override def get(key: String): Option[String] = {
+    // Try original key first, then lowercase version (for CaseInsensitiveStringMap compatibility)
+    Option(options.get(key)).orElse(Option(options.get(key.toLowerCase)))
+  }
+  override def name: String = "DataFrame options"
 }
 
 case class HadoopConfigSource(hadoopConf: Configuration, prefix: String = "") extends ConfigSource {
   override def get(key: String): Option[String] = {
     val fullKey = if (prefix.isEmpty) key else s"$prefix.$key"
-    Option(hadoopConf.get(fullKey))
+    // Try original key first, then lowercase version (for CaseInsensitiveStringMap compatibility)
+    Option(hadoopConf.get(fullKey)).orElse(Option(hadoopConf.get(fullKey.toLowerCase)))
   }
   override def name: String = if (prefix.isEmpty) "Hadoop config" else s"Hadoop config ($prefix)"
 }
