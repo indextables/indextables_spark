@@ -300,9 +300,13 @@ object CredentialProviderFactory {
     tablePath: String,
     hadoopConf: Configuration
   ): Option[BasicAWSCredentials] = {
+    // TODO: Remove debug println statements after testing credential resolution changes
+    println(s"[CRED-DEBUG] resolveAWSCredentials called: tablePath=$tablePath, hasExplicitKey=${accessKey.exists(_.nonEmpty)}, providerClass=${providerClassName.getOrElse("None")}")
+
     // Priority 1: Use explicit credentials if present
     (accessKey.filter(_.nonEmpty), secretKey.filter(_.nonEmpty)) match {
       case (Some(key), Some(secret)) =>
+        println(s"[CRED-DEBUG] Using EXPLICIT credentials: accessKey=${key.take(4)}..., hasSessionToken=${sessionToken.exists(_.nonEmpty)}")
         logger.debug(s"Using explicit credentials: accessKey=${key.take(4)}...")
         return Some(BasicAWSCredentials(key, secret, sessionToken.filter(_.nonEmpty)))
       case _ => // continue to provider
@@ -312,18 +316,22 @@ object CredentialProviderFactory {
     providerClassName.filter(_.nonEmpty) match {
       case Some(className) =>
         try {
+          println(s"[CRED-DEBUG] Invoking PROVIDER: $className for tablePath=$tablePath")
           val uri = new URI(tablePath)
           val provider = createCredentialProvider(className, uri, hadoopConf)
           val creds = extractCredentialsViaReflection(provider)
+          println(s"[CRED-DEBUG] Provider $className returned: accessKey=${creds.accessKey.take(4)}..., hasSessionToken=${creds.hasSessionToken}")
           logger.debug(s"Resolved credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
           Some(creds)
         } catch {
           case ex: Exception =>
+            println(s"[CRED-DEBUG] Provider $className FAILED: ${ex.getMessage}")
             logger.warn(s"Failed to resolve credentials from provider $className: ${ex.getMessage}")
             None
         }
       case None =>
         // Priority 3: Return None, let caller use default provider chain
+        println(s"[CRED-DEBUG] No credentials resolved, returning None (will use default provider chain)")
         None
     }
   }
