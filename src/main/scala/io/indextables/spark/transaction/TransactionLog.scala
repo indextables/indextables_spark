@@ -1128,24 +1128,75 @@ class TransactionLog(
     }
   }
 
-  /** Read all actions from all transaction log versions. */
-  private def readAllActions(): Seq[Action] = {
-    val versions = getVersions()
-    versions.flatMap(readVersion)
-  }
+  /**
+   * Get all skipped files from the transaction log using checkpoint-aware reading.
+   * This is optimized to read from checkpoint + incremental versions, not all versions.
+   */
+  def getSkippedFiles(): Seq[SkipAction] = {
+    val skips = ListBuffer[SkipAction]()
 
-  /** Get all skipped files from the transaction log. */
-  def getSkippedFiles(): Seq[SkipAction] =
-    readAllActions().collect { case skip: SkipAction => skip }
+    // Try to get base state from checkpoint first (same pattern as listFiles)
+    checkpoint.flatMap(_.getActionsFromCheckpoint()) match {
+      case Some(checkpointActions) =>
+        // Extract SkipActions from checkpoint
+        checkpointActions.foreach {
+          case skip: SkipAction => skips += skip
+          case _                => // Ignore other actions
+        }
+
+        // Then read incremental changes since checkpoint
+        val checkpointVersion       = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+        val allVersions             = getVersions()
+        val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
+
+        if (versionsAfterCheckpoint.nonEmpty) {
+          logger.debug(
+            s"Reading ${versionsAfterCheckpoint.length} versions after checkpoint $checkpointVersion for SkipActions"
+          )
+          checkpoint.get.readVersionsInParallel(versionsAfterCheckpoint).foreach {
+            case (_, actions) =>
+              actions.foreach {
+                case skip: SkipAction => skips += skip
+                case _                => // Ignore other actions
+              }
+          }
+        }
+
+      case None =>
+        // No checkpoint available - read all versions (fallback)
+        val versions = getVersions()
+        if (versions.nonEmpty) {
+          logger.debug(s"No checkpoint available, reading ${versions.length} versions for SkipActions")
+          checkpoint match {
+            case Some(cp) =>
+              cp.readVersionsInParallel(versions).foreach {
+                case (_, actions) =>
+                  actions.foreach {
+                    case skip: SkipAction => skips += skip
+                    case _                => // Ignore other actions
+                  }
+              }
+            case None =>
+              // Sequential fallback
+              for (version <- versions) {
+                val actions = readVersion(version)
+                actions.foreach {
+                  case skip: SkipAction => skips += skip
+                  case _                => // Ignore other actions
+                }
+              }
+          }
+        }
+    }
+
+    skips.toSeq
+  }
 
   /** Check if a file is currently in cooldown (should not be retried yet). */
   def isFileInCooldown(filePath: String): Boolean = {
     val now = System.currentTimeMillis()
-    val recentSkips = getSkippedFiles()
-      .filter(_.path == filePath)
-      .filter(skip => skip.retryAfter.exists(_ > now))
-
-    recentSkips.nonEmpty
+    // Use getFilesInCooldown which already filters for active cooldowns
+    getFilesInCooldown().contains(filePath)
   }
 
   /** Get files that are currently in cooldown with their retry timestamps. */
@@ -1164,14 +1215,16 @@ class TransactionLog(
 
   /** Filter out files that are in cooldown from a list of candidate files for merge. */
   def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] = {
-    val filesInCooldown = getFilesInCooldown().keySet
+    val cooldownMap     = getFilesInCooldown()
+    val filesInCooldown = cooldownMap.keySet
     val filtered        = candidateFiles.filterNot(file => filesInCooldown.contains(file.path))
 
     val filteredCount = candidateFiles.length - filtered.length
     if (filteredCount > 0) {
       logger.info(s"Filtered out $filteredCount files currently in cooldown period")
       filesInCooldown.foreach { path =>
-        val retryTime = getFilesInCooldown().get(path)
+        // Reuse the already-computed map instead of calling getFilesInCooldown() again
+        val retryTime = cooldownMap.get(path)
         logger.debug(s"File in cooldown: $path (retry after: ${retryTime.map(java.time.Instant.ofEpochMilli)})")
       }
     }

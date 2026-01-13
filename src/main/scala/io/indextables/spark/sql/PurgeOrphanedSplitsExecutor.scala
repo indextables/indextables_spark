@@ -27,7 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.io.{CloudStorageProvider, CloudStorageProviderFactory}
+import io.indextables.spark.io.{CloudFileInfo, CloudStorageProvider, CloudStorageProviderFactory}
 import io.indextables.spark.transaction._
 import io.indextables.spark.transaction.compression.CompressionUtils
 import org.slf4j.LoggerFactory
@@ -370,16 +370,16 @@ class PurgeOrphanedSplitsExecutor(
           if (checkpointVersion == latestVersion) {
             logger.debug(s"Preserving latest checkpoint: $fileName (v$checkpointVersion)")
 
-            // If this is a manifest, track its checkpoint ID (streaming read to avoid OOM on legacy checkpoints)
-            tryReadManifestFromFirstLine(provider, checkpointFile.path).foreach { manifest =>
+            // If this is a manifest, track its checkpoint ID (uses file size heuristic to skip large legacy checkpoints)
+            tryReadManifest(provider, checkpointFile).foreach { manifest =>
               retainedCheckpointIds += manifest.checkpointId
               logger.debug(s"Tracking retained checkpoint ID: ${manifest.checkpointId}")
             }
 
           } else if (fileAge > logRetentionDuration) {
             // Delete old checkpoint (manifest or legacy)
-            // Check if it's a manifest and get part files to delete (streaming read to avoid OOM on legacy checkpoints)
-            val partsToDelete = tryReadManifestFromFirstLine(provider, checkpointFile.path) match {
+            // Check if it's a manifest and get part files to delete (uses file size heuristic to skip large legacy checkpoints)
+            val partsToDelete = tryReadManifest(provider, checkpointFile) match {
               case Some(manifest) =>
                 logger.debug(s"Checkpoint v$checkpointVersion is multi-part with ${manifest.parts.size} parts")
                 manifest.parts.map(p => s"${transactionLogPath.toString}/$p")
@@ -426,8 +426,8 @@ class PurgeOrphanedSplitsExecutor(
           } else {
             logger.debug(s"Keeping checkpoint: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)")
 
-            // Track checkpoint ID if it's a manifest within retention (streaming read to avoid OOM on legacy checkpoints)
-            tryReadManifestFromFirstLine(provider, checkpointFile.path).foreach { manifest =>
+            // Track checkpoint ID if it's a manifest within retention (uses file size heuristic to skip large legacy checkpoints)
+            tryReadManifest(provider, checkpointFile).foreach { manifest =>
               retainedCheckpointIds += manifest.checkpointId
             }
           }
@@ -869,6 +869,33 @@ class PurgeOrphanedSplitsExecutor(
         throw new IllegalArgumentException(s"Unknown action type in line: $line")
       }
     }.toSeq
+  }
+
+  // Multi-part manifest files are small JSON (typically < 2KB)
+  // Legacy checkpoints are NDJSON with many actions (typically > 10KB)
+  // Use this threshold to skip reading large files entirely
+  private val MANIFEST_MAX_SIZE_BYTES = 10 * 1024L // 10KB
+
+  /**
+   * Try to read a checkpoint file as a manifest, using file size as a heuristic.
+   *
+   * This optimization avoids making network requests for large legacy checkpoint files:
+   * - If file size > 10KB, it's definitely a legacy checkpoint (no network read needed)
+   * - If file size <= 10KB, read first line to check if it's a manifest
+   *
+   * @param provider Cloud storage provider
+   * @param fileInfo File info including size
+   * @return Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
+   */
+  private def tryReadManifest(provider: CloudStorageProvider, fileInfo: CloudFileInfo): Option[MultiPartCheckpointManifest] = {
+    // Skip large files - they're definitely legacy checkpoints, not manifests
+    if (fileInfo.size > MANIFEST_MAX_SIZE_BYTES) {
+      logger.debug(s"Skipping manifest check for large file (${fileInfo.size} bytes > ${MANIFEST_MAX_SIZE_BYTES}): ${fileInfo.path}")
+      return None
+    }
+
+    // Small file - could be a manifest, read first line to check
+    tryReadManifestFromFirstLine(provider, fileInfo.path)
   }
 
   /**
