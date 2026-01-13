@@ -208,9 +208,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     // (no credentials were added because resolution failed gracefully)
     result.get("spark.indextables.aws.accessKey") shouldBe None
 
-    // The [CRED-DEBUG] output proves the provider was invoked:
-    // "[CRED-DEBUG] Invoking PROVIDER: io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider"
-    // "[CRED-DEBUG] Provider ... FAILED: ..."
+    // The logger.warn output shows the provider was invoked and failed gracefully
 
     logger.info("SUCCESS: Credential resolution attempted using Unity Catalog provider (failed gracefully as expected)")
   }
@@ -488,9 +486,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     // This proves the config was propagated correctly to the provider
     result shouldBe None
 
-    // Verify we can see from the [CRED-DEBUG] output that the provider was invoked
-    // The debug output shows: "[CRED-DEBUG] Invoking PROVIDER: io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider"
-    // and "[CRED-DEBUG] Provider ... FAILED: ..."
+    // The logger.warn output shows the provider was invoked and failed gracefully
 
     logger.info("Verified: Credential resolution invoked Unity Catalog provider (which failed as expected with fake URL)")
     logger.info("Provider returned None, indicating graceful fallback to default provider chain")
