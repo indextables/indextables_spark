@@ -1354,6 +1354,88 @@ class OptimizedTransactionLog(
   def getCacheStatistics(): CacheStatistics =
     enhancedCache.getStatistics()
 
+  /**
+   * Get all SkipActions from the transaction log using cached checkpoint data.
+   * This is more efficient than the base TransactionLog implementation because
+   * it reuses the cached checkpoint actions.
+   */
+  def getSkippedFiles(): Seq[SkipAction] = {
+    val skips = scala.collection.mutable.ListBuffer[SkipAction]()
+
+    // Get checkpoint version for determining which versions to read
+    val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+
+    // Use cached checkpoint actions (shared with other operations)
+    getCheckpointActionsCached() match {
+      case Some(checkpointActions) =>
+        // Extract SkipActions from cached checkpoint
+        checkpointActions.foreach {
+          case skip: SkipAction => skips += skip
+          case _ => // Ignore other actions
+        }
+        logger.debug(s"Found ${skips.size} SkipActions in cached checkpoint")
+
+      case None =>
+        // No checkpoint, will read all versions below
+        logger.debug("No cached checkpoint available for SkipActions")
+    }
+
+    // Read versions after checkpoint for any additional SkipActions
+    val allVersions = getVersions()
+    val versionsToRead = allVersions.filter(_ > checkpointVersion)
+
+    if (versionsToRead.nonEmpty) {
+      logger.debug(s"Reading ${versionsToRead.size} versions after checkpoint $checkpointVersion for SkipActions")
+      versionsToRead.foreach { version =>
+        val actions = readVersionOptimized(version)
+        actions.foreach {
+          case skip: SkipAction => skips += skip
+          case _ => // Ignore other actions
+        }
+      }
+    }
+
+    skips.toSeq
+  }
+
+  /**
+   * Get files currently in cooldown period.
+   * Returns a map of file path to retry-after timestamp.
+   */
+  def getFilesInCooldown(): Map[String, Long] = {
+    val now = System.currentTimeMillis()
+    getSkippedFiles()
+      .filter(skip => skip.retryAfter.exists(_ > now))
+      .groupBy(_.path)
+      .map {
+        case (path, skips) =>
+          // Get the latest retry time for this path
+          val latestRetryAfter = skips.flatMap(_.retryAfter).max
+          path -> latestRetryAfter
+      }
+  }
+
+  /**
+   * Filter out files that are in cooldown from a list of candidate files for merge.
+   * Uses cached checkpoint data for efficiency.
+   */
+  def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] = {
+    val cooldownMap = getFilesInCooldown()
+    val filesInCooldown = cooldownMap.keySet
+    val filtered = candidateFiles.filterNot(file => filesInCooldown.contains(file.path))
+
+    val filteredCount = candidateFiles.length - filtered.length
+    if (filteredCount > 0) {
+      logger.info(s"Filtered out $filteredCount files currently in cooldown period")
+      filesInCooldown.foreach { path =>
+        val retryTime = cooldownMap.get(path)
+        logger.debug(s"File in cooldown: $path (retry after: ${retryTime.map(java.time.Instant.ofEpochMilli)})")
+      }
+    }
+
+    filtered
+  }
+
   /** Invalidate all cached data for this table. Useful for testing or after external modifications. */
   def invalidateCache(tablePath: String): Unit = {
     enhancedCache.invalidateTable(tablePath)
