@@ -164,6 +164,14 @@ class CredentialProviderE2ERealS3Test
     // Reset instantiation tracking
     AwsCredentialsFileProvider.reset()
 
+    // Clear credential provider cache to force re-instantiation
+    // This is necessary because CredentialProviderFactory caches provider instances
+    try {
+      io.indextables.spark.utils.CredentialProviderFactory.clearCache()
+    } catch {
+      case _: Exception => // Ignore
+    }
+
     // Clear global split cache
     try {
       import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
@@ -297,6 +305,7 @@ class CredentialProviderE2ERealS3Test
     println("=" * 60)
 
     AwsCredentialsFileProvider.reset() // Reset to track merge-specific instantiations
+    io.indextables.spark.utils.CredentialProviderFactory.clearCache() // Clear provider cache
 
     val mergeResult = spark.sql(s"MERGE SPLITS '$tablePath' TARGET SIZE 100M")
     val mergeRows = mergeResult.collect()
@@ -331,6 +340,7 @@ class CredentialProviderE2ERealS3Test
     println("=" * 60)
 
     AwsCredentialsFileProvider.reset()
+    io.indextables.spark.utils.CredentialProviderFactory.clearCache()
 
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN")
     val purgeRows = purgeResult.collect()
@@ -450,6 +460,7 @@ class CredentialProviderE2ERealS3Test
 
     // Reset tracking before merge
     AwsCredentialsFileProvider.reset()
+    io.indextables.spark.utils.CredentialProviderFactory.clearCache()
 
     // Execute merge
     val mergeResult = spark.sql(s"MERGE SPLITS '$tablePath' TARGET SIZE 100M")
@@ -510,6 +521,7 @@ class CredentialProviderE2ERealS3Test
 
     // Reset tracking before read
     AwsCredentialsFileProvider.reset()
+    io.indextables.spark.utils.CredentialProviderFactory.clearCache()
 
     // Read the data
     val readDf = spark.read
