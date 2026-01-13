@@ -366,16 +366,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
 
     // Create empty configs for test
     val awsConfig = SerializableAwsConfig(
-      "",
-      "",
-      None,
-      "us-east-1",
-      None,
-      false,
-      None,
-      None,
-      java.lang.Long.valueOf(1073741824L),
-      false
+      configs = Map("spark.indextables.aws.region" -> "us-east-1"),
+      tablePath = tempTablePath
     )
     val azureConfig = SerializableAzureConfig(None, None, None, None, None, None, None, None)
 

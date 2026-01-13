@@ -439,24 +439,15 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     mergedConfigs("spark.indextables.databricks.workspaceUrl") shouldBe fakeWorkspaceUrl
     mergedConfigs("spark.indextables.databricks.apiToken") shouldBe fakeApiToken
 
-    // Create SerializableAwsConfig with all configs
+    // Create SerializableAwsConfig with merged configs (new simplified approach)
     val awsConfig = SerializableAwsConfig(
-      accessKey = "",
-      secretKey = "",
-      sessionToken = None,
-      region = "us-west-2",
-      endpoint = None,
-      pathStyleAccess = false,
-      tempDirectoryPath = None,
-      credentialsProviderClass = Some(testProviderClass),
-      heapSize = java.lang.Long.valueOf(1073741824L),
-      debugEnabled = false,
-      allIndextablesConfigs = mergedConfigs
+      configs = mergedConfigs + ("spark.indextables.aws.region" -> "us-west-2"),
+      tablePath = "s3://test-bucket/test-table"
     )
 
     // Verify the serializable config has databricks keys
-    awsConfig.allIndextablesConfigs should contain key "spark.indextables.databricks.workspaceUrl"
-    awsConfig.allIndextablesConfigs("spark.indextables.databricks.workspaceUrl") shouldBe fakeWorkspaceUrl
+    awsConfig.configs should contain key "spark.indextables.databricks.workspaceUrl"
+    awsConfig.configs("spark.indextables.databricks.workspaceUrl") shouldBe fakeWorkspaceUrl
 
     logger.info("SerializableAwsConfig: Databricks configs are present and will be passed to executor")
   }

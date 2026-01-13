@@ -387,36 +387,33 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   test("SerializableAwsConfig should include Databricks configs from overrideOptions") {
     import scala.jdk.CollectionConverters._
 
-    val overrideOptions = Map(
+    val testConfigs = Map(
       "spark.indextables.databricks.workspaceUrl" -> fakeWorkspaceUrl,
       "spark.indextables.databricks.apiToken" -> fakeApiToken,
       "spark.indextables.aws.credentialsProviderClass" -> testProviderClass,
       "spark.indextables.aws.accessKey" -> "test-access-key",
-      "spark.indextables.aws.secretKey" -> "test-secret-key"
+      "spark.indextables.aws.secretKey" -> "test-secret-key",
+      "spark.indextables.aws.region" -> "us-west-2"
     )
 
-    // Create SerializableAwsConfig like extractAwsConfig does
+    // Create SerializableAwsConfig with merged configs (new simplified approach)
     val awsConfig = SerializableAwsConfig(
-      accessKey = "test-access-key",
-      secretKey = "test-secret-key",
-      sessionToken = None,
-      region = "us-west-2",
-      endpoint = None,
-      pathStyleAccess = false,
-      tempDirectoryPath = None,
-      credentialsProviderClass = Some(testProviderClass),
-      heapSize = java.lang.Long.valueOf(1073741824L),
-      debugEnabled = false,
-      allIndextablesConfigs = overrideOptions // This should include Databricks configs
+      configs = testConfigs,
+      tablePath = "s3://test-bucket/test-table"
     )
 
-    // Verify Databricks configs are in allIndextablesConfigs
-    awsConfig.allIndextablesConfigs should contain key "spark.indextables.databricks.workspaceUrl"
-    awsConfig.allIndextablesConfigs should contain key "spark.indextables.databricks.apiToken"
-    awsConfig.allIndextablesConfigs("spark.indextables.databricks.workspaceUrl") shouldBe fakeWorkspaceUrl
-    awsConfig.allIndextablesConfigs("spark.indextables.databricks.apiToken") shouldBe fakeApiToken
+    // Verify configs are accessible
+    awsConfig.configs should contain key "spark.indextables.databricks.workspaceUrl"
+    awsConfig.configs should contain key "spark.indextables.databricks.apiToken"
+    awsConfig.configs("spark.indextables.databricks.workspaceUrl") shouldBe fakeWorkspaceUrl
+    awsConfig.configs("spark.indextables.databricks.apiToken") shouldBe fakeApiToken
 
-    logger.info("Verified: SerializableAwsConfig includes Databricks configs in allIndextablesConfigs")
+    // Verify accessors work
+    awsConfig.accessKey shouldBe "test-access-key"
+    awsConfig.secretKey shouldBe "test-secret-key"
+    awsConfig.region shouldBe "us-west-2"
+
+    logger.info("Verified: SerializableAwsConfig includes Databricks configs")
   }
 
   /**

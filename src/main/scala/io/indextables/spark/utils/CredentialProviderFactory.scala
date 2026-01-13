@@ -277,4 +277,78 @@ object CredentialProviderFactory {
 
   /** Get the size of the provider cache (useful for monitoring) */
   def getCacheSize: Int = providerCache.size()
+
+  /**
+   * Resolve AWS credentials with standard priority:
+   * 1. Explicit credentials (if present - driver may have already resolved them)
+   * 2. Custom provider class (if configured)
+   * 3. Return None (caller should use default provider chain)
+   *
+   * @param accessKey Explicit access key (may be empty/null)
+   * @param secretKey Explicit secret key (may be empty/null)
+   * @param sessionToken Explicit session token (optional)
+   * @param providerClassName Custom credential provider class (optional)
+   * @param tablePath Table path for provider constructor
+   * @param hadoopConf Hadoop configuration for provider
+   * @return Some(credentials) if resolved, None if should use default chain
+   */
+  def resolveAWSCredentials(
+    accessKey: Option[String],
+    secretKey: Option[String],
+    sessionToken: Option[String],
+    providerClassName: Option[String],
+    tablePath: String,
+    hadoopConf: Configuration
+  ): Option[BasicAWSCredentials] = {
+    // Priority 1: Use explicit credentials if present
+    (accessKey.filter(_.nonEmpty), secretKey.filter(_.nonEmpty)) match {
+      case (Some(key), Some(secret)) =>
+        logger.debug(s"Using explicit credentials: accessKey=${key.take(4)}...")
+        return Some(BasicAWSCredentials(key, secret, sessionToken.filter(_.nonEmpty)))
+      case _ => // continue to provider
+    }
+
+    // Priority 2: Use custom provider if configured
+    providerClassName.filter(_.nonEmpty) match {
+      case Some(className) =>
+        try {
+          val uri = new URI(tablePath)
+          val provider = createCredentialProvider(className, uri, hadoopConf)
+          val creds = extractCredentialsViaReflection(provider)
+          logger.debug(s"Resolved credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
+          Some(creds)
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"Failed to resolve credentials from provider $className: ${ex.getMessage}")
+            None
+        }
+      case None =>
+        // Priority 3: Return None, let caller use default provider chain
+        None
+    }
+  }
+
+  /**
+   * Resolve AWS credentials from a config map with standard priority.
+   * Convenience method that extracts values from config map.
+   */
+  def resolveAWSCredentialsFromConfig(
+    configs: Map[String, String],
+    tablePath: String
+  ): Option[BasicAWSCredentials] = {
+    def getConfig(key: String): Option[String] =
+      configs.get(key).orElse(configs.get(key.toLowerCase))
+
+    val hadoopConf = new Configuration()
+    configs.foreach { case (k, v) => hadoopConf.set(k, v) }
+
+    resolveAWSCredentials(
+      accessKey = getConfig("spark.indextables.aws.accessKey"),
+      secretKey = getConfig("spark.indextables.aws.secretKey"),
+      sessionToken = getConfig("spark.indextables.aws.sessionToken"),
+      providerClassName = getConfig("spark.indextables.aws.credentialsProviderClass"),
+      tablePath = tablePath,
+      hadoopConf = hadoopConf
+    )
+  }
 }

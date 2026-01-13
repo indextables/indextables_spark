@@ -290,6 +290,8 @@ object ConfigUtils {
     config: Map[String, String],
     tablePath: String
   ): Map[String, String] = {
+    import io.indextables.spark.utils.CredentialProviderFactory
+
     // Only resolve AWS credentials for S3 paths
     val isS3Path = tablePath != null && (tablePath.startsWith("s3://") || tablePath.startsWith("s3a://"))
     if (!isS3Path) {
@@ -297,84 +299,26 @@ object ConfigUtils {
       return config
     }
 
-    val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
-    val providerClass = config.get(providerClassKey)
-      .orElse(config.get(providerClassKey.toLowerCase))
-
-    providerClass match {
-      case Some(className) if className.trim.nonEmpty =>
-        logger.info(s"Resolving AWS credentials using provider: $className for path: $tablePath")
-        // If a credential provider is explicitly configured and fails, let the error propagate
-        // Don't silently fall back - the user should know their provider configuration is broken
-        resolveCredentialsUsingProvider(config, className.trim, tablePath)
-      case _ =>
-        // No custom provider configured, return config as-is
-        config
-    }
-  }
-
-  /**
-   * Internal method to instantiate a credential provider and resolve credentials.
-   */
-  private def resolveCredentialsUsingProvider(
-    config: Map[String, String],
-    providerClassName: String,
-    tablePath: String
-  ): Map[String, String] = {
-    import org.apache.hadoop.conf.Configuration
-    import java.net.URI
-    import com.amazonaws.auth.{AWSCredentialsProvider, AWSSessionCredentials}
-
-    // Create Hadoop Configuration with all indextables configs
-    val hadoopConf = new Configuration()
-    config.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
-    }
-
     // Normalize s3a:// to s3:// for credential providers (Unity Catalog expects s3://)
     val normalizedPath = ProtocolNormalizer.normalizeS3Protocol(tablePath)
 
-    // Parse the table path as URI
-    val uri = new URI(normalizedPath)
+    // Use centralized credential resolution
+    CredentialProviderFactory.resolveAWSCredentialsFromConfig(config, normalizedPath) match {
+      case Some(creds) =>
+        logger.info(s"Successfully resolved credentials from provider (accessKeyId: ${creds.accessKey.take(8)}...)")
+        // Update config with resolved credentials
+        val updatedConfig = config +
+          ("spark.indextables.aws.accessKey" -> creds.accessKey) +
+          ("spark.indextables.aws.secretKey" -> creds.secretKey)
 
-    // Load the provider class
-    val providerClass = Class.forName(providerClassName)
-
-    // Find constructor that takes (URI, Configuration)
-    val constructor = providerClass.getConstructor(classOf[URI], classOf[Configuration])
-
-    // Instantiate the provider
-    val provider = constructor.newInstance(uri, hadoopConf).asInstanceOf[AWSCredentialsProvider]
-
-    // Get credentials
-    logger.info(s"Calling getCredentials() on provider $providerClassName")
-    val credentials = provider.getCredentials()
-
-    if (credentials == null) {
-      throw new RuntimeException(s"Provider $providerClassName returned null credentials")
-    }
-
-    // Extract credential values
-    val accessKey = credentials.getAWSAccessKeyId
-    val secretKey = credentials.getAWSSecretKey
-    val sessionToken = credentials match {
-      case session: AWSSessionCredentials => Some(session.getSessionToken)
-      case _ => None
-    }
-
-    logger.info(s"Successfully resolved credentials from $providerClassName (accessKeyId: ${accessKey.take(8)}...)")
-
-    // Update config with resolved credentials
-    val updatedConfig = config +
-      ("spark.indextables.aws.accessKey" -> accessKey) +
-      ("spark.indextables.aws.secretKey" -> secretKey)
-
-    // Add session token if present
-    sessionToken match {
-      case Some(token) =>
-        updatedConfig + ("spark.indextables.aws.sessionToken" -> token)
+        // Add session token if present
+        creds.sessionToken match {
+          case Some(token) => updatedConfig + ("spark.indextables.aws.sessionToken" -> token)
+          case None => updatedConfig
+        }
       case None =>
-        updatedConfig
+        // No credentials resolved (no provider configured or using default chain)
+        config
     }
   }
 }
