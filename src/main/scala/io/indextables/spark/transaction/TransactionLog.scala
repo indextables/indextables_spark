@@ -105,6 +105,12 @@ class TransactionLog(
   // Atomic version counter for thread-safe version assignment
   private val versionCounter = new AtomicLong(-1L)
 
+  // Schema registry cache for write-time deduplication
+  // Tracks which schemas have been written to MetadataAction.configuration
+  // Initialized lazily from existing table state on first write
+  @volatile private var schemaRegistryCache: Option[Map[String, String]] = None
+  private val schemaRegistryLock = new Object()
+
   def getTablePath(): Path = tablePath
 
   override def close(): Unit = {
@@ -456,9 +462,108 @@ class TransactionLog(
   private def writeAction(version: Long, action: Action): Unit =
     writeActions(version, Seq(action))
 
+  /**
+   * Apply schema deduplication to actions before writing to transaction log.
+   *
+   * This method:
+   * 1. Gets the current schema registry (initializes from table if needed)
+   * 2. Identifies new schemas that need registration
+   * 3. Deduplicates AddActions (replaces docMappingJson with docMappingRef)
+   * 4. Returns deduplicated actions + optional MetadataAction update
+   *
+   * @param actions Actions to write
+   * @return Tuple of (deduplicated actions, optional metadata update with new schemas)
+   */
+  private def applySchemaDeduplicationForWrite(
+    actions: Seq[Action]
+  ): (Seq[Action], Option[MetadataAction]) = {
+
+    // Skip deduplication if no AddActions with schemas
+    val hasSchemas = actions.exists {
+      case add: AddAction if add.docMappingJson.isDefined => true
+      case _ => false
+    }
+
+    if (!hasSchemas) {
+      logger.debug("No schemas to deduplicate in write actions")
+      return (actions, None)
+    }
+
+    // Get current schema registry (initializes from table if needed)
+    val currentRegistry = getSchemaRegistry()
+
+    // Convert registry from (hash -> schema) to configuration format (prefixed keys)
+    val registryAsConfiguration = currentRegistry.map {
+      case (hash, schema) => (SchemaDeduplication.SCHEMA_KEY_PREFIX + hash, schema)
+    }
+
+    // Deduplicate schemas
+    val (deduplicatedActions, newSchemaRegistry) =
+      SchemaDeduplication.deduplicateSchemas(actions, registryAsConfiguration)
+
+    // Check if new schemas were found (keys not in existing registry)
+    val newSchemas = newSchemaRegistry.filterNot {
+      case (key, _) => registryAsConfiguration.contains(key)
+    }
+
+    if (newSchemas.nonEmpty) {
+      // Log new schemas being registered
+      val newHashes = newSchemas.keys.map(_.stripPrefix(SchemaDeduplication.SCHEMA_KEY_PREFIX))
+      logger.info(s"Schema deduplication: found ${newSchemas.size} new schemas to register: ${newHashes.mkString(", ")}")
+
+      // Get current metadata to merge new schemas
+      val currentMetadata = try {
+        getMetadata()
+      } catch {
+        case _: RuntimeException =>
+          // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
+          // but handle gracefully by skipping deduplication
+          logger.warn("No existing metadata found during write - skipping schema deduplication")
+          return (actions, None)
+      }
+
+      // Merge new schemas into metadata configuration
+      val updatedConfiguration =
+        SchemaDeduplication.mergeIntoConfiguration(currentMetadata.configuration, newSchemas)
+
+      val updatedMetadata = currentMetadata.copy(configuration = updatedConfiguration)
+
+      (deduplicatedActions, Some(updatedMetadata))
+    } else {
+      // All schemas already registered, no metadata update needed
+      logger.debug(s"Schema deduplication: all schemas already registered (${currentRegistry.size} existing)")
+      (deduplicatedActions, None)
+    }
+  }
+
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
+
+    // Apply schema deduplication to reduce transaction log size
+    val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(actions)
+
+    // Build final actions list, including metadata update if needed
+    val actionsToWrite = metadataUpdate match {
+      case Some(updatedMetadata) =>
+        // Check if MetadataAction is already in actions
+        val hasMetadataInActions = actions.exists(_.isInstanceOf[MetadataAction])
+
+        if (hasMetadataInActions) {
+          // Replace existing MetadataAction with updated one
+          deduplicatedActions.map {
+            case _: MetadataAction => updatedMetadata
+            case other => other
+          }
+        } else {
+          // Prepend MetadataAction to actions
+          updatedMetadata +: deduplicatedActions
+        }
+
+      case None =>
+        // No new schemas, use deduplicated actions as-is
+        deduplicatedActions
+    }
 
     // Use streaming write to avoid OOM for large transaction log versions
     // This prevents StringBuilder exceeding JVM's ~2GB array size limit
@@ -468,7 +573,7 @@ class TransactionLog(
     // CRITICAL: Use conditional write (ifNotExists=true) to prevent overwriting transaction log files
     // Transaction log files are immutable and should never be overwritten
     val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
-      actions = actions,
+      actions = actionsToWrite,
       cloudProvider = cloudProvider,
       path = versionFilePath,
       codec = codec,
@@ -483,11 +588,17 @@ class TransactionLog(
       )
     }
 
+    // Update schema registry cache after successful write
+    metadataUpdate.foreach { updatedMetadata =>
+      val newSchemas = SchemaDeduplication.extractSchemaRegistry(updatedMetadata.configuration)
+      updateSchemaRegistry(newSchemas)
+    }
+
     // Invalidate caches after any write operation since the transaction log state has changed
     cache.foreach(_.invalidateVersionDependentCaches())
 
     logger.info(
-      s"Written ${actions.length} actions to version $version$compressionInfo: ${actions.map(_.getClass.getSimpleName).mkString(", ")}"
+      s"Written ${actionsToWrite.length} actions to version $version$compressionInfo: ${actionsToWrite.map(_.getClass.getSimpleName).mkString(", ")}"
     )
 
     // Check if we should create a checkpoint
@@ -684,6 +795,71 @@ class TransactionLog(
 
         throw new RuntimeException("No metadata found in transaction log")
     }
+
+  /**
+   * Get the current schema registry, initializing from existing table state if needed.
+   *
+   * This method is thread-safe and ensures the registry is initialized only once.
+   * The registry is extracted from MetadataAction.configuration.
+   *
+   * @return Schema registry map (hash -> schema JSON)
+   */
+  private def getSchemaRegistry(): Map[String, String] = {
+    schemaRegistryCache match {
+      case Some(registry) => registry
+      case None =>
+        schemaRegistryLock.synchronized {
+          // Double-check pattern
+          schemaRegistryCache match {
+            case Some(registry) => registry
+            case None =>
+              // Initialize from existing MetadataAction.configuration
+              val registry = try {
+                val metadata = getMetadata()
+                val extracted = SchemaDeduplication.extractSchemaRegistry(metadata.configuration)
+                logger.info(s"Initialized schema registry with ${extracted.size} existing schemas")
+                extracted
+              } catch {
+                case _: RuntimeException =>
+                  // No metadata yet (new table), return empty registry
+                  logger.debug("No existing metadata, initializing empty schema registry")
+                  Map.empty[String, String]
+              }
+              schemaRegistryCache = Some(registry)
+              registry
+          }
+        }
+    }
+  }
+
+  /**
+   * Update the schema registry cache with new schemas.
+   *
+   * This method is called after writing a MetadataAction with new schema entries.
+   * It updates the in-memory cache to reflect the newly written schemas.
+   *
+   * @param newSchemas New schema entries (hash -> schema JSON)
+   */
+  private def updateSchemaRegistry(newSchemas: Map[String, String]): Unit = {
+    schemaRegistryLock.synchronized {
+      val currentRegistry = schemaRegistryCache.getOrElse(Map.empty)
+      schemaRegistryCache = Some(currentRegistry ++ newSchemas)
+      logger.debug(s"Updated schema registry: added ${newSchemas.size} new schemas, total ${schemaRegistryCache.get.size}")
+    }
+  }
+
+  /**
+   * Invalidate the schema registry cache.
+   *
+   * This should be called when the MetadataAction.configuration is updated
+   * outside of the normal write flow (e.g., during cache invalidation or external modifications).
+   */
+  private def invalidateSchemaRegistry(): Unit = {
+    schemaRegistryLock.synchronized {
+      schemaRegistryCache = None
+      logger.debug("Invalidated schema registry cache")
+    }
+  }
 
   /** Get the current protocol action from the transaction log. */
   def getProtocol(): ProtocolAction =
@@ -981,6 +1157,7 @@ class TransactionLog(
    */
   def invalidateCache(): Unit = {
     cache.foreach(_.invalidateAll())
+    invalidateSchemaRegistry()
     logger.info("Transaction log cache invalidated manually")
   }
 
