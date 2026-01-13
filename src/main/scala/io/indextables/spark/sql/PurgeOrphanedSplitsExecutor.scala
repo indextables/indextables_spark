@@ -871,24 +871,29 @@ class PurgeOrphanedSplitsExecutor(
     }.toSeq
   }
 
-  // Multi-part manifest files are small JSON (typically < 2KB)
-  // Legacy checkpoints are NDJSON with many actions (typically > 10KB)
-  // Use this threshold to skip reading large files entirely
+  // Multi-part manifest files are small JSON metadata (typically < 1KB)
+  // Single-part checkpoints and legacy checkpoints contain action data and can be large
+  // We only need to read small files to detect multi-part manifests
   private val MANIFEST_MAX_SIZE_BYTES = 10 * 1024L // 10KB
 
   /**
    * Try to read a checkpoint file as a manifest, using file size as a heuristic.
    *
-   * This optimization avoids making network requests for large legacy checkpoint files:
-   * - If file size > 10KB, it's definitely a legacy checkpoint (no network read needed)
-   * - If file size <= 10KB, read first line to check if it's a manifest
+   * This optimization avoids making network requests for large checkpoint files:
+   * - Multi-part manifests are always small (< 1KB) - they're just metadata pointing to part files
+   * - Single-part checkpoints can be any size - they contain action data directly
+   * - Legacy checkpoints can be any size - they contain action data in older format
+   *
+   * If file size > 10KB, it's definitely NOT a multi-part manifest (no network read needed).
+   * If file size <= 10KB, read first line to check if it's a manifest.
    *
    * @param provider Cloud storage provider
    * @param fileInfo File info including size
    * @return Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
    */
   private def tryReadManifest(provider: CloudStorageProvider, fileInfo: CloudFileInfo): Option[MultiPartCheckpointManifest] = {
-    // Skip large files - they're definitely legacy checkpoints, not manifests
+    // Skip large files - they're definitely not multi-part manifests
+    // (could be single-part checkpoint or legacy checkpoint, but either way no part files to track)
     if (fileInfo.size > MANIFEST_MAX_SIZE_BYTES) {
       logger.debug(s"Skipping manifest check for large file (${fileInfo.size} bytes > ${MANIFEST_MAX_SIZE_BYTES}): ${fileInfo.path}")
       return None
