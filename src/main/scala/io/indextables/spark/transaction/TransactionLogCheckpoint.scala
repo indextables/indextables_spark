@@ -565,6 +565,8 @@ class TransactionLogCheckpoint(
       JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
     } else if (jsonNode.has("remove")) {
       JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+    } else if (jsonNode.has("mergeskip")) {
+      JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
     } else {
       throw new IllegalArgumentException(s"Unknown action type in line: $line")
     }
@@ -585,6 +587,8 @@ class TransactionLogCheckpoint(
         JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
       } else if (jsonNode.has("remove")) {
         JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+      } else if (jsonNode.has("mergeskip")) {
+        JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
       } else {
         throw new IllegalArgumentException(s"Unknown action type in line: $line")
       }

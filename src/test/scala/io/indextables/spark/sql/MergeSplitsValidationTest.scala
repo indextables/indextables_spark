@@ -973,39 +973,26 @@ class MergeSplitsValidationTest extends TestBase with BeforeAndAfterEach {
 
   /** Create AWS configuration for validation that matches the merge operation configuration. */
   private def createAwsConfigForValidation(): SerializableAwsConfig = {
-    val accessKey = spark.conf
-      .getOption("spark.indextables.aws.accessKey")
-      .orElse(Option(System.getenv("AWS_ACCESS_KEY_ID")))
-      .getOrElse("test-default-access-key")
-
-    val secretKey = spark.conf
-      .getOption("spark.indextables.aws.secretKey")
-      .orElse(Option(System.getenv("AWS_SECRET_ACCESS_KEY")))
-      .getOrElse("test-default-secret-key")
-
-    val sessionToken = spark.conf
-      .getOption("spark.indextables.aws.sessionToken")
-      .orElse(Option(System.getenv("AWS_SESSION_TOKEN")))
-
-    val region = spark.conf
-      .getOption("spark.indextables.aws.region")
-      .orElse(Option(System.getenv("AWS_DEFAULT_REGION")))
-      .getOrElse("us-east-1")
-
-    val endpoint = spark.conf.getOption("spark.indextables.s3.endpoint")
-
-    val pathStyleAccess = spark.conf
-      .getOption("spark.indextables.s3.pathStyleAccess")
-      .map(_.toBoolean)
-      .getOrElse(false)
+    val configs = Map(
+      "spark.indextables.aws.accessKey" -> spark.conf
+        .getOption("spark.indextables.aws.accessKey")
+        .orElse(Option(System.getenv("AWS_ACCESS_KEY_ID")))
+        .getOrElse("test-default-access-key"),
+      "spark.indextables.aws.secretKey" -> spark.conf
+        .getOption("spark.indextables.aws.secretKey")
+        .orElse(Option(System.getenv("AWS_SECRET_ACCESS_KEY")))
+        .getOrElse("test-default-secret-key"),
+      "spark.indextables.aws.region" -> spark.conf
+        .getOption("spark.indextables.aws.region")
+        .orElse(Option(System.getenv("AWS_DEFAULT_REGION")))
+        .getOrElse("us-east-1")
+    ) ++ spark.conf.getOption("spark.indextables.aws.sessionToken").map("spark.indextables.aws.sessionToken" -> _) ++
+      spark.conf.getOption("spark.indextables.s3.endpoint").map("spark.indextables.s3.endpoint" -> _) ++
+      spark.conf.getOption("spark.indextables.s3.pathStyleAccess").map("spark.indextables.s3.pathStyleAccess" -> _)
 
     SerializableAwsConfig(
-      accessKey = accessKey,
-      secretKey = secretKey,
-      sessionToken = sessionToken,
-      region = region,
-      endpoint = endpoint,
-      pathStyleAccess = pathStyleAccess
+      configs = configs,
+      tablePath = "s3://test-bucket/test-table"
     )
   }
 }

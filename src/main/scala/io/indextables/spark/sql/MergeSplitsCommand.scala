@@ -337,142 +337,61 @@ case class SerializableAzureConfig(
 }
 
 /** Serializable wrapper for AWS configuration that can be broadcast across executors. */
+/**
+ * Simplified AWS configuration for merge operations.
+ * Holds merged config map and resolves credentials on executor using CredentialProviderFactory.
+ */
 case class SerializableAwsConfig(
-  accessKey: String,
-  secretKey: String,
-  sessionToken: Option[String],
-  region: String,
-  endpoint: Option[String],
-  pathStyleAccess: Boolean,
+  configs: Map[String, String],
+  tablePath: String,
   tempDirectoryPath: Option[String] = None,
-  credentialsProviderClass: Option[String] = None,                // Custom credential provider class name
-  heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L), // Heap size for merge operations (default 1GB)
-  debugEnabled: Boolean = false,                                  // Enable debug logging in merge operations
-  // All spark.indextables.* configs for credential provider (includes databricks keys)
-  allIndextablesConfigs: Map[String, String] = Map.empty
+  heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L),
+  debugEnabled: Boolean = false
 ) extends Serializable {
 
-  /** Convert to tantivy4java AwsConfig instance. Uses pre-resolved credentials if available. */
-  def toQuickwitSplitAwsConfig(tablePath: String): QuickwitSplit.AwsConfig = {
-    // DEBUG: Log what credentials were received on executor (WARN level via stderr for visibility)
-    System.err.println(s"🔧 [EXECUTOR] toQuickwitSplitAwsConfig called with:")
-    System.err.println(s"🔧   accessKey: ${if (accessKey == null) "NULL" else if (accessKey.isEmpty) "EMPTY" else accessKey.take(8) + "..."}")
-    System.err.println(s"🔧   secretKey: ${if (secretKey == null) "NULL" else if (secretKey.isEmpty) "EMPTY" else "***"}")
-    System.err.println(s"🔧   sessionToken: ${sessionToken.map(_ => "present").getOrElse("None")}")
-    System.err.println(s"🔧   region: $region")
-    System.err.println(s"🔧   credentialsProviderClass: ${credentialsProviderClass.getOrElse("None")}")
-    System.err.println(s"🔧   allIndextablesConfigs has ${allIndextablesConfigs.size} keys")
-    if (allIndextablesConfigs.nonEmpty) {
-      val databricksKeys = allIndextablesConfigs.keys.filter(_.contains("databricks")).toSeq
-      System.err.println(s"🔧   databricks keys: ${databricksKeys.mkString(", ")}")
-    }
+  private def getConfig(key: String): Option[String] =
+    configs.get(key).orElse(configs.get(key.toLowerCase))
 
-    // Priority 1: If we have explicit credentials, use them directly.
-    // This takes precedence over provider class because the driver may have already
-    // resolved credentials from the provider and passed them here.
-    if (accessKey.nonEmpty && secretKey.nonEmpty) {
-      System.err.println(s"✅ [EXECUTOR] Using pre-resolved credentials (accessKey: ${accessKey.take(4)}...)")
-      return new QuickwitSplit.AwsConfig(
-        accessKey,
-        secretKey,
-        sessionToken.orNull,
-        region,
-        endpoint.orNull,
-        pathStyleAccess
-      )
-    }
-
-    // Priority 2: Fall back to provider-based resolution only if no explicit credentials
-    credentialsProviderClass match {
-      case Some(providerClassName) =>
-        try {
-          System.err.println(s"🔑 [EXECUTOR] No explicit credentials, resolving via provider: $providerClassName")
-          // Resolve credentials using custom credential provider
-          val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) =
-            resolveCredentialsFromProvider(providerClassName, tablePath)
-          new QuickwitSplit.AwsConfig(
-            resolvedAccessKey,
-            resolvedSecretKey,
-            resolvedSessionToken.orNull,
-            region,
-            endpoint.orNull,
-            pathStyleAccess
-          )
-        } catch {
-          case ex: Exception =>
-            System.err.println(
-              s"⚠️ [EXECUTOR] Failed to resolve credentials from provider $providerClassName: ${ex.getMessage}"
-            )
-            // Return null config - no fallback available since we have no explicit credentials
-            new QuickwitSplit.AwsConfig(
-              null,
-              null,
-              null,
-              region,
-              endpoint.orNull,
-              pathStyleAccess
-            )
-        }
-      case None =>
-        // Priority 3: No explicit credentials and no provider - use empty config
-        System.err.println(s"⚠️ [EXECUTOR] No credentials configured - accessKey=${if (accessKey == null) "NULL" else if (accessKey.isEmpty) "EMPTY" else "present"}")
-        new QuickwitSplit.AwsConfig(
-          null,
-          null,
-          null,
-          region,
-          endpoint.orNull,
-          pathStyleAccess
-        )
-    }
-  }
+  def accessKey: String = getConfig("spark.indextables.aws.accessKey").getOrElse("")
+  def secretKey: String = getConfig("spark.indextables.aws.secretKey").getOrElse("")
+  def sessionToken: Option[String] = getConfig("spark.indextables.aws.sessionToken")
+  def region: String = getConfig("spark.indextables.aws.region").getOrElse("us-east-1")
+  def endpoint: Option[String] = getConfig("spark.indextables.s3.endpoint")
+  def pathStyleAccess: Boolean = getConfig("spark.indextables.s3.pathStyleAccess").exists(_.equalsIgnoreCase("true"))
 
   /**
-   * Resolve AWS credentials from a custom credential provider class.
-   * Returns (accessKey, secretKey, sessionToken).
-   *
-   * Populates the Hadoop Configuration with all spark.indextables.* configs (including databricks keys)
-   * so credential providers like UnityCatalogAWSCredentialProvider can find their configuration.
+   * Resolve AWS credentials using centralized CredentialProviderFactory.
+   * Priority: explicit credentials > custom provider class > default chain (returns None)
    */
-  private def resolveCredentialsFromProvider(providerClassName: String, tablePath: String)
-    : (String, String, Option[String]) = {
-    import java.net.URI
-    import org.apache.hadoop.conf.Configuration
+  private def resolveAWSCredentials(): (Option[String], Option[String], Option[String]) = {
     import io.indextables.spark.utils.CredentialProviderFactory
 
-    // Use the provided table path for the credential provider constructor
-    val tableUri   = new URI(tablePath)
-    val hadoopConf = new Configuration()
-
-    // CRITICAL: Populate Hadoop config with all spark.indextables.* configs
-    // This includes databricks keys needed by UnityCatalogAWSCredentialProvider:
-    //   - spark.indextables.databricks.workspaceUrl
-    //   - spark.indextables.databricks.apiToken
-    //   - etc.
-    allIndextablesConfigs.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
+    CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath) match {
+      case Some(creds) => (Some(creds.accessKey), Some(creds.secretKey), creds.sessionToken)
+      case None => (None, None, None)
     }
-
-    System.err.println(s"[EXECUTOR] Resolving credentials from provider $providerClassName with ${allIndextablesConfigs.size} config keys")
-
-    // Use CredentialProviderFactory to instantiate and extract credentials
-    val provider         = CredentialProviderFactory.createCredentialProvider(providerClassName, tableUri, hadoopConf)
-    val basicCredentials = CredentialProviderFactory.extractCredentialsViaReflection(provider)
-
-    (basicCredentials.accessKey, basicCredentials.secretKey, basicCredentials.sessionToken)
   }
 
-  /**
-   * Execute merge operation using direct/in-process merge. Returns the result as SerializableSplitMetadata for
-   * consistency.
-   */
+  /** Convert to tantivy4java AwsConfig instance. Resolves credentials on executor if needed. */
+  def toQuickwitSplitAwsConfig(tablePathStr: String): QuickwitSplit.AwsConfig = {
+    val (resolvedAccessKey, resolvedSecretKey, resolvedSessionToken) = resolveAWSCredentials()
+    new QuickwitSplit.AwsConfig(
+      resolvedAccessKey.orNull,
+      resolvedSecretKey.orNull,
+      resolvedSessionToken.orNull,
+      region,
+      endpoint.orNull,
+      pathStyleAccess
+    )
+  }
+
+  /** Execute merge operation using direct/in-process merge. */
   def executeMerge(
     inputSplitPaths: java.util.List[String],
     outputSplitPath: String,
     mergeConfig: QuickwitSplit.MergeConfig
   ): SerializableSplitMetadata = {
     val logger = LoggerFactory.getLogger(this.getClass)
-    // Direct merging using QuickwitSplit.mergeSplits with retry logic for streaming errors and timeouts
     val metadata = MergeSplitsCommand.retryOnStreamingError(
       () => QuickwitSplit.mergeSplits(inputSplitPaths, outputSplitPath, mergeConfig),
       s"execute merge ${inputSplitPaths.size()} splits to $outputSplitPath",
@@ -511,213 +430,49 @@ class MergeSplitsExecutor(
   logger.info(s"Skip split threshold: $skipSplitThreshold bytes (${(skipSplitThresholdPercent * 100).toInt}% of target size $targetSize)")
 
   /**
-   * Extract AWS configuration from SparkSession for tantivy4java merge operations. Uses same pattern as
-   * TantivySearchEngine for consistency. Returns a serializable wrapper that can be broadcast across executors.
+   * Extract AWS configuration from SparkSession for merge operations.
+   * Merges configs from: overrideOptions > sparkSession > hadoopConfiguration
+   * Credentials are resolved on executor using CredentialProviderFactory (same as S3CloudStorageProvider).
    */
-  private def extractAwsConfig(): SerializableAwsConfig =
-    try {
-      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
+  private def extractAwsConfig(): SerializableAwsConfig = {
+    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
 
-      // Extract and normalize all tantivy4spark configs from both Spark and Hadoop
-      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-      val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-      val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
-
-      // DEBUG: Log config extraction summary (WARN level to ensure visibility in tests)
-      logger.warn(s"🔧 MERGE extractAwsConfig: Extracted ${sparkConfigs.size} Spark configs, ${hadoopConfigs.size} Hadoop configs, ${mergedConfigs.size} merged configs")
-      logger.warn(s"🔧 MERGE extractAwsConfig: overrideOptions has ${overrideOptions.map(_.size).getOrElse(0)} entries")
-
-      // DEBUG: Log credential-related configs
-      val credentialKeys = Seq(
-        "spark.indextables.aws.accessKey",
-        "spark.indextables.aws.secretKey",
-        "spark.indextables.aws.sessionToken",
-        "spark.indextables.aws.credentialsProviderClass",
-        "spark.indextables.databricks.workspaceUrl",
-        "spark.indextables.databricks.apiToken"
-      )
-      logger.warn(s"🔧 MERGE extractAwsConfig: Credential config sources:")
-      credentialKeys.foreach { key =>
-        val inSpark = sparkConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
-        val inHadoop = hadoopConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
-        val inMerged = mergedConfigs.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
-        val inOverride = overrideOptions.flatMap(_.get(key)).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(30))
-        logger.warn(s"🔧   $key: spark=${inSpark.getOrElse("None")}, hadoop=${inHadoop.getOrElse("None")}, merged=${inMerged.getOrElse("None")}, override=${inOverride.getOrElse("None")}")
-      }
-
-      // Helper function to get config with priority: overrideOptions > mergedConfigs
-      // CASE-INSENSITIVE lookup to handle write options (lowercase) vs expected keys (camelCase)
-      def getConfigWithFallback(sparkKey: String): Option[String] = {
-        // Try exact match first, then case-insensitive match
-        val overrideValue = overrideOptions.flatMap { opts =>
-          opts.get(sparkKey).orElse {
-            // Case-insensitive fallback for write options
-            opts.find { case (k, _) => k.equalsIgnoreCase(sparkKey) }.map(_._2)
-          }
-        }
-
-        val result = overrideValue.orElse(mergedConfigs.get(sparkKey))
-
-        logger.debug(s"AWS Config fallback for $sparkKey: override=${overrideValue.getOrElse("None")}, merged=${result.getOrElse("None")}")
-        result
-      }
-
-      val accessKey    = getConfigWithFallback("spark.indextables.aws.accessKey")
-      val secretKey    = getConfigWithFallback("spark.indextables.aws.secretKey")
-      val sessionToken = getConfigWithFallback("spark.indextables.aws.sessionToken")
-      val region       = getConfigWithFallback("spark.indextables.aws.region")
-      val endpoint     = getConfigWithFallback("spark.indextables.s3.endpoint")
-      val pathStyleAccess = getConfigWithFallback("spark.indextables.s3.pathStyleAccess")
-        .map(_.toLowerCase == "true")
-        .getOrElse(false)
-
-      // Extract temporary directory configuration for merge operations with fallback chain:
-      // 1. Explicit config, 2. /local_disk0 if available, 3. null (system default)
-      val tempDirectoryPath = getConfigWithFallback("spark.indextables.merge.tempDirectoryPath")
-        .orElse(if (MergeSplitsCommand.isLocalDisk0Available()) Some("/local_disk0/tantivy4spark-temp") else None)
-
-      // Extract custom credential provider class name
-      val credentialsProviderClass = getConfigWithFallback("spark.indextables.aws.credentialsProviderClass")
-
-      // Extract merge operation configuration (default heap size: 1GB)
-      val heapSize = getConfigWithFallback("spark.indextables.merge.heapSize")
-        .map(io.indextables.spark.util.SizeParser.parseSize)
-        .map(java.lang.Long.valueOf)
-        .getOrElse(java.lang.Long.valueOf(1073741824L)) // 1GB default
-      val debugEnabled =
-        getConfigWithFallback("spark.indextables.merge.debug").exists(v => v.equalsIgnoreCase("true") || v == "1")
-
-      logger.info(s"Creating AwsConfig with: region=${region.getOrElse("None")}, endpoint=${endpoint.getOrElse("None")}, pathStyle=$pathStyleAccess")
-      logger.info(
-        s"AWS credentials: accessKey=${accessKey.map(k => s"${k.take(4)}***").getOrElse("None")}, sessionToken=${sessionToken.map(_ => "***").getOrElse("None")}"
-      )
-      logger.info(s"Credentials provider class: ${credentialsProviderClass.getOrElse("None")}")
-      logger.info(s"Merge temp directory: ${tempDirectoryPath.getOrElse("system default")}")
-
-      // Validate temp directory path if specified
-      tempDirectoryPath.foreach { path =>
-        try {
-          val dir = new java.io.File(path)
-          if (!dir.exists()) {
-            logger.warn(s"⚠️ Custom temp directory does not exist: $path - will fall back to system temp directory")
-          } else if (!dir.isDirectory()) {
-            logger.warn(
-              s"⚠️ Custom temp directory path is not a directory: $path - will fall back to system temp directory"
-            )
-          } else if (!dir.canWrite()) {
-            logger.warn(s"⚠️ Custom temp directory is not writable: $path - will fall back to system temp directory")
-          } else {
-            logger.info(s"✅ Custom temp directory validated: $path")
-          }
-        } catch {
-          case ex: Exception =>
-            logger.warn(s"⚠️ Failed to validate custom temp directory '$path': ${ex.getMessage} - will fall back to system temp directory")
-        }
-      }
-
-      // Resolve credentials from custom provider on driver if configured
-      // This fetches actual AWS credentials so workers don't need to run the provider
-      // CRITICAL: Merge overrideOptions with mergedConfigs to include write options
-      // This ensures Databricks configs (workspaceUrl, apiToken) are available for
-      // Unity Catalog credential resolution when set via write options
-      val configForResolution = overrideOptions match {
-        case Some(overrides) =>
-          val merged = mergedConfigs ++ overrides
-          logger.warn(s"🔧 MERGE extractAwsConfig: Merged ${overrides.size} override options with ${mergedConfigs.size} session configs for credential resolution")
-          merged
-        case None =>
-          logger.warn(s"🔧 MERGE extractAwsConfig: No override options, using ${mergedConfigs.size} merged configs")
-          mergedConfigs
-      }
-
-      // DEBUG: Log configForResolution contents for credential-related keys
-      logger.warn(s"🔧 MERGE extractAwsConfig: configForResolution has ${configForResolution.size} entries")
-      credentialKeys.foreach { key =>
-        val value = configForResolution.get(key).map(v => if (key.contains("secret") || key.contains("Key") || key.contains("Token")) "***" else v.take(50))
-        logger.warn(s"🔧   configForResolution[$key] = ${value.getOrElse("None")}")
-      }
-
-      val resolvedConfigs = credentialsProviderClass match {
-        case Some(providerClass) if providerClass.nonEmpty =>
-          logger.warn(s"🔧 MERGE extractAwsConfig: Resolving credentials from provider: $providerClass")
-          logger.warn(s"🔧 MERGE extractAwsConfig: Table path for resolution: $tablePath")
-          try {
-            val resolved = ConfigUtils.resolveCredentialsFromProviderOnDriver(configForResolution, tablePath.toString)
-            logger.warn(s"🔧 MERGE extractAwsConfig: Credential resolution SUCCEEDED")
-            logger.warn(s"🔧   Resolved accessKey: ${resolved.get("spark.indextables.aws.accessKey").map(_.take(8) + "...").getOrElse("None")}")
-            logger.warn(s"🔧   Resolved sessionToken: ${resolved.get("spark.indextables.aws.sessionToken").map(_ => "present").getOrElse("None")}")
-            resolved
-          } catch {
-            case ex: Exception =>
-              logger.error(s"🔧 MERGE extractAwsConfig: Credential resolution FAILED: ${ex.getMessage}", ex)
-              throw ex
-          }
-        case _ =>
-          logger.warn(s"🔧 MERGE extractAwsConfig: No credential provider class configured, using existing configs")
-          configForResolution
-      }
-
-      // Re-extract credentials from resolved configs (may have been updated by provider)
-      val resolvedAccessKey = resolvedConfigs.get("spark.indextables.aws.accessKey")
-        .orElse(accessKey)
-      val resolvedSecretKey = resolvedConfigs.get("spark.indextables.aws.secretKey")
-        .orElse(secretKey)
-      val resolvedSessionToken = resolvedConfigs.get("spark.indextables.aws.sessionToken")
-        .orElse(sessionToken)
-
-      // DEBUG: Log final credential values
-      logger.warn(s"🔧 MERGE extractAwsConfig: Final credentials:")
-      logger.warn(s"🔧   accessKey (from getConfigWithFallback): ${accessKey.map(_.take(8) + "...").getOrElse("None")}")
-      logger.warn(s"🔧   resolvedAccessKey (final): ${resolvedAccessKey.map(_.take(8) + "...").getOrElse("None")}")
-      logger.warn(s"🔧   resolvedSecretKey (final): ${resolvedSecretKey.map(_ => "***").getOrElse("None")}")
-      logger.warn(s"🔧   resolvedSessionToken (final): ${resolvedSessionToken.map(_ => "present").getOrElse("None")}")
-
-      // Create SerializableAwsConfig with the extracted credentials and temp directory
-      // Include ALL spark.indextables.* configs for credential providers (e.g., databricks keys)
-      logger.warn(s"🔧 MERGE extractAwsConfig: Including ${resolvedConfigs.size} spark.indextables.* configs")
-      if (resolvedConfigs.keys.exists(_.contains("databricks"))) {
-        val databricksKeys = resolvedConfigs.keys.filter(_.contains("databricks"))
-        logger.warn(s"🔧 MERGE extractAwsConfig: Databricks configs included: ${databricksKeys.mkString(", ")}")
-      }
-
-      // CRITICAL: If credentials were resolved on driver, clear the provider class
-      // This prevents executors from trying to re-instantiate the provider
-      val credentialsResolved = resolvedAccessKey.isDefined && !accessKey.isDefined
-      logger.warn(s"🔧 MERGE extractAwsConfig: credentialsResolved=$credentialsResolved (resolvedAccessKey.isDefined=${resolvedAccessKey.isDefined}, accessKey.isDefined=${accessKey.isDefined})")
-      val effectiveProviderClass = if (credentialsResolved) {
-        logger.warn(s"🔧 MERGE extractAwsConfig: Credentials resolved on driver - clearing providerClass to prevent executor re-instantiation")
-        None
-      } else {
-        logger.warn(s"🔧 MERGE extractAwsConfig: Keeping providerClass=${credentialsProviderClass.getOrElse("None")} for executor fallback")
-        credentialsProviderClass
-      }
-
-      // Log what's being passed to SerializableAwsConfig
-      logger.warn(s"🔧 MERGE extractAwsConfig: Creating SerializableAwsConfig with:")
-      logger.warn(s"🔧   accessKey: ${resolvedAccessKey.map(_.take(8) + "...").getOrElse("EMPTY")}")
-      logger.warn(s"🔧   secretKey: ${resolvedSecretKey.map(_ => "***").getOrElse("EMPTY")}")
-      logger.warn(s"🔧   sessionToken: ${resolvedSessionToken.map(_ => "present").getOrElse("None")}")
-      logger.warn(s"🔧   region: ${region.getOrElse("us-east-1")}")
-      logger.warn(s"🔧   providerClass: ${effectiveProviderClass.getOrElse("None")}")
-
-      SerializableAwsConfig(
-        resolvedAccessKey.getOrElse(""),
-        resolvedSecretKey.getOrElse(""),
-        resolvedSessionToken, // Can be None for permanent credentials
-        region.getOrElse("us-east-1"),
-        endpoint, // Can be None for default AWS endpoint
-        pathStyleAccess,
-        tempDirectoryPath,         // Custom temp directory path for merge operations
-        effectiveProviderClass,    // Cleared if credentials were resolved on driver
-        heapSize,                  // Heap size for merge operations
-        debugEnabled,              // Debug logging for merge operations
-        resolvedConfigs            // All spark.indextables.* configs for credential provider
-      )
-    } catch {
-      case ex: Exception =>
-        logger.error("Failed to extract AWS config from Spark session", ex)
-        throw new RuntimeException("Failed to extract AWS config for merge operation", ex)
+    // Merge configs: hadoop < spark < overrideOptions (highest priority)
+    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val baseConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val mergedConfigs = overrideOptions match {
+      case Some(overrides) => baseConfigs ++ overrides
+      case None => baseConfigs
     }
+
+    // Helper to get config with case-insensitive fallback
+    def getConfig(key: String): Option[String] =
+      mergedConfigs.get(key).orElse(mergedConfigs.get(key.toLowerCase))
+
+    // Extract temp directory with fallback to /local_disk0 if available
+    val tempDirectoryPath = getConfig("spark.indextables.merge.tempDirectoryPath")
+      .orElse(if (MergeSplitsCommand.isLocalDisk0Available()) Some("/local_disk0/tantivy4spark-temp") else None)
+
+    // Extract heap size (default 1GB)
+    val heapSize = getConfig("spark.indextables.merge.heapSize")
+      .map(io.indextables.spark.util.SizeParser.parseSize)
+      .map(java.lang.Long.valueOf)
+      .getOrElse(java.lang.Long.valueOf(1073741824L))
+
+    val debugEnabled = getConfig("spark.indextables.merge.debug")
+      .exists(v => v.equalsIgnoreCase("true") || v == "1")
+
+    logger.info(s"Merge config: ${mergedConfigs.size} entries, tempDir=${tempDirectoryPath.getOrElse("default")}")
+
+    SerializableAwsConfig(
+      configs = mergedConfigs,
+      tablePath = tablePath.toString,
+      tempDirectoryPath = tempDirectoryPath,
+      heapSize = heapSize,
+      debugEnabled = debugEnabled
+    )
+  }
 
   /**
    * Extract Azure configuration from SparkSession for tantivy4java merge operations. Returns a serializable wrapper
@@ -1807,164 +1562,90 @@ object MergeSplitsExecutor {
 
     val inputSplitPaths = mergeGroup.files.map { file =>
       if (isS3Path) {
-        // For S3 paths, handle cases where file.path might already be a full S3 URL
         if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
-          // file.path is already a full S3 URL, just normalize the scheme
-          val normalized = file.path.replaceFirst("^s3a://", "s3://")
-          logger.warn(s"🔄 [EXECUTOR] Normalized full S3 path: ${file.path} -> $normalized")
-          normalized
+          file.path.replaceFirst("^s3a://", "s3://")
         } else {
-          // file.path is relative, construct full URL with normalized scheme
           val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-          val fullPath          = s"$normalizedBaseUri/${file.path}"
-          logger.warn(s"🔄 [EXECUTOR] Constructed relative S3 path: ${file.path} -> $fullPath")
-          fullPath
+          s"$normalizedBaseUri/${file.path}"
         }
       } else if (isAzurePath) {
-        // For Azure paths, normalize to azure:// scheme for tantivy4java
         if (
           file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
           file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
           file.path.startsWith("abfss://")
         ) {
-          // file.path is already a full Azure URL, normalize to azure://
-          val normalized = normalizeAzureUrl(file.path)
-          logger.info(s"🔄 [EXECUTOR] Normalized full Azure path: ${file.path} -> $normalized")
-          normalized
+          normalizeAzureUrl(file.path)
         } else {
-          // file.path is relative, construct full URL with normalized scheme
           val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-          val fullPath          = s"$normalizedBaseUri/${file.path}"
-          logger.info(s"🔄 [EXECUTOR] Constructed relative Azure path: ${file.path} -> $fullPath")
-          fullPath
+          s"$normalizedBaseUri/${file.path}"
         }
       } else {
-        // For local/HDFS paths, use Path concatenation and extract raw path for tantivy4java
-        val fullPath = new org.apache.hadoop.fs.Path(tablePathStr, file.path)
-        // tantivy4java expects raw filesystem paths, not file: URIs
-        fullPath.toUri.getPath
+        new org.apache.hadoop.fs.Path(tablePathStr, file.path).toUri.getPath
       }
     }.asJava
 
     val outputSplitPath = if (isS3Path) {
-      // For S3 paths, construct the URL directly with s3:// normalization for tantivy4java compatibility
       val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-      val outputPath        = s"$normalizedBaseUri/$mergedPath"
-      logger.warn(s"🔄 [EXECUTOR] Normalized output path: $tablePathStr/$mergedPath -> $outputPath")
-      outputPath
+      s"$normalizedBaseUri/$mergedPath"
     } else if (isAzurePath) {
-      // For Azure paths, construct the URL with azure:// normalization for tantivy4java compatibility
       val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      val outputPath        = s"$normalizedBaseUri/$mergedPath"
-      logger.warn(s"🔄 [EXECUTOR] Normalized Azure output path: $tablePathStr/$mergedPath -> $outputPath")
-      outputPath
+      s"$normalizedBaseUri/$mergedPath"
     } else {
-      // For local/HDFS paths, extract raw path for tantivy4java (not file: URI)
       new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toUri.getPath
     }
 
     logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
-    logger.debug(s"[EXECUTOR] Input splits: ${inputSplitPaths.asScala.mkString(", ")}")
-
-    logger.info("[EXECUTOR] Attempting to merge splits using Tantivy4Java merge functionality")
-
-    // CRITICAL DEBUG: Check ALL source splits for their docMappingJson
-    logger.debug(s"SOURCE SPLITS DEBUG: Checking docMappingJson from ${mergeGroup.files.length} source splits")
-    mergeGroup.files.zipWithIndex.foreach {
-      case (file, idx) =>
-        file.docMappingJson match {
-          case Some(json) =>
-            logger.debug(s"SOURCE SPLIT[$idx]: ${file.path} HAS docMappingJson (${json.length} chars)")
-            logger.debug(s"SOURCE SPLIT[$idx]: Content: $json")
-          case None =>
-            logger.error(s"❌ SOURCE SPLIT[$idx]: ${file.path} has NO docMappingJson!")
-        }
-    }
 
     // Extract docMappingJson from first file to preserve fast fields configuration
     val docMappingJson = mergeGroup.files.headOption
       .flatMap(_.docMappingJson)
       .getOrElse {
-        val errorMsg =
-          "[EXECUTOR] FATAL: No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
-        logger.error(errorMsg)
-        throw new IllegalStateException(errorMsg)
+        throw new IllegalStateException(
+          "No docMappingJson found in source splits - cannot preserve fast fields configuration during merge"
+        )
       }
-    logger.warn(s"✅ MERGE INPUT: Using docMappingJson from source split[0]: $docMappingJson")
 
-    // Create merge configuration with broadcast AWS and Azure credentials and temp directory
+    // Create merge configuration
     val mergeConfigBuilder = QuickwitSplit.MergeConfig
       .builder()
       .indexUid("merged-index-uid")
       .sourceId("tantivy4spark")
       .nodeId("merge-node")
-      .docMappingUid(docMappingJson) // extracted from source splits to preserve fast fields
+      .docMappingUid(docMappingJson)
       .partitionId(0L)
       .deleteQueries(java.util.Collections.emptyList[String]())
       .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePathStr))
       .debugEnabled(awsConfig.debugEnabled)
 
-    // Add optional Azure configuration if available
+    // Add optional Azure configuration
     val azureConf = azureConfig.toQuickwitSplitAzureConfig()
     if (azureConf != null) {
       mergeConfigBuilder.azureConfig(azureConf)
     }
 
-    // Add optional temp directory path if available
+    // Add optional temp directory and heap size
     awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
-
-    // Add optional heap size if available
     Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
 
     val mergeConfig = mergeConfigBuilder.build()
 
-    // Perform the actual merge using direct/in-process merge
-    logger.warn(s"⚙️  [EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
-    logger.warn(s"📁 [EXECUTOR] Input paths:")
-    inputSplitPaths.asScala.zipWithIndex.foreach {
-      case (path, idx) =>
-        logger.warn(s"📁 [EXECUTOR]   [$idx]: $path")
-    }
-    logger.warn(s"📁 [EXECUTOR] Output path: $outputSplitPath")
-    logger.warn(s"📁 [EXECUTOR] Relative path for transaction log: $mergedPath")
-    logger.info(s"[EXECUTOR] Executing direct merge with ${inputSplitPaths.size()} input paths")
-
     val serializedMetadata =
-      try
+      try {
         awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
-      catch {
+      } catch {
         case ex: Exception =>
-          println(
-            s"💥 [EXECUTOR] CRITICAL: Direct merge threw exception: ${ex.getClass.getSimpleName}: ${ex.getMessage}"
-          )
-          logger.error(s"[EXECUTOR] Direct merge failed", ex)
-          ex.printStackTrace()
-          throw new RuntimeException(s"Direct merge operation failed: ${ex.getMessage}", ex)
+          logger.error(s"Merge failed: ${ex.getMessage}", ex)
+          throw new RuntimeException(s"Merge operation failed: ${ex.getMessage}", ex)
       }
 
-    logger.info(s"[EXECUTOR] Successfully merged splits: ${serializedMetadata.getNumDocs} documents, ${serializedMetadata.getUncompressedSizeBytes} bytes")
-    logger.debug(s"[EXECUTOR] Merge metadata: split_id=${serializedMetadata.getSplitId}, merge_ops=${serializedMetadata.getNumMergeOps}")
+    logger.info(s"[EXECUTOR] Merged ${serializedMetadata.getNumDocs} docs, ${serializedMetadata.getUncompressedSizeBytes} bytes")
 
-    // CRITICAL: Verify the merged file actually exists at the expected location
-    try
-      if (isS3Path) {
-        logger.debug(s"[EXECUTOR] S3 merge - cannot easily verify file existence in executor context")
-        logger.debug(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
-      } else if (isAzurePath) {
-        logger.debug(s"[EXECUTOR] Azure merge - cannot easily verify file existence in executor context")
-        logger.debug(s"[EXECUTOR] Assuming tantivy4java successfully created: $outputSplitPath")
-      } else {
-        // outputSplitPath is now a raw filesystem path (no file: URI prefix)
-        val outputFile = new java.io.File(outputSplitPath)
-        val exists     = outputFile.exists()
-        logger.debug(s"[EXECUTOR] File verification: $outputSplitPath exists = $exists")
-        if (!exists) {
-          throw new RuntimeException(s"CRITICAL: Merged file was not created at expected location: $outputSplitPath")
-        }
+    // Verify local file existence (cloud paths assumed successful if no exception)
+    if (!isS3Path && !isAzurePath) {
+      val outputFile = new java.io.File(outputSplitPath)
+      if (!outputFile.exists()) {
+        throw new RuntimeException(s"Merged file was not created at: $outputSplitPath")
       }
-    catch {
-      case ex: Exception =>
-        logger.warn(s"[EXECUTOR] File existence check failed", ex)
     }
 
     MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)

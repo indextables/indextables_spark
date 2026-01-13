@@ -171,14 +171,14 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Test with temp directory and custom heap size
     val configWithTempDir = SerializableAwsConfig(
-      accessKey = "test-key",
-      secretKey = "test-secret",
-      sessionToken = Some("test-token"),
-      region = "us-east-1",
-      endpoint = None,
-      pathStyleAccess = false,
+      configs = Map(
+        "spark.indextables.aws.accessKey" -> "test-key",
+        "spark.indextables.aws.secretKey" -> "test-secret",
+        "spark.indextables.aws.sessionToken" -> "test-token",
+        "spark.indextables.aws.region" -> "us-east-1"
+      ),
+      tablePath = "s3://test-bucket/test-table",
       tempDirectoryPath = Some(customTempDir),
-      credentialsProviderClass = None,
       heapSize = java.lang.Long.valueOf(50000000L), // 50MB
       debugEnabled = true
     )
@@ -198,14 +198,13 @@ class MergeSplitsTempDirectoryTest extends TestBase with BeforeAndAfterEach {
 
     // Test without temp directory (using defaults)
     val configWithoutTempDir = SerializableAwsConfig(
-      accessKey = "test-key",
-      secretKey = "test-secret",
-      sessionToken = None,
-      region = "us-west-2",
-      endpoint = None,
-      pathStyleAccess = true,
-      tempDirectoryPath = None,
-      credentialsProviderClass = None
+      configs = Map(
+        "spark.indextables.aws.accessKey" -> "test-key",
+        "spark.indextables.aws.secretKey" -> "test-secret",
+        "spark.indextables.aws.region" -> "us-west-2",
+        "spark.indextables.s3.pathStyleAccess" -> "true"
+      ),
+      tablePath = "s3://test-bucket/test-table"
       // heapSize and debugEnabled use defaults (1GB and false)
     )
 

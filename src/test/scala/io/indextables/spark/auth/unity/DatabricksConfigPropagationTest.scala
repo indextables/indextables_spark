@@ -221,31 +221,24 @@ class DatabricksConfigPropagationTest extends TestBase {
     // Extract configs using ConfigNormalization (same as MergeSplitsExecutor.extractAwsConfig)
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
-    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
+      ("spark.indextables.aws.credentialsProviderClass" -> testProviderClass) +
+      ("spark.indextables.aws.region" -> "us-west-2")
 
-    // Create SerializableAwsConfig with all configs (simulating MergeSplitsExecutor)
+    // Create SerializableAwsConfig with merged configs (new simplified approach)
     val awsConfig = SerializableAwsConfig(
-      accessKey = "",
-      secretKey = "",
-      sessionToken = None,
-      region = "us-west-2",
-      endpoint = None,
-      pathStyleAccess = false,
-      tempDirectoryPath = None,
-      credentialsProviderClass = Some(testProviderClass),
-      heapSize = java.lang.Long.valueOf(1073741824L),
-      debugEnabled = false,
-      allIndextablesConfigs = mergedConfigs
+      configs = mergedConfigs,
+      tablePath = "s3://test-bucket/test-table"
     )
 
-    // Verify databricks configs are in the serializable config
-    awsConfig.allIndextablesConfigs should contain key "spark.indextables.databricks.workspaceUrl"
-    awsConfig.allIndextablesConfigs should contain key "spark.indextables.databricks.apiToken"
-    awsConfig.allIndextablesConfigs("spark.indextables.databricks.workspaceUrl") shouldBe testWorkspaceUrl
-    awsConfig.allIndextablesConfigs("spark.indextables.databricks.apiToken") shouldBe testApiToken
+    // Verify databricks configs are accessible
+    awsConfig.configs should contain key "spark.indextables.databricks.workspaceUrl"
+    awsConfig.configs should contain key "spark.indextables.databricks.apiToken"
+    awsConfig.configs("spark.indextables.databricks.workspaceUrl") shouldBe testWorkspaceUrl
+    awsConfig.configs("spark.indextables.databricks.apiToken") shouldBe testApiToken
 
-    logger.info(s"SerializableAwsConfig contains ${awsConfig.allIndextablesConfigs.size} configs for executor")
-    logger.info(s"Databricks keys present: ${awsConfig.allIndextablesConfigs.keys.filter(_.contains("databricks")).mkString(", ")}")
+    logger.info(s"SerializableAwsConfig contains ${awsConfig.configs.size} configs for executor")
+    logger.info(s"Databricks keys present: ${awsConfig.configs.keys.filter(_.contains("databricks")).mkString(", ")}")
   }
 
   test("PurgeOrphanedSplitsExecutor extractCloudStorageConfigs pattern should include databricks keys") {
