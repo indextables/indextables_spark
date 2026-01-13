@@ -275,4 +275,314 @@ class SchemaDeduplicationTest extends TestBase {
       minReaderVersion = 2,
       minWriterVersion = 2
     )
+
+  test("transaction log roundtrip with schema deduplication - simulates merge scenario") {
+    withTempPath { tempPath =>
+      val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+
+      // Create options that allow direct TransactionLog usage (for testing)
+      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.transaction.allowDirectUsage", "true",
+          "spark.indextables.checkpoint.enabled", "false" // Disable checkpoints to test transaction log directly
+        )
+      )
+
+      val txLog = new TransactionLog(tablePath, spark, options)
+
+      try {
+        // Initialize the table with a schema
+        val schema = new org.apache.spark.sql.types.StructType()
+          .add("id", org.apache.spark.sql.types.LongType)
+          .add("name", org.apache.spark.sql.types.StringType)
+
+        txLog.initialize(schema)
+
+        // Write initial files with docMappingJson (simulates normal write)
+        val initialAddActions = (1 to 3).map { i =>
+          createTestAddAction(s"split$i.split").copy(docMappingJson = Some(largeSchema))
+        }
+        txLog.addFiles(initialAddActions)
+
+        // Verify files can be read back with schemas restored
+        val filesAfterWrite = txLog.listFiles()
+        filesAfterWrite.length shouldBe 3
+        filesAfterWrite.foreach { file =>
+          file.docMappingJson shouldBe Some(largeSchema)
+        }
+
+        // Simulate a merge operation:
+        // 1. Remove old splits
+        // 2. Add new merged split with docMappingJson
+        val removeActions = initialAddActions.map { add =>
+          RemoveAction(
+            path = add.path,
+            deletionTimestamp = Some(System.currentTimeMillis()),
+            dataChange = true,
+            extendedFileMetadata = None,
+            partitionValues = Some(add.partitionValues),
+            size = Some(add.size)
+          )
+        }
+
+        // New merged split - this is what tantivy4java merge produces
+        val mergedAddAction = createTestAddAction("merged.split").copy(
+          docMappingJson = Some(largeSchema), // Same schema as source splits
+          size = 3000L,
+          numRecords = Some(300L)
+        )
+
+        // Commit the merge (removes + add)
+        txLog.commitMergeSplits(removeActions, Seq(mergedAddAction))
+
+        // Verify files can be read back after merge
+        val filesAfterMerge = txLog.listFiles()
+        filesAfterMerge.length shouldBe 1
+        filesAfterMerge.head.path shouldBe "merged.split"
+        filesAfterMerge.head.docMappingJson shouldBe Some(largeSchema)
+      } finally
+        txLog.close()
+    }
+  }
+
+  test("transaction log roundtrip with DIFFERENT schema after merge") {
+    // This test simulates the case where the merged split has a DIFFERENT schema
+    // (e.g., tantivy4java produces slightly different docMapping)
+    withTempPath { tempPath =>
+      val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+
+      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.transaction.allowDirectUsage", "true",
+          "spark.indextables.checkpoint.enabled", "false"
+        )
+      )
+
+      val txLog = new TransactionLog(tablePath, spark, options)
+
+      try {
+        val schema = new org.apache.spark.sql.types.StructType()
+          .add("id", org.apache.spark.sql.types.LongType)
+
+        txLog.initialize(schema)
+
+        // Write initial files with schema A
+        val schemaA = """{"fields":[{"name":"id","type":"i64","fast":true}]}"""
+        val initialAddActions = (1 to 3).map { i =>
+          createTestAddAction(s"split$i.split").copy(docMappingJson = Some(schemaA))
+        }
+        txLog.addFiles(initialAddActions)
+
+        // Verify initial files
+        val filesAfterWrite = txLog.listFiles()
+        filesAfterWrite.length shouldBe 3
+
+        // Simulate merge with a DIFFERENT schema B
+        // (This could happen if tantivy4java produces a different JSON structure)
+        val schemaB = """{"fields":[{"name":"id","type":"i64","fast":true,"stored":true}]}"""
+
+        val removeActions = initialAddActions.map { add =>
+          RemoveAction(
+            path = add.path,
+            deletionTimestamp = Some(System.currentTimeMillis()),
+            dataChange = true,
+            extendedFileMetadata = None,
+            partitionValues = Some(add.partitionValues),
+            size = Some(add.size)
+          )
+        }
+
+        val mergedAddAction = createTestAddAction("merged.split").copy(
+          docMappingJson = Some(schemaB), // Different schema!
+          size = 3000L,
+          numRecords = Some(300L)
+        )
+
+        // Commit the merge
+        txLog.commitMergeSplits(removeActions, Seq(mergedAddAction))
+
+        // Verify files can be read back with the new schema
+        val filesAfterMerge = txLog.listFiles()
+        filesAfterMerge.length shouldBe 1
+        filesAfterMerge.head.path shouldBe "merged.split"
+        filesAfterMerge.head.docMappingJson shouldBe Some(schemaB)
+      } finally
+        txLog.close()
+    }
+  }
+
+  test("OptimizedTransactionLog merge with schema deduplication") {
+    // This test specifically uses OptimizedTransactionLog (the production code path)
+    // to ensure schema deduplication works correctly during merge operations
+    withTempPath { tempPath =>
+      val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+
+      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.checkpoint.enabled", "false"
+        )
+      )
+
+      val txLog = new OptimizedTransactionLog(tablePath, spark, options)
+
+      try {
+        // Initialize the table
+        val schema = new org.apache.spark.sql.types.StructType()
+          .add("id", org.apache.spark.sql.types.LongType)
+
+        txLog.initialize(schema)
+
+        // Write initial files with docMappingJson
+        val initialAddActions = (1 to 3).map { i =>
+          createTestAddAction(s"split$i.split").copy(docMappingJson = Some(largeSchema))
+        }
+        txLog.addFiles(initialAddActions)
+
+        // Verify files can be read
+        val filesAfterWrite = txLog.listFiles()
+        filesAfterWrite.length shouldBe 3
+        filesAfterWrite.foreach { file =>
+          file.docMappingJson shouldBe Some(largeSchema)
+        }
+
+        // Simulate merge operation
+        val removeActions = filesAfterWrite.map { add =>
+          RemoveAction(
+            path = add.path,
+            deletionTimestamp = Some(System.currentTimeMillis()),
+            dataChange = true,
+            extendedFileMetadata = None,
+            partitionValues = Some(add.partitionValues),
+            size = Some(add.size)
+          )
+        }
+
+        val mergedAddAction = createTestAddAction("merged.split").copy(
+          docMappingJson = Some(largeSchema),
+          size = 3000L,
+          numRecords = Some(300L)
+        )
+
+        // Commit the merge
+        txLog.commitMergeSplits(removeActions, Seq(mergedAddAction))
+
+        // Verify files can be read back after merge
+        val filesAfterMerge = txLog.listFiles()
+        filesAfterMerge.length shouldBe 1
+        filesAfterMerge.head.path shouldBe "merged.split"
+        filesAfterMerge.head.docMappingJson shouldBe Some(largeSchema)
+      } finally
+        txLog.close()
+    }
+  }
+
+  test("merge on table written BEFORE schema deduplication - simulates legacy table upgrade") {
+    // This test simulates the real-world scenario where:
+    // 1. Table was created BEFORE schema deduplication was implemented
+    // 2. AddActions have docMappingJson directly (no docMappingRef)
+    // 3. MetadataAction.configuration is empty (no schema registry)
+    // 4. After code upgrade, merge runs and produces deduped AddActions
+    // 5. Reading should work correctly
+    withTempPath { tempPath =>
+      val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+      val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
+
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        tempPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        // Step 1: Manually create a "legacy" transaction log without schema deduplication
+        // This simulates a table written before the schema deduplication feature
+        cloudProvider.createDirectory(transactionLogPath.toString)
+
+        val schemaA = """{"fields":[{"name":"id","type":"i64","fast":true}]}"""
+
+        // Version 0: Protocol + Metadata (no schema registry in configuration)
+        val protocolAction = createTestProtocolAction()
+        val metadataAction = MetadataAction(
+          id = "legacy-table",
+          name = Some("legacy"),
+          description = None,
+          format = FileFormat("indextables", Map.empty),
+          schemaString = """{"type":"struct","fields":[{"name":"id","type":"long"}]}""",
+          partitionColumns = Seq.empty,
+          configuration = Map.empty, // IMPORTANT: No schema registry - legacy table
+          createdTime = Some(System.currentTimeMillis())
+        )
+
+        // Write version 0 directly (bypassing schema deduplication)
+        StreamingActionWriter.writeActionsStreaming(
+          actions = Seq(protocolAction, metadataAction),
+          cloudProvider = cloudProvider,
+          path = new org.apache.hadoop.fs.Path(transactionLogPath, "00000000000000000000.json").toString,
+          codec = None,
+          ifNotExists = true
+        )
+
+        // Version 1: Add files with docMappingJson (legacy format - no deduplication)
+        val legacyAddActions = (1 to 3).map { i =>
+          createTestAddAction(s"split$i.split").copy(docMappingJson = Some(schemaA))
+        }
+
+        StreamingActionWriter.writeActionsStreaming(
+          actions = legacyAddActions,
+          cloudProvider = cloudProvider,
+          path = new org.apache.hadoop.fs.Path(transactionLogPath, "00000000000000000001.json").toString,
+          codec = None,
+          ifNotExists = true
+        )
+
+        // Step 2: Now open the table with the NEW code (schema deduplication enabled)
+        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+          java.util.Map.of(
+            "spark.indextables.transaction.allowDirectUsage", "true",
+            "spark.indextables.checkpoint.enabled", "false"
+          )
+        )
+
+        val txLog = new TransactionLog(tablePath, spark, options)
+
+        try {
+          // Verify we can read the legacy files
+          val legacyFiles = txLog.listFiles()
+          legacyFiles.length shouldBe 3
+          legacyFiles.foreach { file =>
+            file.docMappingJson shouldBe Some(schemaA) // Should have docMappingJson directly
+          }
+
+          // Step 3: Simulate a merge operation
+          val removeActions = legacyFiles.map { add =>
+            RemoveAction(
+              path = add.path,
+              deletionTimestamp = Some(System.currentTimeMillis()),
+              dataChange = true,
+              extendedFileMetadata = None,
+              partitionValues = Some(add.partitionValues),
+              size = Some(add.size)
+            )
+          }
+
+          val mergedAddAction = createTestAddAction("merged.split").copy(
+            docMappingJson = Some(schemaA),
+            size = 3000L,
+            numRecords = Some(300L)
+          )
+
+          // Commit the merge - this should apply schema deduplication
+          txLog.commitMergeSplits(removeActions, Seq(mergedAddAction))
+
+          // Step 4: Verify we can read back after merge
+          val filesAfterMerge = txLog.listFiles()
+          filesAfterMerge.length shouldBe 1
+          filesAfterMerge.head.path shouldBe "merged.split"
+          filesAfterMerge.head.docMappingJson shouldBe Some(schemaA)
+        } finally
+          txLog.close()
+      } finally
+        cloudProvider.close()
+    }
+  }
 }
