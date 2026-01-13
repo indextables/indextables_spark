@@ -407,26 +407,61 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing metadata from transaction log")
 
+        // Get checkpoint version and metadata (if available)
+        val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion())
+        var baseMetadata: Option[MetadataAction] = None
+
         // Try checkpoint first if available - uses cached checkpoint actions
         getCheckpointActionsCached() match {
           case Some(checkpointActions) =>
             checkpointActions.collectFirst { case metadata: MetadataAction => metadata } match {
               case Some(metadata) =>
-                logger.info("Found metadata in checkpoint (cached)")
-                return metadata
-              case None => // Continue searching in version files
+                logger.info(s"Found metadata in checkpoint (version ${checkpointVersion.getOrElse("unknown")})")
+                baseMetadata = Some(metadata)
+              case None => // No metadata in checkpoint, continue searching
             }
           case None => // No checkpoint, continue with version files
         }
 
-        // Look for metadata in reverse chronological order
+        // CRITICAL: Check versions AFTER checkpoint for MetadataAction updates
+        // Schema deduplication may have registered new schemas after the checkpoint
         val latestVersion = getLatestVersion()
-        for (version <- latestVersion to 0L by -1) {
+        val startVersion = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
+
+        // Search from checkpoint+1 to latest for any metadata updates
+        for (version <- latestVersion to startVersion by -1) {
           val actions = readVersionOptimized(version)
           actions.collectFirst { case metadata: MetadataAction => metadata } match {
-            case Some(metadata) => return metadata
-            case None           => // Continue searching
+            case Some(metadata) =>
+              // Found newer metadata - merge schema registries
+              baseMetadata match {
+                case Some(base) =>
+                  // Merge configurations: newer entries override older ones
+                  val mergedConfig = base.configuration ++ metadata.configuration
+                  logger.info(s"Merging metadata from version $version with checkpoint (${metadata.configuration.size} + ${base.configuration.size} = ${mergedConfig.size} config entries)")
+                  return metadata.copy(configuration = mergedConfig)
+                case None =>
+                  logger.info(s"Found metadata in version $version")
+                  return metadata
+              }
+            case None => // Continue searching
           }
+        }
+
+        // If we found checkpoint metadata but no newer updates, return checkpoint metadata
+        baseMetadata match {
+          case Some(metadata) =>
+            logger.info("Using checkpoint metadata (no newer updates found)")
+            return metadata
+          case None =>
+            // No checkpoint, search all versions from latest to 0
+            for (version <- latestVersion to 0L by -1) {
+              val actions = readVersionOptimized(version)
+              actions.collectFirst { case metadata: MetadataAction => metadata } match {
+                case Some(metadata) => return metadata
+                case None           => // Continue searching
+              }
+            }
         }
 
         throw new RuntimeException("No metadata found in transaction log")

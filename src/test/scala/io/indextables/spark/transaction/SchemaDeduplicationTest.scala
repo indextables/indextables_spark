@@ -585,4 +585,115 @@ class SchemaDeduplicationTest extends TestBase {
         cloudProvider.close()
     }
   }
+
+  test("checkpoint triggers missing schema error - reproduces production bug") {
+    // This test reproduces the production bug:
+    // 1. Create a new table using DataFrame API with LARGE schema (hundreds of fields)
+    // 2. Append 13 times with 100 records each (triggers checkpoint at version 10)
+    // 3. Verifies that MetadataAction is NOT written to every transaction (only version 1)
+    // 4. Verifies that reading works after checkpoint
+    withTempPath { tempPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create a DataFrame with a large schema (100 fields) and 100 records
+      val numFields = 100
+      val numRecords = 100
+
+      def createLargeDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
+        val rows = (1 to numRecords).map { i =>
+          val id = (batchNum - 1) * numRecords + i
+          val values = (1 to numFields).map(f => s"value_${id}_$f")
+          org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
+        }
+        val schema = org.apache.spark.sql.types.StructType(
+          org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
+          (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+        )
+        spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+      }
+
+      // First write to create the table
+      val df1 = createLargeDF(1)
+      df1.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .mode("overwrite")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "10")
+        .save(tempPath)
+
+      // Append 12 more times to trigger checkpoint at version 10
+      (2 to 13).foreach { i =>
+        println(s"DEBUG: Writing batch $i")
+        val df = createLargeDF(i)
+        df.write
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .mode("append")
+          .option("spark.indextables.checkpoint.enabled", "true")
+          .option("spark.indextables.checkpoint.interval", "10")
+          .save(tempPath)
+      }
+
+      // Verify transaction log structure - MetadataAction should NOT be in every version
+      val txLogPath = new org.apache.hadoop.fs.Path(tempPath, "_transaction_log")
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        tempPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        var metadataCount = 0
+        var addActionCount = 0
+
+        // Read each version and check for MetadataAction
+        (0 to 13).foreach { version =>
+          val versionFilePath = new org.apache.hadoop.fs.Path(txLogPath, f"$version%020d.json").toString
+          if (cloudProvider.exists(versionFilePath)) {
+            // Read and decompress if needed
+            val bytes = cloudProvider.readFile(versionFilePath)
+            val decompressedBytes = io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
+            val content = new String(decompressedBytes, java.nio.charset.StandardCharsets.UTF_8)
+            val lines = content.split("\n").filter(_.trim.nonEmpty)
+
+            // Check for metadata and add actions by looking at JSON keys
+            val hasMetadata = lines.exists(_.contains("\"metadataAction\""))
+            val addActionLines = lines.filter(_.contains("\"add\""))
+            addActionCount += addActionLines.size
+
+            if (hasMetadata) {
+              metadataCount += 1
+              println(s"DEBUG: Version $version has MetadataAction (${lines.size} actions total)")
+            }
+
+            // Check if AddActions use docMappingRef (deduplication) vs docMappingJson
+            val withRef = addActionLines.count(_.contains("\"docMappingRef\""))
+            val withJson = addActionLines.count(_.contains("\"docMappingJson\""))
+            if (addActionLines.nonEmpty) {
+              println(s"DEBUG: Version $version: ${addActionLines.size} AddActions ($withRef with ref, $withJson with json)")
+            }
+          }
+        }
+
+        println(s"DEBUG: MetadataAction found in $metadataCount versions, $addActionCount total AddActions")
+
+        // MetadataAction should be in version 0 (initialize) and version 1 (first schema registration)
+        // It should NOT be in every version
+        metadataCount should be <= 3 // Allow for version 0, 1, and maybe one more
+      } finally {
+        cloudProvider.close()
+      }
+
+      // Read back - this should fail with "Missing schema hashes" if deduplication isn't working
+      println("DEBUG: Reading back data")
+      val result = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+
+      // Verify we can read all rows
+      val count = result.count()
+      println(s"DEBUG: Read $count rows")
+      count shouldBe (13 * numRecords)
+    }
+  }
 }
