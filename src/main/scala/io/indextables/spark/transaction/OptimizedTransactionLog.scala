@@ -191,6 +191,17 @@ class OptimizedTransactionLog(
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
 
+    // Re-cache metadata after invalidation since writeActions() may have written updated metadata
+    // with new schema registry entries from schema deduplication
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after addFiles for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after addFiles: ${e.getMessage}")
+    }
+
     version
   }
 
@@ -260,6 +271,19 @@ class OptimizedTransactionLog(
     // Clear current snapshot to force recomputation
     currentSnapshot.set(None)
 
+    // Re-cache metadata after invalidation since writeActions() wrote updated metadata
+    // This is needed because invalidateTable() clears all caches including metadata
+    // The getMetadata() call will recompute and cache the correct metadata from disk
+    // We proactively cache it here to avoid the compute overhead on subsequent calls
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after overwrite for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after overwrite: ${e.getMessage}")
+    }
+
     logger.info(
       s"Overwrite complete: removed ${removeActions.length} files, added ${addActions.length} files"
     )
@@ -277,6 +301,17 @@ class OptimizedTransactionLog(
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
     currentSnapshot.set(None)
+
+    // Re-cache metadata after invalidation since writeActions() may have written updated metadata
+    // with new schema registry entries from schema deduplication
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after commitMergeSplits for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after commitMergeSplits: ${e.getMessage}")
+    }
 
     version
   }
@@ -1087,6 +1122,14 @@ class OptimizedTransactionLog(
     enhancedCache.putVersionActions(tablePath.toString, version, actionsToWrite)
     logger.debug(s" Cached version actions for ${tablePath.toString} version $version")
 
+    // IMPORTANT: Update metadata cache BEFORE listFiles() call below
+    // The listFiles() -> restoreSchemasInAddActions() -> getMetadata() path needs the updated
+    // metadata to contain the new schema registry entries
+    actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
+      enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
+      logger.debug(s" Cached metadata for ${tablePath.toString}")
+    }
+
     // Update file list cache if we have AddActions
     val addActions = actionsToWrite.collect { case add: AddAction => add }
     if (addActions.nonEmpty) {
@@ -1102,12 +1145,6 @@ class OptimizedTransactionLog(
       val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
       enhancedCache.putFileList(tablePath.toString, fileListChecksum, currentFiles)
       logger.debug(s" Updated file list cache for ${tablePath.toString} with checksum $fileListChecksum")
-    }
-
-    // Update metadata cache if we have MetadataAction (including schema updates)
-    actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
-      enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
-      logger.debug(s" Cached metadata for ${tablePath.toString}")
     }
 
     // Create checkpoint if needed (synchronously to ensure consistency)
