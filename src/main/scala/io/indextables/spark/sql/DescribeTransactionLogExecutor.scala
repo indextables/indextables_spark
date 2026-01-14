@@ -147,6 +147,7 @@ class DescribeTransactionLogExecutor(
           toLongOrNull(add.deleteOpstamp),
           add.numMergeOps.orNull,
           add.docMappingJson.orNull,
+          add.docMappingRef.orNull,
           toLongOrNull(add.uncompressedSizeBytes),
           // RemoveAction specific fields
           null,
@@ -188,6 +189,7 @@ class DescribeTransactionLogExecutor(
           remove.dataChange,
           remove.tags.map(toJsonString).orNull,
           // AddAction specific fields
+          null,
           null,
           null,
           null,
@@ -262,6 +264,7 @@ class DescribeTransactionLogExecutor(
           null,
           null,
           null,
+          null,
           // RemoveAction specific fields
           null,
           null,
@@ -302,6 +305,7 @@ class DescribeTransactionLogExecutor(
           null,
           null,
           // AddAction specific fields
+          null,
           null,
           null,
           null,
@@ -376,6 +380,7 @@ class DescribeTransactionLogExecutor(
           null,
           null,
           null,
+          null,
           // RemoveAction specific fields
           null,
           null,
@@ -412,6 +417,9 @@ class DescribeTransactionLogExecutor(
           logFilePath,
           "unknown",
           // All other fields null
+          null,
+          null,
+          null,
           null,
           null,
           null,

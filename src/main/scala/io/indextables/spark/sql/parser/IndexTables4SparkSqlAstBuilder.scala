@@ -36,7 +36,8 @@ import io.indextables.spark.sql.{
   MergeSplitsCommand,
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
-  RepairIndexFilesTransactionLogCommand
+  RepairIndexFilesTransactionLogCommand,
+  TruncateTimeTravelCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
@@ -363,6 +364,44 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     val result = CheckpointCommand(pathOption.get)
     logger.debug(s"Created CheckpointCommand: $result")
     result
+  }
+
+  override def visitTruncateTimeTravel(ctx: TruncateTimeTravelContext): LogicalPlan = {
+    logger.debug(s"visitTruncateTimeTravel called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
+
+    try {
+      // Extract table path or identifier
+      val tablePath = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        pathStr
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        tableId.mkString(".")
+      } else {
+        throw new IllegalArgumentException(
+          "TRUNCATE INDEXTABLES TIME TRAVEL requires either a path or table identifier"
+        )
+      }
+
+      // Extract DRY RUN flag
+      val dryRun = ctx.DRY() != null && ctx.RUN() != null
+      logger.debug(s"DRY RUN flag: $dryRun")
+
+      // Create command
+      logger.debug(s"Creating TruncateTimeTravelCommand with tablePath=$tablePath, dryRun=$dryRun")
+      val result = TruncateTimeTravelCommand(tablePath, dryRun)
+      logger.debug(s"Created TruncateTimeTravelCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitTruncateTimeTravel: ${e.getMessage}", e)
+        throw e
+    }
   }
 
   override def visitRepairIndexFilesTransactionLog(ctx: RepairIndexFilesTransactionLogContext): LogicalPlan = {
