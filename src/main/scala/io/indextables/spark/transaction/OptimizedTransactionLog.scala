@@ -392,6 +392,8 @@ class OptimizedTransactionLog(
     val checksum      = computeCurrentChecksumWithVersions(versions)
     logger.debug(s" Computed checksum: $checksum, latest version: $latestVersion")
 
+    // Cache stores RESTORED actions (with docMappingJson, not docMappingRef)
+    // This avoids running restoreSchemasInAddActions() on every listFiles() call
     val cached = enhancedCache.getOrComputeFileList(
       tablePath.toString,
       checksum, {
@@ -399,7 +401,7 @@ class OptimizedTransactionLog(
         logger.info(s"Computing file list using optimized operations for checksum: $checksum")
 
         // Try to get from current snapshot first, but verify it's up to date with latest version
-        currentSnapshot.get() match {
+        val rawFiles = currentSnapshot.get() match {
           case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
             logger.debug(s" Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
             snapshot.files
@@ -417,13 +419,16 @@ class OptimizedTransactionLog(
             )
             reconstructStateStandard(versions)
         }
+
+        // Restore schemas BEFORE caching to avoid running restoration on every listFiles() call
+        // This is a significant performance optimization: schema restoration creates new AddAction
+        // objects, so doing it once during cache computation vs. on every call is much more efficient
+        restoreSchemasInAddActions(rawFiles)
       }
     )
 
-    // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
-    val result = restoreSchemasInAddActions(cached)
-    logger.debug(s" Returning ${result.size} files from listFilesOptimized")
-    result
+    logger.debug(s" Returning ${cached.size} files from listFilesOptimized")
+    cached
   }
 
   /**
@@ -444,27 +449,33 @@ class OptimizedTransactionLog(
       return addActions
     }
 
-    // Get MetadataAction which contains the schema registry
-    val metadata = getMetadata()
-    val schemaRegistry = metadata.configuration
-
-    // Log what's in the schema registry for debugging
-    val schemaKeys = schemaRegistry.keys.filter(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX)).toSeq
-    val requestedRefs = addActions.flatMap(_.docMappingRef).distinct
-    logger.info(s"Schema restoration: registry has ${schemaKeys.size} schemas: ${schemaKeys.map(_.stripPrefix(SchemaDeduplication.SCHEMA_KEY_PREFIX)).mkString(", ")}")
-    logger.info(s"Schema restoration: requested refs: ${requestedRefs.mkString(", ")}")
+    // Use cached schema registry instead of reloading metadata each time
+    // getSchemaRegistry() uses double-checked locking and caches the result
+    // The registry is already in (hash -> schema) format without prefix
+    val schemaRegistry = getSchemaRegistry()
 
     // Check if registry has any schemas
-    if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
+    if (schemaRegistry.isEmpty) {
       throw new IllegalStateException(
         "AddActions have docMappingRef but no schema registry found in MetadataAction.configuration. " +
           "This indicates a corrupted transaction log or checkpoint."
       )
     }
 
-    // Restore schemas
-    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions")
-    val restored = SchemaDeduplication.restoreSchemas(addActions, schemaRegistry).collect { case a: AddAction => a }
+    // Restore schemas directly using the hash -> schema map (no prefix manipulation needed)
+    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions using cached registry (${schemaRegistry.size} schemas)")
+    val restored = addActions.map {
+      case add: AddAction if add.docMappingRef.isDefined && add.docMappingJson.isEmpty =>
+        val hash = add.docMappingRef.get
+        schemaRegistry.get(hash) match {
+          case Some(schema) =>
+            add.copy(docMappingJson = Some(schema), docMappingRef = None)
+          case None =>
+            logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
+            add
+        }
+      case other => other
+    }.collect { case a: AddAction => a }
 
     // Verify all schemas were restored
     val unresolvedRefs = restored.filter(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
