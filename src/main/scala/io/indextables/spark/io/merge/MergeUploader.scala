@@ -18,40 +18,43 @@
 package io.indextables.spark.io.merge
 
 import java.io.File
+import java.net.URI
 import java.nio.file.{Files, Paths}
 
-import io.indextables.spark.io.{CloudStorageProvider, CloudStorageProviderFactory}
+import io.indextables.spark.utils.CredentialProviderFactory
 
-import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import software.amazon.awssdk.auth.credentials._
+import software.amazon.awssdk.core.sync.RequestBody
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.PutObjectRequest
 
 import org.slf4j.LoggerFactory
-
-import scala.jdk.CollectionConverters._
 
 /**
  * Helper for uploading merged splits to cloud storage.
  *
- * Uses the existing CloudStorageProvider infrastructure for uploads, including multipart uploads for large files.
+ * Uses the same credential resolution as S3AsyncDownloader for consistency:
+ * CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath)
  */
 object MergeUploader {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  // Threshold for using streaming uploads (100MB)
-  private val STREAMING_THRESHOLD = 100L * 1024 * 1024
-
   /**
-   * Upload a local file to cloud storage.
+   * Upload a local file to S3.
+   *
+   * Uses the same credential resolution pattern as S3AsyncDownloader.fromConfig()
+   * to ensure Unity Catalog and other custom credential providers work consistently.
    *
    * @param localPath
    *   Path to the local file to upload
    * @param destPath
-   *   Destination cloud storage path
+   *   Destination S3 path (s3:// or s3a://)
    * @param configs
    *   Configuration map with cloud provider settings
-   * @param hadoopConf
-   *   Hadoop configuration (optional)
+   * @param tablePath
+   *   Table path for credential provider resolution
    * @return
    *   The number of bytes uploaded
    */
@@ -59,7 +62,7 @@ object MergeUploader {
     localPath: String,
     destPath: String,
     configs: Map[String, String],
-    hadoopConf: Configuration = new Configuration()
+    tablePath: String
   ): Long = {
     val localFile = new File(localPath)
     val fileSize  = localFile.length()
@@ -67,12 +70,9 @@ object MergeUploader {
     logger.info(s"Uploading merged split: $localPath -> $destPath ($fileSize bytes)")
 
     // Determine if this is a cloud path
-    val isCloudPath = destPath.startsWith("s3://") || destPath.startsWith("s3a://") ||
-      destPath.startsWith("azure://") || destPath.startsWith("wasb://") ||
-      destPath.startsWith("wasbs://") || destPath.startsWith("abfs://") ||
-      destPath.startsWith("abfss://")
+    val isS3Path = destPath.startsWith("s3://") || destPath.startsWith("s3a://")
 
-    if (!isCloudPath) {
+    if (!isS3Path) {
       // Local path - just copy the file
       val destFile = new File(destPath)
       destFile.getParentFile.mkdirs()
@@ -81,32 +81,101 @@ object MergeUploader {
       return fileSize
     }
 
-    // Create cloud storage provider
-    val options = new CaseInsensitiveStringMap(configs.asJava)
-    val cloudProvider = CloudStorageProviderFactory.createProvider(destPath, options, hadoopConf)
+    // Use the SAME credential resolution as S3AsyncDownloader
+    val s3Client = createS3Client(configs, tablePath)
 
     try {
-      if (fileSize > STREAMING_THRESHOLD) {
-        // Use streaming upload for large files (memory-efficient)
-        logger.info(s"Using streaming upload for large split: ${fileSize / (1024 * 1024)} MB")
-        val inputStream = Files.newInputStream(localFile.toPath)
-        try {
-          cloudProvider.writeFileFromStream(destPath, inputStream, Some(fileSize))
-        } finally {
-          inputStream.close()
-        }
-      } else {
-        // Use traditional upload for smaller files
-        logger.info(s"Using traditional upload for split: ${fileSize / (1024 * 1024)} MB")
-        val content = Files.readAllBytes(localFile.toPath)
-        cloudProvider.writeFile(destPath, content)
-      }
+      // Parse S3 path
+      val (bucket, key) = parseS3Path(destPath)
+
+      logger.info(s"Uploading to S3: bucket=$bucket, key=$key")
+
+      // Upload file
+      val putRequest = PutObjectRequest.builder()
+        .bucket(bucket)
+        .key(key)
+        .build()
+
+      s3Client.putObject(putRequest, RequestBody.fromFile(localFile))
 
       logger.info(s"Upload completed: $destPath ($fileSize bytes)")
       fileSize
     } finally {
-      cloudProvider.close()
+      s3Client.close()
     }
+  }
+
+  /**
+   * Create S3 client using the same credential resolution as S3AsyncDownloader.
+   * This ensures Unity Catalog and other custom credential providers work.
+   */
+  private def createS3Client(configs: Map[String, String], tablePath: String): S3Client = {
+    def get(key: String): Option[String] =
+      configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
+
+    // Use centralized credential resolution (SAME as S3AsyncDownloader.fromConfig)
+    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath)
+
+    val credentialsProvider: AwsCredentialsProvider = resolvedCreds match {
+      case Some(creds) =>
+        logger.info(s"Using resolved credentials from provider: accessKey=${creds.accessKey.take(4)}...")
+        creds.sessionToken match {
+          case Some(token) =>
+            StaticCredentialsProvider.create(AwsSessionCredentials.create(creds.accessKey, creds.secretKey, token))
+          case None =>
+            StaticCredentialsProvider.create(AwsBasicCredentials.create(creds.accessKey, creds.secretKey))
+        }
+      case None =>
+        logger.info("No credentials resolved from provider, using default credentials provider chain")
+        DefaultCredentialsProvider.create()
+    }
+
+    val builder = S3Client.builder()
+      .credentialsProvider(credentialsProvider)
+
+    // Configure region
+    get("spark.indextables.aws.region").foreach { region =>
+      logger.debug(s"S3Client: Setting region to $region")
+      builder.region(Region.of(region))
+    }
+
+    // Configure endpoint (for S3-compatible services)
+    get("spark.indextables.aws.endpoint").foreach { endpoint =>
+      val isStandardAwsEndpoint = endpoint.contains("s3.amazonaws.com") || endpoint.contains("amazonaws.com")
+
+      if (!isStandardAwsEndpoint || get("spark.indextables.aws.region").isEmpty) {
+        try {
+          val endpointUri = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+            URI.create(endpoint)
+          } else {
+            URI.create(s"https://$endpoint")
+          }
+
+          logger.debug(s"S3Client: Setting endpoint to $endpointUri")
+          builder.endpointOverride(endpointUri)
+
+          if (get("spark.indextables.aws.pathStyleAccess").exists(_.toBoolean)) {
+            builder.forcePathStyle(true)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Failed to parse S3 endpoint: $endpoint", ex)
+        }
+      }
+    }
+
+    builder.build()
+  }
+
+  /**
+   * Parse an S3 path into bucket and key.
+   */
+  private def parseS3Path(path: String): (String, String) = {
+    val normalizedPath = path.replaceFirst("^s3a://", "s3://")
+    val uri    = new URI(normalizedPath)
+    val bucket = uri.getHost
+    val key    = uri.getPath.stripPrefix("/")
+    (bucket, key)
   }
 
   /**
@@ -118,8 +187,8 @@ object MergeUploader {
    *   Destination cloud storage path
    * @param configs
    *   Configuration map with cloud provider settings
-   * @param hadoopConf
-   *   Hadoop configuration (optional)
+   * @param tablePath
+   *   Table path for credential provider resolution
    * @param maxRetries
    *   Maximum number of retry attempts (default: 3)
    * @return
@@ -129,7 +198,7 @@ object MergeUploader {
     localPath: String,
     destPath: String,
     configs: Map[String, String],
-    hadoopConf: Configuration = new Configuration(),
+    tablePath: String,
     maxRetries: Int = 3
   ): Long = {
     var lastException: Throwable = null
@@ -138,7 +207,7 @@ object MergeUploader {
     while (attempt < maxRetries) {
       attempt += 1
       try {
-        return upload(localPath, destPath, configs, hadoopConf)
+        return upload(localPath, destPath, configs, tablePath)
       } catch {
         case e: Exception =>
           lastException = e

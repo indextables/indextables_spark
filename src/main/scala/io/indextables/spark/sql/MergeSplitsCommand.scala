@@ -1711,12 +1711,12 @@ object MergeSplitsExecutor {
           s"$normalizedBaseUri/$mergedPath"
         }
 
-        // Upload using existing cloud provider infrastructure
+        // Upload using same credential resolution as download (CredentialProviderFactory)
         val uploadedBytes = io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
           localOutputPath,
           destPath,
           awsConfig.configs,
-          new org.apache.hadoop.conf.Configuration(),
+          tablePathStr,  // Pass tablePath for credential provider resolution
           maxRetries = 3
         )
 
