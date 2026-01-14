@@ -20,7 +20,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 - **Aggregate pushdown**: COUNT(), SUM(), AVG(), MIN(), MAX() with transaction log optimization
 - **Bucket aggregations**: DateHistogram, Histogram, and Range bucketing via SQL functions for time-series and distribution analysis
 - **Partitioned datasets**: Full support with partition pruning
-- **Merge operations**: SQL-based split consolidation (`MERGE SPLITS`)
+- **Merge operations**: SQL-based split consolidation (`MERGE SPLITS`) with Scala-side I/O (priority queuing, async downloads)
 - **Drop partitions**: SQL-based partition removal with WHERE clause validation (`DROP INDEXTABLES PARTITIONS`)
 - **Purge operations**: SQL-based cleanup of orphaned splits and old transaction logs (`PURGE INDEXTABLE`)
 - **Purge-on-write**: Automatic table hygiene during write operations
@@ -66,6 +66,13 @@ spark.indextables.mergeOnWrite.mergeGroupMultiplier: 2.0 (default: 2.0, threshol
 spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
 spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker: <auto> (default: auto-calculated based on heap size)
 spark.indextables.mergeOnWrite.memoryOverheadFactor: 3.0 (default: 3.0, memory overhead multiplier for merge size)
+
+// Merge I/O (Scala-side download/upload for merge operations)
+// Downloads source splits to local disk before merge, uploads merged split after
+spark.indextables.merge.download.maxConcurrencyPerCore: 8 (default: 8 concurrent downloads per CPU core)
+spark.indextables.merge.download.memoryBudget: "2G" (default: 2GB memory budget per executor)
+spark.indextables.merge.download.retries: 3 (default: 3 retry attempts with exponential backoff)
+spark.indextables.merge.upload.maxConcurrency: 6 (default: 6 concurrent upload threads)
 
 // Purge-On-Write (automatic cleanup of orphaned files and old transaction logs)
 spark.indextables.purgeOnWrite.enabled: false (default: false)
@@ -941,6 +948,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - ✅ **Purge-on-write**: 8/8 tests passing (local/Hadoop integration)
   - Real S3/Azure purge-on-write tests available but require credentials
 - ✅ **DESCRIBE ENVIRONMENT**: 10/10 tests passing (parsing, schema, redaction, queryability)
+- ✅ **Merge I/O**: 34/34 tests passing (config, priority queue, download manager, local copy downloader)
 
 ## Important Notes
 - **DataSource API**: Use `io.indextables.spark.core.IndexTables4SparkTableProvider` for all read/write operations
@@ -957,6 +965,7 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Purge-on-write safety**: Disabled by default, respects minimum retention periods, propagates credentials, graceful failure handling
 - **L2 Disk Cache**: Auto-enabled on Databricks/EMR when `/local_disk0` detected; disabled on spinning disk systems (no benefit). Use `spark.indextables.cache.disk.enabled=false` to explicitly disable.
 - **Bucket aggregations**: Use `indextables_histogram`, `indextables_date_histogram`, `indextables_range` functions in GROUP BY for time-series and distribution analysis. Requires fast fields.
+- **Merge I/O**: Downloads/uploads handled in Scala using AWS SDK v2 async client; tantivy4java receives only local paths. Priority queue ensures first-submitted batches complete first while maximizing throughput.
 
 ---
 

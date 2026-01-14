@@ -54,6 +54,10 @@ object SchemaDeduplication {
 
   /**
    * Recursively sort all object keys in a JsonNode tree to create a canonical representation.
+   *
+   * For arrays of objects that have a "name" field (like field definitions in docMappingJson),
+   * the array elements are also sorted by their "name" value to ensure consistent ordering
+   * regardless of serialization order.
    */
   private def sortJsonNode(node: JsonNode): JsonNode =
     node match {
@@ -66,15 +70,36 @@ object SchemaDeduplication {
         }
         sortedNode
       case arr: ArrayNode =>
-        // Process array elements (preserve order - arrays are ordered)
-        val sortedArray = mapper.createArrayNode()
-        arr.elements().asScala.foreach { elem =>
-          sortedArray.add(sortJsonNode(elem))
+        // Process array elements recursively first
+        val processedElements = arr.elements().asScala.toSeq.map(sortJsonNode)
+
+        // Sort array elements if they are objects with a "name" field
+        // This handles field definition arrays like docMappingJson where order is semantically irrelevant
+        val sortedElements = if (isNamedObjectArray(processedElements)) {
+          processedElements.sortBy { elem =>
+            elem.asInstanceOf[ObjectNode].get("name").asText()
+          }
+        } else {
+          // Keep original order for other arrays (primitives, mixed types, objects without "name")
+          processedElements
         }
+
+        val sortedArray = mapper.createArrayNode()
+        sortedElements.foreach(sortedArray.add)
         sortedArray
       case _ =>
         // Primitives (strings, numbers, booleans, nulls) - return as-is
         node
+    }
+
+  /**
+   * Check if an array consists of objects that all have a "name" field.
+   * This identifies field definition arrays that should be sorted canonically.
+   */
+  private def isNamedObjectArray(elements: Seq[JsonNode]): Boolean =
+    elements.nonEmpty && elements.forall {
+      case obj: ObjectNode => obj.has("name")
+      case _               => false
     }
 
   /**

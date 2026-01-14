@@ -2305,8 +2305,18 @@ spark.sql("MERGE SPLITS 's3://bucket/path' WHERE year = 2023 TARGET SIZE 100M")
 |---------|---------|-------------|
 | `spark.indextables.merge.maxSourceSplitsPerMerge` | 1000 | Maximum number of source splits that can be merged into a single destination split |
 | `spark.indextables.merge.skipSplitThreshold` | 0.45 | Splits >= this percentage of target size are skipped from merge (0.0 to 1.0) |
+| `spark.indextables.merge.download.maxConcurrencyPerCore` | 8 | Maximum concurrent downloads per CPU core for merge operations |
+| `spark.indextables.merge.download.memoryBudget` | "2G" | Memory budget per executor for download operations |
+| `spark.indextables.merge.download.retries` | 3 | Number of retry attempts for failed downloads (exponential backoff) |
+| `spark.indextables.merge.upload.maxConcurrency` | 6 | Maximum concurrent upload threads |
 
 **Skip Split Threshold**: Splits that are already close to the target size are excluded from merge consideration. With the default 0.45 (45%), a merge with TARGET SIZE 5G will skip any splits >= 2.25GB. This prevents wasting resources merging already-large splits.
+
+**Merge I/O Architecture**: Merge operations download source splits to local disk before merging, then upload the merged split. This architecture:
+- **Priority Queuing**: First-submitted merge batches complete before later ones while maximizing throughput
+- **Async Downloads**: Uses AWS SDK v2 async client for non-blocking S3 downloads
+- **Retry Logic**: Exponential backoff with jitter for transient failures
+- **Cleanup**: Automatic temp file cleanup after merge or on failure
 
 #### Dropping Partitions with DROP INDEXTABLES PARTITIONS
 

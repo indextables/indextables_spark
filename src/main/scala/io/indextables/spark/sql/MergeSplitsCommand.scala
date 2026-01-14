@@ -1552,48 +1552,21 @@ object MergeSplitsExecutor {
       }
     val mergedPath = s"$partitionPath$uuid.split"
 
-    // Create full paths for input splits and output split
-    // Handle S3 and Azure paths specially to preserve proper schemes for tantivy4java
+    // Determine if this is a cloud path
     val isS3Path = tablePathStr.startsWith("s3://") || tablePathStr.startsWith("s3a://")
     val isAzurePath = tablePathStr.startsWith("azure://") || tablePathStr.startsWith("wasb://") ||
       tablePathStr.startsWith("wasbs://") || tablePathStr.startsWith("abfs://") ||
       tablePathStr.startsWith("abfss://")
+    val isCloudPath = isS3Path || isAzurePath
 
-    val inputSplitPaths = mergeGroup.files.map { file =>
-      if (isS3Path) {
-        if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
-          file.path.replaceFirst("^s3a://", "s3://")
-        } else {
-          val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-          s"$normalizedBaseUri/${file.path}"
-        }
-      } else if (isAzurePath) {
-        if (
-          file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
-          file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
-          file.path.startsWith("abfss://")
-        ) {
-          normalizeAzureUrl(file.path)
-        } else {
-          val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-          s"$normalizedBaseUri/${file.path}"
-        }
-      } else {
-        new org.apache.hadoop.fs.Path(tablePathStr, file.path).toUri.getPath
-      }
-    }.asJava
+    // Determine temp directory for downloads
+    val tempDir = awsConfig.tempDirectoryPath
+      .getOrElse(if (MergeSplitsCommand.isLocalDisk0Available()) "/local_disk0/tantivy4spark-merge"
+                 else System.getProperty("java.io.tmpdir"))
 
-    val outputSplitPath = if (isS3Path) {
-      val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
-      s"$normalizedBaseUri/$mergedPath"
-    } else if (isAzurePath) {
-      val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
-      s"$normalizedBaseUri/$mergedPath"
-    } else {
-      new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toUri.getPath
-    }
-
-    logger.info(s"[EXECUTOR] Merging ${inputSplitPaths.size()} splits into $outputSplitPath")
+    val mergeId = java.util.UUID.randomUUID().toString
+    val downloadDir = new java.io.File(tempDir, s"merge-download-$mergeId")
+    downloadDir.mkdirs()
 
     // Extract docMappingJson from first file to preserve fast fields configuration
     val docMappingJson = mergeGroup.files.headOption
@@ -1604,50 +1577,215 @@ object MergeSplitsExecutor {
         )
       }
 
-    // Create merge configuration
-    val mergeConfigBuilder = QuickwitSplit.MergeConfig
-      .builder()
-      .indexUid("merged-index-uid")
-      .sourceId("tantivy4spark")
-      .nodeId("merge-node")
-      .docMappingUid(docMappingJson)
-      .partitionId(0L)
-      .deleteQueries(java.util.Collections.emptyList[String]())
-      .awsConfig(awsConfig.toQuickwitSplitAwsConfig(tablePathStr))
-      .debugEnabled(awsConfig.debugEnabled)
+    try {
+      // ============ PHASE 1: DOWNLOAD SOURCE SPLITS ============
+      val localInputPaths: Seq[String] = if (isCloudPath) {
+        logger.info(s"[EXECUTOR] Phase 1: Downloading ${mergeGroup.files.length} source splits")
 
-    // Add optional Azure configuration
-    val azureConf = azureConfig.toQuickwitSplitAzureConfig()
-    if (azureConf != null) {
-      mergeConfigBuilder.azureConfig(azureConf)
-    }
+        // Construct full cloud URLs for source splits
+        val sourceUrls = mergeGroup.files.map { file =>
+          if (isS3Path) {
+            if (file.path.startsWith("s3://") || file.path.startsWith("s3a://")) {
+              file.path.replaceFirst("^s3a://", "s3://")
+            } else {
+              val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+              s"$normalizedBaseUri/${file.path}"
+            }
+          } else {
+            // Azure path
+            if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+                file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+                file.path.startsWith("abfss://")) {
+              normalizeAzureUrl(file.path)
+            } else {
+              val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+              s"$normalizedBaseUri/${file.path}"
+            }
+          }
+        }
 
-    // Add optional temp directory and heap size
-    awsConfig.tempDirectoryPath.foreach(path => mergeConfigBuilder.tempDirectoryPath(path))
-    Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+        // Create download requests
+        val downloadRequests = sourceUrls.zipWithIndex.map { case (sourceUrl, idx) =>
+          val localPath = new java.io.File(downloadDir, s"source-$idx.split").getAbsolutePath
+          io.indextables.spark.io.merge.DownloadRequest(
+            sourcePath = sourceUrl,
+            destinationPath = localPath,
+            expectedSize = mergeGroup.files(idx).size,
+            batchId = 0,
+            index = idx
+          )
+        }
 
-    val mergeConfig = mergeConfigBuilder.build()
+        // Create appropriate downloader based on protocol
+        // Note: tablePath is passed for credential provider resolution (e.g., Unity Catalog)
+        val downloader: io.indextables.spark.io.merge.AsyncDownloader = if (isS3Path) {
+          io.indextables.spark.io.merge.S3AsyncDownloader.fromConfig(awsConfig.configs, tablePathStr)
+        } else {
+          io.indextables.spark.io.merge.AzureAsyncDownloader.fromConfig(awsConfig.configs)
+            .getOrElse(throw new RuntimeException("Failed to create Azure downloader - check credentials"))
+        }
 
-    val serializedMetadata =
+        // Download all source splits
+        val ioConfig = io.indextables.spark.io.merge.MergeIOConfig.fromMap(awsConfig.configs)
+        val downloadManager = io.indextables.spark.io.merge.CloudDownloadManager.getInstance(ioConfig)
+        val downloadResults = downloadManager.submitBatch(downloadRequests, downloader, ioConfig.downloadRetries).get()
+
+        // Check for failures
+        val failures = downloadResults.filter(!_.success)
+        if (failures.nonEmpty) {
+          val errorMsgs = failures.map(f => s"${f.request.sourcePath}: ${f.error.map(_.getMessage).getOrElse("unknown")}").mkString("; ")
+          throw new RuntimeException(s"Failed to download ${failures.length} source splits: $errorMsgs")
+        }
+
+        // Update Spark input metrics
+        val totalDownloadBytes = downloadResults.map(_.bytesDownloaded).sum
+        org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(totalDownloadBytes, downloadResults.length)
+
+        logger.info(s"[EXECUTOR] Phase 1 complete: Downloaded ${downloadResults.length} splits (${totalDownloadBytes} bytes)")
+
+        // Return local paths
+        downloadResults.map(_.localPath)
+      } else {
+        // Local paths - no download needed, just resolve the paths
+        logger.info(s"[EXECUTOR] Phase 1: Using local paths (no download needed)")
+        mergeGroup.files.map { file =>
+          new org.apache.hadoop.fs.Path(tablePathStr, file.path).toUri.getPath
+        }
+      }
+
+      // ============ PHASE 2: LOCAL MERGE (tantivy4java) ============
+      logger.info(s"[EXECUTOR] Phase 2: Merging ${localInputPaths.size} splits locally")
+
+      val localOutputPath = new java.io.File(downloadDir, s"merged-$mergeId.split").getAbsolutePath
+
+      // Create merge configuration WITHOUT cloud credentials - all paths are local!
+      val mergeConfigBuilder = QuickwitSplit.MergeConfig
+        .builder()
+        .indexUid("merged-index-uid")
+        .sourceId("tantivy4spark")
+        .nodeId("merge-node")
+        .docMappingUid(docMappingJson)
+        .partitionId(0L)
+        .deleteQueries(java.util.Collections.emptyList[String]())
+        .debugEnabled(awsConfig.debugEnabled)
+
+      // Add temp directory and heap size
+      mergeConfigBuilder.tempDirectoryPath(tempDir)
+      Option(awsConfig.heapSize).foreach(heap => mergeConfigBuilder.heapSizeBytes(heap))
+
+      val mergeConfig = mergeConfigBuilder.build()
+
+      val serializedMetadata =
+        try {
+          val metadata = MergeSplitsCommand.retryOnStreamingError(
+            () => QuickwitSplit.mergeSplits(localInputPaths.asJava, localOutputPath, mergeConfig),
+            s"merge ${localInputPaths.size} local splits",
+            logger
+          )
+          SerializableSplitMetadata.fromQuickwitSplitMetadata(metadata)
+        } catch {
+          case ex: Exception =>
+            logger.error(s"Merge failed: ${ex.getMessage}", ex)
+            throw new RuntimeException(s"Merge operation failed: ${ex.getMessage}", ex)
+        }
+
+      logger.info(s"[EXECUTOR] Phase 2 complete: Merged ${serializedMetadata.getNumDocs} docs, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+
+      // Verify local merged file exists
+      val mergedFile = new java.io.File(localOutputPath)
+      if (!mergedFile.exists()) {
+        throw new RuntimeException(s"Merged file was not created at: $localOutputPath")
+      }
+      val mergedSize = mergedFile.length()
+
+      // ============ PHASE 3: UPLOAD MERGED SPLIT ============
+      val finalMergedSize = if (isCloudPath) {
+        logger.info(s"[EXECUTOR] Phase 3: Uploading merged split ($mergedSize bytes)")
+
+        // Construct cloud destination path
+        val destPath = if (isS3Path) {
+          val normalizedBaseUri = tablePathStr.replaceFirst("^s3a://", "s3://").replaceAll("/$", "")
+          s"$normalizedBaseUri/$mergedPath"
+        } else {
+          val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
+          s"$normalizedBaseUri/$mergedPath"
+        }
+
+        // Upload using same credential resolution as download (CredentialProviderFactory)
+        val uploadedBytes = io.indextables.spark.io.merge.MergeUploader.uploadWithRetry(
+          localOutputPath,
+          destPath,
+          awsConfig.configs,
+          tablePathStr,  // Pass tablePath for credential provider resolution
+          maxRetries = 3
+        )
+
+        // Update Spark output metrics
+        org.apache.spark.sql.indextables.OutputMetricsUpdater.updateOutputMetrics(uploadedBytes, 1)
+
+        logger.info(s"[EXECUTOR] Phase 3 complete: Uploaded to $destPath ($uploadedBytes bytes)")
+        uploadedBytes
+      } else {
+        // For local paths, tantivy4java already wrote to the correct location
+        // Just move the file to the final destination
+        val destPath = new org.apache.hadoop.fs.Path(tablePathStr, mergedPath).toUri.getPath
+        val destFile = new java.io.File(destPath)
+        destFile.getParentFile.mkdirs()
+        java.nio.file.Files.move(mergedFile.toPath, destFile.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        logger.info(s"[EXECUTOR] Phase 3: Moved local merge result to $destPath")
+        mergedSize
+      }
+
+      // ============ PHASE 4: CLEANUP ============
+      logger.info(s"[EXECUTOR] Phase 4: Cleaning up temp files")
+
+      // Delete source temp files (downloaded splits) - only if we downloaded them
+      if (isCloudPath) {
+        localInputPaths.foreach { path =>
+          try {
+            java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(path))
+          } catch {
+            case e: Exception => logger.warn(s"Failed to delete temp source file: $path", e)
+          }
+        }
+      }
+
+      // Delete merged temp file (after upload success) - only if we uploaded it
+      if (isCloudPath) {
+        try {
+          java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(localOutputPath))
+        } catch {
+          case e: Exception => logger.warn(s"Failed to delete temp merged file: $localOutputPath", e)
+        }
+      }
+
+      // Delete download directory
       try {
-        awsConfig.executeMerge(inputSplitPaths, outputSplitPath, mergeConfig)
+        if (downloadDir.exists()) {
+          org.apache.commons.io.FileUtils.deleteDirectory(downloadDir)
+        }
       } catch {
-        case ex: Exception =>
-          logger.error(s"Merge failed: ${ex.getMessage}", ex)
-          throw new RuntimeException(s"Merge operation failed: ${ex.getMessage}", ex)
+        case e: Exception => logger.warn(s"Failed to delete download directory: ${downloadDir.getAbsolutePath}", e)
       }
 
-    logger.info(s"[EXECUTOR] Merged ${serializedMetadata.getNumDocs} docs, ${serializedMetadata.getUncompressedSizeBytes} bytes")
+      logger.info(s"[EXECUTOR] Merge complete: ${mergeGroup.files.length} splits -> $mergedPath ($finalMergedSize bytes)")
 
-    // Verify local file existence (cloud paths assumed successful if no exception)
-    if (!isS3Path && !isAzurePath) {
-      val outputFile = new java.io.File(outputSplitPath)
-      if (!outputFile.exists()) {
-        throw new RuntimeException(s"Merged file was not created at: $outputSplitPath")
-      }
+      MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
+
+    } catch {
+      case e: Exception =>
+        // Cleanup on failure - scrub all temp files
+        logger.error(s"[EXECUTOR] Merge failed, cleaning up temp files", e)
+        try {
+          if (downloadDir.exists()) {
+            org.apache.commons.io.FileUtils.deleteDirectory(downloadDir)
+          }
+        } catch {
+          case cleanupEx: Exception =>
+            logger.warn(s"Failed to cleanup download directory on error: ${downloadDir.getAbsolutePath}", cleanupEx)
+        }
+        throw e
     }
-
-    MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
   }
 }
 
@@ -1738,7 +1876,7 @@ case class SerializableSplitMetadata(
       numMergeOps.getOrElse(0),                                              // numMergeOps
       "doc-mapping-uid",                                                     // docMappingUid (NEW - required)
       docMappingJson.orNull,                                                 // docMappingJson (MOVED - for performance)
-      skippedSplits.asJava                                                   // skippedSplits
+      skippedSplits.map(s => new QuickwitSplit.SkippedSplit(s, "")).asJava    // skippedSplits
     )
   }
 }

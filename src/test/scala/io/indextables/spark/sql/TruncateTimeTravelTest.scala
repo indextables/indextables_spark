@@ -358,6 +358,100 @@ class TruncateTimeTravelTest extends TestBase {
     row.getString(1) shouldBe "SUCCESS"
   }
 
+  // ===== Fast Fields Preservation Tests =====
+
+  test("Fast fields configuration should be preserved after truncation") {
+    val tablePath = new File(tempDir, "fast_fields_preservation_test").getAbsolutePath
+
+    val schema = StructType(
+      Seq(
+        StructField("id", IntegerType, nullable = false),
+        StructField("region", StringType, nullable = false),  // partition column
+        StructField("category", StringType, nullable = false),
+        StructField("amount", DoubleType, nullable = false),  // fast field (non-partition)
+        StructField("count", IntegerType, nullable = false)   // fast field (non-partition)
+      )
+    )
+
+    // Create initial data with multiple transactions to generate version files
+    for (i <- 1 to 12) {
+      val data = Seq(
+        Row(i * 2 - 1, "us-east", s"cat_${i % 3}", i * 10.0, i * 2),
+        Row(i * 2, "us-west", s"cat_${i % 3}", i * 15.0, i * 3)
+      )
+      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "amount,count,region")
+        .partitionBy("region")
+        .mode(if (i == 1) "overwrite" else "append")
+        .save(tablePath)
+    }
+
+    // Verify aggregations work BEFORE truncation
+    val dfBefore = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    val countBefore = dfBefore.count()
+    val sumAmountBefore = dfBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+    val sumCountBefore = dfBefore.agg(Map("count" -> "sum")).collect().head.getLong(0)
+    val avgAmountBefore = dfBefore.agg(Map("amount" -> "avg")).collect().head.getDouble(0)
+    val maxAmountBefore = dfBefore.agg(Map("amount" -> "max")).collect().head.getDouble(0)
+    val minAmountBefore = dfBefore.agg(Map("amount" -> "min")).collect().head.getDouble(0)
+
+    // Aggregation by partition column
+    val sumByPartitionBefore = dfBefore
+      .groupBy("region")
+      .agg(Map("amount" -> "sum"))
+      .collect()
+      .map(r => (r.getString(0), r.getDouble(1)))
+      .toMap
+
+    countBefore shouldBe 24 // 12 transactions * 2 records each
+
+    // Truncate time travel
+    val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
+    val row = result.collect().head
+    row.getString(1) shouldBe "SUCCESS"
+
+    // Verify aggregations work AFTER truncation (proves fast fields preserved)
+    val dfAfter = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    // Basic count should match
+    val countAfter = dfAfter.count()
+    countAfter shouldBe countBefore
+
+    // Aggregations on fast fields should still work and return same results
+    val sumAmountAfter = dfAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+    val sumCountAfter = dfAfter.agg(Map("count" -> "sum")).collect().head.getLong(0)
+    val avgAmountAfter = dfAfter.agg(Map("amount" -> "avg")).collect().head.getDouble(0)
+    val maxAmountAfter = dfAfter.agg(Map("amount" -> "max")).collect().head.getDouble(0)
+    val minAmountAfter = dfAfter.agg(Map("amount" -> "min")).collect().head.getDouble(0)
+
+    sumAmountAfter shouldBe sumAmountBefore
+    sumCountAfter shouldBe sumCountBefore
+    avgAmountAfter shouldBe avgAmountBefore
+    maxAmountAfter shouldBe maxAmountBefore
+    minAmountAfter shouldBe minAmountBefore
+
+    // Aggregation by partition column should still work
+    val sumByPartitionAfter = dfAfter
+      .groupBy("region")
+      .agg(Map("amount" -> "sum"))
+      .collect()
+      .map(r => (r.getString(0), r.getDouble(1)))
+      .toMap
+
+    sumByPartitionAfter("us-east") shouldBe sumByPartitionBefore("us-east")
+    sumByPartitionAfter("us-west") shouldBe sumByPartitionBefore("us-west")
+
+    println(s"✅ Fast fields preserved: SUM(amount)=$sumAmountAfter, SUM(count)=$sumCountAfter")
+    println(s"✅ Partition aggregation preserved: us-east=${sumByPartitionAfter("us-east")}, us-west=${sumByPartitionAfter("us-west")}")
+  }
+
   // ===== Multiple Checkpoint Tests =====
 
   test("TRUNCATE should handle multiple existing checkpoints with uncheckpointed version") {

@@ -37,6 +37,7 @@ import io.indextables.spark.search.{SplitSearchEngine, TantivySearchEngine}
 import io.indextables.spark.storage.SplitCacheConfig
 import io.indextables.spark.transaction.{AddAction, PartitionUtils}
 import io.indextables.spark.util.StatisticsCalculator
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /** Utility for consistent path resolution across different scan types. */
@@ -311,7 +312,7 @@ class IndexTables4SparkPartitionReader(
           addAction.numMergeOps.getOrElse(0),                      // numMergeOps (Int is OK for this field)
           "doc-mapping-uid",                                       // docMappingUid (NEW - required)
           addAction.docMappingJson.orNull,                         // docMappingJson (MOVED - for performance)
-          java.util.Collections.emptyList[String]()                // skippedSplits
+          java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()  // skippedSplits
         )
 
         // Create IndexTables4SparkOptions from config map for JSON field support
