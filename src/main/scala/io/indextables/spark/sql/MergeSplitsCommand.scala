@@ -542,18 +542,17 @@ class MergeSplitsExecutor(
     // Get current metadata to understand partition schema
     val metadata = transactionLog.getMetadata()
 
-    // DEBUG: Log the metadata details
-    logger.info(s"MERGE DEBUG: Retrieved metadata from transaction log:")
-    logger.info(s"MERGE DEBUG:   Metadata ID: ${metadata.id}")
-    logger.info(s"MERGE DEBUG:   Partition columns: ${metadata.partitionColumns}")
-    logger.info(s"MERGE DEBUG:   Partition columns size: ${metadata.partitionColumns.size}")
-    logger.info(s"MERGE DEBUG:   Configuration: ${metadata.configuration}")
+    // Log metadata details (avoid logging full configuration as it may contain large schema registry)
+    logger.debug(s"MERGE DEBUG: Retrieved metadata - ID: ${metadata.id}, partition columns: ${metadata.partitionColumns.mkString(",")}")
+    if (logger.isDebugEnabled) {
+      logger.debug(s"MERGE DEBUG: Configuration has ${metadata.configuration.size} entries")
+    }
 
     val partitionSchema = StructType(
       metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
     )
 
-    logger.info(s"MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
+    logger.debug(s"MERGE DEBUG: Constructed partition schema: ${partitionSchema.fieldNames.mkString(", ")}")
 
     // If no partition columns are defined in metadata, skip partition validation
     if (metadata.partitionColumns.isEmpty) {

@@ -226,6 +226,16 @@ class TransactionLogAdapter(
     super.invalidateCache()
   }
 
+  // Override cooldown-related methods to use optimized versions that share cached checkpoint data
+  override def getSkippedFiles(): Seq[SkipAction] =
+    optimizedLog.getSkippedFiles()
+
+  override def getFilesInCooldown(): Map[String, Long] =
+    optimizedLog.getFilesInCooldown()
+
+  override def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] =
+    optimizedLog.filterFilesInCooldown(candidateFiles)
+
   // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions
   // are not in the base TransactionLog class but could be added if needed.
   // The OptimizedTransactionLog handles these operations internally.

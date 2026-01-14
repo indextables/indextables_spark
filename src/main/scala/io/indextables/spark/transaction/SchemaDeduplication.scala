@@ -92,6 +92,7 @@ object SchemaDeduplication {
     }
 
     // Process actions and collect new schemas
+    // NOTE: .toList is required to force strict evaluation - Scala 2.12 Seq.map can be lazy
     val deduplicatedActions = actions.map {
       case add: AddAction if add.docMappingJson.isDefined =>
         val schema = add.docMappingJson.get
@@ -100,7 +101,7 @@ object SchemaDeduplication {
         // Add to registry if not already present
         if (!registryBuilder.contains(hash)) {
           registryBuilder(hash) = schema
-          logger.debug(s"Registered new schema with hash: $hash (${schema.length} bytes)")
+          logger.debug(s"Schema deduplication: registered schema hash=$hash (${schema.length} bytes)")
         }
 
         // Replace docMappingJson with docMappingRef
@@ -110,7 +111,7 @@ object SchemaDeduplication {
         )
 
       case other => other
-    }
+    }.toList // Force STRICT eager evaluation (toList is always strict unlike toSeq in Scala 2.12)
 
     // Convert registry to configuration format (with prefix)
     val registryMap = registryBuilder.map {

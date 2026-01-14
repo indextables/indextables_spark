@@ -586,6 +586,122 @@ class SchemaDeduplicationTest extends TestBase {
     }
   }
 
+  test("multiple transactions with same schema should produce single hash in checkpoint") {
+    // This test validates that when multiple transactions write with the same schema,
+    // the checkpoint contains only ONE copy of that schema (not duplicates)
+    withTempPath { tempPath =>
+      val sparkImplicits = spark.implicits
+      import sparkImplicits._
+
+      // Create a DataFrame with a medium schema (50 fields)
+      val numFields = 50
+      val numRecords = 10
+
+      def createDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
+        val rows = (1 to numRecords).map { i =>
+          val id = (batchNum - 1) * numRecords + i
+          val values = (1 to numFields).map(f => s"value_${id}_$f")
+          org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
+        }
+        val schema = org.apache.spark.sql.types.StructType(
+          org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
+          (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+        )
+        spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
+      }
+
+      // Write 12 batches to trigger checkpoint at version 10
+      (1 to 12).foreach { i =>
+        val mode = if (i == 1) "overwrite" else "append"
+        val df = createDF(i)
+        df.write
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .mode(mode)
+          .option("spark.indextables.checkpoint.enabled", "true")
+          .option("spark.indextables.checkpoint.interval", "10")
+          .save(tempPath)
+      }
+
+      // Read the checkpoint file and verify schema deduplication
+      val txLogPath = new org.apache.hadoop.fs.Path(tempPath, "_transaction_log")
+      val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
+        tempPath,
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        // Find checkpoint file
+        val checkpointPath = new org.apache.hadoop.fs.Path(txLogPath, "00000000000000000010.checkpoint.json").toString
+        println(s"DEBUG: Looking for checkpoint at: $checkpointPath")
+        println(s"DEBUG: Checkpoint exists: ${cloudProvider.exists(checkpointPath)}")
+
+        // List all files in transaction log directory
+        val allFiles = cloudProvider.listFiles(txLogPath.toString)
+        println(s"DEBUG: Transaction log files: ${allFiles.mkString(", ")}")
+
+        if (cloudProvider.exists(checkpointPath)) {
+          val bytes = cloudProvider.readFile(checkpointPath)
+          val decompressedBytes = io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
+          val content = new String(decompressedBytes, java.nio.charset.StandardCharsets.UTF_8)
+          val lines = content.split("\n").filter(_.trim.nonEmpty)
+
+          // Debug: show first few lines of checkpoint
+          println(s"DEBUG: Checkpoint has ${lines.length} lines")
+          lines.take(3).foreach(line => println(s"DEBUG: Line sample: ${line.take(200)}..."))
+
+          // Count MetadataAction entries - checkpoint uses "metaData" key (note capital D)
+          val metadataLines = lines.filter(_.contains("\"metaData\""))
+          println(s"DEBUG: Found ${metadataLines.length} MetadataAction entries in checkpoint")
+
+          // There should be exactly 1 MetadataAction
+          metadataLines.length shouldBe 1
+
+          // Extract schema registry entries from MetadataAction
+          val metadataLine = metadataLines.head
+          val schemaKeyPattern = """"docMappingSchema\.[^"]+"""".r
+          val schemaKeys = schemaKeyPattern.findAllIn(metadataLine).toList
+
+          println(s"DEBUG: Found ${schemaKeys.length} schema registry entries: ${schemaKeys.mkString(", ")}")
+
+          // All 12 batches used the SAME schema, so there should be only 1 unique schema hash
+          // (The schema keys are like "docMappingSchema.ABC123...")
+          val uniqueHashes = schemaKeys.map(_.replace("\"docMappingSchema.", "").replace("\"", "")).distinct
+          println(s"DEBUG: Unique schema hashes: ${uniqueHashes.mkString(", ")}")
+
+          // Should have exactly 1 unique schema since all batches use the same schema
+          uniqueHashes.length shouldBe 1
+
+          // Count AddActions and verify they all use docMappingRef (not docMappingJson)
+          val addActionLines = lines.filter(_.contains("\"add\""))
+          val withRef = addActionLines.count(_.contains("\"docMappingRef\""))
+          val withFullJson = addActionLines.count(line =>
+            line.contains("\"docMappingJson\"") && !line.contains("\"docMappingJson\":null")
+          )
+
+          println(s"DEBUG: ${addActionLines.length} AddActions total, $withRef with docMappingRef, $withFullJson with full docMappingJson")
+
+          // All AddActions should use docMappingRef (deduplicated), none should have full docMappingJson
+          withFullJson shouldBe 0
+          withRef shouldBe addActionLines.length
+        } else {
+          fail(s"Checkpoint file not found at $checkpointPath")
+        }
+
+        // Verify we can read all data back
+        val result = spark.read
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .load(tempPath)
+
+        val count = result.count()
+        println(s"DEBUG: Read $count rows")
+        count shouldBe (12 * numRecords)
+      } finally {
+        cloudProvider.close()
+      }
+    }
+  }
+
   test("checkpoint triggers missing schema error - reproduces production bug") {
     // This test reproduces the production bug:
     // 1. Create a new table using DataFrame API with LARGE schema (hundreds of fields)

@@ -17,7 +17,10 @@
 
 package io.indextables.spark.transaction
 
-import java.io.{BufferedReader, InputStreamReader}
+import java.io.{BufferedReader, File, FileInputStream, InputStreamReader}
+import java.nio.file.{Files, StandardCopyOption}
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 import scala.collection.mutable.ListBuffer
@@ -114,6 +117,44 @@ class OptimizedTransactionLog(
   private val maxStaleness        = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
 
+  // Temp directory for downloading transaction log files before parsing (avoids slow streaming reads from object storage)
+  private val tempDirectoryPath: Option[String] = {
+    Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
+      .orElse(Option(spark.sparkContext.hadoopConfiguration.get("spark.indextables.indexWriter.tempDirectoryPath")))
+      .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultTempPath())
+  }
+
+  // Transaction log cache directory - persists downloaded files for reuse across reads
+  // Each table gets its own cache directory based on a hash of the table path to avoid conflicts
+  private lazy val txlogCacheDir: File = {
+    val baseDir = tempDirectoryPath.map(new File(_)).getOrElse(new File(System.getProperty("java.io.tmpdir")))
+    val cacheBase = new File(baseDir, "txlog_cache")
+
+    // Create a short hash of the table path to use as directory name (avoids path special chars)
+    val tablePathHash = {
+      val digest = MessageDigest.getInstance("SHA-256")
+      val hashBytes = digest.digest(tablePath.toString.getBytes("UTF-8"))
+      Base64.getUrlEncoder.withoutPadding().encodeToString(hashBytes).take(12)
+    }
+
+    val tableDir = new File(cacheBase, tablePathHash)
+    if (!tableDir.exists()) {
+      tableDir.mkdirs()
+      logger.debug(s"Created txlog cache directory: ${tableDir.getAbsolutePath} for table $tablePath")
+    }
+    tableDir
+  }
+
+  /**
+   * Get the cache file path for a transaction log file.
+   * Extracts the filename from the cloud path to use as the local cache filename.
+   */
+  private def getCacheFilePath(cloudFilePath: String): File = {
+    // Extract just the filename (e.g., "00000000000000000001.json" or "00000000000000000010.checkpoint.json")
+    val fileName = cloudFilePath.split("/").last
+    new File(txlogCacheDir, fileName)
+  }
+
   def getTablePath(): Path = tablePath
 
   override def close(): Unit = {
@@ -190,6 +231,18 @@ class OptimizedTransactionLog(
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
+    invalidateSchemaRegistry()
+
+    // Re-cache metadata after invalidation since writeActions() may have written updated metadata
+    // with new schema registry entries from schema deduplication
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after addFiles for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after addFiles: ${e.getMessage}")
+    }
 
     version
   }
@@ -256,9 +309,23 @@ class OptimizedTransactionLog(
 
     // Clear all caches after overwrite
     enhancedCache.invalidateTable(tablePath.toString)
+    invalidateSchemaRegistry()
 
     // Clear current snapshot to force recomputation
     currentSnapshot.set(None)
+
+    // Re-cache metadata after invalidation since writeActions() wrote updated metadata
+    // This is needed because invalidateTable() clears all caches including metadata
+    // The getMetadata() call will recompute and cache the correct metadata from disk
+    // We proactively cache it here to avoid the compute overhead on subsequent calls
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after overwrite for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after overwrite: ${e.getMessage}")
+    }
 
     logger.info(
       s"Overwrite complete: removed ${removeActions.length} files, added ${addActions.length} files"
@@ -276,7 +343,19 @@ class OptimizedTransactionLog(
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
     currentSnapshot.set(None)
+
+    // Re-cache metadata after invalidation since writeActions() may have written updated metadata
+    // with new schema registry entries from schema deduplication
+    try {
+      val metadata = getMetadata()
+      enhancedCache.putMetadata(tablePath.toString, metadata)
+      logger.debug(s" Re-cached metadata after commitMergeSplits for ${tablePath.toString}")
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to re-cache metadata after commitMergeSplits: ${e.getMessage}")
+    }
 
     version
   }
@@ -292,6 +371,7 @@ class OptimizedTransactionLog(
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
     currentSnapshot.set(None)
 
     logger.info(s"Committed ${removeActions.length} remove actions in version $version")
@@ -312,6 +392,8 @@ class OptimizedTransactionLog(
     val checksum      = computeCurrentChecksumWithVersions(versions)
     logger.debug(s" Computed checksum: $checksum, latest version: $latestVersion")
 
+    // Cache stores RESTORED actions (with docMappingJson, not docMappingRef)
+    // This avoids running restoreSchemasInAddActions() on every listFiles() call
     val cached = enhancedCache.getOrComputeFileList(
       tablePath.toString,
       checksum, {
@@ -319,7 +401,7 @@ class OptimizedTransactionLog(
         logger.info(s"Computing file list using optimized operations for checksum: $checksum")
 
         // Try to get from current snapshot first, but verify it's up to date with latest version
-        currentSnapshot.get() match {
+        val rawFiles = currentSnapshot.get() match {
           case Some(snapshot) if snapshot.age < maxStaleness.toMillis && snapshot.version >= latestVersion =>
             logger.debug(s" Using cached snapshot (version ${snapshot.version}) with ${snapshot.files.size} files")
             snapshot.files
@@ -337,13 +419,16 @@ class OptimizedTransactionLog(
             )
             reconstructStateStandard(versions)
         }
+
+        // Restore schemas BEFORE caching to avoid running restoration on every listFiles() call
+        // This is a significant performance optimization: schema restoration creates new AddAction
+        // objects, so doing it once during cache computation vs. on every call is much more efficient
+        restoreSchemasInAddActions(rawFiles)
       }
     )
 
-    // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
-    val result = restoreSchemasInAddActions(cached)
-    logger.debug(s" Returning ${result.size} files from listFilesOptimized")
-    result
+    logger.debug(s" Returning ${cached.size} files from listFilesOptimized")
+    cached
   }
 
   /**
@@ -364,21 +449,33 @@ class OptimizedTransactionLog(
       return addActions
     }
 
-    // Get MetadataAction which contains the schema registry
-    val metadata = getMetadata()
-    val schemaRegistry = metadata.configuration
+    // Use cached schema registry instead of reloading metadata each time
+    // getSchemaRegistry() uses double-checked locking and caches the result
+    // The registry is already in (hash -> schema) format without prefix
+    val schemaRegistry = getSchemaRegistry()
 
     // Check if registry has any schemas
-    if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
+    if (schemaRegistry.isEmpty) {
       throw new IllegalStateException(
         "AddActions have docMappingRef but no schema registry found in MetadataAction.configuration. " +
           "This indicates a corrupted transaction log or checkpoint."
       )
     }
 
-    // Restore schemas
-    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions")
-    val restored = SchemaDeduplication.restoreSchemas(addActions, schemaRegistry).collect { case a: AddAction => a }
+    // Restore schemas directly using the hash -> schema map (no prefix manipulation needed)
+    logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions using cached registry (${schemaRegistry.size} schemas)")
+    val restored = addActions.map {
+      case add: AddAction if add.docMappingRef.isDefined && add.docMappingJson.isEmpty =>
+        val hash = add.docMappingRef.get
+        schemaRegistry.get(hash) match {
+          case Some(schema) =>
+            add.copy(docMappingJson = Some(schema), docMappingRef = None)
+          case None =>
+            logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
+            add
+        }
+      case other => other
+    }.collect { case a: AddAction => a }
 
     // Verify all schemas were restored
     val unresolvedRefs = restored.filter(a => a.docMappingRef.isDefined && a.docMappingJson.isEmpty)
@@ -847,24 +944,86 @@ class OptimizedTransactionLog(
       val actions = parseActionsFromStream(versionFilePath)
       logger.debug(s" Parsed ${actions.size} actions from version $version using streaming")
       actions
-    }.getOrElse {
-      logger.debug(s" Failed to read/parse version $version")
-      Seq.empty
+    } match {
+      case scala.util.Success(actions) => actions
+      case scala.util.Failure(e) =>
+        logger.error(s"Failed to read/parse version $version from $versionFilePath", e)
+        Seq.empty
     }
   }
 
   /**
-   * Parse actions directly from a cloud storage file using full streaming.
+   * Parse actions from a cloud storage file by first downloading to local temp storage.
    *
-   * This method provides the most memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method downloads the file to local temp storage first, then reads from local disk.
+   * This avoids the high per-line latency of streaming directly from object storage (S3/Azure),
+   * where each BufferedReader.readLine() call incurs network round-trip overhead.
    *
-   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   * Flow: CloudStorage -> Local Temp File -> Decompressing InputStream -> BufferedReader -> Line parsing
    */
   private def parseActionsFromStream(filePath: String): Seq[Action] = {
-    val rawStream = cloudProvider.openInputStream(filePath)
-    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    // Use cached file if available, otherwise download to cache
+    val cacheFile = getCacheFilePath(filePath)
+
+    // Download to cache if not already cached
+    if (!cacheFile.exists()) {
+      downloadToCache(filePath, cacheFile)
+    } else {
+      logger.debug(s"Using cached txlog file: ${cacheFile.getAbsolutePath}")
+    }
+
+    // Read from cached file (fast local I/O)
+    readActionsFromLocalFile(cacheFile)
+  }
+
+  /**
+   * Download a transaction log file from cloud storage to the local cache.
+   * Uses Java NIO Files.copy() which is optimized for stream-to-file transfers:
+   * - Uses optimal internal buffer sizing (typically 8KB)
+   * - Can leverage OS-level zero-copy when available
+   * - Handles large files efficiently without excessive heap allocation
+   */
+  private def downloadToCache(cloudFilePath: String, cacheFile: File): Unit = {
+    // Download to a temp file first, then rename atomically to avoid partial file issues
+    val tempFile = new File(cacheFile.getParentFile, cacheFile.getName + ".tmp")
+
+    try {
+      val rawStream = cloudProvider.openInputStream(cloudFilePath)
+      try {
+        // Files.copy is more efficient than manual buffering:
+        // - Uses optimal buffer size internally
+        // - Can use transferTo() for zero-copy when OS supports it
+        // - Avoids large heap allocations (unlike 64MB manual buffers)
+        Files.copy(rawStream, tempFile.toPath, StandardCopyOption.REPLACE_EXISTING)
+      } finally {
+        rawStream.close()
+      }
+
+      // Atomic rename to final cache location
+      // Use Files.move with ATOMIC_MOVE for true atomicity when supported
+      try {
+        Files.move(tempFile.toPath, cacheFile.toPath, StandardCopyOption.ATOMIC_MOVE)
+      } catch {
+        case _: java.nio.file.AtomicMoveNotSupportedException =>
+          // Fall back to replace if atomic move not supported
+          Files.move(tempFile.toPath, cacheFile.toPath, StandardCopyOption.REPLACE_EXISTING)
+      }
+      logger.debug(s"Cached txlog file: ${cacheFile.getAbsolutePath} (${cacheFile.length()} bytes)")
+    } catch {
+      case e: Exception =>
+        // Clean up temp file on failure
+        if (tempFile.exists()) tempFile.delete()
+        throw e
+    }
+  }
+
+  /**
+   * Read actions from a local cached file.
+   * Handles decompression transparently.
+   */
+  private def readActionsFromLocalFile(localFile: File): Seq[Action] = {
+    val localStream = new FileInputStream(localFile)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(localStream)
     val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
     val actions = ListBuffer[Action]()
 
@@ -875,7 +1034,14 @@ class OptimizedTransactionLog(
           Try {
             val jsonNode = JsonUtil.mapper.readTree(line)
             parseAction(jsonNode)
-          }.toOption.flatten.foreach(actions += _)
+          } match {
+            case scala.util.Success(Some(action)) =>
+              actions += action
+            case scala.util.Success(None) =>
+              logger.warn(s"Unrecognized action format in line: ${line.take(200)}...")
+            case scala.util.Failure(e) =>
+              logger.error(s"Failed to parse action from line: ${line.take(200)}...", e)
+          }
         }
         line = reader.readLine()
       }
@@ -1087,6 +1253,14 @@ class OptimizedTransactionLog(
     enhancedCache.putVersionActions(tablePath.toString, version, actionsToWrite)
     logger.debug(s" Cached version actions for ${tablePath.toString} version $version")
 
+    // IMPORTANT: Update metadata cache BEFORE listFiles() call below
+    // The listFiles() -> restoreSchemasInAddActions() -> getMetadata() path needs the updated
+    // metadata to contain the new schema registry entries
+    actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
+      enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
+      logger.debug(s" Cached metadata for ${tablePath.toString}")
+    }
+
     // Update file list cache if we have AddActions
     val addActions = actionsToWrite.collect { case add: AddAction => add }
     if (addActions.nonEmpty) {
@@ -1102,12 +1276,6 @@ class OptimizedTransactionLog(
       val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
       enhancedCache.putFileList(tablePath.toString, fileListChecksum, currentFiles)
       logger.debug(s" Updated file list cache for ${tablePath.toString} with checksum $fileListChecksum")
-    }
-
-    // Update metadata cache if we have MetadataAction (including schema updates)
-    actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
-      enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
-      logger.debug(s" Cached metadata for ${tablePath.toString}")
     }
 
     // Create checkpoint if needed (synchronously to ensure consistency)
@@ -1353,6 +1521,88 @@ class OptimizedTransactionLog(
    */
   def getCacheStatistics(): CacheStatistics =
     enhancedCache.getStatistics()
+
+  /**
+   * Get all SkipActions from the transaction log using cached checkpoint data.
+   * This is more efficient than the base TransactionLog implementation because
+   * it reuses the cached checkpoint actions.
+   */
+  def getSkippedFiles(): Seq[SkipAction] = {
+    val skips = scala.collection.mutable.ListBuffer[SkipAction]()
+
+    // Get checkpoint version for determining which versions to read
+    val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+
+    // Use cached checkpoint actions (shared with other operations)
+    getCheckpointActionsCached() match {
+      case Some(checkpointActions) =>
+        // Extract SkipActions from cached checkpoint
+        checkpointActions.foreach {
+          case skip: SkipAction => skips += skip
+          case _ => // Ignore other actions
+        }
+        logger.debug(s"Found ${skips.size} SkipActions in cached checkpoint")
+
+      case None =>
+        // No checkpoint, will read all versions below
+        logger.debug("No cached checkpoint available for SkipActions")
+    }
+
+    // Read versions after checkpoint for any additional SkipActions
+    val allVersions = getVersions()
+    val versionsToRead = allVersions.filter(_ > checkpointVersion)
+
+    if (versionsToRead.nonEmpty) {
+      logger.debug(s"Reading ${versionsToRead.size} versions after checkpoint $checkpointVersion for SkipActions")
+      versionsToRead.foreach { version =>
+        val actions = readVersionOptimized(version)
+        actions.foreach {
+          case skip: SkipAction => skips += skip
+          case _ => // Ignore other actions
+        }
+      }
+    }
+
+    skips.toSeq
+  }
+
+  /**
+   * Get files currently in cooldown period.
+   * Returns a map of file path to retry-after timestamp.
+   */
+  def getFilesInCooldown(): Map[String, Long] = {
+    val now = System.currentTimeMillis()
+    getSkippedFiles()
+      .filter(skip => skip.retryAfter.exists(_ > now))
+      .groupBy(_.path)
+      .map {
+        case (path, skips) =>
+          // Get the latest retry time for this path
+          val latestRetryAfter = skips.flatMap(_.retryAfter).max
+          path -> latestRetryAfter
+      }
+  }
+
+  /**
+   * Filter out files that are in cooldown from a list of candidate files for merge.
+   * Uses cached checkpoint data for efficiency.
+   */
+  def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] = {
+    val cooldownMap = getFilesInCooldown()
+    val filesInCooldown = cooldownMap.keySet
+    val filtered = candidateFiles.filterNot(file => filesInCooldown.contains(file.path))
+
+    val filteredCount = candidateFiles.length - filtered.length
+    if (filteredCount > 0) {
+      logger.info(s"Filtered out $filteredCount files currently in cooldown period")
+      filesInCooldown.foreach { path =>
+        val retryTime = cooldownMap.get(path)
+        logger.debug(s"File in cooldown: $path (retry after: ${retryTime.map(java.time.Instant.ofEpochMilli)})")
+      }
+    }
+
+    filtered
+  }
 
   /** Invalidate all cached data for this table. Useful for testing or after external modifications. */
   def invalidateCache(tablePath: String): Unit = {
