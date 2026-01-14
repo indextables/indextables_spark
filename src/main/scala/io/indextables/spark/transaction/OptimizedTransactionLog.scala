@@ -17,7 +17,10 @@
 
 package io.indextables.spark.transaction
 
-import java.io.{BufferedReader, InputStreamReader}
+import java.io.{BufferedReader, File, FileInputStream, InputStreamReader}
+import java.nio.file.{Files, StandardCopyOption}
+import java.security.MessageDigest
+import java.util.Base64
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 import scala.collection.mutable.ListBuffer
@@ -114,6 +117,44 @@ class OptimizedTransactionLog(
   private val maxStaleness        = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
 
+  // Temp directory for downloading transaction log files before parsing (avoids slow streaming reads from object storage)
+  private val tempDirectoryPath: Option[String] = {
+    Option(options.get("spark.indextables.indexWriter.tempDirectoryPath"))
+      .orElse(Option(spark.sparkContext.hadoopConfiguration.get("spark.indextables.indexWriter.tempDirectoryPath")))
+      .orElse(io.indextables.spark.storage.SplitCacheConfig.getDefaultTempPath())
+  }
+
+  // Transaction log cache directory - persists downloaded files for reuse across reads
+  // Each table gets its own cache directory based on a hash of the table path to avoid conflicts
+  private lazy val txlogCacheDir: File = {
+    val baseDir = tempDirectoryPath.map(new File(_)).getOrElse(new File(System.getProperty("java.io.tmpdir")))
+    val cacheBase = new File(baseDir, "txlog_cache")
+
+    // Create a short hash of the table path to use as directory name (avoids path special chars)
+    val tablePathHash = {
+      val digest = MessageDigest.getInstance("SHA-256")
+      val hashBytes = digest.digest(tablePath.toString.getBytes("UTF-8"))
+      Base64.getUrlEncoder.withoutPadding().encodeToString(hashBytes).take(12)
+    }
+
+    val tableDir = new File(cacheBase, tablePathHash)
+    if (!tableDir.exists()) {
+      tableDir.mkdirs()
+      logger.debug(s"Created txlog cache directory: ${tableDir.getAbsolutePath} for table $tablePath")
+    }
+    tableDir
+  }
+
+  /**
+   * Get the cache file path for a transaction log file.
+   * Extracts the filename from the cloud path to use as the local cache filename.
+   */
+  private def getCacheFilePath(cloudFilePath: String): File = {
+    // Extract just the filename (e.g., "00000000000000000001.json" or "00000000000000000010.checkpoint.json")
+    val fileName = cloudFilePath.split("/").last
+    new File(txlogCacheDir, fileName)
+  }
+
   def getTablePath(): Path = tablePath
 
   override def close(): Unit = {
@@ -190,6 +231,7 @@ class OptimizedTransactionLog(
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
+    invalidateSchemaRegistry()
 
     // Re-cache metadata after invalidation since writeActions() may have written updated metadata
     // with new schema registry entries from schema deduplication
@@ -267,6 +309,7 @@ class OptimizedTransactionLog(
 
     // Clear all caches after overwrite
     enhancedCache.invalidateTable(tablePath.toString)
+    invalidateSchemaRegistry()
 
     // Clear current snapshot to force recomputation
     currentSnapshot.set(None)
@@ -300,6 +343,7 @@ class OptimizedTransactionLog(
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
     currentSnapshot.set(None)
 
     // Re-cache metadata after invalidation since writeActions() may have written updated metadata
@@ -327,6 +371,7 @@ class OptimizedTransactionLog(
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+    invalidateSchemaRegistry()
     currentSnapshot.set(None)
 
     logger.info(s"Committed ${removeActions.length} remove actions in version $version")
@@ -402,6 +447,12 @@ class OptimizedTransactionLog(
     // Get MetadataAction which contains the schema registry
     val metadata = getMetadata()
     val schemaRegistry = metadata.configuration
+
+    // Log what's in the schema registry for debugging
+    val schemaKeys = schemaRegistry.keys.filter(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX)).toSeq
+    val requestedRefs = addActions.flatMap(_.docMappingRef).distinct
+    logger.info(s"Schema restoration: registry has ${schemaKeys.size} schemas: ${schemaKeys.map(_.stripPrefix(SchemaDeduplication.SCHEMA_KEY_PREFIX)).mkString(", ")}")
+    logger.info(s"Schema restoration: requested refs: ${requestedRefs.mkString(", ")}")
 
     // Check if registry has any schemas
     if (!schemaRegistry.keys.exists(_.startsWith(SchemaDeduplication.SCHEMA_KEY_PREFIX))) {
@@ -882,24 +933,86 @@ class OptimizedTransactionLog(
       val actions = parseActionsFromStream(versionFilePath)
       logger.debug(s" Parsed ${actions.size} actions from version $version using streaming")
       actions
-    }.getOrElse {
-      logger.debug(s" Failed to read/parse version $version")
-      Seq.empty
+    } match {
+      case scala.util.Success(actions) => actions
+      case scala.util.Failure(e) =>
+        logger.error(s"Failed to read/parse version $version from $versionFilePath", e)
+        Seq.empty
     }
   }
 
   /**
-   * Parse actions directly from a cloud storage file using full streaming.
+   * Parse actions from a cloud storage file by first downloading to local temp storage.
    *
-   * This method provides the most memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method downloads the file to local temp storage first, then reads from local disk.
+   * This avoids the high per-line latency of streaming directly from object storage (S3/Azure),
+   * where each BufferedReader.readLine() call incurs network round-trip overhead.
    *
-   * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
+   * Flow: CloudStorage -> Local Temp File -> Decompressing InputStream -> BufferedReader -> Line parsing
    */
   private def parseActionsFromStream(filePath: String): Seq[Action] = {
-    val rawStream = cloudProvider.openInputStream(filePath)
-    val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
+    // Use cached file if available, otherwise download to cache
+    val cacheFile = getCacheFilePath(filePath)
+
+    // Download to cache if not already cached
+    if (!cacheFile.exists()) {
+      downloadToCache(filePath, cacheFile)
+    } else {
+      logger.debug(s"Using cached txlog file: ${cacheFile.getAbsolutePath}")
+    }
+
+    // Read from cached file (fast local I/O)
+    readActionsFromLocalFile(cacheFile)
+  }
+
+  /**
+   * Download a transaction log file from cloud storage to the local cache.
+   * Uses Java NIO Files.copy() which is optimized for stream-to-file transfers:
+   * - Uses optimal internal buffer sizing (typically 8KB)
+   * - Can leverage OS-level zero-copy when available
+   * - Handles large files efficiently without excessive heap allocation
+   */
+  private def downloadToCache(cloudFilePath: String, cacheFile: File): Unit = {
+    // Download to a temp file first, then rename atomically to avoid partial file issues
+    val tempFile = new File(cacheFile.getParentFile, cacheFile.getName + ".tmp")
+
+    try {
+      val rawStream = cloudProvider.openInputStream(cloudFilePath)
+      try {
+        // Files.copy is more efficient than manual buffering:
+        // - Uses optimal buffer size internally
+        // - Can use transferTo() for zero-copy when OS supports it
+        // - Avoids large heap allocations (unlike 64MB manual buffers)
+        Files.copy(rawStream, tempFile.toPath, StandardCopyOption.REPLACE_EXISTING)
+      } finally {
+        rawStream.close()
+      }
+
+      // Atomic rename to final cache location
+      // Use Files.move with ATOMIC_MOVE for true atomicity when supported
+      try {
+        Files.move(tempFile.toPath, cacheFile.toPath, StandardCopyOption.ATOMIC_MOVE)
+      } catch {
+        case _: java.nio.file.AtomicMoveNotSupportedException =>
+          // Fall back to replace if atomic move not supported
+          Files.move(tempFile.toPath, cacheFile.toPath, StandardCopyOption.REPLACE_EXISTING)
+      }
+      logger.debug(s"Cached txlog file: ${cacheFile.getAbsolutePath} (${cacheFile.length()} bytes)")
+    } catch {
+      case e: Exception =>
+        // Clean up temp file on failure
+        if (tempFile.exists()) tempFile.delete()
+        throw e
+    }
+  }
+
+  /**
+   * Read actions from a local cached file.
+   * Handles decompression transparently.
+   */
+  private def readActionsFromLocalFile(localFile: File): Seq[Action] = {
+    val localStream = new FileInputStream(localFile)
+    val decompressingStream = CompressionUtils.createDecompressingInputStream(localStream)
     val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
     val actions = ListBuffer[Action]()
 
@@ -910,7 +1023,14 @@ class OptimizedTransactionLog(
           Try {
             val jsonNode = JsonUtil.mapper.readTree(line)
             parseAction(jsonNode)
-          }.toOption.flatten.foreach(actions += _)
+          } match {
+            case scala.util.Success(Some(action)) =>
+              actions += action
+            case scala.util.Success(None) =>
+              logger.warn(s"Unrecognized action format in line: ${line.take(200)}...")
+            case scala.util.Failure(e) =>
+              logger.error(s"Failed to parse action from line: ${line.take(200)}...", e)
+          }
         }
         line = reader.readLine()
       }
