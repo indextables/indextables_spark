@@ -20,7 +20,12 @@ package io.indextables.spark.transaction
 import java.security.MessageDigest
 import java.util.Base64
 
+import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
+
 import org.slf4j.LoggerFactory
+
+import scala.jdk.CollectionConverters._
 
 /**
  * Utility for schema deduplication in transaction logs and checkpoints.
@@ -44,11 +49,46 @@ object SchemaDeduplication {
   /** Hash length (16 characters of Base64 = 96 bits of entropy, virtually collision-free) */
   private val HASH_LENGTH = 16
 
+  /** ObjectMapper for parsing JSON */
+  private val mapper: ObjectMapper = new ObjectMapper()
+
   /**
-   * Compute a short hash of the schema JSON.
+   * Recursively sort all object keys in a JsonNode tree to create a canonical representation.
+   */
+  private def sortJsonNode(node: JsonNode): JsonNode =
+    node match {
+      case obj: ObjectNode =>
+        // Create a new ObjectNode with sorted keys
+        val sortedNode = mapper.createObjectNode()
+        val fieldNames = obj.fieldNames().asScala.toSeq.sorted
+        fieldNames.foreach { fieldName =>
+          sortedNode.set[JsonNode](fieldName, sortJsonNode(obj.get(fieldName)))
+        }
+        sortedNode
+      case arr: ArrayNode =>
+        // Process array elements (preserve order - arrays are ordered)
+        val sortedArray = mapper.createArrayNode()
+        arr.elements().asScala.foreach { elem =>
+          sortedArray.add(sortJsonNode(elem))
+        }
+        sortedArray
+      case _ =>
+        // Primitives (strings, numbers, booleans, nulls) - return as-is
+        node
+    }
+
+  /**
+   * Compute a short hash of the schema JSON using canonical normalization.
    *
-   * Uses SHA-256, then Base64 encodes, then truncates to 16 characters. This provides 96 bits of entropy which is
-   * sufficient to avoid collisions for any practical number of unique schemas.
+   * This method normalizes the JSON before hashing to ensure that semantically identical schemas produce the same hash,
+   * regardless of property ordering or whitespace differences in the input.
+   *
+   * The normalization process: 1. Parse the JSON string into a JsonNode tree 2. Recursively sort all object keys
+   * alphabetically 3. Serialize back to a canonical form with no extra whitespace 4. Hash the canonical string with
+   * SHA-256 5. Base64 encode and truncate to 16 characters (96 bits of entropy)
+   *
+   * This provides 96 bits of entropy which is sufficient to avoid collisions for any practical number of unique
+   * schemas.
    *
    * @param docMappingJson
    *   The schema JSON string
@@ -56,8 +96,20 @@ object SchemaDeduplication {
    *   A 16-character Base64-encoded hash
    */
   def computeSchemaHash(docMappingJson: String): String = {
+    // Normalize the JSON to canonical form for consistent hashing
+    val canonicalJson = try {
+      val jsonNode = mapper.readTree(docMappingJson)
+      val sortedNode = sortJsonNode(jsonNode)
+      mapper.writeValueAsString(sortedNode)
+    } catch {
+      case e: Exception =>
+        // If JSON parsing fails, fall back to hashing the original string
+        logger.warn(s"Failed to parse JSON for canonical hashing, using original: ${e.getMessage}")
+        docMappingJson
+    }
+
     val digest = MessageDigest.getInstance("SHA-256")
-    val hashBytes = digest.digest(docMappingJson.getBytes("UTF-8"))
+    val hashBytes = digest.digest(canonicalJson.getBytes("UTF-8"))
     // Use URL-safe Base64 to avoid special characters in keys
     val base64 = Base64.getUrlEncoder.withoutPadding().encodeToString(hashBytes)
     base64.take(HASH_LENGTH)
@@ -231,5 +283,115 @@ object SchemaDeduplication {
     val refSize = addActions.count(_.docMappingJson.isDefined) * (HASH_LENGTH + 20L) // hash + JSON overhead
 
     (originalSize, uniqueSize + refSize)
+  }
+
+  /** Threshold for suspecting duplicate schemas from old buggy hash calculation */
+  val DUPLICATE_DETECTION_THRESHOLD = 10
+
+  /**
+   * Consolidate duplicate schema mappings that may have been created by the old buggy hash calculation.
+   *
+   * The old hash calculation used raw string hashing, which meant semantically identical JSON schemas with different
+   * property ordering would produce different hashes. This method detects and consolidates such duplicates.
+   *
+   * The consolidation process:
+   *   1. Re-hash all schema values using the canonical algorithm
+   *   2. Group schemas by their new canonical hash
+   *   3. For duplicate groups, keep one schema and map all old hashes to the new canonical hash
+   *   4. Update all AddActions to reference the new canonical hash
+   *   5. Return consolidated registry and updated actions
+   *
+   * @param actions
+   *   Actions to process (AddActions with docMappingRef will be updated)
+   * @param registry
+   *   Current schema registry from MetadataAction.configuration (with prefix)
+   * @return
+   *   Tuple of (updated actions, consolidated registry, number of duplicates removed)
+   */
+  def consolidateDuplicateSchemas(
+    actions: Seq[Action],
+    registry: Map[String, String]
+  ): (Seq[Action], Map[String, String], Int) = {
+
+    // Extract schema entries (hash -> schema)
+    val schemaEntries = registry.collect {
+      case (key, value) if key.startsWith(SCHEMA_KEY_PREFIX) =>
+        key.stripPrefix(SCHEMA_KEY_PREFIX) -> value
+    }
+
+    // If below threshold, skip consolidation
+    if (schemaEntries.size <= DUPLICATE_DETECTION_THRESHOLD) {
+      logger.debug(s"Schema registry has ${schemaEntries.size} entries, below threshold of $DUPLICATE_DETECTION_THRESHOLD - skipping consolidation")
+      return (actions, registry, 0)
+    }
+
+    logger.info(s"Checking ${schemaEntries.size} schema mappings for duplicates (threshold: $DUPLICATE_DETECTION_THRESHOLD)")
+
+    // Re-hash all schemas using canonical algorithm and group by new hash
+    // Map: new_canonical_hash -> List[(old_hash, schema)]
+    val schemasByCanonicalHash = schemaEntries.toSeq.groupBy {
+      case (_, schema) => computeSchemaHash(schema)
+    }
+
+    // Count how many old hashes map to each new hash
+    val duplicateGroups = schemasByCanonicalHash.filter(_._2.size > 1)
+
+    if (duplicateGroups.isEmpty) {
+      logger.info("No duplicate schema mappings found - all hashes are canonical")
+      return (actions, registry, 0)
+    }
+
+    // Build old_hash -> new_canonical_hash mapping
+    val hashRemapping = scala.collection.mutable.Map[String, String]()
+    val consolidatedSchemas = scala.collection.mutable.Map[String, String]()
+
+    schemasByCanonicalHash.foreach {
+      case (newCanonicalHash, oldHashSchemas) =>
+        // Keep the first schema (they're all semantically identical)
+        val (_, representativeSchema) = oldHashSchemas.head
+        consolidatedSchemas(newCanonicalHash) = representativeSchema
+
+        // Map all old hashes to the new canonical hash
+        oldHashSchemas.foreach {
+          case (oldHash, _) =>
+            if (oldHash != newCanonicalHash) {
+              hashRemapping(oldHash) = newCanonicalHash
+            }
+        }
+    }
+
+    val duplicatesRemoved = schemaEntries.size - consolidatedSchemas.size
+    logger.info(s"Consolidating schema registry: ${schemaEntries.size} entries -> ${consolidatedSchemas.size} entries " +
+      s"($duplicatesRemoved duplicates removed, ${duplicateGroups.size} duplicate groups found)")
+
+    // Log details of duplicate groups
+    duplicateGroups.foreach {
+      case (newHash, oldHashSchemas) =>
+        val oldHashes = oldHashSchemas.map(_._1).mkString(", ")
+        logger.debug(s"Duplicate group: ${oldHashSchemas.size} old hashes [$oldHashes] -> canonical hash [$newHash]")
+    }
+
+    // Update AddActions to use new canonical hashes
+    val updatedActions = actions.map {
+      case add: AddAction if add.docMappingRef.isDefined =>
+        val oldHash = add.docMappingRef.get
+        hashRemapping.get(oldHash) match {
+          case Some(newHash) =>
+            logger.debug(s"Remapping AddAction ${add.path}: $oldHash -> $newHash")
+            add.copy(docMappingRef = Some(newHash))
+          case None =>
+            // Hash is already canonical or not in registry
+            add
+        }
+      case other => other
+    }
+
+    // Build new registry with prefix (keep non-schema entries)
+    val nonSchemaEntries = registry.filterNot(_._1.startsWith(SCHEMA_KEY_PREFIX))
+    val newRegistry = nonSchemaEntries ++ consolidatedSchemas.map {
+      case (hash, schema) => (SCHEMA_KEY_PREFIX + hash, schema)
+    }
+
+    (updatedActions, newRegistry.toMap, duplicatesRemoved)
   }
 }
