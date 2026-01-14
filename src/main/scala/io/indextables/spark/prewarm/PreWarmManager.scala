@@ -33,6 +33,7 @@ import io.indextables.spark.util.ConfigUtils
 import io.indextables.spark.transaction.AddAction
 import io.indextables.tantivy4java.split.SplitSearcher
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**
@@ -633,7 +634,7 @@ object PreWarmManager {
       addAction.numMergeOps.getOrElse(0),                           // numMergeOps (Int is OK for this field)
       "doc-mapping-uid",                                            // docMappingUid (NEW - required)
       addAction.docMappingJson.orNull,                              // docMappingJson (MOVED - for performance)
-      java.util.Collections.emptyList[String]()                     // skippedSplits
+      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()      // skippedSplits
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }

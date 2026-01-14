@@ -23,6 +23,7 @@ import org.apache.spark.sql.Row
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import io.indextables.spark.TestBase
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.scalatest.BeforeAndAfterEach
 
 class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
@@ -229,7 +230,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
             0,                                        // deleteOpstamp, numMergeOps
             "doc-mapping-uid",                        // docMappingUid (NEW - required)
             addAction.docMappingJson.getOrElse(""),   // docMappingJson (MOVED - for performance)
-            java.util.Collections.emptyList[String]() // skippedSplits
+            java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
           )
         catch {
           case ex: Exception =>

@@ -21,6 +21,7 @@ import org.apache.spark.sql.SaveMode
 
 import io.indextables.spark.TestBase
 import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery, SplitTermQuery}
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 
 /** Simple test to validate that tantivy4java term queries work properly on the indexes we create. */
 class SimpleTermQueryTest extends TestBase {
@@ -123,7 +124,7 @@ class SimpleTermQueryTest extends TestBase {
           matchingFile.numMergeOps.getOrElse(0),                      // numMergeOps (Int is OK for this field)
           "doc-mapping-uid",                                          // docMappingUid (NEW - required)
           matchingFile.docMappingJson.orNull,                         // docMappingJson (MOVED - for performance)
-          java.util.Collections.emptyList[String]()                   // skippedSplits
+          java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
         )
         println(s"✅ Retrieved metadata from transaction log with footer offsets: ${metadata.hasFooterOffsets()}")
 
