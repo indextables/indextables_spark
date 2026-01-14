@@ -716,6 +716,9 @@ class TransactionLogCheckpoint(
    *
    * This replaces docMappingJson with docMappingRef in AddActions and stores the schema registry in
    * MetadataAction.configuration. This can reduce checkpoint size by up to 99% for tables with large schemas.
+   *
+   * Additionally, this method consolidates duplicate schema mappings that may have been created by an older version
+   * of the hash calculation algorithm (which used raw string hashing instead of canonical JSON hashing).
    */
   private def applySchemaDeduplication(actions: Seq[Action]): Seq[Action] = {
     // Find the MetadataAction (should be present in checkpoint)
@@ -731,7 +734,7 @@ class TransactionLogCheckpoint(
           SchemaDeduplication.deduplicateSchemas(actions, existingRegistry)
 
         // If new schemas were found, update MetadataAction with merged registry
-        if (newSchemaRegistry.nonEmpty) {
+        val (actionsAfterDedup, configAfterDedup) = if (newSchemaRegistry.nonEmpty) {
           val originalSize = actions.collect { case a: AddAction => a }.flatMap(_.docMappingJson).map(_.length).sum
           val uniqueSchemaSize = newSchemaRegistry.values.map(_.length).sum
           logger.info(
@@ -743,13 +746,29 @@ class TransactionLogCheckpoint(
           val updatedConfiguration =
             SchemaDeduplication.mergeIntoConfiguration(metadata.configuration, newSchemaRegistry)
 
-          // Replace MetadataAction with updated configuration
-          deduplicatedActions.map {
-            case _: MetadataAction => metadata.copy(configuration = updatedConfiguration)
+          (deduplicatedActions, updatedConfiguration)
+        } else {
+          (deduplicatedActions, metadata.configuration)
+        }
+
+        // STEP 2: Consolidate duplicate schema mappings from old buggy hash calculation
+        // This handles tables that were affected by the old string-based hash calculation
+        // which produced different hashes for semantically identical JSON (different property order)
+        val (consolidatedActions, consolidatedConfig, duplicatesRemoved) =
+          SchemaDeduplication.consolidateDuplicateSchemas(actionsAfterDedup, configAfterDedup)
+
+        if (duplicatesRemoved > 0) {
+          logger.info(s"Schema consolidation: removed $duplicatesRemoved duplicate schema mappings from legacy hash calculation")
+        }
+
+        // Replace MetadataAction with final configuration
+        if (configAfterDedup != metadata.configuration || duplicatesRemoved > 0) {
+          consolidatedActions.map {
+            case _: MetadataAction => metadata.copy(configuration = consolidatedConfig)
             case other             => other
           }
         } else {
-          // No schemas to deduplicate, return original actions
+          // No changes needed
           actions
         }
 
