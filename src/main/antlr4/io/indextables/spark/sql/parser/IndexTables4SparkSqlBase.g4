@@ -71,6 +71,9 @@ statement
         (WITH PERWORKER PARALLELISM OF parallelism=INTEGER_VALUE)?
         (WHERE whereClause=predicateToken)?                     #prewarmCache
     | CHECKPOINT indexTablesKeyword (path=STRING | table=qualifiedName)   #checkpointIndexTable
+    | TRUNCATE indexTablesKeyword TIME TRAVEL
+        (path=STRING | table=qualifiedName)
+        (DRY RUN)?                                              #truncateTimeTravel
     | .*?                                                       #passThrough
     ;
 
@@ -109,7 +112,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
-    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT
+    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | TRUNCATE | TIME | TRAVEL
     ;
 
 // Keywords (case-insensitive)
@@ -165,6 +168,9 @@ SOURCE: [Ss][Oo][Uu][Rr][Cc][Ee];
 PER: [Pp][Ee][Rr];
 ENVIRONMENT: [Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt];
 CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
+TRUNCATE: [Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee];
+TIME: [Tt][Ii][Mm][Ee];
+TRAVEL: [Tt][Rr][Aa][Vv][Ee][Ll];
 
 // Literals
 STRING

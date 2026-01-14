@@ -85,6 +85,7 @@ case class DescribeTransactionLogCommand(
     AttributeReference("delete_opstamp", LongType, nullable = true)(),
     AttributeReference("num_merge_ops", IntegerType, nullable = true)(),
     AttributeReference("doc_mapping_json", StringType, nullable = true)(),
+    AttributeReference("doc_mapping_ref", StringType, nullable = true)(),
     AttributeReference("uncompressed_size_bytes", LongType, nullable = true)(),
 
     // RemoveAction specific fields

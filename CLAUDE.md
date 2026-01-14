@@ -650,6 +650,50 @@ CHECKPOINT TANTIVY4SPARK 's3://bucket/path';  -- alternate syntax
 | `protocol_version` | Long | Protocol version (3 for V3) |
 | `is_multi_part` | Boolean | True if checkpoint split into parts |
 
+### Truncate Time Travel
+```sql
+-- Remove all historical transaction log versions, keeping only current state
+TRUNCATE INDEXTABLES TIME TRAVEL 's3://bucket/path';
+TRUNCATE INDEXTABLES TIME TRAVEL 's3://bucket/path' DRY RUN;  -- Preview only
+TRUNCATE TANTIVY4SPARK TIME TRAVEL my_table;  -- Alternate syntax
+
+-- Example output:
+-- +-------------------+-------+------------------+----------------+-------------------+---------------+------------------------+
+-- |table_path         |status |checkpoint_version|versions_deleted|checkpoints_deleted|files_preserved|message                 |
+-- +-------------------+-------+------------------+----------------+-------------------+---------------+------------------------+
+-- |s3://bucket/path   |SUCCESS|               20 |             19 |                  2|             20|Successfully trunca...|
+-- +-------------------+-------+------------------+----------------+-------------------+---------------+------------------------+
+```
+
+**Key features:**
+- **Creates checkpoint first**: If no checkpoint exists at current version, creates one automatically
+- **Deletes historical versions**: Removes all transaction log version files older than the checkpoint
+- **Deletes old checkpoints**: Removes all checkpoint files except the latest
+- **Preserves data files**: Only transaction log metadata is affected; split files are preserved
+- **DRY RUN mode**: Preview what would be deleted without making changes
+
+**When to use:**
+- **Reduce storage overhead**: After many small write operations accumulate transaction log files
+- **Clean up history**: When time travel capability is no longer needed
+- **Prepare for archival**: Remove history before archiving a table
+- **After MERGE operations**: Clean up transaction log after split consolidation
+
+**Output schema:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `table_path` | String | Resolved table path |
+| `status` | String | "SUCCESS", "DRY_RUN", or "ERROR" |
+| `checkpoint_version` | Long | Version at which checkpoint exists |
+| `versions_deleted` | Long | Number of version files deleted |
+| `checkpoints_deleted` | Long | Number of checkpoint files deleted |
+| `files_preserved` | Long | Number of data files (splits) in table |
+| `message` | String | Descriptive status message |
+
+**Safety notes:**
+- After truncation, time travel to earlier versions is no longer possible
+- Always use DRY RUN first to preview what will be deleted
+- This operation is irreversible - deleted transaction log files cannot be recovered
+
 ### Describe Disk Cache
 ```sql
 -- View disk cache statistics across all executors
