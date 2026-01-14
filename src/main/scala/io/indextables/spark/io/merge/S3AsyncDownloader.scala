@@ -24,6 +24,8 @@ import java.util.concurrent.CompletableFuture
 
 import scala.util.Try
 
+import io.indextables.spark.utils.CredentialProviderFactory
+
 import software.amazon.awssdk.auth.credentials._
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3AsyncClient
@@ -160,19 +162,44 @@ object S3AsyncDownloader {
    * Create an S3AsyncDownloader from a serializable config map.
    *
    * This is useful when creating downloaders on executors from broadcast configuration.
+   * Uses CredentialProviderFactory to resolve credentials, supporting custom credential
+   * providers like Unity Catalog.
+   *
+   * @param configs
+   *   Configuration map with AWS settings
+   * @param tablePath
+   *   Table path used for credential provider resolution (required for custom providers)
    */
-  def fromConfig(configs: Map[String, String]): S3AsyncDownloader = {
+  def fromConfig(configs: Map[String, String], tablePath: String): S3AsyncDownloader = {
     def get(key: String): Option[String] =
       configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
 
-    create(
-      accessKey = get("spark.indextables.aws.accessKey"),
-      secretKey = get("spark.indextables.aws.secretKey"),
-      sessionToken = get("spark.indextables.aws.sessionToken"),
-      region = get("spark.indextables.aws.region"),
-      endpoint = get("spark.indextables.aws.endpoint"),
-      pathStyleAccess = get("spark.indextables.aws.pathStyleAccess").exists(_.toBoolean)
-    )
+    // Use centralized credential resolution (same as S3CloudStorageProvider)
+    // This supports custom credential providers like Unity Catalog
+    val resolvedCreds = CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath)
+
+    resolvedCreds match {
+      case Some(creds) =>
+        logger.info(s"Using resolved credentials from provider: accessKey=${creds.accessKey.take(4)}...")
+        create(
+          accessKey = Some(creds.accessKey),
+          secretKey = Some(creds.secretKey),
+          sessionToken = creds.sessionToken,
+          region = get("spark.indextables.aws.region"),
+          endpoint = get("spark.indextables.aws.endpoint"),
+          pathStyleAccess = get("spark.indextables.aws.pathStyleAccess").exists(_.toBoolean)
+        )
+      case None =>
+        logger.info("No credentials resolved from provider, using default credentials provider chain")
+        create(
+          accessKey = None,
+          secretKey = None,
+          sessionToken = None,
+          region = get("spark.indextables.aws.region"),
+          endpoint = get("spark.indextables.aws.endpoint"),
+          pathStyleAccess = get("spark.indextables.aws.pathStyleAccess").exists(_.toBoolean)
+        )
+    }
   }
 
   /**

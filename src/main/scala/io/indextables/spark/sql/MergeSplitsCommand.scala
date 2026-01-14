@@ -1617,8 +1617,9 @@ object MergeSplitsExecutor {
         }
 
         // Create appropriate downloader based on protocol
+        // Note: tablePath is passed for credential provider resolution (e.g., Unity Catalog)
         val downloader: io.indextables.spark.io.merge.AsyncDownloader = if (isS3Path) {
-          io.indextables.spark.io.merge.S3AsyncDownloader.fromConfig(awsConfig.configs)
+          io.indextables.spark.io.merge.S3AsyncDownloader.fromConfig(awsConfig.configs, tablePathStr)
         } else {
           io.indextables.spark.io.merge.AzureAsyncDownloader.fromConfig(awsConfig.configs)
             .getOrElse(throw new RuntimeException("Failed to create Azure downloader - check credentials"))
