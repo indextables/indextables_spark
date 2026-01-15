@@ -199,11 +199,6 @@ class IndexTables4SparkStandardWrite(
 
     logger.debug(s"SAVEMODE DEBUG: shouldOverwrite = $shouldOverwrite")
 
-    // CRITICAL FIX: Refresh credentials immediately before commit operations
-    // This prevents credential expiration during long-running write transactions
-    // by acquiring fresh credentials from the provider (e.g., Unity Catalog) at commit time
-    refreshTransactionLogCredentials()
-
     // Initialize transaction log with schema if this is the first commit
     transactionLog.initialize(writeSchema, partitionColumns)
 
@@ -267,35 +262,6 @@ class IndexTables4SparkStandardWrite(
     // TODO: In a real implementation, we would delete the physical files here
     logger.warn(s"Would clean up ${addActions.length} uncommitted files")
   }
-
-  /**
-   * Refresh transaction log credentials immediately before commit operations.
-   *
-   * When a custom credential provider is configured (e.g., Unity Catalog), this method
-   * triggers recreation of the cloud provider which will acquire fresh credentials.
-   * This prevents credential expiration during long-running write transactions.
-   */
-  private def refreshTransactionLogCredentials(): Unit =
-    try {
-      // Combine serializedHadoopConf with serializedOptions
-      val currentConfigs = serializedHadoopConf ++ serializedOptions
-
-      // Check if a custom credential provider is configured
-      val providerClassKey = "spark.indextables.aws.credentialsProviderClass"
-      val hasCredentialProvider = currentConfigs.get(providerClassKey).isDefined ||
-        currentConfigs.get(providerClassKey.toLowerCase).isDefined
-
-      if (hasCredentialProvider) {
-        logger.info("Custom credential provider configured - refreshing cloud provider before commit")
-        // Pass the config with provider class - CloudStorageProviderFactory will
-        // invoke the provider to get fresh credentials when creating the new provider
-        transactionLog.updateCredentials(currentConfigs)
-        logger.info("Transaction log credentials refreshed successfully")
-      }
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to refresh credentials before commit: ${e.getMessage}", e)
-    }
 
   /**
    * Validate indexing configuration for append operations. Checks that the new configuration is compatible with the

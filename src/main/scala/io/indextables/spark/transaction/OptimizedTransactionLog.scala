@@ -50,8 +50,8 @@ class OptimizedTransactionLog(
 
   private val logger = LoggerFactory.getLogger(classOf[OptimizedTransactionLog])
 
-  // Cloud storage provider - mutable to allow credential refresh for long-running transactions
-  private var cloudProvider = CloudStorageProviderFactory.createProvider(
+  // Cloud storage provider
+  private val cloudProvider = CloudStorageProviderFactory.createProvider(
     tablePath.toString,
     options,
     spark.sparkContext.hadoopConfiguration
@@ -88,16 +88,16 @@ class OptimizedTransactionLog(
     )
   }
 
-  // Parallel operations handler - mutable to allow credential refresh for long-running transactions
-  private var parallelOps = new ParallelTransactionLogOperations(
+  // Parallel operations handler
+  private val parallelOps = new ParallelTransactionLogOperations(
     transactionLogPath,
     cloudProvider,
     spark
   )
 
-  // Checkpoint handler - mutable to allow credential refresh for long-running transactions
+  // Checkpoint handler
   private val checkpointEnabled = options.getBoolean("spark.indextables.checkpoint.enabled", true)
-  private var checkpoint: Option[TransactionLogCheckpoint] = if (checkpointEnabled) {
+  private val checkpoint = if (checkpointEnabled) {
     Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options))
   } else None
 
@@ -163,63 +163,6 @@ class OptimizedTransactionLog(
     checkpoint.foreach(_.close())
     cloudProvider.close()
     // Note: Thread pools are managed globally and not closed here
-  }
-
-  /**
-   * Updates the cloud storage credentials used by this transaction log.
-   *
-   * This method recreates the cloud provider and dependent components with fresh credentials
-   * to prevent expiration during long-running write transactions.
-   *
-   * @param newConfigs
-   *   Map of configuration key-value pairs containing fresh credentials
-   */
-  override def updateCredentials(newConfigs: Map[String, String]): Unit = {
-    import scala.jdk.CollectionConverters._
-
-    logger.info(s"Refreshing optimized transaction log credentials with ${newConfigs.size} config entries")
-
-    // Merge new configs with existing options, with new configs taking precedence
-    val existingConfigs = options.asCaseSensitiveMap().asScala.toMap
-    val mergedConfigs   = existingConfigs ++ newConfigs
-    val updatedOptions  = new CaseInsensitiveStringMap(mergedConfigs.asJava)
-
-    // Close old cloud provider
-    try
-      cloudProvider.close()
-    catch {
-      case e: Exception =>
-        logger.warn(s"Error closing old cloud provider during credential refresh: ${e.getMessage}")
-    }
-
-    // Create new cloud provider with fresh credentials
-    cloudProvider = CloudStorageProviderFactory.createProvider(
-      tablePath.toString,
-      updatedOptions,
-      spark.sparkContext.hadoopConfiguration
-    )
-
-    // Recreate parallel operations handler with new cloud provider
-    parallelOps = new ParallelTransactionLogOperations(
-      transactionLogPath,
-      cloudProvider,
-      spark
-    )
-
-    // Recreate checkpoint handler with new cloud provider if checkpointing is enabled
-    if (checkpointEnabled) {
-      checkpoint.foreach { cp =>
-        try
-          cp.close()
-        catch {
-          case e: Exception =>
-            logger.warn(s"Error closing old checkpoint during credential refresh: ${e.getMessage}")
-        }
-      }
-      checkpoint = Some(new TransactionLogCheckpoint(transactionLogPath, cloudProvider, updatedOptions))
-    }
-
-    logger.info("Optimized transaction log credentials refreshed successfully")
   }
 
   /** Initialize transaction log with schema (single parameter version for interface compatibility) */
