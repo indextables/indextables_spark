@@ -1063,7 +1063,7 @@ class TransactionLog(
     }
   }
 
-  def readVersion(version: Long): Seq[Action] =
+  override def readVersion(version: Long): Seq[Action] =
     // Check cache first
     cache.flatMap(_.getCachedVersion(version)) match {
       case Some(cachedActions) =>
@@ -1094,7 +1094,7 @@ class TransactionLog(
         }
     }
 
-  def getVersions(): Seq[Long] =
+  override def getVersions(): Seq[Long] =
     // Check cache first
     cache.flatMap(_.getCachedVersions()) match {
       case Some(cachedVersions) =>
@@ -1168,6 +1168,10 @@ class TransactionLog(
   /** Get the full checkpoint info (including multi-part checkpoint details). */
   def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
     checkpoint.flatMap(_.getLastCheckpointInfo())
+
+  /** Get all actions from the latest checkpoint (consolidated state). */
+  override def getCheckpointActions(): Option[Seq[Action]] =
+    checkpoint.flatMap(_.getActionsFromCheckpoint())
 
   /**
    * Prewarm the transaction log cache for faster subsequent reads. Default implementation is a no-op; optimized

@@ -237,4 +237,40 @@ trait TransactionLogInterface extends AutoCloseable {
   def commitRemoveActions(removeActions: Seq[RemoveAction]): Long =
     // Default implementation can be overridden by subclasses
     throw new UnsupportedOperationException("commitRemoveActions must be implemented by subclass")
+
+  /**
+   * Gets all actions from the latest checkpoint.
+   *
+   * This returns the consolidated state from the checkpoint file, which contains
+   * all AddActions visible at the checkpoint version. This is different from
+   * readVersion() which only reads a single transaction file.
+   *
+   * @return
+   *   Option containing all actions from the checkpoint, or None if no checkpoint exists
+   */
+  def getCheckpointActions(): Option[Seq[Action]] =
+    throw new UnsupportedOperationException("getCheckpointActions must be implemented by subclass")
+
+  /**
+   * Gets all transaction version numbers in the log.
+   *
+   * @return
+   *   Sequence of version numbers, sorted ascending
+   */
+  def getVersions(): Seq[Long] =
+    throw new UnsupportedOperationException("getVersions must be implemented by subclass")
+
+  /**
+   * Reads a specific version of the transaction log.
+   *
+   * This reads the individual version file (e.g., 00000000000000000005.json),
+   * not the checkpoint file.
+   *
+   * @param version
+   *   The version number to read
+   * @return
+   *   Sequence of actions in that version
+   */
+  def readVersion(version: Long): Seq[Action] =
+    throw new UnsupportedOperationException("readVersion must be implemented by subclass")
 }

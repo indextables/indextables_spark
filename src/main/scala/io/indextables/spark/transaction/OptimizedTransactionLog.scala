@@ -819,6 +819,10 @@ class OptimizedTransactionLog(
   def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
     checkpoint.flatMap(_.getLastCheckpointInfo())
 
+  /** Get all actions from the latest checkpoint (consolidated state). */
+  override def getCheckpointActions(): Option[Seq[Action]] =
+    getCheckpointActionsCached()
+
   /**
    * Aggressively populate the transaction log cache to make subsequent reads faster. This should be called once during
    * table initialization (V2 DataSource). Populates: protocol, metadata, file list, and recent versions.
@@ -877,7 +881,7 @@ class OptimizedTransactionLog(
     versionCounter.incrementAndGet()
   }
 
-  private def getVersions(): Seq[Long] = {
+  override def getVersions(): Seq[Long] = {
     val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
     logger.debug(
       s" getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}"
@@ -886,6 +890,9 @@ class OptimizedTransactionLog(
     logger.debug(s" getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
     versions
   }
+
+  override def readVersion(version: Long): Seq[Action] =
+    readVersionOptimized(version)
 
   private def parseVersionFromPath(path: String): Option[Long] =
     Try {

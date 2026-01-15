@@ -91,8 +91,11 @@ class DescribeTransactionLogExecutor(
     // Get all versions
     val allVersions = txLog.getVersions()
 
-    // Read checkpoint version to get current state
-    val checkpointActions  = txLog.readVersion(checkpointVersion.get)
+    // Read checkpoint to get consolidated state (this reads the checkpoint FILE, not version file)
+    val checkpointActions: Seq[Action] = txLog.getCheckpointActions().getOrElse {
+      logger.warn(s"Checkpoint version ${checkpointVersion.get} exists but couldn't read checkpoint actions")
+      Seq.empty[Action]
+    }
     val checkpointFilePath = getCheckpointFilePath(txLog, checkpointVersion.get)
     checkpointActions.foreach { action =>
       rows += actionToRow(checkpointVersion.get, checkpointFilePath, action, isCheckpoint = true)
