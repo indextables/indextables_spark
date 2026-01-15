@@ -126,34 +126,79 @@ class S3CloudStorageProvider(
 
   /**
    * Create AWS SDK credentials provider using centralized credential resolution.
-   * Priority: explicit credentials > custom provider class > default chain
+   *
+   * Priority:
+   *   1. Explicit credentials (accessKey/secretKey/sessionToken) - uses StaticCredentialsProvider
+   *   2. Custom provider class - wraps in V1ToV2CredentialsProviderAdapter to preserve refresh logic
+   *   3. Default chain - uses DefaultCredentialsProvider
+   *
+   * IMPORTANT: When a custom provider class is configured (like UnityCatalogAWSCredentialProvider),
+   * we wrap it in V1ToV2CredentialsProviderAdapter instead of extracting credentials statically.
+   * This preserves the provider's refresh logic and prevents "token expired" errors for long-running
+   * Spark jobs that exceed the credential TTL.
    */
   private def createAwsCredentialsProvider(): software.amazon.awssdk.auth.credentials.AwsCredentialsProvider = {
     val normalizedTablePath = normalizeToTablePath(tablePath)
     val hadoopConfiguration = if (hadoopConf != null) hadoopConf else new org.apache.hadoop.conf.Configuration()
 
-    // Use centralized credential resolution
-    CredentialProviderFactory.resolveAWSCredentials(
-      accessKey = config.awsAccessKey,
-      secretKey = config.awsSecretKey,
-      sessionToken = config.awsSessionToken,
-      providerClassName = config.awsCredentialsProviderClass,
-      tablePath = normalizedTablePath,
-      hadoopConf = hadoopConfiguration
-    ) match {
-      case Some(creds) =>
-        logger.info(s"Using resolved AWS credentials: accessKey=${creds.accessKey.take(4)}...")
-        if (creds.hasSessionToken) {
-          val credentials = AwsSessionCredentials.create(creds.accessKey, creds.secretKey, creds.sessionToken.get)
-          StaticCredentialsProvider.create(credentials)
-        } else {
-          val credentials = AwsBasicCredentials.create(creds.accessKey, creds.secretKey)
-          StaticCredentialsProvider.create(credentials)
+    // Priority 1: Explicit credentials take precedence (these don't expire, so static is fine)
+    (config.awsAccessKey.filter(_.nonEmpty), config.awsSecretKey.filter(_.nonEmpty)) match {
+      case (Some(accessKey), Some(secretKey)) =>
+        logger.info(s"Using explicit AWS credentials: accessKey=${accessKey.take(4)}...")
+        val credentials = config.awsSessionToken.filter(_.nonEmpty) match {
+          case Some(sessionToken) =>
+            AwsSessionCredentials.create(accessKey, secretKey, sessionToken)
+          case None =>
+            AwsBasicCredentials.create(accessKey, secretKey)
+        }
+        return StaticCredentialsProvider.create(credentials)
+      case _ =>
+        // Continue to custom provider check
+    }
+
+    // Priority 2: Custom provider class - wrap it to preserve refresh logic
+    config.awsCredentialsProviderClass.filter(_.nonEmpty) match {
+      case Some(providerClassName) =>
+        try {
+          logger.info(s"Creating custom credential provider: $providerClassName")
+          val v1Provider = CredentialProviderFactory.createCredentialProvider(
+            providerClassName,
+            new URI(normalizedTablePath),
+            hadoopConfiguration
+          )
+
+          // Check if it's a v1 provider that can be wrapped
+          if (CredentialProviderFactory.isV1Provider(v1Provider)) {
+            logger.info(s"Wrapping v1 credential provider in V1ToV2CredentialsProviderAdapter to preserve refresh logic")
+            return new io.indextables.spark.auth.V1ToV2CredentialsProviderAdapter(v1Provider)
+          } else if (CredentialProviderFactory.isV2Provider(v1Provider)) {
+            // If it's already a v2 provider, use it directly
+            logger.info(s"Using v2 credential provider directly: $providerClassName")
+            return v1Provider.asInstanceOf[software.amazon.awssdk.auth.credentials.AwsCredentialsProvider]
+          } else {
+            // Fallback: extract credentials statically (legacy behavior)
+            logger.warn(s"Provider $providerClassName is not a recognized AWS credential provider type, " +
+              "extracting credentials statically (refresh logic will not be preserved)")
+            val creds = CredentialProviderFactory.extractCredentialsViaReflection(v1Provider)
+            val credentials = if (creds.hasSessionToken) {
+              AwsSessionCredentials.create(creds.accessKey, creds.secretKey, creds.sessionToken.get)
+            } else {
+              AwsBasicCredentials.create(creds.accessKey, creds.secretKey)
+            }
+            return StaticCredentialsProvider.create(credentials)
+          }
+        } catch {
+          case ex: Exception =>
+            logger.warn(s"Failed to create custom credential provider $providerClassName: ${ex.getMessage}")
+            logger.warn("Falling back to DefaultCredentialsProvider")
         }
       case None =>
-        logger.info("No AWS credentials resolved, using DefaultCredentialsProvider")
-        DefaultCredentialsProvider.create()
+        // Continue to default chain
     }
+
+    // Priority 3: Default credentials provider chain
+    logger.info("No explicit credentials or custom provider configured, using DefaultCredentialsProvider")
+    DefaultCredentialsProvider.create()
   }
 
   private val s3Client: S3Client = {
