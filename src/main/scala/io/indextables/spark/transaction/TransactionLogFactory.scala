@@ -245,6 +245,13 @@ class TransactionLogAdapter(
   override def filterFilesInCooldown(candidateFiles: Seq[AddAction]): Seq[AddAction] =
     optimizedLog.filterFilesInCooldown(candidateFiles)
 
+  override def updateCredentials(newConfigs: Map[String, String]): Unit = {
+    // Delegate to the optimized log which will recreate its cloud provider and dependent components
+    optimizedLog.updateCredentials(newConfigs)
+    // Also update the parent TransactionLog's credentials if it has its own cloudProvider
+    super.updateCredentials(newConfigs)
+  }
+
   // Note: Some methods like mergeFiles, getLatestVersion, readVersion, getVersions
   // are not in the base TransactionLog class but could be added if needed.
   // The OptimizedTransactionLog handles these operations internally.

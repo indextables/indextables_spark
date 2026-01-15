@@ -273,4 +273,19 @@ trait TransactionLogInterface extends AutoCloseable {
    */
   def readVersion(version: Long): Seq[Action] =
     throw new UnsupportedOperationException("readVersion must be implemented by subclass")
+
+  /**
+   * Updates the cloud storage credentials used by this transaction log.
+   *
+   * This method allows refreshing credentials before long-running operations to prevent
+   * expiration during write transactions. The cloud provider is recreated with the new
+   * credentials.
+   *
+   * @param newConfigs
+   *   Map of configuration key-value pairs containing fresh credentials
+   *   (e.g., spark.indextables.aws.accessKey, spark.indextables.aws.secretKey)
+   */
+  def updateCredentials(newConfigs: Map[String, String]): Unit =
+    // Default no-op implementation - subclasses should override
+    ()
 }
