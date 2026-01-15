@@ -20,8 +20,6 @@ package io.indextables.spark.io.merge
 import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.mutable.ListBuffer
-
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -149,28 +147,38 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
     val executor = Executors.newFixedThreadPool(10)
     val polledItems = new java.util.concurrent.ConcurrentLinkedQueue[DownloadRequest]()
     val latch = new CountDownLatch(numRequests)
+    val stopSignal = new java.util.concurrent.atomic.AtomicBoolean(false)
 
     // Start 10 threads polling concurrently
     (0 until 10).foreach { _ =>
       executor.submit(new Runnable {
         override def run(): Unit = {
-          var continue = true
-          while (continue) {
+          var emptyPolls = 0
+          // Keep polling until stop signal or too many consecutive empty polls
+          while (!stopSignal.get() && emptyPolls < 50) {
             queue.poll() match {
               case Some(req) =>
                 polledItems.add(req)
                 latch.countDown()
+                emptyPolls = 0 // Reset on successful poll
               case None =>
-                continue = false
+                emptyPolls += 1
+                // Brief pause before retry to avoid tight spinning
+                Thread.sleep(1)
             }
           }
         }
       })
     }
 
-    latch.await(10, TimeUnit.SECONDS)
+    // Wait for all items to be polled
+    val completed = latch.await(30, TimeUnit.SECONDS)
+    stopSignal.set(true) // Signal threads to stop
     executor.shutdown()
+    executor.awaitTermination(5, TimeUnit.SECONDS)
 
+    // Verify completion
+    completed shouldBe true
     // All items should have been polled exactly once
     polledItems.size() shouldBe numRequests
     val indices = new java.util.HashSet[Int]()
@@ -212,5 +220,70 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
     val ids = (0 until 100).map(_ => queue.nextBatchId())
     ids shouldBe sorted
     ids.toSet.size shouldBe 100 // All unique
+  }
+
+  test("concurrent poll and cancel maintains correct pendingCount") {
+    val batchId = queue.nextBatchId()
+    val numRequests = 1000
+    val requests = (0 until numRequests).map { i =>
+      DownloadRequest(s"s3://bucket/file$i.split", s"/tmp/file$i.split", 1000L, batchId, i)
+    }
+    queue.submitBatch(DownloadBatch(batchId, System.currentTimeMillis(), requests))
+
+    queue.pendingDownloads shouldBe numRequests
+
+    val executor = Executors.newFixedThreadPool(10)
+    val polledCount = new AtomicInteger(0)
+    val cancelledCount = new AtomicInteger(0)
+    val startLatch = new CountDownLatch(1)
+    val doneLatch = new CountDownLatch(11) // 10 pollers + 1 canceller
+
+    // Start 10 threads polling concurrently
+    (0 until 10).foreach { _ =>
+      executor.submit(new Runnable {
+        override def run(): Unit = {
+          try {
+            startLatch.await() // Wait for all threads to be ready
+            var continue = true
+            while (continue) {
+              queue.poll() match {
+                case Some(_) => polledCount.incrementAndGet()
+                case None => continue = false
+              }
+            }
+          } finally {
+            doneLatch.countDown()
+          }
+        }
+      })
+    }
+
+    // Start 1 thread that will cancel after a brief delay
+    executor.submit(new Runnable {
+      override def run(): Unit = {
+        try {
+          startLatch.await()
+          Thread.sleep(5) // Let some polls happen first
+          cancelledCount.set(queue.cancelBatch(batchId))
+        } finally {
+          doneLatch.countDown()
+        }
+      }
+    })
+
+    // Start all threads simultaneously
+    startLatch.countDown()
+
+    // Wait for completion
+    doneLatch.await(30, TimeUnit.SECONDS)
+    executor.shutdown()
+
+    // Verify: polled + cancelled should equal total requests
+    val totalProcessed = polledCount.get() + cancelledCount.get()
+    totalProcessed shouldBe numRequests
+
+    // pendingCount should be 0 (all items either polled or cancelled)
+    queue.pendingDownloads shouldBe 0
+    queue.isEmpty shouldBe true
   }
 }
