@@ -235,6 +235,9 @@ class TransactionLogAdapter(
     super.invalidateCache()
   }
 
+  override def getLastRetryMetrics(): Option[TxRetryMetrics] =
+    optimizedLog.getLastRetryMetrics()
+
   // Override cooldown-related methods to use optimized versions that share cached checkpoint data
   override def getSkippedFiles(): Seq[SkipAction] =
     optimizedLog.getSkippedFiles()

@@ -51,6 +51,11 @@ spark.indextables.checkpoint.enabled: true
 spark.indextables.checkpoint.interval: 10
 spark.indextables.transaction.compression.enabled: true (default)
 
+// Transaction Log Concurrent Write Retry (automatic retry on version conflicts)
+spark.indextables.transaction.retry.maxAttempts: 10 (default: 10, max retry attempts on conflict)
+spark.indextables.transaction.retry.baseDelayMs: 100 (default: 100ms, initial backoff delay)
+spark.indextables.transaction.retry.maxDelayMs: 5000 (default: 5000ms, maximum backoff cap)
+
 // Statistics Truncation (enabled by default)
 spark.indextables.stats.truncation.enabled: true
 spark.indextables.stats.truncation.maxLength: 32
