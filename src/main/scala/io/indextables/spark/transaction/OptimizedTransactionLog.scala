@@ -113,6 +113,18 @@ class OptimizedTransactionLog(
   @volatile private var schemaRegistryCache: Option[Map[String, String]] = None
   private val schemaRegistryLock = new Object()
 
+  // Retry metrics tracking for testing and monitoring
+  // Stores metrics from the most recent write operation with retry
+  @volatile private var lastRetryMetrics: Option[TxRetryMetrics] = None
+
+  /**
+   * Get metrics from the most recent write operation with retry.
+   * Useful for testing and monitoring concurrent write behavior.
+   *
+   * @return The retry metrics from the last write, or None if no writes have occurred
+   */
+  def getLastRetryMetrics(): Option[TxRetryMetrics] = lastRetryMetrics
+
   // Performance configuration
   private val maxStaleness        = options.getLong("spark.indextables.snapshot.maxStaleness", 5000).millis
   private val parallelReadEnabled = options.getBoolean("spark.indextables.parallel.read.enabled", true)
@@ -213,7 +225,12 @@ class OptimizedTransactionLog(
     )
   }
 
-  /** Add files using parallel batch write */
+  /**
+   * Add files using retry-enabled write for concurrent safety.
+   *
+   * This method uses automatic retry on concurrent write conflict, making it safe for
+   * concurrent append operations from multiple processes.
+   */
   def addFiles(addActions: Seq[AddAction]): Long = {
     // Check protocol before writing
     assertTableWritable()
@@ -222,12 +239,8 @@ class OptimizedTransactionLog(
       return getLatestVersion()
     }
 
-    // Use atomic version generation to prevent race conditions
-    val version = getNextVersion()
-    logger.debug(s" Assigning version $version for addFiles with ${addActions.size} actions")
-
-    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
-    writeActions(version, addActions)
+    // Use retry-enabled write for concurrent safety
+    val version = writeActionsWithRetry(addActions)
 
     // Invalidate all caches to ensure consistency (matches overwriteFiles pattern)
     enhancedCache.invalidateTable(tablePath.toString)
@@ -275,79 +288,141 @@ class OptimizedTransactionLog(
   }
 
   /**
-   * Overwrite files with optimized operations For overwrite, we need to:
-   *   1. Get all existing files 2. Create RemoveActions for all of them 3. Add the new files 4. Write both removes and
-   *      adds in the same transaction
+   * Overwrite files with retry on concurrent write conflict.
+   *
+   * On each retry attempt, the list of files to remove is recalculated to include
+   * any files that may have been added by competing writers.
    */
   def overwriteFiles(addActions: Seq[AddAction]): Long = {
     logger.debug(s" Starting overwrite operation with ${addActions.size} files")
     logger.info(s"Starting overwrite operation with ${addActions.size} files")
 
-    // Get existing files using optimized listing
-    val existingFiles = listFilesOptimized()
-    logger.debug(s" Found ${existingFiles.size} existing files to remove: ${existingFiles.map(_.path).mkString(", ")}")
-    val removeActions = existingFiles.map { file =>
-      RemoveAction(
-        path = file.path,
-        deletionTimestamp = Some(System.currentTimeMillis()),
-        dataChange = true,
-        extendedFileMetadata = None,
-        partitionValues = Some(file.partitionValues),
-        size = Some(file.size)
+    val retryConfig = getRetryConfig()
+    var attempt = 1
+    var lastConflictVersion = -1L
+    val conflictedVersions = scala.collection.mutable.ListBuffer[Long]()
+
+    while (attempt <= retryConfig.maxAttempts) {
+      val version = if (attempt == 1) {
+        getNextVersion()
+      } else {
+        refreshVersionCounterFromDisk()
+        versionCounter.incrementAndGet()
+      }
+
+      // Recalculate files to remove on each attempt
+      val existingFiles = listFilesOptimized()
+      logger.debug(s" Found ${existingFiles.size} existing files to remove")
+      val removeActions = existingFiles.map { file =>
+        RemoveAction(
+          path = file.path,
+          deletionTimestamp = Some(System.currentTimeMillis()),
+          dataChange = true,
+          extendedFileMetadata = None,
+          partitionValues = Some(file.partitionValues),
+          size = Some(file.size)
+        )
+      }
+
+      val allActions: Seq[Action] = removeActions ++ addActions
+      val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFilePath = versionFile.toString
+
+      val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(allActions)
+      val actionsToWrite = metadataUpdate match {
+        case Some(updatedMetadata) =>
+          val hasMetadataInActions = allActions.exists(_.isInstanceOf[MetadataAction])
+          if (hasMetadataInActions) {
+            deduplicatedActions.map {
+              case _: MetadataAction => updatedMetadata
+              case other => other
+            }
+          } else {
+            updatedMetadata +: deduplicatedActions
+          }
+        case None =>
+          deduplicatedActions
+      }
+
+      val codec = getCompressionCodec()
+      val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+        actions = actionsToWrite,
+        cloudProvider = cloudProvider,
+        path = versionFilePath,
+        codec = codec,
+        ifNotExists = true
       )
+
+      if (writeSucceeded) {
+        metadataUpdate.foreach { updatedMetadata =>
+          val newSchemas = SchemaDeduplication.extractSchemaRegistry(updatedMetadata.configuration)
+          updateSchemaRegistry(newSchemas)
+        }
+
+        // Clear all caches after overwrite
+        enhancedCache.invalidateTable(tablePath.toString)
+        invalidateSchemaRegistry()
+        currentSnapshot.set(None)
+
+        try {
+          val metadata = getMetadata()
+          enhancedCache.putMetadata(tablePath.toString, metadata)
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Failed to re-cache metadata after overwrite: ${e.getMessage}")
+        }
+
+        // Store retry metrics for testing and monitoring
+        lastRetryMetrics = Some(TxRetryMetrics(
+          attemptsMade = attempt,
+          conflictsEncountered = attempt - 1,
+          finalVersion = version,
+          conflictedVersions = conflictedVersions.toSeq
+        ))
+
+        if (attempt > 1) {
+          logger.info(s"Overwrite complete: removed ${removeActions.length} files, added ${addActions.length} files after $attempt attempts")
+        } else {
+          logger.info(s"Overwrite complete: removed ${removeActions.length} files, added ${addActions.length} files")
+        }
+
+        return version
+      }
+
+      lastConflictVersion = version
+      conflictedVersions += version
+      logger.warn(s"Concurrent write conflict during overwrite at version $version (attempt $attempt/${retryConfig.maxAttempts}). Retrying.")
+
+      if (attempt < retryConfig.maxAttempts) {
+        val delay = calculateRetryDelay(attempt, retryConfig)
+        Thread.sleep(delay)
+      }
+
+      attempt += 1
     }
 
-    // Use atomic version generation to prevent race conditions (same as addFiles)
-    val version = getNextVersion()
-    logger.debug(s" Using atomic version assignment: $version")
-    // Write removes first, then adds - this ensures proper overwrite semantics
-    val allActions: Seq[Action] = removeActions ++ addActions
-    logger.debug(s" Writing ${allActions.size} actions (${removeActions.size} removes + ${addActions.size} adds) to version $version")
-
-    // Write actions directly - removed "parallel write" which was just blocking on a thread pool
-    writeActions(version, allActions)
-
-    // Clear all caches after overwrite
-    enhancedCache.invalidateTable(tablePath.toString)
-    invalidateSchemaRegistry()
-
-    // Clear current snapshot to force recomputation
-    currentSnapshot.set(None)
-
-    // Re-cache metadata after invalidation since writeActions() wrote updated metadata
-    // This is needed because invalidateTable() clears all caches including metadata
-    // The getMetadata() call will recompute and cache the correct metadata from disk
-    // We proactively cache it here to avoid the compute overhead on subsequent calls
-    try {
-      val metadata = getMetadata()
-      enhancedCache.putMetadata(tablePath.toString, metadata)
-      logger.debug(s" Re-cached metadata after overwrite for ${tablePath.toString}")
-    } catch {
-      case e: Exception =>
-        logger.warn(s"Failed to re-cache metadata after overwrite: ${e.getMessage}")
-    }
-
-    logger.info(
-      s"Overwrite complete: removed ${removeActions.length} files, added ${addActions.length} files"
+    throw new TransactionConflictException(
+      s"Overwrite operation failed after ${retryConfig.maxAttempts} attempts. Last conflicted version: $lastConflictVersion.",
+      lastConflictVersion,
+      retryConfig.maxAttempts
     )
-    logger.info(s"After overwrite, visible files should be: ${addActions.length} (adds) - 0 (active removes) = ${addActions.length}")
-
-    version
   }
 
-  /** Commits a merge splits operation atomically. */
+  /**
+   * Commits a merge splits operation atomically with retry on concurrent conflict.
+   *
+   * Merge operations are idempotent since RemoveActions for already-removed files are no-ops.
+   */
   override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
-    val version = getNextVersion()
-    val actions = removeActions ++ addActions
-    writeActions(version, actions)
+    val actions: Seq[Action] = removeActions ++ addActions
+    val version = writeActionsWithRetry(actions)
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
     invalidateSchemaRegistry()
     currentSnapshot.set(None)
 
-    // Re-cache metadata after invalidation since writeActions() may have written updated metadata
-    // with new schema registry entries from schema deduplication
+    // Re-cache metadata after invalidation
     try {
       val metadata = getMetadata()
       enhancedCache.putMetadata(tablePath.toString, metadata)
@@ -360,14 +435,17 @@ class OptimizedTransactionLog(
     version
   }
 
-  /** Commits remove actions to mark files as logically deleted. */
+  /**
+   * Commits remove actions to mark files as logically deleted with retry on concurrent conflict.
+   *
+   * Remove operations are idempotent.
+   */
   override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
     if (removeActions.isEmpty) {
       return getLatestVersion()
     }
 
-    val version = getNextVersion()
-    writeActions(version, removeActions)
+    val version = writeActionsWithRetry(removeActions)
 
     // Invalidate caches
     enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
@@ -881,6 +959,55 @@ class OptimizedTransactionLog(
     versionCounter.incrementAndGet()
   }
 
+  /**
+   * Get retry configuration from options.
+   */
+  private def getRetryConfig(): TxRetryConfig = {
+    TxRetryConfig(
+      maxAttempts = options.getInt(TransactionLog.RETRY_MAX_ATTEMPTS, 10),
+      baseDelayMs = options.getLong(TransactionLog.RETRY_BASE_DELAY_MS, 100),
+      maxDelayMs = options.getLong(TransactionLog.RETRY_MAX_DELAY_MS, 5000)
+    )
+  }
+
+  /**
+   * Refresh the version counter from disk to handle concurrent writes from other JVMs.
+   *
+   * This method reads the actual version files from storage to determine the latest version,
+   * ignoring the JVM-local version counter.
+   *
+   * @return The latest version number found on disk
+   */
+  private def refreshVersionCounterFromDisk(): Long = {
+    // Invalidate version-related caches
+    enhancedCache.invalidateVersionDependentCaches(tablePath.toString)
+
+    // Read versions directly from storage
+    val versions = getVersions()
+    val latest = if (versions.nonEmpty) versions.max else -1L
+
+    // Update our local counter to match
+    versionCounter.set(latest)
+
+    logger.debug(s"Refreshed version counter from disk: latest version is $latest")
+    latest
+  }
+
+  /**
+   * Calculate exponential backoff delay with jitter for retry attempts.
+   *
+   * @param attempt The current attempt number (1-based)
+   * @param config The retry configuration
+   * @return The delay in milliseconds to wait before the next attempt
+   */
+  private def calculateRetryDelay(attempt: Int, config: TxRetryConfig): Long = {
+    val exponentialDelay = config.baseDelayMs * math.pow(2, attempt - 1).toLong
+    val cappedDelay = math.min(exponentialDelay, config.maxDelayMs)
+    // Add 10% jitter to prevent thundering herd
+    val jitter = (cappedDelay * 0.1 * scala.util.Random.nextDouble()).toLong
+    cappedDelay + jitter
+  }
+
   override def getVersions(): Seq[Long] = {
     val files = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
     logger.debug(
@@ -1186,6 +1313,135 @@ class OptimizedTransactionLog(
     }
   }
 
+  /**
+   * Write actions with automatic retry on concurrent write conflict.
+   *
+   * This method handles version assignment and retry logic internally.
+   *
+   * @param actions The actions to write
+   * @return The version number that was successfully written
+   * @throws TransactionConflictException if all retry attempts fail
+   */
+  private def writeActionsWithRetry(actions: Seq[Action]): Long = {
+    val retryConfig = getRetryConfig()
+    var attempt = 1
+    var lastConflictVersion = -1L
+    val conflictedVersions = scala.collection.mutable.ListBuffer[Long]()
+
+    while (attempt <= retryConfig.maxAttempts) {
+      val version = if (attempt == 1) {
+        getNextVersion()
+      } else {
+        refreshVersionCounterFromDisk()
+        versionCounter.incrementAndGet()
+      }
+
+      val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFilePath = versionFile.toString
+
+      logger.debug(s" Writing version $version to $versionFilePath with ${actions.size} actions (attempt $attempt)")
+
+      // Apply schema deduplication fresh on each attempt
+      val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(actions)
+
+      val actionsToWrite = metadataUpdate match {
+        case Some(updatedMetadata) =>
+          val hasMetadataInActions = actions.exists(_.isInstanceOf[MetadataAction])
+          if (hasMetadataInActions) {
+            deduplicatedActions.map {
+              case _: MetadataAction => updatedMetadata
+              case other => other
+            }
+          } else {
+            updatedMetadata +: deduplicatedActions
+          }
+        case None =>
+          deduplicatedActions
+      }
+
+      val codec = getCompressionCodec()
+      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+
+      val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
+        actions = actionsToWrite,
+        cloudProvider = cloudProvider,
+        path = versionFilePath,
+        codec = codec,
+        ifNotExists = true
+      )
+
+      if (writeSucceeded) {
+        // Update schema registry cache
+        metadataUpdate.foreach { updatedMetadata =>
+          val newSchemas = SchemaDeduplication.extractSchemaRegistry(updatedMetadata.configuration)
+          updateSchemaRegistry(newSchemas)
+        }
+
+        Thread.sleep(10) // File system consistency delay
+
+        // Update caches
+        enhancedCache.putVersionActions(tablePath.toString, version, actionsToWrite)
+        actionsToWrite.find(_.isInstanceOf[MetadataAction]).foreach { metadata =>
+          enhancedCache.putMetadata(tablePath.toString, metadata.asInstanceOf[MetadataAction])
+        }
+
+        val addActionsToWrite = actionsToWrite.collect { case add: AddAction => add }
+        if (addActionsToWrite.nonEmpty) {
+          val currentFiles = try { listFiles() } catch { case _: Exception => Seq.empty[AddAction] }
+          val fileListChecksum = currentFiles.map(_.path).sorted.mkString(",").hashCode.toString
+          enhancedCache.putFileList(tablePath.toString, fileListChecksum, currentFiles)
+        }
+
+        // Create checkpoint if needed
+        checkpoint.foreach { cp =>
+          if (cp.shouldCreateCheckpoint(version)) {
+            try { createCheckpointOptimized(version) }
+            catch { case e: Exception => logger.warn(s"Failed to create checkpoint at version $version", e) }
+          }
+        }
+
+        // Store retry metrics for testing and monitoring
+        lastRetryMetrics = Some(TxRetryMetrics(
+          attemptsMade = attempt,
+          conflictsEncountered = attempt - 1,
+          finalVersion = version,
+          conflictedVersions = conflictedVersions.toSeq
+        ))
+
+        if (attempt > 1) {
+          logger.info(s"Written ${actionsToWrite.length} actions to version $version$compressionInfo after $attempt attempts")
+        } else {
+          logger.info(s"Writing ${actionsToWrite.length} actions to version $version$compressionInfo: ${actionsToWrite.map(_.getClass.getSimpleName).mkString(", ")}")
+        }
+
+        return version
+      }
+
+      // Conflict detected
+      lastConflictVersion = version
+      conflictedVersions += version
+      logger.warn(s"Concurrent write conflict at version $version (attempt $attempt/${retryConfig.maxAttempts}). Retrying.")
+
+      if (attempt < retryConfig.maxAttempts) {
+        val delay = calculateRetryDelay(attempt, retryConfig)
+        Thread.sleep(delay)
+      }
+
+      attempt += 1
+    }
+
+    throw new TransactionConflictException(
+      s"Failed to write transaction log after ${retryConfig.maxAttempts} attempts. Last conflicted version: $lastConflictVersion.",
+      lastConflictVersion,
+      retryConfig.maxAttempts
+    )
+  }
+
+  /**
+   * Write actions to a specific version (internal method without retry).
+   *
+   * Used for initialization (version 0) where retry doesn't make sense.
+   */
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
     val versionFilePath = versionFile.toString
