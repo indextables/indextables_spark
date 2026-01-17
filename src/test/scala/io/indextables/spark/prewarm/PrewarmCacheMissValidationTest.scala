@@ -31,22 +31,19 @@ import org.slf4j.LoggerFactory
 /**
  * Cache miss validation tests for PREWARM INDEXTABLES CACHE command.
  *
- * These tests verify that after prewarming specific index components, subsequent queries do not cause cache misses
- * for those components.
+ * These tests verify that after prewarming specific index components, subsequent queries do not cause cache misses for
+ * those components.
  *
  * Key validation approach:
- *   1. Write test data to create split files
- *   2. Clear caches to ensure clean state
- *   3. Execute PREWARM with specific segments
- *   4. Record cache stats after prewarm
- *   5. Execute queries that would normally cause cache misses
- *   6. Verify no new cache misses occurred
+ *   1. Write test data to create split files 2. Clear caches to ensure clean state 3. Execute PREWARM with specific
+ *      segments 4. Record cache stats after prewarm 5. Execute queries that would normally cause cache misses 6. Verify
+ *      no new cache misses occurred
  */
 class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheMissValidationTest])
 
-  var spark: SparkSession = _
+  var spark: SparkSession   = _
   var tempTablePath: String = _
 
   override def beforeEach(): Unit = {
@@ -95,15 +92,17 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     import ss.implicits._
 
     // Create diverse test data with multiple field types
-    val testData = (1 until numRecords + 1).map { i =>
-      (
-        i.toLong,
-        s"title_$i unique content for record number $i",
-        s"category_${i % 10}",
-        i * 1.5,
-        s"2024-${(i % 12) + 1}-${(i % 28) + 1}"
-      )
-    }.toDF("id", "content", "category", "score", "date_str")
+    val testData = (1 until numRecords + 1)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i unique content for record number $i",
+          s"category_${i % 10}",
+          i * 1.5,
+          s"2024-${(i % 12) + 1}-${(i % 28) + 1}"
+        )
+      }
+      .toDF("id", "content", "category", "score", "date_str")
 
     // Write with small batch size to create multiple split files
     testData
@@ -182,8 +181,10 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Verify default segments are included
     val segments = prewarmRows.head.getAs[String]("segments")
-    assert(segments.contains("TERM") || segments.contains("FIELDNORM") || segments.contains("POSTINGS"),
-      s"Default segments should include TERM, FIELDNORM, POSTINGS. Got: $segments")
+    assert(
+      segments.contains("TERM") || segments.contains("FIELDNORM") || segments.contains("POSTINGS"),
+      s"Default segments should include TERM, FIELDNORM, POSTINGS. Got: $segments"
+    )
 
     // Execute various queries to validate complete prewarm
     val df = spark.read
@@ -260,14 +261,16 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     val partitionedPath = Files.createTempDirectory("prewarm_partition_test_").toFile.getAbsolutePath
 
     try {
-      val testData = (1 until 301).map { i =>
-        (
-          i.toLong,
-          s"content_$i",
-          s"region_${i % 3}",
-          s"2024-0${(i % 3) + 1}-01"
-        )
-      }.toDF("id", "content", "region", "date")
+      val testData = (1 until 301)
+        .map { i =>
+          (
+            i.toLong,
+            s"content_$i",
+            s"region_${i % 3}",
+            s"2024-0${(i % 3) + 1}-01"
+          )
+        }
+        .toDF("id", "content", "region", "date")
 
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -327,7 +330,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$tempTablePath'")
 
     // Verify schema
-    val schema = prewarmResult.schema
+    val schema      = prewarmResult.schema
     val columnNames = schema.fieldNames.toSet
 
     assert(columnNames.contains("host"), "Schema should include 'host' column")
@@ -363,8 +366,10 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
     val status = prewarmRows.head.getAs[String]("status")
     // With at least one record, we should get a success or no_splits (if in-memory only)
-    assert(status == "success" || status == "no_splits" || status == "partial",
-      s"Status should be success, no_splits, or partial, got: $status")
+    assert(
+      status == "success" || status == "no_splits" || status == "partial",
+      s"Status should be success, no_splits, or partial, got: $status"
+    )
 
     logger.info("PREWARM minimal table test passed")
   }
@@ -394,7 +399,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     val diskCachePath = Files.createTempDirectory("prewarm_disk_cache_test_").toFile.getAbsolutePath
-    val testPath = Files.createTempDirectory("prewarm_disk_cache_data_").toFile.getAbsolutePath
+    val testPath      = Files.createTempDirectory("prewarm_disk_cache_data_").toFile.getAbsolutePath
 
     try {
       // Create SparkSession with disk cache enabled
@@ -413,9 +418,9 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         import diskCacheSpark.implicits._
 
         // Create test data
-        val testData = (1 until 201).map { i =>
-          (i.toLong, s"title_$i", s"content for record $i", i * 1.5)
-        }.toDF("id", "title", "content", "score")
+        val testData = (1 until 201)
+          .map(i => (i.toLong, s"title_$i", s"content for record $i", i * 1.5))
+          .toDF("id", "title", "content", "score")
 
         testData
           .coalesce(1)
@@ -433,12 +438,12 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Check initial disk cache state
         val initialCacheResult = diskCacheSpark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-        val initialRows = initialCacheResult.collect()
+        val initialRows        = initialCacheResult.collect()
         logger.info(s"Initial disk cache state: ${initialRows.map(_.toString).mkString(", ")}")
 
         // Execute PREWARM with all default segments
         val prewarmResult = diskCacheSpark.sql(s"PREWARM INDEXTABLES CACHE '$testPath'")
-        val prewarmRows = prewarmResult.collect()
+        val prewarmRows   = prewarmResult.collect()
 
         logger.info(s"Prewarm result: ${prewarmRows.map(_.toString).mkString(", ")}")
         assert(prewarmRows.length > 0, "Prewarm should return results")
@@ -448,7 +453,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Verify disk cache state via DESCRIBE INDEXTABLES DISK CACHE
         val postPrewarmCacheResult = diskCacheSpark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-        val postPrewarmRows = postPrewarmCacheResult.collect()
+        val postPrewarmRows        = postPrewarmCacheResult.collect()
 
         logger.info(s"Post-prewarm disk cache state: ${postPrewarmRows.map(_.toString).mkString(", ")}")
 
@@ -461,8 +466,10 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
           val enabled = row.getAs[Boolean]("enabled")
           if (enabled) {
             val totalBytes = if (row.isNullAt(row.fieldIndex("total_bytes"))) 0L else row.getAs[Long]("total_bytes")
-            val splitsInCache = if (row.isNullAt(row.fieldIndex("splits_cached"))) 0L else row.getAs[Long]("splits_cached")
-            val componentsInCache = if (row.isNullAt(row.fieldIndex("components_cached"))) 0L else row.getAs[Long]("components_cached")
+            val splitsInCache =
+              if (row.isNullAt(row.fieldIndex("splits_cached"))) 0L else row.getAs[Long]("splits_cached")
+            val componentsInCache =
+              if (row.isNullAt(row.fieldIndex("components_cached"))) 0L else row.getAs[Long]("components_cached")
             logger.info(s"Disk cache (enabled=true): total_bytes=$totalBytes, splits=$splitsInCache, components=$componentsInCache")
           } else {
             logger.info(s"Disk cache (enabled=false): cache not initialized in this JVM context")
@@ -471,9 +478,8 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         logger.info("PREWARM disk cache validation test passed - DESCRIBE command works correctly")
 
-      } finally {
+      } finally
         diskCacheSpark.stop()
-      }
 
     } finally {
       // Cleanup
@@ -498,7 +504,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     val diskCachePath = Files.createTempDirectory("prewarm_segment_cache_test_").toFile.getAbsolutePath
-    val testPath = Files.createTempDirectory("prewarm_segment_data_").toFile.getAbsolutePath
+    val testPath      = Files.createTempDirectory("prewarm_segment_data_").toFile.getAbsolutePath
 
     try {
       val diskCacheSpark = SparkSession
@@ -516,9 +522,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         import diskCacheSpark.implicits._
 
         // Create test data with fast field
-        val testData = (1 until 101).map { i =>
-          (i.toLong, s"content_$i", i * 2.5)
-        }.toDF("id", "content", "score")
+        val testData = (1 until 101).map(i => (i.toLong, s"content_$i", i * 2.5)).toDF("id", "content", "score")
 
         testData
           .coalesce(1)
@@ -543,7 +547,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Check disk cache state
         val cacheResult = diskCacheSpark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-        val cacheRows = cacheResult.collect()
+        val cacheRows   = cacheResult.collect()
 
         logger.info(s"Disk cache after FAST_FIELD prewarm: ${cacheRows.map(_.toString).mkString(", ")}")
 
@@ -561,9 +565,8 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         logger.info("PREWARM segment-specific cache validation test passed")
 
-      } finally {
+      } finally
         diskCacheSpark.stop()
-      }
 
     } finally {
       deleteRecursively(new File(diskCachePath))
@@ -586,7 +589,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     val diskCachePath = Files.createTempDirectory("flush_disk_cache_test_").toFile.getAbsolutePath
-    val testPath = Files.createTempDirectory("flush_disk_cache_data_").toFile.getAbsolutePath
+    val testPath      = Files.createTempDirectory("flush_disk_cache_data_").toFile.getAbsolutePath
 
     try {
       // Create SparkSession with disk cache enabled
@@ -605,9 +608,9 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
         import diskCacheSpark.implicits._
 
         // Create test data
-        val testData = (1 until 201).map { i =>
-          (i.toLong, s"title_$i", s"content for record $i", i * 1.5)
-        }.toDF("id", "title", "content", "score")
+        val testData = (1 until 201)
+          .map(i => (i.toLong, s"title_$i", s"content for record $i", i * 1.5))
+          .toDF("id", "title", "content", "score")
 
         testData
           .coalesce(1)
@@ -622,7 +625,7 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Execute PREWARM to populate the disk cache
         val prewarmResult = diskCacheSpark.sql(s"PREWARM INDEXTABLES CACHE '$testPath'")
-        val prewarmRows = prewarmResult.collect()
+        val prewarmRows   = prewarmResult.collect()
         logger.info(s"Prewarm result: ${prewarmRows.map(_.toString).mkString(", ")}")
 
         val splitsPrewarmed = prewarmRows.head.getAs[Int]("splits_prewarmed")
@@ -638,12 +641,12 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Verify cache has data via DESCRIBE before flush
         val preFlushedCacheResult = diskCacheSpark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-        val preFlushRows = preFlushedCacheResult.collect()
+        val preFlushRows          = preFlushedCacheResult.collect()
         logger.info(s"Pre-flush disk cache state: ${preFlushRows.map(_.toString).mkString(", ")}")
 
         // Execute FLUSH INDEXTABLES DISK CACHE
         val flushResult = diskCacheSpark.sql("FLUSH INDEXTABLES DISK CACHE")
-        val flushRows = flushResult.collect()
+        val flushRows   = flushResult.collect()
         logger.info(s"Flush result: ${flushRows.map(_.toString).mkString(", ")}")
 
         // Verify flush returned success
@@ -656,30 +659,31 @@ class PrewarmCacheMissValidationTest extends AnyFunSuite with BeforeAndAfterEach
 
         // Verify disk cache is cleared via DESCRIBE INDEXTABLES DISK CACHE
         val postFlushCacheResult = diskCacheSpark.sql("DESCRIBE INDEXTABLES DISK CACHE")
-        val postFlushRows = postFlushCacheResult.collect()
+        val postFlushRows        = postFlushCacheResult.collect()
         logger.info(s"Post-flush disk cache state: ${postFlushRows.map(_.toString).mkString(", ")}")
 
         // Verify cache shows zeros after flush
         postFlushRows.foreach { row =>
           if (row.getAs[Boolean]("enabled")) {
-            val totalBytes = row.getAs[Long]("total_bytes")
-            val splitsInCache = row.getAs[Int]("splits_cached")
+            val totalBytes        = row.getAs[Long]("total_bytes")
+            val splitsInCache     = row.getAs[Int]("splits_cached")
             val componentsInCache = row.getAs[Int]("components_cached")
 
             logger.info(s"Post-flush cache: total_bytes=$totalBytes, splits_cached=$splitsInCache, components_cached=$componentsInCache")
 
             // After flush, cache should be empty (or near-empty due to potential race)
-            assert(totalBytes == 0 || splitsInCache == 0 || componentsInCache == 0,
-              s"After FLUSH, disk cache should be cleared. Got: total_bytes=$totalBytes, splits=$splitsInCache, components=$componentsInCache")
+            assert(
+              totalBytes == 0 || splitsInCache == 0 || componentsInCache == 0,
+              s"After FLUSH, disk cache should be cleared. Got: total_bytes=$totalBytes, splits=$splitsInCache, components=$componentsInCache"
+            )
           }
         }
 
         logger.info("✓ FLUSH INDEXTABLES DISK CACHE successfully cleared cache")
         logger.info("FLUSH disk cache validation test passed")
 
-      } finally {
+      } finally
         diskCacheSpark.stop()
-      }
 
     } finally {
       // Cleanup

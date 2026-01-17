@@ -28,9 +28,8 @@ import io.indextables.spark.RealS3TestBase
  * Real S3 test for schema deduplication bug.
  *
  * This test reproduces the production bug where:
- * 1. MetadataAction appears in every transaction (not just the first few)
- * 2. After version 11 (post-checkpoint), writes fail with "Missing schema hashes"
- * 3. Each subsequent failure adds more missing hashes
+ *   1. MetadataAction appears in every transaction (not just the first few) 2. After version 11 (post-checkpoint),
+ *      writes fail with "Missing schema hashes" 3. Each subsequent failure adds more missing hashes
  *
  * The bug does NOT reproduce on local filesystem but happens on real S3.
  */
@@ -74,10 +73,10 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
   override def afterAll(): Unit = {
     // Clean up test data
     if (awsCredentials.isDefined) {
-      try {
+      try
         println(s"🧹 Cleaning up test data at $testBasePath")
-        // Note: Actual cleanup would require S3 delete operations
-      } catch {
+      // Note: Actual cleanup would require S3 delete operations
+      catch {
         case e: Exception =>
           println(s"⚠️ Warning: Failed to clean up test data: ${e.getMessage}")
       }
@@ -85,11 +84,9 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
     super.afterAll()
   }
 
-  /**
-   * Load AWS credentials from ~/.aws/credentials file.
-   */
+  /** Load AWS credentials from ~/.aws/credentials file. */
   private def loadAwsCredentials(): Option[(String, String)] = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
 
     if (!credFile.exists()) {
@@ -120,23 +117,25 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
   test("schema deduplication with large schema - reproduces production bug on S3") {
     assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
-    val tablePath = s"$testBasePath/large_schema_test"
+    val tablePath      = s"$testBasePath/large_schema_test"
     val sparkImplicits = spark.implicits
     import sparkImplicits._
 
     // Create a DataFrame with a large schema (100 fields) - similar to production
-    val numFields = 100
+    val numFields  = 100
     val numRecords = 100
 
     def createLargeDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
       val rows = (1 to numRecords).map { i =>
-        val id = (batchNum - 1) * numRecords + i
+        val id     = (batchNum - 1) * numRecords + i
         val values = (1 to numFields).map(f => s"value_${id}_$f")
         org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
       }
       val schema = org.apache.spark.sql.types.StructType(
         org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
-        (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+          (1 to numFields).map(f =>
+            org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType)
+          )
       )
       spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
     }
@@ -153,7 +152,7 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
 
     // Append 12 more times - checkpoint triggers at version 10
     (2 to 13).foreach { i =>
-      println(s"📝 Writing batch $i (version ${i})")
+      println(s"📝 Writing batch $i (version $i)")
 
       try {
         val df = createLargeDF(i)
@@ -175,7 +174,7 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
             // This is the expected failure for the bug - we've reproduced it
             // Let's continue and see if more hashes are missing on next attempt
             if (i <= 12) {
-              println(s"📝 Attempting batch ${i} again to see if more hashes are missing...")
+              println(s"📝 Attempting batch $i again to see if more hashes are missing...")
               try {
                 val df = createLargeDF(i)
                 df.write
@@ -211,23 +210,25 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
   test("schema deduplication - verify MetadataAction presence in transactions") {
     assume(awsCredentials.isDefined, "AWS credentials not available - skipping test")
 
-    val tablePath = s"$testBasePath/metadata_presence_test"
+    val tablePath      = s"$testBasePath/metadata_presence_test"
     val sparkImplicits = spark.implicits
     import sparkImplicits._
 
     // Create a simple schema (fewer fields for easier debugging)
-    val numFields = 50
+    val numFields  = 50
     val numRecords = 10
 
     def createDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
       val rows = (1 to numRecords).map { i =>
-        val id = (batchNum - 1) * numRecords + i
+        val id     = (batchNum - 1) * numRecords + i
         val values = (1 to numFields).map(f => s"value_${id}_$f")
         org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
       }
       val schema = org.apache.spark.sql.types.StructType(
         org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
-        (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+          (1 to numFields).map(f =>
+            org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType)
+          )
       )
       spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
     }
@@ -253,14 +254,15 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
     )
 
     try {
-      val txLogPath = tablePath + "/_transaction_log"
+      val txLogPath        = tablePath + "/_transaction_log"
       var metadataVersions = List.empty[Long]
 
       (0 to 5).foreach { version =>
         val versionFilePath = f"$txLogPath/$version%020d.json"
         if (cloudProvider.exists(versionFilePath)) {
           val bytes = cloudProvider.readFile(versionFilePath)
-          val decompressedBytes = io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
+          val decompressedBytes =
+            io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
           val content = new String(decompressedBytes, java.nio.charset.StandardCharsets.UTF_8)
 
           val hasMetadata = content.contains("\"metadataAction\"")
@@ -283,10 +285,12 @@ class RealS3SchemaDeduplicationTest extends RealS3TestBase {
         println(s"   Actual: versions ${metadataVersions.mkString(", ")}")
       }
 
-      assert(metadataVersions.size <= 2,
-        s"MetadataAction should only be in 2 versions (init + first schema), found in ${metadataVersions.size} versions: ${metadataVersions.mkString(", ")}")
-    } finally {
+      assert(
+        metadataVersions.size <= 2,
+        s"MetadataAction should only be in 2 versions (init + first schema), found in ${metadataVersions.size} versions: ${metadataVersions
+            .mkString(", ")}"
+      )
+    } finally
       cloudProvider.close()
-    }
   }
 }

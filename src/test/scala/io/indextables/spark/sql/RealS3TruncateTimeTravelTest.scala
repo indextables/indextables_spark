@@ -148,11 +148,11 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
       return (0, 0)
     }
 
-    val files = fs.listStatus(txLogPath)
-    val versionPattern = """^\d{20}\.json$""".r
+    val files             = fs.listStatus(txLogPath)
+    val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint.*\.json$""".r
 
-    val versionCount = files.count(f => versionPattern.findFirstIn(f.getPath.getName).isDefined)
+    val versionCount    = files.count(f => versionPattern.findFirstIn(f.getPath.getName).isDefined)
     val checkpointCount = files.count(f => checkpointPattern.findFirstIn(f.getPath.getName).isDefined)
 
     (versionCount, checkpointCount)
@@ -185,7 +185,7 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
 
     // Truncate time travel
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     println(s"📋 Truncation result: status=${row.getString(1)}, versions_deleted=${row.getLong(3)}")
 
@@ -231,7 +231,7 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
 
     // Run DRY RUN
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath' DRY RUN")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     println(s"📋 DRY RUN result: status=${row.getString(1)}, would_delete=${row.getLong(3)}")
 
@@ -268,11 +268,11 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
       .load(tablePath)
 
     val countBefore = dataBefore.count()
-    val sumBefore = dataBefore.agg(Map("score" -> "sum")).collect().head.getDouble(0)
+    val sumBefore   = dataBefore.agg(Map("score" -> "sum")).collect().head.getDouble(0)
 
     // Truncate
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     println(s"📋 Truncation result: status=${row.getString(1)}, versions_deleted=${row.getLong(3)}")
     row.getString(1) shouldBe "SUCCESS"
@@ -283,7 +283,7 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
       .load(tablePath)
 
     val countAfter = dataAfter.count()
-    val sumAfter = dataAfter.agg(Map("score" -> "sum")).collect().head.getDouble(0)
+    val sumAfter   = dataAfter.agg(Map("score" -> "sum")).collect().head.getDouble(0)
 
     countAfter shouldBe countBefore
     sumAfter shouldBe sumBefore
@@ -332,8 +332,8 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
       val countBefore = dataBefore.count()
-      val sumBefore = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-      val idsBefore = dataBefore.select("id").collect().map(_.getInt(0)).sorted
+      val sumBefore   = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+      val idsBefore   = dataBefore.select("id").collect().map(_.getInt(0)).sorted
 
       println(s"📊 Data before truncation: count=$countBefore, sum(amount)=$sumBefore")
       countBefore shouldBe 21
@@ -341,7 +341,7 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
 
       // Truncate time travel
       val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-      val row = result.collect().head
+      val row    = result.collect().head
 
       println(s"📋 Truncation result:")
       println(s"   - status: ${row.getString(1)}")
@@ -351,7 +351,7 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
 
       row.getString(1) shouldBe "SUCCESS"
       row.getLong(3) should be >= 20L // Should delete versions 0-19 or 0-20
-      row.getLong(4) should be >= 1L // Should delete at least checkpoint at v10
+      row.getLong(4) should be >= 1L  // Should delete at least checkpoint at v10
 
       // Verify transaction log state after truncation
       val (versionsAfter, checkpointsAfter) = countTransactionLogFiles(tablePath)
@@ -365,8 +365,8 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
         .load(tablePath)
 
       val countAfter = dataAfter.count()
-      val sumAfter = dataAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-      val idsAfter = dataAfter.select("id").collect().map(_.getInt(0)).sorted
+      val sumAfter   = dataAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+      val idsAfter   = dataAfter.select("id").collect().map(_.getInt(0)).sorted
 
       println(s"📊 Data after truncation: count=$countAfter, sum(amount)=$sumAfter")
 
@@ -389,9 +389,8 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
       println(s"   - Sum(amount): before=$sumBefore, after=$sumAfter")
       println(s"   - All IDs match: ${idsBefore.mkString(",")}")
 
-    } finally {
+    } finally
       // Restore checkpoint interval
       spark.conf.set("spark.indextables.checkpoint.interval", "5")
-    }
   }
 }

@@ -17,26 +17,26 @@
 
 package io.indextables.spark.io
 
-import io.indextables.spark.TestBase
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
-import org.scalatest.funsuite.AnyFunSuite
-
 import java.io.File
 import java.util.UUID
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
+import org.scalatest.funsuite.AnyFunSuite
 
 /**
  * Tests for S3 pagination fix.
  *
- * Background: S3's listObjectsV2 API returns a maximum of 1000 objects per request.
- * Without proper pagination handling, directories with >1000 files would only return
- * partial results, causing data corruption in PURGE operations.
+ * Background: S3's listObjectsV2 API returns a maximum of 1000 objects per request. Without proper pagination handling,
+ * directories with >1000 files would only return partial results, causing data corruption in PURGE operations.
  *
  * The fix uses s3Client.listObjectsV2Paginator() which automatically handles pagination.
  *
  * These tests verify:
- * 1. Local filesystem listing works with >1000 files (flow test)
- * 2. CloudStorageProvider interface handles large file counts correctly
+ *   1. Local filesystem listing works with >1000 files (flow test) 2. CloudStorageProvider interface handles large file
+ *      counts correctly
  *
  * For real S3 testing, see RealS3PaginationTest (requires AWS credentials).
  */
@@ -68,31 +68,30 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
 
       // Use HadoopCloudStorageProvider to list them
       val hadoopConf = new Configuration()
-      val provider = new HadoopCloudStorageProvider(hadoopConf)
+      val provider   = new HadoopCloudStorageProvider(hadoopConf)
 
       try {
         val files = provider.listFiles(testPath.getAbsolutePath, recursive = false)
 
         println(s"Listed ${files.size} files")
-        assert(files.size == numFiles,
+        assert(
+          files.size == numFiles,
           s"Expected $numFiles files but got ${files.size}. " +
-          "This would indicate a pagination bug if this were S3.")
+            "This would indicate a pagination bug if this were S3."
+        )
 
         // Verify all files are present
         val fileNames = files.map(f => new Path(f.path).getName).toSet
         (1 to numFiles).foreach { i =>
           val expectedName = f"file_$i%05d.split"
-          assert(fileNames.contains(expectedName),
-            s"Missing file: $expectedName")
+          assert(fileNames.contains(expectedName), s"Missing file: $expectedName")
         }
 
         println(s"✓ Successfully listed all $numFiles files")
-      } finally {
+      } finally
         provider.close()
-      }
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("HadoopCloudStorageProvider should list more than 1000 files recursively") {
@@ -100,8 +99,8 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
 
     try {
       val filesPerDir = 400
-      val numDirs = 4
-      val totalFiles = filesPerDir * numDirs // 1600 files total
+      val numDirs     = 4
+      val totalFiles  = filesPerDir * numDirs // 1600 files total
 
       // Create nested directory structure like partitioned tables
       println(s"Creating $totalFiles test files across $numDirs directories...")
@@ -118,23 +117,23 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
 
       // Use HadoopCloudStorageProvider to list them recursively
       val hadoopConf = new Configuration()
-      val provider = new HadoopCloudStorageProvider(hadoopConf)
+      val provider   = new HadoopCloudStorageProvider(hadoopConf)
 
       try {
         val files = provider.listFiles(tempDir.getAbsolutePath, recursive = true)
 
         println(s"Listed ${files.size} files recursively")
-        assert(files.size == totalFiles,
+        assert(
+          files.size == totalFiles,
           s"Expected $totalFiles files but got ${files.size}. " +
-          "This would indicate a pagination bug in recursive listing.")
+            "This would indicate a pagination bug in recursive listing."
+        )
 
         println(s"✓ Successfully listed all $totalFiles files recursively")
-      } finally {
+      } finally
         provider.close()
-      }
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   test("CloudStorageProvider listing should handle empty directories") {
@@ -142,18 +141,16 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
 
     try {
       val hadoopConf = new Configuration()
-      val provider = new HadoopCloudStorageProvider(hadoopConf)
+      val provider   = new HadoopCloudStorageProvider(hadoopConf)
 
       try {
         val files = provider.listFiles(tempDir.getAbsolutePath, recursive = false)
         assert(files.isEmpty, "Empty directory should return empty list")
         println("✓ Empty directory handled correctly")
-      } finally {
+      } finally
         provider.close()
-      }
-    } finally {
+    } finally
       deleteRecursively(tempDir)
-    }
   }
 
   /**
@@ -176,9 +173,8 @@ class S3PaginationTest extends AnyFunSuite with TestBase {
    * }}}
    *
    * To test with real S3:
-   * 1. Set AWS credentials in environment or spark config
-   * 2. Create a test bucket with >1000 files
-   * 3. Run RealS3PaginationTest
+   *   1. Set AWS credentials in environment or spark config 2. Create a test bucket with >1000 files 3. Run
+   *      RealS3PaginationTest
    */
   test("S3 pagination fix documentation") {
     // This test just documents the fix - see method scaladoc above

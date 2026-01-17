@@ -105,9 +105,7 @@ class LocalCopyDownloader extends AsyncDownloader {
     future
   }
 
-  /**
-   * Normalize a local path by removing file:// prefix if present.
-   */
+  /** Normalize a local path by removing file:// prefix if present. */
   private def normalizeLocalPath(path: String): String =
     if (path.startsWith("file://")) {
       path.stripPrefix("file://")

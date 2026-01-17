@@ -294,25 +294,25 @@ class IndexTables4SparkPartitionReader(
         }
 
         val splitMetadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
-          addAction.path.split("/").last.replace(".split", ""),    // splitId from filename
-          "tantivy4spark-index",                                   // indexUid (NEW - required)
-          0L,                                                      // partitionId (NEW - required)
-          "tantivy4spark-source",                                  // sourceId (NEW - required)
-          "tantivy4spark-node",                                    // nodeId (NEW - required)
-          toLongSafeOption(addAction.numRecords),                  // numDocs
-          toLongSafeOption(addAction.uncompressedSizeBytes),       // uncompressedSizeBytes
-          addAction.timeRangeStart.map(Instant.parse).orNull,      // timeRangeStart
-          addAction.timeRangeEnd.map(Instant.parse).orNull,        // timeRangeEnd
-          System.currentTimeMillis() / 1000,                       // createTimestamp (NEW - required)
-          "Mature",                                                // maturity (NEW - required)
-          addAction.splitTags.getOrElse(Set.empty[String]).asJava, // tags
-          toLongSafeOption(addAction.footerStartOffset),           // footerStartOffset
-          toLongSafeOption(addAction.footerEndOffset),             // footerEndOffset
-          toLongSafeOption(addAction.deleteOpstamp),               // deleteOpstamp
-          addAction.numMergeOps.getOrElse(0),                      // numMergeOps (Int is OK for this field)
-          "doc-mapping-uid",                                       // docMappingUid (NEW - required)
-          addAction.docMappingJson.orNull,                         // docMappingJson (MOVED - for performance)
-          java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()  // skippedSplits
+          addAction.path.split("/").last.replace(".split", ""),         // splitId from filename
+          "tantivy4spark-index",                                        // indexUid (NEW - required)
+          0L,                                                           // partitionId (NEW - required)
+          "tantivy4spark-source",                                       // sourceId (NEW - required)
+          "tantivy4spark-node",                                         // nodeId (NEW - required)
+          toLongSafeOption(addAction.numRecords),                       // numDocs
+          toLongSafeOption(addAction.uncompressedSizeBytes),            // uncompressedSizeBytes
+          addAction.timeRangeStart.map(Instant.parse).orNull,           // timeRangeStart
+          addAction.timeRangeEnd.map(Instant.parse).orNull,             // timeRangeEnd
+          System.currentTimeMillis() / 1000,                            // createTimestamp (NEW - required)
+          "Mature",                                                     // maturity (NEW - required)
+          addAction.splitTags.getOrElse(Set.empty[String]).asJava,      // tags
+          toLongSafeOption(addAction.footerStartOffset),                // footerStartOffset
+          toLongSafeOption(addAction.footerEndOffset),                  // footerEndOffset
+          toLongSafeOption(addAction.deleteOpstamp),                    // deleteOpstamp
+          addAction.numMergeOps.getOrElse(0),                           // numMergeOps (Int is OK for this field)
+          "doc-mapping-uid",                                            // docMappingUid (NEW - required)
+          addAction.docMappingJson.orNull,                              // docMappingJson (MOVED - for performance)
+          java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
         )
 
         // Create IndexTables4SparkOptions from config map for JSON field support

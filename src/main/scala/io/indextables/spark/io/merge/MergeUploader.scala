@@ -21,20 +21,17 @@ import java.io.File
 import java.net.URI
 import java.nio.file.{Files, Paths}
 
-import io.indextables.spark.util.ProtocolNormalizer
-import io.indextables.spark.utils.CredentialProviderFactory
-
-import software.amazon.awssdk.auth.credentials._
-import software.amazon.awssdk.core.sync.RequestBody
-import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.S3Client
-import software.amazon.awssdk.services.s3.model.PutObjectRequest
-
 import com.azure.identity.ClientSecretCredentialBuilder
 import com.azure.storage.blob.{BlobClient, BlobServiceClient, BlobServiceClientBuilder}
 import com.azure.storage.common.StorageSharedKeyCredential
-
+import io.indextables.spark.util.ProtocolNormalizer
+import io.indextables.spark.utils.CredentialProviderFactory
 import org.slf4j.LoggerFactory
+import software.amazon.awssdk.auth.credentials._
+import software.amazon.awssdk.core.sync.RequestBody
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.S3Client
 
 /**
  * Helper for uploading merged splits to cloud storage (S3 and Azure).
@@ -44,8 +41,8 @@ import org.slf4j.LoggerFactory
  *   - Azure: azure://, wasb://, wasbs://, abfs://, abfss:// paths with account key or OAuth
  *   - Local: file paths copied directly
  *
- * Uses the same credential resolution patterns as S3AsyncDownloader and AzureAsyncDownloader
- * for consistency across download and upload operations.
+ * Uses the same credential resolution patterns as S3AsyncDownloader and AzureAsyncDownloader for consistency across
+ * download and upload operations.
  */
 object MergeUploader {
 
@@ -54,8 +51,8 @@ object MergeUploader {
   /**
    * Upload a local file to cloud storage (S3, Azure, or local).
    *
-   * Uses the same credential resolution patterns as S3AsyncDownloader and AzureAsyncDownloader
-   * to ensure Unity Catalog and other custom credential providers work consistently.
+   * Uses the same credential resolution patterns as S3AsyncDownloader and AzureAsyncDownloader to ensure Unity Catalog
+   * and other custom credential providers work consistently.
    *
    * @param localPath
    *   Path to the local file to upload
@@ -103,7 +100,8 @@ object MergeUploader {
       logger.info(s"Uploading to S3: bucket=$bucket, key=$key")
 
       // Upload file
-      val putRequest = PutObjectRequest.builder()
+      val putRequest = PutObjectRequest
+        .builder()
         .bucket(bucket)
         .key(key)
         .build()
@@ -112,14 +110,13 @@ object MergeUploader {
 
       logger.info(s"Upload completed: $destPath ($fileSize bytes)")
       fileSize
-    } finally {
+    } finally
       s3Client.close()
-    }
   }
 
   /**
-   * Create S3 client using the same credential resolution as S3AsyncDownloader.
-   * This ensures Unity Catalog and other custom credential providers work.
+   * Create S3 client using the same credential resolution as S3AsyncDownloader. This ensures Unity Catalog and other
+   * custom credential providers work.
    */
   private def createS3Client(configs: Map[String, String], tablePath: String): S3Client = {
     def get(key: String): Option[String] =
@@ -142,7 +139,8 @@ object MergeUploader {
         DefaultCredentialsProvider.create()
     }
 
-    val builder = S3Client.builder()
+    val builder = S3Client
+      .builder()
       .credentialsProvider(credentialsProvider)
 
     // Configure region
@@ -179,22 +177,20 @@ object MergeUploader {
     builder.build()
   }
 
-  /**
-   * Parse an S3 path into bucket and key.
-   */
+  /** Parse an S3 path into bucket and key. */
   private def parseS3Path(path: String): (String, String) = {
     val normalizedPath = path.replaceFirst("^s3a://", "s3://")
-    val uri    = new URI(normalizedPath)
-    val bucket = uri.getHost
-    val key    = uri.getPath.stripPrefix("/")
+    val uri            = new URI(normalizedPath)
+    val bucket         = uri.getHost
+    val key            = uri.getPath.stripPrefix("/")
     (bucket, key)
   }
 
   /**
    * Upload a local file to Azure Blob Storage.
    *
-   * Uses the same credential resolution pattern as AzureAsyncDownloader.fromConfig()
-   * to ensure consistent authentication.
+   * Uses the same credential resolution pattern as AzureAsyncDownloader.fromConfig() to ensure consistent
+   * authentication.
    *
    * @param localFile
    *   The local file to upload
@@ -345,9 +341,9 @@ object MergeUploader {
 
     while (attempt < maxRetries) {
       attempt += 1
-      try {
+      try
         return upload(localPath, destPath, configs, tablePath)
-      } catch {
+      catch {
         case e: Exception =>
           lastException = e
           if (attempt < maxRetries) {

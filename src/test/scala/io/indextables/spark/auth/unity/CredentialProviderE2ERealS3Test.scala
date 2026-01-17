@@ -35,8 +35,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Custom credential provider that loads AWS credentials from ~/.aws/credentials file.
- * This simulates a real-world credential provider that resolves credentials dynamically.
+ * Custom credential provider that loads AWS credentials from ~/.aws/credentials file. This simulates a real-world
+ * credential provider that resolves credentials dynamically.
  */
 class AwsCredentialsFileProvider(uri: URI, conf: Configuration) extends AWSCredentialsProvider {
 
@@ -51,12 +51,11 @@ class AwsCredentialsFileProvider(uri: URI, conf: Configuration) extends AWSCrede
     new BasicAWSCredentials(accessKey, secretKey)
   }
 
-  override def refresh(): Unit = {
+  override def refresh(): Unit =
     println(s"[AwsCredentialsFileProvider] refresh() called")
-  }
 
   private def loadAwsCredentials(): (String, String) = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
 
     if (!credFile.exists()) {
@@ -64,9 +63,7 @@ class AwsCredentialsFileProvider(uri: URI, conf: Configuration) extends AWSCrede
     }
 
     val props = new Properties()
-    Using(new FileInputStream(credFile)) { fis =>
-      props.load(fis)
-    }.get
+    Using(new FileInputStream(credFile))(fis => props.load(fis)).get
 
     val accessKey = props.getProperty("aws_access_key_id")
     val secretKey = props.getProperty("aws_secret_access_key")
@@ -75,7 +72,9 @@ class AwsCredentialsFileProvider(uri: URI, conf: Configuration) extends AWSCrede
       throw new RuntimeException("aws_access_key_id or aws_secret_access_key not found in ~/.aws/credentials")
     }
 
-    println(s"[AwsCredentialsFileProvider] Loaded credentials from ~/.aws/credentials (accessKey: ${accessKey.take(8)}...)")
+    println(
+      s"[AwsCredentialsFileProvider] Loaded credentials from ~/.aws/credentials (accessKey: ${accessKey.take(8)}...)"
+    )
     (accessKey, secretKey)
   }
 }
@@ -83,7 +82,7 @@ class AwsCredentialsFileProvider(uri: URI, conf: Configuration) extends AWSCrede
 object AwsCredentialsFileProvider {
   // Track instantiations for verification
   @volatile var instantiations: List[(URI, String)] = List.empty
-  private val lock = new Object
+  private val lock                                  = new Object
 
   def recordInstantiation(uri: URI, conf: Configuration): Unit = lock.synchronized {
     val role = if (isDriver()) "DRIVER" else "EXECUTOR"
@@ -99,41 +98,34 @@ object AwsCredentialsFileProvider {
     instantiations
   }
 
-  private def isDriver(): Boolean = {
+  private def isDriver(): Boolean =
     // Simple heuristic: check if we can access SparkContext
-    try {
+    try
       org.apache.spark.SparkContext.getOrCreate() != null
-    } catch {
+    catch {
       case _: Exception => false
     }
-  }
 }
 
 /**
- * End-to-end integration test that verifies custom credential providers work correctly
- * across all operations: WRITE, READ, MERGE SPLITS, PURGE, REPAIR, etc.
+ * End-to-end integration test that verifies custom credential providers work correctly across all operations: WRITE,
+ * READ, MERGE SPLITS, PURGE, REPAIR, etc.
  *
  * This test:
- * 1. Creates a custom credential provider that loads from ~/.aws/credentials
- * 2. Ensures all AWS id/session/key are UNSET in the Spark context
- * 3. Configures only the provider class
- * 4. Performs all relevant operations against real S3
- * 5. Validates that credentials are properly resolved on driver and propagated to executors
+ *   1. Creates a custom credential provider that loads from ~/.aws/credentials 2. Ensures all AWS id/session/key are
+ *      UNSET in the Spark context 3. Configures only the provider class 4. Performs all relevant operations against
+ *      real S3 5. Validates that credentials are properly resolved on driver and propagated to executors
  */
-class CredentialProviderE2ERealS3Test
-  extends AnyFunSuite
-  with Matchers
-  with BeforeAndAfterAll
-  with BeforeAndAfterEach {
+class CredentialProviderE2ERealS3Test extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var spark: SparkSession = _
 
-  private val S3_BUCKET = "test-tantivy4sparkbucket"
-  private val S3_REGION = "us-east-2"
+  private val S3_BUCKET    = "test-tantivy4sparkbucket"
+  private val S3_REGION    = "us-east-2"
   private val S3_BASE_PATH = s"s3a://$S3_BUCKET"
 
   // Generate unique test run ID to avoid conflicts
-  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
   private val testBasePath = s"$S3_BASE_PATH/credential-provider-e2e-$testRunId"
 
   override def beforeAll(): Unit = {
@@ -166,9 +158,9 @@ class CredentialProviderE2ERealS3Test
 
     // Clear credential provider cache to force re-instantiation
     // This is necessary because CredentialProviderFactory caches provider instances
-    try {
+    try
       io.indextables.spark.utils.CredentialProviderFactory.clearCache()
-    } catch {
+    catch {
       case _: Exception => // Ignore
     }
 
@@ -204,14 +196,13 @@ class CredentialProviderE2ERealS3Test
 
   /** Check if AWS credentials file exists */
   private def hasAwsCredentials: Boolean = {
-    val home = System.getProperty("user.home")
+    val home     = System.getProperty("user.home")
     val credFile = new File(s"$home/.aws/credentials")
     credFile.exists()
   }
 
   /**
-   * COMPREHENSIVE E2E TEST:
-   * Tests all operations with ONLY the credential provider configured (no explicit credentials)
+   * COMPREHENSIVE E2E TEST: Tests all operations with ONLY the credential provider configured (no explicit credentials)
    */
   test("E2E: All operations work with ONLY credential provider configured (no explicit credentials)") {
     assume(hasAwsCredentials, "AWS credentials file (~/.aws/credentials) required for this test")
@@ -221,7 +212,7 @@ class CredentialProviderE2ERealS3Test
     // Configure ONLY the credential provider - NO explicit credentials
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[AwsCredentialsFileProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // Also set in session config for SQL commands
@@ -235,11 +226,13 @@ class CredentialProviderE2ERealS3Test
     println("STEP 1: WRITE")
     println("=" * 60)
 
-    val data1 = spark.range(50).select(
-      col("id"),
-      concat(lit("Document "), col("id")).as("title"),
-      (col("id") % 5).cast("string").as("category")
-    )
+    val data1 = spark
+      .range(50)
+      .select(
+        col("id"),
+        concat(lit("Document "), col("id")).as("title"),
+        (col("id") % 5).cast("string").as("category")
+      )
 
     println(s"Writing ${data1.count()} records to $tablePath...")
 
@@ -262,11 +255,13 @@ class CredentialProviderE2ERealS3Test
     println("STEP 2: WRITE (append)")
     println("=" * 60)
 
-    val data2 = spark.range(50, 100).select(
-      col("id"),
-      concat(lit("Document "), col("id")).as("title"),
-      (col("id") % 5).cast("string").as("category")
-    )
+    val data2 = spark
+      .range(50, 100)
+      .select(
+        col("id"),
+        concat(lit("Document "), col("id")).as("title"),
+        (col("id") % 5).cast("string").as("category")
+      )
 
     data2.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -304,11 +299,11 @@ class CredentialProviderE2ERealS3Test
     println("STEP 4: MERGE SPLITS")
     println("=" * 60)
 
-    AwsCredentialsFileProvider.reset() // Reset to track merge-specific instantiations
+    AwsCredentialsFileProvider.reset()                                // Reset to track merge-specific instantiations
     io.indextables.spark.utils.CredentialProviderFactory.clearCache() // Clear provider cache
 
     val mergeResult = spark.sql(s"MERGE SPLITS '$tablePath' TARGET SIZE 100M")
-    val mergeRows = mergeResult.collect()
+    val mergeRows   = mergeResult.collect()
     println(s"✅ MERGE SPLITS completed: ${mergeRows.length} result rows")
     mergeRows.foreach(row => println(s"  - $row"))
 
@@ -343,7 +338,7 @@ class CredentialProviderE2ERealS3Test
     io.indextables.spark.utils.CredentialProviderFactory.clearCache()
 
     val purgeResult = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 24 HOURS DRY RUN")
-    val purgeRows = purgeResult.collect()
+    val purgeRows   = purgeResult.collect()
     println(s"✅ PURGE (dry run) completed: ${purgeRows.length} result rows")
     purgeRows.foreach(row => println(s"  - $row"))
 
@@ -355,7 +350,7 @@ class CredentialProviderE2ERealS3Test
     println("=" * 60)
 
     val describeResult = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$tablePath'")
-    val describeRows = describeResult.collect()
+    val describeRows   = describeResult.collect()
     println(s"✅ DESCRIBE TRANSACTION LOG completed: ${describeRows.length} rows")
 
     // ========================================
@@ -394,7 +389,7 @@ class CredentialProviderE2ERealS3Test
 
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[AwsCredentialsFileProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     AwsCredentialsFileProvider.reset()
@@ -414,7 +409,7 @@ class CredentialProviderE2ERealS3Test
 
     // All instantiations should be on DRIVER
     // (If any are on EXECUTOR, it means credentials weren't properly propagated)
-    val driverInstantiations = instantiations.filter(_._2 == "DRIVER")
+    val driverInstantiations   = instantiations.filter(_._2 == "DRIVER")
     val executorInstantiations = instantiations.filter(_._2 == "EXECUTOR")
 
     // ASSERTIONS: Verify exact number of instantiations
@@ -440,7 +435,7 @@ class CredentialProviderE2ERealS3Test
 
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[AwsCredentialsFileProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     spark.conf.set("spark.indextables.aws.credentialsProviderClass", classOf[AwsCredentialsFileProvider].getName)
@@ -468,9 +463,11 @@ class CredentialProviderE2ERealS3Test
 
     val instantiations = AwsCredentialsFileProvider.getInstantiations
 
-    println(s"Provider instantiations during MERGE: ${instantiations.map { case (uri, role) => s"$role: $uri" }.mkString(", ")}")
+    println(
+      s"Provider instantiations during MERGE: ${instantiations.map { case (uri, role) => s"$role: $uri" }.mkString(", ")}"
+    )
 
-    val driverInstantiations = instantiations.filter(_._2 == "DRIVER")
+    val driverInstantiations   = instantiations.filter(_._2 == "DRIVER")
     val executorInstantiations = instantiations.filter(_._2 == "EXECUTOR")
 
     println(s"MERGE: Driver instantiations: ${driverInstantiations.size}, Executor instantiations: ${executorInstantiations.size}")
@@ -485,7 +482,9 @@ class CredentialProviderE2ERealS3Test
 
     // CRITICAL: Provider should NEVER be instantiated on executor
     // This verifies the credentialsAlreadyResolved flag is working correctly
-    withClue("Provider should NOT be instantiated on executor during MERGE - credentials should be pre-resolved on driver") {
+    withClue(
+      "Provider should NOT be instantiated on executor during MERGE - credentials should be pre-resolved on driver"
+    ) {
       executorInstantiations.size shouldBe 0
     }
 
@@ -506,7 +505,7 @@ class CredentialProviderE2ERealS3Test
 
     val options = Map(
       "spark.indextables.aws.credentialsProviderClass" -> classOf[AwsCredentialsFileProvider].getName,
-      "spark.indextables.aws.region" -> S3_REGION
+      "spark.indextables.aws.region"                   -> S3_REGION
     )
 
     // First write some data
@@ -534,9 +533,11 @@ class CredentialProviderE2ERealS3Test
 
     val instantiations = AwsCredentialsFileProvider.getInstantiations
 
-    println(s"Provider instantiations during READ: ${instantiations.map { case (uri, role) => s"$role: $uri" }.mkString(", ")}")
+    println(
+      s"Provider instantiations during READ: ${instantiations.map { case (uri, role) => s"$role: $uri" }.mkString(", ")}"
+    )
 
-    val driverInstantiations = instantiations.filter(_._2 == "DRIVER")
+    val driverInstantiations   = instantiations.filter(_._2 == "DRIVER")
     val executorInstantiations = instantiations.filter(_._2 == "EXECUTOR")
 
     println(s"READ: Driver instantiations: ${driverInstantiations.size}, Executor instantiations: ${executorInstantiations.size}")

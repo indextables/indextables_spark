@@ -241,7 +241,7 @@ object TantivyDirectInterface {
                   logger.debug(s"CALLING addStringField: name=$fieldName, stored=$stored, indexed=$indexed, fast=$fast")
                   builder.addStringField(fieldName, stored, indexed, fast)
                 case "text" =>
-                  val tokenizer = indexingConfig.tokenizerOverride.getOrElse("default")
+                  val tokenizer    = indexingConfig.tokenizerOverride.getOrElse("default")
                   val recordOption = indexingConfig.indexRecordOption.getOrElse("position")
                   builder.addTextField(fieldName, stored, fast, tokenizer, recordOption)
                 case other =>
@@ -821,11 +821,11 @@ class TantivyDirectInterface(
           // Spark stores timestamps as microseconds since epoch
           // Convert to LocalDateTime for tantivy date field
           import java.time.{Instant, LocalDateTime, ZoneOffset}
-          val microseconds = value.asInstanceOf[Long]
-          val seconds = microseconds / 1000000L
+          val microseconds   = value.asInstanceOf[Long]
+          val seconds        = microseconds / 1000000L
           val nanoAdjustment = (microseconds % 1000000L) * 1000L
-          val instant = Instant.ofEpochSecond(seconds, nanoAdjustment)
-          val localDateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
+          val instant        = Instant.ofEpochSecond(seconds, nanoAdjustment)
+          val localDateTime  = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
           adder.addDate(fieldName, localDateTime)
         case org.apache.spark.sql.types.DateType =>
           import java.time.LocalDate

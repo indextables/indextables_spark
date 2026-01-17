@@ -19,26 +19,24 @@ package io.indextables.spark.io.merge
 
 import java.io.File
 import java.nio.file.Files
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CompletableFuture
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
   private var tempDir: File = _
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     tempDir = Files.createTempDirectory("cloud-download-test").toFile
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     if (tempDir != null && tempDir.exists()) {
       deleteRecursively(tempDir)
     }
-  }
 
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
@@ -66,21 +64,22 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       destDir.mkdirs()
 
       // Create download requests using LocalCopyDownloader
-      val requests = sourceFiles.zipWithIndex.map { case (sourceFile, idx) =>
-        DownloadRequest(
-          sourcePath = sourceFile.getAbsolutePath,
-          destinationPath = new File(destDir, s"downloaded$idx.txt").getAbsolutePath,
-          expectedSize = sourceFile.length(),
-          batchId = 0,
-          index = idx
-        )
+      val requests = sourceFiles.zipWithIndex.map {
+        case (sourceFile, idx) =>
+          DownloadRequest(
+            sourcePath = sourceFile.getAbsolutePath,
+            destinationPath = new File(destDir, s"downloaded$idx.txt").getAbsolutePath,
+            expectedSize = sourceFile.length(),
+            batchId = 0,
+            index = idx
+          )
       }
 
       val downloader = new LocalCopyDownloader()
 
       // Submit batch and wait for completion
       val resultFuture = manager.submitBatch(requests, downloader)
-      val results = resultFuture.get()
+      val results      = resultFuture.get()
 
       // Verify all downloads succeeded
       results should have size 5
@@ -91,38 +90,37 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       }
 
       // Verify content
-      results.zipWithIndex.foreach { case (result, idx) =>
-        val content = Files.readString(new File(result.localPath).toPath)
-        content shouldBe s"Content of file $idx"
+      results.zipWithIndex.foreach {
+        case (result, idx) =>
+          val content = Files.readString(new File(result.localPath).toPath)
+          content shouldBe s"Content of file $idx"
       }
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 
   test("submitBatch should handle empty batch") {
     val manager = new CloudDownloadManager(MergeIOConfig(maxConcurrencyPerCore = 2))
 
     try {
-      val downloader = new LocalCopyDownloader()
+      val downloader   = new LocalCopyDownloader()
       val resultFuture = manager.submitBatch(Seq.empty, downloader)
-      val results = resultFuture.get()
+      val results      = resultFuture.get()
 
       results shouldBe empty
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 
   test("submitBatch should respect concurrency limits") {
-    val maxConcurrent = new AtomicInteger(0)
+    val maxConcurrent     = new AtomicInteger(0)
     val currentConcurrent = new AtomicInteger(0)
 
     // Create a slow downloader that tracks concurrency
     val slowDownloader = new AsyncDownloader {
-      override def protocol: String = "test"
+      override def protocol: String                 = "test"
       override def canHandle(path: String): Boolean = true
 
       override def downloadAsync(request: DownloadRequest): CompletableFuture[DownloadResult] = {
@@ -145,9 +143,8 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
               bytesDownloaded = 12,
               durationMs = System.currentTimeMillis() - startTime
             )
-          } finally {
+          } finally
             currentConcurrent.decrementAndGet()
-          }
         }
       }
 
@@ -172,7 +169,7 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       }
 
       val resultFuture = manager.submitBatch(requests, slowDownloader)
-      val results = resultFuture.get()
+      val results      = resultFuture.get()
 
       results should have size 10
       results.foreach(_.success shouldBe true)
@@ -181,18 +178,17 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       val expectedLimit = Runtime.getRuntime.availableProcessors() * 1
       maxConcurrent.get() should be <= expectedLimit
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 
   test("submitBatch should handle download failures") {
     // Create a downloader that always fails
     val failingDownloader = new AsyncDownloader {
-      override def protocol: String = "failing"
+      override def protocol: String                 = "failing"
       override def canHandle(path: String): Boolean = true
 
-      override def downloadAsync(request: DownloadRequest): CompletableFuture[DownloadResult] = {
+      override def downloadAsync(request: DownloadRequest): CompletableFuture[DownloadResult] =
         CompletableFuture.completedFuture(
           DownloadResult.failure(
             request = request,
@@ -200,7 +196,6 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
             durationMs = 0
           )
         )
-      }
 
       override def close(): Unit = ()
     }
@@ -219,15 +214,14 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       )
 
       val resultFuture = manager.submitBatch(requests, failingDownloader)
-      val results = resultFuture.get()
+      val results      = resultFuture.get()
 
       results should have size 1
       results.head.success shouldBe false
       results.head.error shouldBe defined
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 
   test("multiple batches should process in priority order") {
@@ -256,25 +250,27 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       destDir.mkdirs()
 
       // Create requests for batch 1
-      val batch1Requests = batch1Files.zipWithIndex.map { case (file, idx) =>
-        DownloadRequest(
-          sourcePath = file.getAbsolutePath,
-          destinationPath = new File(destDir, s"batch1-$idx.txt").getAbsolutePath,
-          expectedSize = file.length(),
-          batchId = 0,
-          index = idx
-        )
+      val batch1Requests = batch1Files.zipWithIndex.map {
+        case (file, idx) =>
+          DownloadRequest(
+            sourcePath = file.getAbsolutePath,
+            destinationPath = new File(destDir, s"batch1-$idx.txt").getAbsolutePath,
+            expectedSize = file.length(),
+            batchId = 0,
+            index = idx
+          )
       }
 
       // Create requests for batch 2
-      val batch2Requests = batch2Files.zipWithIndex.map { case (file, idx) =>
-        DownloadRequest(
-          sourcePath = file.getAbsolutePath,
-          destinationPath = new File(destDir, s"batch2-$idx.txt").getAbsolutePath,
-          expectedSize = file.length(),
-          batchId = 0,
-          index = idx
-        )
+      val batch2Requests = batch2Files.zipWithIndex.map {
+        case (file, idx) =>
+          DownloadRequest(
+            sourcePath = file.getAbsolutePath,
+            destinationPath = new File(destDir, s"batch2-$idx.txt").getAbsolutePath,
+            expectedSize = file.length(),
+            batchId = 0,
+            index = idx
+          )
       }
 
       // Submit both batches
@@ -292,9 +288,8 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       batch2Results should have size 3
       batch2Results.foreach(_.success shouldBe true)
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 
   test("getMetrics should return download statistics") {
@@ -314,14 +309,15 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       val destDir = new File(tempDir, "dest")
       destDir.mkdirs()
 
-      val requests = sourceFiles.zipWithIndex.map { case (file, idx) =>
-        DownloadRequest(
-          sourcePath = file.getAbsolutePath,
-          destinationPath = new File(destDir, s"file$idx.txt").getAbsolutePath,
-          expectedSize = file.length(),
-          batchId = 0,
-          index = idx
-        )
+      val requests = sourceFiles.zipWithIndex.map {
+        case (file, idx) =>
+          DownloadRequest(
+            sourcePath = file.getAbsolutePath,
+            destinationPath = new File(destDir, s"file$idx.txt").getAbsolutePath,
+            expectedSize = file.length(),
+            batchId = 0,
+            index = idx
+          )
       }
 
       val downloader = new LocalCopyDownloader()
@@ -335,8 +331,7 @@ class CloudDownloadManagerTest extends AnyFunSuite with Matchers with BeforeAndA
       metrics.failedDownloads shouldBe 0
       metrics.totalBytes should be > 0L
 
-    } finally {
+    } finally
       manager.shutdown()
-    }
   }
 }

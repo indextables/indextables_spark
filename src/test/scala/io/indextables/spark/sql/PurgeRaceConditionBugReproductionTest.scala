@@ -22,29 +22,28 @@ import java.util.UUID
 
 import scala.util.Random
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+import org.apache.spark.sql.SparkSession
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 
+import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.BeforeAndAfterEach
-
-import io.indextables.spark.transaction.{TransactionLog, TransactionLogFactory}
 
 /**
  * Bug reproduction tests for PURGE INDEXTABLE race condition.
  *
  * These tests reproduce the bug where:
- * 1. `getTransactionLogVersionsToDelete()` calculates which versions to delete at time T1
- * 2. `cleanupOldTransactionLogFiles()` runs at time T2 and INDEPENDENTLY recalculates
- * 3. Due to time passing, more versions may qualify for deletion at T2
- * 4. `getAllFilesFromVersions()` tries to read versions that were calculated as "to keep" but deleted
- * 5. Files from those versions are not included in valid set -> deleted -> DATA CORRUPTION
+ *   1. `getTransactionLogVersionsToDelete()` calculates which versions to delete at time T1 2.
+ *      `cleanupOldTransactionLogFiles()` runs at time T2 and INDEPENDENTLY recalculates 3. Due to time passing, more
+ *      versions may qualify for deletion at T2 4. `getAllFilesFromVersions()` tries to read versions that were
+ *      calculated as "to keep" but deleted 5. Files from those versions are not included in valid set -> deleted ->
+ *      DATA CORRUPTION
  *
  * EXPECTED BEHAVIOR:
- * - With current BUGGY code: Tests should FAIL
- * - After fix is applied: Tests should PASS
+ *   - With current BUGGY code: Tests should FAIL
+ *   - After fix is applied: Tests should PASS
  */
 class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAfterEach {
 
@@ -88,10 +87,10 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
    * BUG REPRODUCTION TEST 1: Race condition at retention boundary
    *
    * This test reproduces the exact scenario reported by the user:
-   * - Table with date/hour partitions
-   * - ~100 transactions
-   * - PURGE with 2 day retention
-   * - Files still in active transaction get deleted
+   *   - Table with date/hour partitions
+   *   - ~100 transactions
+   *   - PURGE with 2 day retention
+   *   - Files still in active transaction get deleted
    *
    * EXPECTED: FAILS with current buggy code, PASSES after fix
    */
@@ -124,7 +123,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     }
 
     // Step 3: Get files that are in the CURRENT transaction state (should NEVER be deleted)
-    val txLog = getTransactionLog(tablePath)
+    val txLog             = getTransactionLog(tablePath)
     val currentStateFiles = txLog.listFiles().map(_.path).toSet
     val currentRowCount = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -144,9 +143,9 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Step 5: Run PURGE with same parameters as user
     val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 2 DAYS TRANSACTION LOG RETENTION 2 DAYS").collect()
-    val metrics = result(0).getStruct(1)
+    val metrics              = result(0).getStruct(1)
     val orphanedFilesDeleted = metrics.getLong(2)
-    val txLogsDeleted = metrics.getLong(5)
+    val txLogsDeleted        = metrics.getLong(5)
 
     println(s"PURGE deleted $orphanedFilesDeleted orphaned files and $txLogsDeleted transaction logs")
 
@@ -183,9 +182,9 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
    * BUG REPRODUCTION TEST 2: Multiple consecutive PURGE operations
    *
    * Reproduces user's observation:
-   * - First run: "strangely small number" of files deleted
-   * - Second run: deleted files still referenced in active transaction
-   * - Third run: deleted a few more files
+   *   - First run: "strangely small number" of files deleted
+   *   - Second run: deleted files still referenced in active transaction
+   *   - Third run: deleted a few more files
    *
    * EXPECTED: FAILS with current buggy code, PASSES after fix
    */
@@ -224,13 +223,15 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
 
     // Run PURGE 3 times like user did
     for (run <- 1 to 3) {
-      val result = spark.sql(
-        s"PURGE INDEXTABLE '$tablePath' OLDER THAN 2 DAYS TRANSACTION LOG RETENTION 2 DAYS"
-      ).collect()
+      val result = spark
+        .sql(
+          s"PURGE INDEXTABLE '$tablePath' OLDER THAN 2 DAYS TRANSACTION LOG RETENTION 2 DAYS"
+        )
+        .collect()
 
-      val metrics = result(0).getStruct(1)
+      val metrics         = result(0).getStruct(1)
       val orphanedDeleted = metrics.getLong(2)
-      val txLogsDeleted = metrics.getLong(5)
+      val txLogsDeleted   = metrics.getLong(5)
 
       val rowCountAfterRun = spark.read
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -253,8 +254,8 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
   /**
    * BUG REPRODUCTION TEST 3: Verifies versionsToDelete is used consistently
    *
-   * This test directly checks that when a transaction log version is calculated
-   * to be kept, it is NOT deleted by the cleanup operation.
+   * This test directly checks that when a transaction log version is calculated to be kept, it is NOT deleted by the
+   * cleanup operation.
    *
    * EXPECTED: FAILS with current buggy code, PASSES after fix
    */
@@ -281,7 +282,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     }
 
     // Get transaction log versions before
-    val txLog = getTransactionLog(tablePath)
+    val txLog          = getTransactionLog(tablePath)
     val versionsBefore = txLog.getVersions().toSet
 
     println(s"Versions before PURGE: ${versionsBefore.size}")
@@ -322,8 +323,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
   /**
    * BUG REPRODUCTION TEST 4: Partitioned table with nested directories
    *
-   * Tests that PURGE correctly handles partitioned tables with nested
-   * directory structures like date=X/hour=Y.
+   * Tests that PURGE correctly handles partitioned tables with nested directory structures like date=X/hour=Y.
    *
    * EXPECTED: FAILS with current buggy code if race condition triggers, PASSES after fix
    */
@@ -362,7 +362,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
       .load(tablePath)
       .count()
 
-    val txLog = getTransactionLog(tablePath)
+    val txLog        = getTransactionLog(tablePath)
     val currentFiles = txLog.listFiles().map(_.path).toSet
 
     println(s"Baseline: $baselineRowCount rows, ${currentFiles.size} files across partitions")
@@ -411,16 +411,15 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
    * Ages BOTH transaction log files AND split files to be at the retention boundary.
    *
    * CRITICAL: Both must be aged to reproduce the bug!
-   * - Transaction log files: controls which tx logs are deleted
-   * - Split files: controls which orphaned files are eligible for deletion
+   *   - Transaction log files: controls which tx logs are deleted
+   *   - Split files: controls which orphaned files are eligible for deletion
    *
-   * In production, both would be old (data written days ago).
-   * The race condition occurs when:
-   * - Some tx log files are set to be just INSIDE the boundary at T1
-   * - Time passes between getTransactionLogVersionsToDelete() and cleanupOldTransactionLogFiles()
-   * - At T2, those files may now be OUTSIDE the boundary and get deleted
-   * - getAllFilesFromVersions() tries to read them but they're gone -> files become orphaned
-   * - Those orphaned files are also old, so they get deleted -> DATA CORRUPTION
+   * In production, both would be old (data written days ago). The race condition occurs when:
+   *   - Some tx log files are set to be just INSIDE the boundary at T1
+   *   - Time passes between getTransactionLogVersionsToDelete() and cleanupOldTransactionLogFiles()
+   *   - At T2, those files may now be OUTSIDE the boundary and get deleted
+   *   - getAllFilesFromVersions() tries to read them but they're gone -> files become orphaned
+   *   - Those orphaned files are also old, so they get deleted -> DATA CORRUPTION
    */
   private def ageTransactionLogFilesToBoundary(tablePath: String, retentionHours: Long): Unit = {
     val txLogPath = new Path(tablePath, "_transaction_log")
@@ -429,7 +428,8 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     val boundaryTime = System.currentTimeMillis() - (retentionHours * 3600 * 1000)
 
     // 1. Age transaction log files
-    val txLogFiles = fs.listStatus(txLogPath)
+    val txLogFiles = fs
+      .listStatus(txLogPath)
       .filter(_.getPath.getName.endsWith(".json"))
       .filterNot(_.getPath.getName.contains("checkpoint"))
       .sortBy(_.getPath.getName)
@@ -437,19 +437,20 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
     // Set files at different times around the boundary
     // Earlier versions: outside boundary (will be deleted)
     // Later versions: at or just inside boundary (race condition target)
-    txLogFiles.zipWithIndex.foreach { case (file, idx) =>
-      val fraction = idx.toDouble / math.max(txLogFiles.length - 1, 1)
-      // Files range from 10 minutes outside boundary to 1 second inside boundary
-      val offset = if (fraction < 0.7) {
-        // Early versions: clearly outside boundary (10 min to 1 hour old beyond boundary)
-        -((1 - fraction) * 60 * 60 * 1000).toLong
-      } else {
-        // Later versions: RIGHT AT the boundary (within 10 seconds)
-        // This is where the race condition can strike
-        ((1 - fraction) * 10 * 1000).toLong
-      }
-      val newTime = boundaryTime + offset
-      fs.setTimes(file.getPath, newTime, -1)
+    txLogFiles.zipWithIndex.foreach {
+      case (file, idx) =>
+        val fraction = idx.toDouble / math.max(txLogFiles.length - 1, 1)
+        // Files range from 10 minutes outside boundary to 1 second inside boundary
+        val offset = if (fraction < 0.7) {
+          // Early versions: clearly outside boundary (10 min to 1 hour old beyond boundary)
+          -((1 - fraction) * 60 * 60 * 1000).toLong
+        } else {
+          // Later versions: RIGHT AT the boundary (within 10 seconds)
+          // This is where the race condition can strike
+          ((1 - fraction) * 10 * 1000).toLong
+        }
+        val newTime = boundaryTime + offset
+        fs.setTimes(file.getPath, newTime, -1)
     }
 
     println(s"Aged ${txLogFiles.length} transaction log files around ${retentionHours}h boundary")
@@ -460,9 +461,7 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
       .filter(_.endsWith(".split"))
 
     val oldTime = boundaryTime - (60 * 60 * 1000) // 1 hour before boundary (definitely old enough)
-    splitFiles.foreach { splitPath =>
-      fs.setTimes(new Path(splitPath), oldTime, -1)
-    }
+    splitFiles.foreach(splitPath => fs.setTimes(new Path(splitPath), oldTime, -1))
 
     println(s"Aged ${splitFiles.length} split files to be older than ${retentionHours}h boundary")
   }

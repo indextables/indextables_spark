@@ -29,22 +29,19 @@ import software.amazon.awssdk.auth.credentials.{
 /**
  * AWS SDK v2 AwsCredentialsProvider that wraps a v1 AWSCredentialsProvider.
  *
- * This adapter allows v1 credential providers (like UnityCatalogAWSCredentialProvider)
- * to be used with the AWS SDK v2 S3Client while preserving the v1 provider's refresh
- * and caching logic.
+ * This adapter allows v1 credential providers (like UnityCatalogAWSCredentialProvider) to be used with the AWS SDK v2
+ * S3Client while preserving the v1 provider's refresh and caching logic.
  *
- * The key insight is that the AWS SDK v2 calls `resolveCredentials()` each time
- * credentials are needed, not just once at client creation. This adapter delegates
- * each call to the v1 provider's `getCredentials()` method, which allows the v1
- * provider to:
+ * The key insight is that the AWS SDK v2 calls `resolveCredentials()` each time credentials are needed, not just once
+ * at client creation. This adapter delegates each call to the v1 provider's `getCredentials()` method, which allows the
+ * v1 provider to:
  *   - Return cached credentials if still valid
  *   - Refresh credentials if they are near expiration
  *   - Fetch new credentials from the source (e.g., Unity Catalog API)
  *
- * Without this adapter, credentials would be extracted once at S3Client creation
- * and wrapped in a StaticCredentialsProvider, which cannot refresh. This causes
- * "token expired" errors for long-running Spark jobs that exceed the credential
- * TTL (typically 1 hour for Unity Catalog temporary credentials).
+ * Without this adapter, credentials would be extracted once at S3Client creation and wrapped in a
+ * StaticCredentialsProvider, which cannot refresh. This causes "token expired" errors for long-running Spark jobs that
+ * exceed the credential TTL (typically 1 hour for Unity Catalog temporary credentials).
  *
  * Usage:
  * {{{
@@ -55,8 +52,8 @@ import software.amazon.awssdk.auth.credentials.{
  *   .build()
  * }}}
  *
- * @param v1Provider The AWS SDK v1 AWSCredentialsProvider to wrap. Must implement
- *                   com.amazonaws.auth.AWSCredentialsProvider interface.
+ * @param v1Provider
+ *   The AWS SDK v1 AWSCredentialsProvider to wrap. Must implement com.amazonaws.auth.AWSCredentialsProvider interface.
  */
 class V1ToV2CredentialsProviderAdapter(v1Provider: AnyRef) extends AwsCredentialsProvider {
 
@@ -74,13 +71,14 @@ class V1ToV2CredentialsProviderAdapter(v1Provider: AnyRef) extends AwsCredential
   /**
    * Resolve credentials by delegating to the v1 provider's getCredentials() method.
    *
-   * This method is called by the AWS SDK v2 each time credentials are needed for
-   * a request. By delegating to the v1 provider, we preserve its refresh logic:
+   * This method is called by the AWS SDK v2 each time credentials are needed for a request. By delegating to the v1
+   * provider, we preserve its refresh logic:
    *   - The v1 provider checks if cached credentials are near expiration
    *   - If near expiration, it fetches fresh credentials from the source
    *   - Fresh credentials are cached and returned
    *
-   * @return AWS credentials (either basic or session credentials)
+   * @return
+   *   AWS credentials (either basic or session credentials)
    */
   override def resolveCredentials(): AwsCredentials = {
     logger.debug(s"resolveCredentials() called, delegating to v1 provider: ${v1Provider.getClass.getName}")
@@ -90,8 +88,10 @@ class V1ToV2CredentialsProviderAdapter(v1Provider: AnyRef) extends AwsCredential
     // credentials if they are near expiration
     val creds = CredentialProviderFactory.extractCredentialsViaReflection(v1Provider)
 
-    logger.debug(s"Resolved credentials: accessKey=${creds.accessKey.take(4)}..., " +
-      s"hasSessionToken=${creds.hasSessionToken}")
+    logger.debug(
+      s"Resolved credentials: accessKey=${creds.accessKey.take(4)}..., " +
+        s"hasSessionToken=${creds.hasSessionToken}"
+    )
 
     // Convert to AWS SDK v2 credentials
     if (creds.hasSessionToken) {
@@ -101,8 +101,6 @@ class V1ToV2CredentialsProviderAdapter(v1Provider: AnyRef) extends AwsCredential
     }
   }
 
-  /**
-   * Get the wrapped v1 provider for debugging/testing purposes.
-   */
+  /** Get the wrapped v1 provider for debugging/testing purposes. */
   def getWrappedProvider: AnyRef = v1Provider
 }

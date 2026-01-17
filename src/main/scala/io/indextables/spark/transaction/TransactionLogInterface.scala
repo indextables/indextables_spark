@@ -241,9 +241,8 @@ trait TransactionLogInterface extends AutoCloseable {
   /**
    * Gets all actions from the latest checkpoint.
    *
-   * This returns the consolidated state from the checkpoint file, which contains
-   * all AddActions visible at the checkpoint version. This is different from
-   * readVersion() which only reads a single transaction file.
+   * This returns the consolidated state from the checkpoint file, which contains all AddActions visible at the
+   * checkpoint version. This is different from readVersion() which only reads a single transaction file.
    *
    * @return
    *   Option containing all actions from the checkpoint, or None if no checkpoint exists
@@ -263,8 +262,7 @@ trait TransactionLogInterface extends AutoCloseable {
   /**
    * Reads a specific version of the transaction log.
    *
-   * This reads the individual version file (e.g., 00000000000000000005.json),
-   * not the checkpoint file.
+   * This reads the individual version file (e.g., 00000000000000000005.json), not the checkpoint file.
    *
    * @param version
    *   The version number to read

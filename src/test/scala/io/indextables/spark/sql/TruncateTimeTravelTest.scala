@@ -19,8 +19,8 @@ package io.indextables.spark.sql
 
 import java.io.File
 
-import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
 
 import io.indextables.spark.TestBase
 
@@ -28,11 +28,11 @@ import io.indextables.spark.TestBase
  * Integration tests for TRUNCATE INDEXTABLES TIME TRAVEL command.
  *
  * Tests cover:
- * - Basic truncation with multiple transactions
- * - Checkpoint creation before truncation
- * - DRY RUN mode
- * - Data integrity after truncation
- * - Edge cases (empty table, single version, etc.)
+ *   - Basic truncation with multiple transactions
+ *   - Checkpoint creation before truncation
+ *   - DRY RUN mode
+ *   - Data integrity after truncation
+ *   - Edge cases (empty table, single version, etc.)
  */
 class TruncateTimeTravelTest extends TestBase {
 
@@ -50,7 +50,7 @@ class TruncateTimeTravelTest extends TestBase {
       )
     )
     val data = Seq(Row(1, "one"), Row(2, "two"), Row(3, "three"))
-    val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+    val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -58,9 +58,7 @@ class TruncateTimeTravelTest extends TestBase {
       .save(tablePath)
   }
 
-  /**
-   * Create a table with multiple transactions to generate version files.
-   */
+  /** Create a table with multiple transactions to generate version files. */
   private def createTableWithManyTransactions(tablePath: String, numTransactions: Int): Unit = {
     val schema = StructType(
       Seq(
@@ -71,7 +69,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     for (i <- 1 to numTransactions) {
       val data = Seq(Row(i, s"value_$i"))
-      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+      val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode(if (i == 1) "overwrite" else "append")
@@ -79,10 +77,7 @@ class TruncateTimeTravelTest extends TestBase {
     }
   }
 
-  /**
-   * Count transaction log files in a table directory.
-   * Returns (versionFileCount, checkpointFileCount)
-   */
+  /** Count transaction log files in a table directory. Returns (versionFileCount, checkpointFileCount) */
   private def countTransactionLogFiles(tablePath: String): (Int, Int) = {
     val txLogDir = new File(tablePath, "_transaction_log")
     if (!txLogDir.exists()) {
@@ -94,10 +89,10 @@ class TruncateTimeTravelTest extends TestBase {
       return (0, 0)
     }
 
-    val versionPattern = """^\d{20}\.json$""".r
+    val versionPattern    = """^\d{20}\.json$""".r
     val checkpointPattern = """^\d{20}\.checkpoint.*\.json$""".r
 
-    val versionCount = files.count(f => versionPattern.findFirstIn(f.getName).isDefined)
+    val versionCount    = files.count(f => versionPattern.findFirstIn(f.getName).isDefined)
     val checkpointCount = files.count(f => checkpointPattern.findFirstIn(f.getName).isDefined)
 
     (versionCount, checkpointCount)
@@ -117,14 +112,14 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Truncate time travel
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     rows.length shouldBe 1
     val row = rows.head
 
     row.getString(1) shouldBe "SUCCESS" // status
-    row.getLong(2) should be >= 0L // checkpoint_version
-    row.getLong(3) should be >= 0L // versions_deleted
+    row.getLong(2) should be >= 0L      // checkpoint_version
+    row.getLong(3) should be >= 0L      // versions_deleted
 
     // Verify version files were deleted
     val (versionsAfter, _) = countTransactionLogFiles(tablePath)
@@ -148,7 +143,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Truncate - should create checkpoint first
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     row.getString(1) shouldBe "SUCCESS"
     row.getLong(2) should be >= 0L // checkpoint_version created
@@ -176,7 +171,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Run DRY RUN
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath' DRY RUN")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     row.getString(1) shouldBe "DRY_RUN"
     row.getLong(3) should be >= 0L // versions_deleted (would be deleted)
@@ -193,13 +188,13 @@ class TruncateTimeTravelTest extends TestBase {
     createTableWithManyTransactions(tablePath, 10)
 
     // First, DRY RUN
-    val dryRunResult = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath' DRY RUN")
-    val dryRunRow = dryRunResult.collect().head
+    val dryRunResult     = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath' DRY RUN")
+    val dryRunRow        = dryRunResult.collect().head
     val versionsToDelete = dryRunRow.getLong(3)
 
     // Now actually truncate
     val actualResult = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val actualRow = actualResult.collect().head
+    val actualRow    = actualResult.collect().head
 
     actualRow.getString(1) shouldBe "SUCCESS"
     actualRow.getLong(3) shouldBe versionsToDelete // Should match DRY RUN
@@ -214,7 +209,7 @@ class TruncateTimeTravelTest extends TestBase {
     createTestTable(tablePath)
 
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     // Should succeed (creates checkpoint, nothing old to delete)
     row.getString(1) shouldBe "SUCCESS"
@@ -235,7 +230,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Try to truncate again
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     row.getString(1) shouldBe "SUCCESS"
     // Message should indicate nothing to delete
@@ -246,7 +241,7 @@ class TruncateTimeTravelTest extends TestBase {
     val nonExistentPath = new File(tempDir, "non_existent_table").getAbsolutePath
 
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$nonExistentPath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     row.getString(1) shouldBe "ERROR"
   }
@@ -292,7 +287,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Write initial data
     val initialData = (1 to 10).map(i => Row(i, s"value_$i", i * 10.0))
-    val initialDf = spark.createDataFrame(spark.sparkContext.parallelize(initialData), schema)
+    val initialDf   = spark.createDataFrame(spark.sparkContext.parallelize(initialData), schema)
     initialDf.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -301,7 +296,7 @@ class TruncateTimeTravelTest extends TestBase {
     // Add more data in separate transactions
     for (i <- 11 to 15) {
       val data = Seq(Row(i, s"value_$i", i * 10.0))
-      val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+      val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("append")
@@ -353,7 +348,7 @@ class TruncateTimeTravelTest extends TestBase {
     createTableWithManyTransactions(tablePath, 8)
 
     val result = spark.sql(s"TRUNCATE TANTIVY4SPARK TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
 
     row.getString(1) shouldBe "SUCCESS"
   }
@@ -366,10 +361,10 @@ class TruncateTimeTravelTest extends TestBase {
     val schema = StructType(
       Seq(
         StructField("id", IntegerType, nullable = false),
-        StructField("region", StringType, nullable = false),  // partition column
+        StructField("region", StringType, nullable = false), // partition column
         StructField("category", StringType, nullable = false),
-        StructField("amount", DoubleType, nullable = false),  // fast field (non-partition)
-        StructField("count", IntegerType, nullable = false)   // fast field (non-partition)
+        StructField("amount", DoubleType, nullable = false), // fast field (non-partition)
+        StructField("count", IntegerType, nullable = false)  // fast field (non-partition)
       )
     )
 
@@ -393,9 +388,9 @@ class TruncateTimeTravelTest extends TestBase {
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tablePath)
 
-    val countBefore = dfBefore.count()
+    val countBefore     = dfBefore.count()
     val sumAmountBefore = dfBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-    val sumCountBefore = dfBefore.agg(Map("count" -> "sum")).collect().head.getLong(0)
+    val sumCountBefore  = dfBefore.agg(Map("count" -> "sum")).collect().head.getLong(0)
     val avgAmountBefore = dfBefore.agg(Map("amount" -> "avg")).collect().head.getDouble(0)
     val maxAmountBefore = dfBefore.agg(Map("amount" -> "max")).collect().head.getDouble(0)
     val minAmountBefore = dfBefore.agg(Map("amount" -> "min")).collect().head.getDouble(0)
@@ -412,7 +407,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Truncate time travel
     val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-    val row = result.collect().head
+    val row    = result.collect().head
     row.getString(1) shouldBe "SUCCESS"
 
     // Verify aggregations work AFTER truncation (proves fast fields preserved)
@@ -426,7 +421,7 @@ class TruncateTimeTravelTest extends TestBase {
 
     // Aggregations on fast fields should still work and return same results
     val sumAmountAfter = dfAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-    val sumCountAfter = dfAfter.agg(Map("count" -> "sum")).collect().head.getLong(0)
+    val sumCountAfter  = dfAfter.agg(Map("count" -> "sum")).collect().head.getLong(0)
     val avgAmountAfter = dfAfter.agg(Map("amount" -> "avg")).collect().head.getDouble(0)
     val maxAmountAfter = dfAfter.agg(Map("amount" -> "max")).collect().head.getDouble(0)
     val minAmountAfter = dfAfter.agg(Map("amount" -> "min")).collect().head.getDouble(0)
@@ -476,7 +471,7 @@ class TruncateTimeTravelTest extends TestBase {
       // - Version 21 (uncheckpointed - the "extra" version after checkpoint)
       for (i <- 1 to 21) {
         val data = Seq(Row(i, s"value_$i", i * 100.0))
-        val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
+        val df   = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
         df.write
           .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode(if (i == 1) "overwrite" else "append")
@@ -493,19 +488,19 @@ class TruncateTimeTravelTest extends TestBase {
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .load(tablePath)
       val countBefore = dataBefore.count()
-      val sumBefore = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-      val idsBefore = dataBefore.select("id").collect().map(_.getInt(0)).sorted
+      val sumBefore   = dataBefore.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+      val idsBefore   = dataBefore.select("id").collect().map(_.getInt(0)).sorted
 
       countBefore shouldBe 21
       sumBefore shouldBe 23100.0 // sum of 100+200+...+2100 = 100*(1+2+...+21) = 100*231 = 23100
 
       // Truncate time travel
       val result = spark.sql(s"TRUNCATE INDEXTABLES TIME TRAVEL '$tablePath'")
-      val row = result.collect().head
+      val row    = result.collect().head
 
       row.getString(1) shouldBe "SUCCESS"
       row.getLong(3) should be >= 20L // Should delete versions 0-19 or 0-20
-      row.getLong(4) should be >= 1L // Should delete at least checkpoint at v10
+      row.getLong(4) should be >= 1L  // Should delete at least checkpoint at v10
 
       // Verify transaction log state after truncation
       val (versionsAfter, checkpointsAfter) = countTransactionLogFiles(tablePath)
@@ -518,8 +513,8 @@ class TruncateTimeTravelTest extends TestBase {
         .load(tablePath)
 
       val countAfter = dataAfter.count()
-      val sumAfter = dataAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
-      val idsAfter = dataAfter.select("id").collect().map(_.getInt(0)).sorted
+      val sumAfter   = dataAfter.agg(Map("amount" -> "sum")).collect().head.getDouble(0)
+      val idsAfter   = dataAfter.select("id").collect().map(_.getInt(0)).sorted
 
       // Verify exact data integrity
       countAfter shouldBe countBefore
@@ -534,12 +529,11 @@ class TruncateTimeTravelTest extends TestBase {
         record.head.getDouble(2) shouldBe (expectedId * 100.0)
       }
 
-    } finally {
+    } finally
       // Restore checkpoint interval
       originalInterval match {
         case Some(v) => spark.conf.set("spark.indextables.checkpoint.interval", v)
         case None    => spark.conf.set("spark.indextables.checkpoint.interval", "5")
       }
-    }
   }
 }

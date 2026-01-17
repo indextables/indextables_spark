@@ -29,20 +29,18 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Tests for bucket aggregation functions (DateHistogram, Histogram, Range).
- * These functions enable time-series analysis and numeric distribution analysis
- * using tantivy4java's bucket aggregation capabilities.
+ * Tests for bucket aggregation functions (DateHistogram, Histogram, Range). These functions enable time-series analysis
+ * and numeric distribution analysis using tantivy4java's bucket aggregation capabilities.
  */
 class BucketAggregationTest extends AnyFunSuite with Matchers {
 
-  def createTestSession(): SparkSession = {
+  def createTestSession(): SparkSession =
     SparkSession
       .builder()
       .appName("BucketAggregationTest")
       .master("local[*]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
-  }
 
   test("Histogram aggregation should bucket numeric values with COUNT") {
     val spark = createTestSession()
@@ -62,7 +60,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
         ("prod8", 150.0, 80)
       ).toDF("name", "price", "quantity")
 
-      val tempDir = Files.createTempDirectory("histogram-test").toFile
+      val tempDir   = Files.createTempDirectory("histogram-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with fast fields for aggregation
@@ -106,8 +104,8 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Expected: 0.0-50.0 has prices 15, 25, 35 (3 items)
       //           50.0-100.0 has prices 55, 75, 85, 95 (4 items)
       //           150.0-200.0 has price 150 (1 item)
-      val bucket0 = rows.find(_.getAs[Double]("price_bucket") == 0.0)
-      val bucket50 = rows.find(_.getAs[Double]("price_bucket") == 50.0)
+      val bucket0   = rows.find(_.getAs[Double]("price_bucket") == 0.0)
+      val bucket50  = rows.find(_.getAs[Double]("price_bucket") == 50.0)
       val bucket150 = rows.find(_.getAs[Double]("price_bucket") == 150.0)
 
       bucket0 shouldBe defined
@@ -124,9 +122,8 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("DateHistogram aggregation should bucket timestamps with COUNT") {
@@ -137,7 +134,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
 
       // Create test data with timestamps spanning multiple days
       val baseTime = System.currentTimeMillis()
-      val dayMs = 24 * 60 * 60 * 1000L
+      val dayMs    = 24 * 60 * 60 * 1000L
 
       val testData = Seq(
         ("event1", new Timestamp(baseTime), 100),
@@ -148,7 +145,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
         ("event6", new Timestamp(baseTime + 3 * dayMs), 600)
       ).toDF("name", "event_time", "value")
 
-      val tempDir = Files.createTempDirectory("date-histogram-test").toFile
+      val tempDir   = Files.createTempDirectory("date-histogram-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with fast fields
@@ -192,9 +189,8 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("Range aggregation should create custom buckets with COUNT") {
@@ -213,7 +209,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
         ("item6", 250.0)
       ).toDF("name", "price")
 
-      val tempDir = Files.createTempDirectory("range-test").toFile
+      val tempDir   = Files.createTempDirectory("range-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with fast fields
@@ -260,9 +256,8 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   test("Histogram aggregation with SUM sub-aggregation should work") {
@@ -280,7 +275,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
         ("prod5", 75.0, 50)
       ).toDF("name", "price", "quantity")
 
-      val tempDir = Files.createTempDirectory("histogram-sum-test").toFile
+      val tempDir   = Files.createTempDirectory("histogram-sum-test").toFile
       val tablePath = tempDir.getAbsolutePath
 
       // Write data with fast fields
@@ -322,7 +317,7 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Verify bucket contents with SUM
       // Expected: 0.0-50.0 has prices 15, 25, 35 with quantities 10, 20, 30 (sum=60)
       //           50.0-100.0 has prices 55, 75 with quantities 40, 50 (sum=90)
-      val bucket0 = rows.find(_.getAs[Double]("price_bucket") == 0.0)
+      val bucket0  = rows.find(_.getAs[Double]("price_bucket") == 0.0)
       val bucket50 = rows.find(_.getAs[Double]("price_bucket") == 50.0)
 
       bucket0 shouldBe defined
@@ -338,9 +333,8 @@ class BucketAggregationTest extends AnyFunSuite with Matchers {
       // Clean up
       deleteRecursively(tempDir)
 
-    } finally {
+    } finally
       spark.stop()
-    }
   }
 
   private def deleteRecursively(file: File): Unit = {

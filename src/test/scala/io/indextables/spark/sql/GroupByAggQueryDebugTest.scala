@@ -31,10 +31,9 @@ import org.scalatest.BeforeAndAfterAll
 /**
  * Debug test to show Tantivy queries for GROUP BY aggregations.
  *
- * Schema:
- *   message_timestamp (timestamp), id(string), logGroup (string), logStream (string),
- *   message(text), messageType (string), owner (int), subscriptionFilter (array[string]),
- *   message_date (date - partition-key), message_hour (string), asv (string)
+ * Schema: message_timestamp (timestamp), id(string), logGroup (string), logStream (string), message(text), messageType
+ * (string), owner (int), subscriptionFilter (array[string]), message_date (date - partition-key), message_hour
+ * (string), asv (string)
  */
 class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
@@ -46,8 +45,12 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
     super.beforeAll()
 
     // Set debug logging to see Tantivy queries
-    org.apache.log4j.Logger.getLogger("io.indextables.spark.core.IndexTables4SparkGroupByAggregateScan").setLevel(org.apache.log4j.Level.DEBUG)
-    org.apache.log4j.Logger.getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder").setLevel(org.apache.log4j.Level.DEBUG)
+    org.apache.log4j.Logger
+      .getLogger("io.indextables.spark.core.IndexTables4SparkGroupByAggregateScan")
+      .setLevel(org.apache.log4j.Level.DEBUG)
+    org.apache.log4j.Logger
+      .getLogger("io.indextables.spark.core.IndexTables4SparkScanBuilder")
+      .setLevel(org.apache.log4j.Level.DEBUG)
     org.apache.log4j.Logger.getLogger("io.indextables.tantivy4java.aggregation").setLevel(org.apache.log4j.Level.DEBUG)
     org.apache.log4j.Logger.getLogger("io.indextables.spark.search").setLevel(org.apache.log4j.Level.DEBUG)
 
@@ -86,39 +89,149 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
   }
 
   private def createTestData(): Unit = {
-    val schema = StructType(Seq(
-      StructField("message_timestamp", TimestampType, nullable = false),
-      StructField("id", StringType, nullable = false),
-      StructField("logGroup", StringType, nullable = true),
-      StructField("logStream", StringType, nullable = true),
-      StructField("message", StringType, nullable = true),
-      StructField("messageType", StringType, nullable = true),
-      StructField("owner", IntegerType, nullable = true),
-      StructField("subscriptionFilter", ArrayType(StringType), nullable = true),
-      StructField("message_date", DateType, nullable = false),
-      StructField("message_hour", StringType, nullable = true),
-      StructField("asv", StringType, nullable = false)
-    ))
+    val schema = StructType(
+      Seq(
+        StructField("message_timestamp", TimestampType, nullable = false),
+        StructField("id", StringType, nullable = false),
+        StructField("logGroup", StringType, nullable = true),
+        StructField("logStream", StringType, nullable = true),
+        StructField("message", StringType, nullable = true),
+        StructField("messageType", StringType, nullable = true),
+        StructField("owner", IntegerType, nullable = true),
+        StructField("subscriptionFilter", ArrayType(StringType), nullable = true),
+        StructField("message_date", DateType, nullable = false),
+        StructField("message_hour", StringType, nullable = true),
+        StructField("asv", StringType, nullable = false)
+      )
+    )
 
     val data = Seq(
       // message_date = 2024-01-01, asv = "v1" - 3 records
-      Row(Timestamp.valueOf("2024-01-01 10:00:00"), "id1", "group1", "stream1", "hello world", "INFO", 100, Seq("filter1"), Date.valueOf("2024-01-01"), "10", "v1"),
-      Row(Timestamp.valueOf("2024-01-01 10:30:00"), "id2", "group1", "stream1", "test message", "INFO", 100, Seq("filter1"), Date.valueOf("2024-01-01"), "10", "v1"),
-      Row(Timestamp.valueOf("2024-01-01 11:00:00"), "id3", "group1", "stream2", "another msg", "WARN", 101, Seq("filter2"), Date.valueOf("2024-01-01"), "11", "v1"),
+      Row(
+        Timestamp.valueOf("2024-01-01 10:00:00"),
+        "id1",
+        "group1",
+        "stream1",
+        "hello world",
+        "INFO",
+        100,
+        Seq("filter1"),
+        Date.valueOf("2024-01-01"),
+        "10",
+        "v1"
+      ),
+      Row(
+        Timestamp.valueOf("2024-01-01 10:30:00"),
+        "id2",
+        "group1",
+        "stream1",
+        "test message",
+        "INFO",
+        100,
+        Seq("filter1"),
+        Date.valueOf("2024-01-01"),
+        "10",
+        "v1"
+      ),
+      Row(
+        Timestamp.valueOf("2024-01-01 11:00:00"),
+        "id3",
+        "group1",
+        "stream2",
+        "another msg",
+        "WARN",
+        101,
+        Seq("filter2"),
+        Date.valueOf("2024-01-01"),
+        "11",
+        "v1"
+      ),
 
       // message_date = 2024-01-01, asv = "v2" - 2 records
-      Row(Timestamp.valueOf("2024-01-01 12:00:00"), "id4", "group2", "stream1", "error occurred", "ERROR", 102, Seq("filter1", "filter2"), Date.valueOf("2024-01-01"), "12", "v2"),
-      Row(Timestamp.valueOf("2024-01-01 13:00:00"), "id5", "group2", "stream2", "debug info", "DEBUG", 102, Seq("filter3"), Date.valueOf("2024-01-01"), "13", "v2"),
+      Row(
+        Timestamp.valueOf("2024-01-01 12:00:00"),
+        "id4",
+        "group2",
+        "stream1",
+        "error occurred",
+        "ERROR",
+        102,
+        Seq("filter1", "filter2"),
+        Date.valueOf("2024-01-01"),
+        "12",
+        "v2"
+      ),
+      Row(
+        Timestamp.valueOf("2024-01-01 13:00:00"),
+        "id5",
+        "group2",
+        "stream2",
+        "debug info",
+        "DEBUG",
+        102,
+        Seq("filter3"),
+        Date.valueOf("2024-01-01"),
+        "13",
+        "v2"
+      ),
 
       // message_date = 2024-01-02, asv = "v1" - 2 records
-      Row(Timestamp.valueOf("2024-01-02 09:00:00"), "id6", "group1", "stream1", "morning log", "INFO", 100, Seq("filter1"), Date.valueOf("2024-01-02"), "09", "v1"),
-      Row(Timestamp.valueOf("2024-01-02 10:00:00"), "id7", "group1", "stream1", "mid morning", "INFO", 100, Seq("filter1"), Date.valueOf("2024-01-02"), "10", "v1"),
+      Row(
+        Timestamp.valueOf("2024-01-02 09:00:00"),
+        "id6",
+        "group1",
+        "stream1",
+        "morning log",
+        "INFO",
+        100,
+        Seq("filter1"),
+        Date.valueOf("2024-01-02"),
+        "09",
+        "v1"
+      ),
+      Row(
+        Timestamp.valueOf("2024-01-02 10:00:00"),
+        "id7",
+        "group1",
+        "stream1",
+        "mid morning",
+        "INFO",
+        100,
+        Seq("filter1"),
+        Date.valueOf("2024-01-02"),
+        "10",
+        "v1"
+      ),
 
       // message_date = 2024-01-02, asv = "v2" - 1 record
-      Row(Timestamp.valueOf("2024-01-02 14:00:00"), "id8", "group2", "stream1", "afternoon log", "INFO", 103, Seq("filter2"), Date.valueOf("2024-01-02"), "14", "v2"),
+      Row(
+        Timestamp.valueOf("2024-01-02 14:00:00"),
+        "id8",
+        "group2",
+        "stream1",
+        "afternoon log",
+        "INFO",
+        103,
+        Seq("filter2"),
+        Date.valueOf("2024-01-02"),
+        "14",
+        "v2"
+      ),
 
       // message_date = 2024-01-03, asv = "v1" - 1 record
-      Row(Timestamp.valueOf("2024-01-03 08:00:00"), "id9", "group1", "stream1", "early log", "INFO", 100, Seq("filter1"), Date.valueOf("2024-01-03"), "08", "v1")
+      Row(
+        Timestamp.valueOf("2024-01-03 08:00:00"),
+        "id9",
+        "group1",
+        "stream1",
+        "early log",
+        "INFO",
+        100,
+        Seq("filter1"),
+        Date.valueOf("2024-01-03"),
+        "08",
+        "v1"
+      )
     )
 
     val df = spark.createDataFrame(spark.sparkContext.parallelize(data), schema)
@@ -230,7 +343,7 @@ class GroupByAggQueryDebugTest extends AnyFunSuite with Matchers with BeforeAndA
 
     // Verify results - should see counts per date
     val rows = result.collect()
-    rows.length shouldBe 3  // 3 distinct dates
+    rows.length shouldBe 3 // 3 distinct dates
 
     // Expected:
     // 2024-01-01 -> 5

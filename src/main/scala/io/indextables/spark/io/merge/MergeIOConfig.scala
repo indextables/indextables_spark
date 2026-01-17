@@ -43,15 +43,11 @@ case class MergeIOConfig(
   retryBaseDelayMs: Long = MergeIOConfig.DEFAULT_RETRY_BASE_DELAY_MS,
   retryMaxDelayMs: Long = MergeIOConfig.DEFAULT_RETRY_MAX_DELAY_MS) {
 
-  /**
-   * Calculate maximum concurrent downloads based on available processors.
-   */
+  /** Calculate maximum concurrent downloads based on available processors. */
   def maxConcurrentDownloads: Int =
     Runtime.getRuntime.availableProcessors() * maxConcurrencyPerCore
 
-  /**
-   * Validate configuration values.
-   */
+  /** Validate configuration values. */
   def validate(): MergeIOConfig = {
     require(maxConcurrencyPerCore > 0, s"maxConcurrencyPerCore must be > 0, got: $maxConcurrencyPerCore")
     require(memoryBudgetBytes > 0, s"memoryBudgetBytes must be > 0, got: $memoryBudgetBytes")
@@ -81,14 +77,10 @@ object MergeIOConfig {
   val DEFAULT_RETRY_BASE_DELAY_MS      = 1000L
   val DEFAULT_RETRY_MAX_DELAY_MS       = 30000L
 
-  /**
-   * Create default configuration.
-   */
+  /** Create default configuration. */
   def default: MergeIOConfig = MergeIOConfig()
 
-  /**
-   * Create configuration from a case-insensitive string map (Spark options).
-   */
+  /** Create configuration from a case-insensitive string map (Spark options). */
   def fromOptions(options: CaseInsensitiveStringMap): MergeIOConfig =
     MergeIOConfig(
       maxConcurrencyPerCore = getIntOption(options, KEY_MAX_CONCURRENCY_PER_CORE, DEFAULT_MAX_CONCURRENCY_PER_CORE),
@@ -113,7 +105,8 @@ object MergeIOConfig {
       lowerCaseConfigs.get(key.toLowerCase)
 
     MergeIOConfig(
-      maxConcurrencyPerCore = get(KEY_MAX_CONCURRENCY_PER_CORE).map(_.toInt).getOrElse(DEFAULT_MAX_CONCURRENCY_PER_CORE),
+      maxConcurrencyPerCore =
+        get(KEY_MAX_CONCURRENCY_PER_CORE).map(_.toInt).getOrElse(DEFAULT_MAX_CONCURRENCY_PER_CORE),
       memoryBudgetBytes = get(KEY_MEMORY_BUDGET).map(parseBytes).getOrElse(DEFAULT_MEMORY_BUDGET_BYTES),
       downloadRetries = get(KEY_DOWNLOAD_RETRIES).map(_.toInt).getOrElse(DEFAULT_DOWNLOAD_RETRIES),
       uploadMaxConcurrency = get(KEY_UPLOAD_MAX_CONCURRENCY).map(_.toInt).getOrElse(DEFAULT_UPLOAD_MAX_CONCURRENCY),
@@ -122,19 +115,25 @@ object MergeIOConfig {
     ).validate()
   }
 
-  private def getIntOption(options: CaseInsensitiveStringMap, key: String, default: Int): Int = {
+  private def getIntOption(
+    options: CaseInsensitiveStringMap,
+    key: String,
+    default: Int
+  ): Int = {
     val value = options.get(key)
     if (value == null || value.isEmpty) default else value.toInt
   }
 
-  private def getLongOption(options: CaseInsensitiveStringMap, key: String, default: Long): Long = {
+  private def getLongOption(
+    options: CaseInsensitiveStringMap,
+    key: String,
+    default: Long
+  ): Long = {
     val value = options.get(key)
     if (value == null || value.isEmpty) default else value.toLong
   }
 
-  /**
-   * Parse a byte size string (e.g., "2G", "512M", "1024K") into bytes.
-   */
+  /** Parse a byte size string (e.g., "2G", "512M", "1024K") into bytes. */
   def parseBytes(size: String): Long = {
     val trimmed = size.trim.toUpperCase
     val multiplier = trimmed.last match {
@@ -154,9 +153,7 @@ object MergeIOConfig {
     numericPart.toLong * multiplier
   }
 
-  /**
-   * Format bytes as a human-readable string.
-   */
+  /** Format bytes as a human-readable string. */
   def formatBytes(bytes: Long): String =
     if (bytes >= 1024L * 1024 * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024 * 1024)}T"
     else if (bytes >= 1024L * 1024 * 1024) s"${bytes / (1024L * 1024 * 1024)}G"

@@ -38,7 +38,7 @@ case class CheckpointInfo(
   sizeInBytes: Long,
   numFiles: Long, // Number of AddActions
   createdTime: Long,
-  parts: Option[Int] = None, // Number of parts for multi-part checkpoint (None = single file)
+  parts: Option[Int] = None,          // Number of parts for multi-part checkpoint (None = single file)
   checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
 )
 
@@ -48,23 +48,22 @@ case class LastCheckpointInfo(
   sizeInBytes: Long,
   numFiles: Long,
   createdTime: Long,
-  parts: Option[Int] = None, // Number of parts for multi-part checkpoint (None = single file)
+  parts: Option[Int] = None,          // Number of parts for multi-part checkpoint (None = single file)
   checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
 )
 
 /**
  * Manifest for multi-part checkpoints.
  *
- * This file is written last (with ifNotExists) to "commit" the checkpoint.
- * It contains the list of part files that make up the complete checkpoint.
+ * This file is written last (with ifNotExists) to "commit" the checkpoint. It contains the list of part files that make
+ * up the complete checkpoint.
  *
- * The format field allows for future extensibility to support different checkpoint
- * file formats (parquet, avro, etc.) without breaking backward compatibility.
+ * The format field allows for future extensibility to support different checkpoint file formats (parquet, avro, etc.)
+ * without breaking backward compatibility.
  *
  * PURGE operations should:
- *   1. Keep manifest files for retained checkpoints
- *   2. Keep all part files referenced by retained manifests
- *   3. Delete orphaned part files (parts from failed checkpoint attempts not referenced by any manifest)
+ *   1. Keep manifest files for retained checkpoints 2. Keep all part files referenced by retained manifests 3. Delete
+ *      orphaned part files (parts from failed checkpoint attempts not referenced by any manifest)
  */
 case class MultiPartCheckpointManifest(
   version: Long,
@@ -113,7 +112,7 @@ class TransactionLogCheckpoint(
 
   // Multi-part checkpoint configuration
   private val multiPartEnabled = options.getBoolean("spark.indextables.checkpoint.multiPart.enabled", true)
-  private val actionsPerPart = options.getInt("spark.indextables.checkpoint.actionsPerPart", 100000)
+  private val actionsPerPart   = options.getInt("spark.indextables.checkpoint.actionsPerPart", 100000)
 
   private val executor                      = Executors.newFixedThreadPool(parallelism).asInstanceOf[ThreadPoolExecutor]
   implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
@@ -181,9 +180,7 @@ class TransactionLogCheckpoint(
     }
   }
 
-  /**
-   * Create a single-file checkpoint (traditional format).
-   */
+  /** Create a single-file checkpoint (traditional format). */
   private def createSinglePartCheckpoint(
     currentVersion: Long,
     actions: Seq[Action],
@@ -216,14 +213,12 @@ class TransactionLogCheckpoint(
    * Create a multi-part checkpoint for large tables.
    *
    * Architecture for race condition safety:
-   *   1. Generate a unique checkpoint ID (UUID) for this attempt
-   *   2. Write all parts with UUID in filename: `<version>.checkpoint.<uuid>.<partNum>.json`
-   *   3. Write manifest file using ifNotExists: `<version>.checkpoint.json`
-   *   4. First writer to successfully write manifest wins
-   *   5. Orphaned parts from failed attempts are cleaned up by PURGE operations
+   *   1. Generate a unique checkpoint ID (UUID) for this attempt 2. Write all parts with UUID in filename:
+   *      `<version>.checkpoint.<uuid>.<partNum>.json` 3. Write manifest file using ifNotExists:
+   *      `<version>.checkpoint.json` 4. First writer to successfully write manifest wins 5. Orphaned parts from failed
+   *      attempts are cleaned up by PURGE operations
    *
-   * Part 1 contains: ProtocolAction + MetadataAction + first batch of AddActions
-   * Parts 2+ contain: AddActions only
+   * Part 1 contains: ProtocolAction + MetadataAction + first batch of AddActions Parts 2+ contain: AddActions only
    *
    * @return
    *   Some(CheckpointInfo) if checkpoint was created, None if another writer completed first
@@ -240,7 +235,7 @@ class TransactionLogCheckpoint(
     val protocolAction = actions.collectFirst { case p: ProtocolAction => p }
     val metadataAction = actions.collectFirst { case m: MetadataAction => m }
     val addActions     = actions.collect { case a: AddAction => a }
-    val otherActions   = actions.filter {
+    val otherActions = actions.filter {
       case _: ProtocolAction => false
       case _: MetadataAction => false
       case _: AddAction      => false
@@ -248,20 +243,23 @@ class TransactionLogCheckpoint(
     }
 
     // Calculate number of parts needed
-    val headerActions      = protocolAction.toSeq ++ metadataAction.toSeq ++ otherActions
-    val addsForFirstPart   = math.max(0, actionsPerPart - headerActions.length)
-    val remainingAdds      = if (addsForFirstPart >= addActions.length) Seq.empty else addActions.drop(addsForFirstPart)
-    val additionalParts    = if (remainingAdds.isEmpty) 0 else math.ceil(remainingAdds.length.toDouble / actionsPerPart).toInt
-    val totalParts         = 1 + additionalParts
+    val headerActions    = protocolAction.toSeq ++ metadataAction.toSeq ++ otherActions
+    val addsForFirstPart = math.max(0, actionsPerPart - headerActions.length)
+    val remainingAdds    = if (addsForFirstPart >= addActions.length) Seq.empty else addActions.drop(addsForFirstPart)
+    val additionalParts =
+      if (remainingAdds.isEmpty) 0 else math.ceil(remainingAdds.length.toDouble / actionsPerPart).toInt
+    val totalParts = 1 + additionalParts
 
-    logger.info(s"Creating multi-part checkpoint (id=$checkpointId) with $totalParts parts for ${actions.length} actions")
+    logger.info(
+      s"Creating multi-part checkpoint (id=$checkpointId) with $totalParts parts for ${actions.length} actions"
+    )
 
     // Write all parts with checkpoint ID in filename
     val partFiles = scala.collection.mutable.ListBuffer[String]()
 
     // Write part 1: header + first batch of adds
     val part1Actions = headerActions ++ addActions.take(addsForFirstPart)
-    val part1File = writeCheckpointPartWithId(currentVersion, checkpointId, 1, part1Actions)
+    val part1File    = writeCheckpointPartWithId(currentVersion, checkpointId, 1, part1Actions)
     partFiles += part1File
 
     // Write remaining parts
@@ -269,7 +267,7 @@ class TransactionLogCheckpoint(
     var remainingIdx = 0
     while (remainingIdx < remainingAdds.length) {
       val partActions = remainingAdds.slice(remainingIdx, remainingIdx + actionsPerPart)
-      val partFile = writeCheckpointPartWithId(currentVersion, checkpointId, partNum, partActions)
+      val partFile    = writeCheckpointPartWithId(currentVersion, checkpointId, partNum, partActions)
       partFiles += partFile
       remainingIdx += actionsPerPart
       partNum += 1
@@ -280,19 +278,23 @@ class TransactionLogCheckpoint(
 
     if (manifestWritten) {
       logger.info(s"Successfully created multi-part checkpoint manifest for version $currentVersion (id=$checkpointId)")
-      Some(CheckpointInfo(
-        version = currentVersion,
-        size = actions.length,
-        sizeInBytes = 0L,
-        numFiles = 0L,
-        createdTime = System.currentTimeMillis(),
-        parts = Some(totalParts),
-        checkpointId = Some(checkpointId)
-      ))
+      Some(
+        CheckpointInfo(
+          version = currentVersion,
+          size = actions.length,
+          sizeInBytes = 0L,
+          numFiles = 0L,
+          createdTime = System.currentTimeMillis(),
+          parts = Some(totalParts),
+          checkpointId = Some(checkpointId)
+        )
+      )
     } else {
       // Another writer completed the checkpoint first - our parts become orphans (cleaned up by PURGE)
-      logger.info(s"Another writer completed checkpoint for version $currentVersion first, " +
-        s"orphaned parts (id=$checkpointId) will be cleaned up by PURGE")
+      logger.info(
+        s"Another writer completed checkpoint for version $currentVersion first, " +
+          s"orphaned parts (id=$checkpointId) will be cleaned up by PURGE"
+      )
       None
     }
   }
@@ -303,7 +305,12 @@ class TransactionLogCheckpoint(
    * @return
    *   The filename of the written part
    */
-  private def writeCheckpointPartWithId(version: Long, checkpointId: String, partNum: Int, actions: Seq[Action]): String = {
+  private def writeCheckpointPartWithId(
+    version: Long,
+    checkpointId: String,
+    partNum: Int,
+    actions: Seq[Action]
+  ): String = {
     val fileName    = f"$version%020d.checkpoint.$checkpointId.$partNum%05d.json"
     val partPath    = new Path(transactionLogPath, fileName)
     val partPathStr = partPath.toString
@@ -324,13 +331,17 @@ class TransactionLogCheckpoint(
   /**
    * Write the checkpoint manifest file.
    *
-   * The manifest contains metadata about the checkpoint and lists all part files.
-   * Uses ifNotExists to ensure only one writer succeeds for a given version.
+   * The manifest contains metadata about the checkpoint and lists all part files. Uses ifNotExists to ensure only one
+   * writer succeeds for a given version.
    *
    * @return
    *   true if manifest was written, false if another writer completed first
    */
-  private def writeCheckpointManifest(version: Long, checkpointId: String, partFiles: Seq[String]): Boolean = {
+  private def writeCheckpointManifest(
+    version: Long,
+    checkpointId: String,
+    partFiles: Seq[String]
+  ): Boolean = {
     val manifestPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
     val manifestPathStr = manifestPath.toString
 
@@ -365,7 +376,7 @@ class TransactionLogCheckpoint(
         // Restore schemas from registry (handles both legacy and deduplicated checkpoints)
         restoreSchemas(actions)
       } match {
-        case Success(actions) => Some(actions)
+        case Success(actions)                     => Some(actions)
         case Failure(e: ProtocolVersionException) =>
           // Re-throw protocol version exceptions to the caller
           throw e
@@ -378,9 +389,8 @@ class TransactionLogCheckpoint(
   /**
    * Read a legacy single-file checkpoint (actions directly in file).
    *
-   * Uses full streaming from cloud storage through decompression to parsing.
-   * This avoids OOM for large checkpoint files (>1GB) by never loading the
-   * entire file into memory.
+   * Uses full streaming from cloud storage through decompression to parsing. This avoids OOM for large checkpoint files
+   * (>1GB) by never loading the entire file into memory.
    */
   private def readLegacySingleFileCheckpoint(version: Long): Seq[Action] = {
     val checkpointPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
@@ -398,8 +408,8 @@ class TransactionLogCheckpoint(
   /**
    * Read a multi-part checkpoint using the manifest file.
    *
-   * The manifest file (`<version>.checkpoint.json`) contains the list of part files.
-   * Each part file is named `<version>.checkpoint.<checkpointId>.<partNum>.json`.
+   * The manifest file (`<version>.checkpoint.json`) contains the list of part files. Each part file is named
+   * `<version>.checkpoint.<checkpointId>.<partNum>.json`.
    */
   private def readMultiPartCheckpointFromManifest(version: Long): Seq[Action] = {
     val manifestPath    = new Path(transactionLogPath, f"$version%020d.checkpoint.json")
@@ -410,11 +420,13 @@ class TransactionLogCheckpoint(
     }
 
     // Read and parse manifest
-    val manifestBytes = cloudProvider.readFile(manifestPathStr)
+    val manifestBytes   = cloudProvider.readFile(manifestPathStr)
     val manifestContent = new String(manifestBytes, "UTF-8")
-    val manifest = JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
+    val manifest        = JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
 
-    logger.debug(s"Reading multi-part checkpoint version $version (id=${manifest.checkpointId}) with ${manifest.parts.size} parts")
+    logger.debug(
+      s"Reading multi-part checkpoint version $version (id=${manifest.checkpointId}) with ${manifest.parts.size} parts"
+    )
 
     // Read all parts listed in manifest
     val allActions = scala.collection.mutable.ListBuffer[Action]()
@@ -472,10 +484,10 @@ class TransactionLogCheckpoint(
 
     var retries = 0
     while (retries <= maxRetries)
-      try {
+      try
         // Use full streaming: cloud storage -> decompression -> line parsing
         return parseActionsFromStream(versionFilePath)
-      } catch {
+      catch {
         case e: Exception =>
           retries += 1
           if (retries > maxRetries) {
@@ -493,17 +505,16 @@ class TransactionLogCheckpoint(
   /**
    * Parse actions directly from a cloud storage file using full streaming.
    *
-   * This method provides the most memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method provides the most memory-efficient parsing by streaming data from cloud storage directly through
+   * decompression and into line-by-line parsing, without ever loading the entire file into memory.
    *
    * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
    */
   private def parseActionsFromStream(filePath: String): Seq[Action] = {
-    val rawStream = cloudProvider.openInputStream(filePath)
+    val rawStream           = cloudProvider.openInputStream(filePath)
     val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
-    val actions = ListBuffer[Action]()
+    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions             = ListBuffer[Action]()
 
     try {
       var line = reader.readLine()
@@ -514,25 +525,22 @@ class TransactionLogCheckpoint(
         line = reader.readLine()
       }
       actions.toSeq
-    } finally {
+    } finally
       reader.close()
-      // Closing reader closes the underlying streams
-    }
+    // Closing reader closes the underlying streams
   }
 
   /**
    * Parse actions from a byte array using streaming line-by-line parsing.
    *
-   * This method avoids OOM for large files (>1GB) by reading line-by-line instead of
-   * loading the entire content as a single String. Java Strings have a maximum size
-   * limit of ~1GB (UTF-16 encoding), so files larger than that would fail with
-   * "UTF16 String size is X, should be less than Y" error.
+   * This method avoids OOM for large files (>1GB) by reading line-by-line instead of loading the entire content as a
+   * single String. Java Strings have a maximum size limit of ~1GB (UTF-16 encoding), so files larger than that would
+   * fail with "UTF16 String size is X, should be less than Y" error.
    *
-   * Each line is small (typically a few KB), so parsing line-by-line allows GC to
-   * reclaim memory between lines.
+   * Each line is small (typically a few KB), so parsing line-by-line allows GC to reclaim memory between lines.
    */
   private def parseActionsFromBytes(bytes: Array[Byte]): Seq[Action] = {
-    val reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes), "UTF-8"))
+    val reader  = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes), "UTF-8"))
     val actions = ListBuffer[Action]()
 
     try {
@@ -544,9 +552,8 @@ class TransactionLogCheckpoint(
         line = reader.readLine()
       }
       actions.toSeq
-    } finally {
+    } finally
       reader.close()
-    }
   }
 
   /**
@@ -717,8 +724,8 @@ class TransactionLogCheckpoint(
    * This replaces docMappingJson with docMappingRef in AddActions and stores the schema registry in
    * MetadataAction.configuration. This can reduce checkpoint size by up to 99% for tables with large schemas.
    *
-   * Additionally, this method consolidates duplicate schema mappings that may have been created by an older version
-   * of the hash calculation algorithm (which used raw string hashing instead of canonical JSON hashing).
+   * Additionally, this method consolidates duplicate schema mappings that may have been created by an older version of
+   * the hash calculation algorithm (which used raw string hashing instead of canonical JSON hashing).
    */
   private def applySchemaDeduplication(actions: Seq[Action]): Seq[Action] = {
     // Find the MetadataAction (should be present in checkpoint)
@@ -735,7 +742,7 @@ class TransactionLogCheckpoint(
 
         // If new schemas were found, update MetadataAction with merged registry
         val (actionsAfterDedup, configAfterDedup) = if (newSchemaRegistry.nonEmpty) {
-          val originalSize = actions.collect { case a: AddAction => a }.flatMap(_.docMappingJson).map(_.length).sum
+          val originalSize     = actions.collect { case a: AddAction => a }.flatMap(_.docMappingJson).map(_.length).sum
           val uniqueSchemaSize = newSchemaRegistry.values.map(_.length).sum
           logger.info(
             s"Schema deduplication: ${newSchemaRegistry.size} unique schemas, " +
@@ -758,7 +765,9 @@ class TransactionLogCheckpoint(
           SchemaDeduplication.consolidateDuplicateSchemas(actionsAfterDedup, configAfterDedup)
 
         if (duplicatesRemoved > 0) {
-          logger.info(s"Schema consolidation: removed $duplicatesRemoved duplicate schema mappings from legacy hash calculation")
+          logger.info(
+            s"Schema consolidation: removed $duplicatesRemoved duplicate schema mappings from legacy hash calculation"
+          )
         }
 
         // Replace MetadataAction with final configuration

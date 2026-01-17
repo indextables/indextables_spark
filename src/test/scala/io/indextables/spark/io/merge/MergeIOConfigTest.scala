@@ -20,6 +20,7 @@ package io.indextables.spark.io.merge
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -37,7 +38,7 @@ class MergeIOConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("maxConcurrentDownloads calculation") {
-    val config = MergeIOConfig(maxConcurrencyPerCore = 4)
+    val config     = MergeIOConfig(maxConcurrencyPerCore = 4)
     val processors = Runtime.getRuntime.availableProcessors()
 
     config.maxConcurrentDownloads shouldBe (processors * 4)
@@ -63,12 +64,14 @@ class MergeIOConfigTest extends AnyFunSuite with Matchers {
   }
 
   test("fromOptions with custom values") {
-    val options = new CaseInsensitiveStringMap(Map(
-      "spark.indextables.merge.download.maxConcurrencyPerCore" -> "16",
-      "spark.indextables.merge.download.memoryBudget" -> "4G",
-      "spark.indextables.merge.download.retries" -> "5",
-      "spark.indextables.merge.upload.maxConcurrency" -> "10"
-    ).asJava)
+    val options = new CaseInsensitiveStringMap(
+      Map(
+        "spark.indextables.merge.download.maxConcurrencyPerCore" -> "16",
+        "spark.indextables.merge.download.memoryBudget"          -> "4G",
+        "spark.indextables.merge.download.retries"               -> "5",
+        "spark.indextables.merge.upload.maxConcurrency"          -> "10"
+      ).asJava
+    )
 
     val config = MergeIOConfig.fromOptions(options)
 
@@ -80,7 +83,7 @@ class MergeIOConfigTest extends AnyFunSuite with Matchers {
 
   test("fromOptions with default values when not specified") {
     val options = new CaseInsensitiveStringMap(Map.empty[String, String].asJava)
-    val config = MergeIOConfig.fromOptions(options)
+    val config  = MergeIOConfig.fromOptions(options)
 
     config shouldBe MergeIOConfig.default
   }
@@ -88,8 +91,8 @@ class MergeIOConfigTest extends AnyFunSuite with Matchers {
   test("fromMap with custom values") {
     val configs = Map(
       "spark.indextables.merge.download.maxConcurrencyPerCore" -> "12",
-      "spark.indextables.merge.download.memoryBudget" -> "1G",
-      "spark.indextables.merge.download.retries" -> "2"
+      "spark.indextables.merge.download.memoryBudget"          -> "1G",
+      "spark.indextables.merge.download.retries"               -> "2"
     )
 
     val config = MergeIOConfig.fromMap(configs)

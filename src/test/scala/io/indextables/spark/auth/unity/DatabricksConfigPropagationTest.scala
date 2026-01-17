@@ -23,25 +23,25 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.conf.Configuration
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
 import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.TestBase
 import org.slf4j.LoggerFactory
 
 /**
- * Tests to verify that Databricks-specific configuration (spark.indextables.databricks.*)
- * is properly propagated through all paths: read, write, merge, prewarm.
+ * Tests to verify that Databricks-specific configuration (spark.indextables.databricks.*) is properly propagated
+ * through all paths: read, write, merge, prewarm.
  *
- * This test reproduces the issue where databricks config keys set via spark.conf.set()
- * are not propagated to the UnityCatalogAWSCredentialProvider.
+ * This test reproduces the issue where databricks config keys set via spark.conf.set() are not propagated to the
+ * UnityCatalogAWSCredentialProvider.
  */
 class DatabricksConfigPropagationTest extends TestBase {
 
   private val logger = LoggerFactory.getLogger(classOf[DatabricksConfigPropagationTest])
 
   // Test databricks configuration values
-  private val testWorkspaceUrl = "https://test-workspace.cloud.databricks.com"
-  private val testApiToken = "test-api-token-12345"
+  private val testWorkspaceUrl  = "https://test-workspace.cloud.databricks.com"
+  private val testApiToken      = "test-api-token-12345"
   private val testRefreshBuffer = "30"
   private val testProviderClass = "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider"
 
@@ -88,9 +88,7 @@ class DatabricksConfigPropagationTest extends TestBase {
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
 
     logger.info(s"Spark configs extracted: ${sparkConfigs.size} keys")
-    sparkConfigs.keys.filter(_.contains("databricks")).foreach { k =>
-      logger.info(s"  Databricks key found: $k")
-    }
+    sparkConfigs.keys.filter(_.contains("databricks")).foreach(k => logger.info(s"  Databricks key found: $k"))
 
     // The fix ensures ALL spark.indextables.* keys are extracted, including databricks
     sparkConfigs should contain key "spark.indextables.databricks.workspaceUrl"
@@ -104,8 +102,9 @@ class DatabricksConfigPropagationTest extends TestBase {
 
     // Simulate what enrichHadoopConfWithSparkConf does: copy all configs to Hadoop
     val enrichedConf = new Configuration()
-    sparkConfigs.foreach { case (key, value) =>
-      enrichedConf.set(key, value)
+    sparkConfigs.foreach {
+      case (key, value) =>
+        enrichedConf.set(key, value)
     }
 
     // Verify Hadoop config now has databricks keys
@@ -121,7 +120,7 @@ class DatabricksConfigPropagationTest extends TestBase {
     val hadoopConf = spark.sparkContext.hadoopConfiguration
 
     // Extract configs from both Spark and Hadoop
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
@@ -133,8 +132,9 @@ class DatabricksConfigPropagationTest extends TestBase {
 
     // Now create a new Hadoop config and copy the merged configs
     val enrichedConf = new Configuration()
-    mergedConfigs.foreach { case (key, value) =>
-      enrichedConf.set(key, value)
+    mergedConfigs.foreach {
+      case (key, value) =>
+        enrichedConf.set(key, value)
     }
 
     // Verify the enriched config has databricks keys
@@ -153,8 +153,9 @@ class DatabricksConfigPropagationTest extends TestBase {
 
     // Create a Hadoop config with ALL the extracted configs
     val hadoopConf = new Configuration()
-    sparkConfigs.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
+    sparkConfigs.foreach {
+      case (key, value) =>
+        hadoopConf.set(key, value)
     }
 
     // Now the credential provider can find databricks keys
@@ -219,11 +220,11 @@ class DatabricksConfigPropagationTest extends TestBase {
     import io.indextables.spark.sql.SerializableAwsConfig
 
     // Extract configs using ConfigNormalization (same as MergeSplitsExecutor.extractAwsConfig)
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs) +
       ("spark.indextables.aws.credentialsProviderClass" -> testProviderClass) +
-      ("spark.indextables.aws.region" -> "us-west-2")
+      ("spark.indextables.aws.region"                   -> "us-west-2")
 
     // Create SerializableAwsConfig with merged configs (new simplified approach)
     val awsConfig = SerializableAwsConfig(
@@ -246,9 +247,7 @@ class DatabricksConfigPropagationTest extends TestBase {
     val sparkConfigs = spark.conf.getAll.filter { case (key, _) => key.startsWith("spark.indextables.") }.toMap
 
     logger.info(s"PurgeOrphanedSplitsExecutor pattern extracted ${sparkConfigs.size} configs")
-    sparkConfigs.keys.filter(_.contains("databricks")).foreach { k =>
-      logger.info(s"  Found databricks key: $k")
-    }
+    sparkConfigs.keys.filter(_.contains("databricks")).foreach(k => logger.info(s"  Found databricks key: $k"))
 
     // Verify databricks keys are included
     sparkConfigs should contain key "spark.indextables.databricks.workspaceUrl"
@@ -322,8 +321,9 @@ class DatabricksConfigPropagationTest extends TestBase {
 
     // Create enriched Hadoop config (simulating enrichHadoopConfWithSparkConf)
     val hadoopConf = new Configuration()
-    sparkConfigs.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
+    sparkConfigs.foreach {
+      case (key, value) =>
+        hadoopConf.set(key, value)
     }
 
     // Simulate what UnityCatalogAWSCredentialProvider.resolveConfig does

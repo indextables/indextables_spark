@@ -17,6 +17,10 @@
 
 package io.indextables.spark.catalyst
 
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.mutable
+
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, Expression, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, LogicalPlan, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -34,24 +38,21 @@ import io.indextables.spark.expressions.{
 }
 import org.slf4j.LoggerFactory
 
-import java.util.concurrent.ConcurrentHashMap
-import scala.collection.mutable
-
 /**
- * Catalyst rule to transform bucket aggregation expressions (DateHistogram, Histogram, Range)
- * in GROUP BY clauses for V2 DataSource pushdown.
+ * Catalyst rule to transform bucket aggregation expressions (DateHistogram, Histogram, Range) in GROUP BY clauses for
+ * V2 DataSource pushdown.
  *
- * Problem: Spark's V2 aggregate pushdown doesn't handle custom function expressions in GROUP BY.
- * When Spark sees `GROUP BY indextables_histogram(price, 50)`, it tries to evaluate the expression
- * directly, but our expressions extend Unevaluable and fail code generation.
+ * Problem: Spark's V2 aggregate pushdown doesn't handle custom function expressions in GROUP BY. When Spark sees `GROUP
+ * BY indextables_histogram(price, 50)`, it tries to evaluate the expression directly, but our expressions extend
+ * Unevaluable and fail code generation.
  *
  * Solution: This rule intercepts Aggregate nodes with bucket expressions and:
- *   1. Replaces the bucket expression with the underlying field reference (e.g., price)
- *   2. Stores the bucket configuration for the ScanBuilder to retrieve
- *   3. Marks the field so ScanBuilder knows to use bucket aggregation instead of terms aggregation
+ *   1. Replaces the bucket expression with the underlying field reference (e.g., price) 2. Stores the bucket
+ *      configuration for the ScanBuilder to retrieve 3. Marks the field so ScanBuilder knows to use bucket aggregation
+ *      instead of terms aggregation
  *
- * The ScanBuilder then recognizes the stored bucket config and executes the appropriate
- * tantivy4java bucket aggregation (DateHistogramAggregation, HistogramAggregation, RangeAggregation).
+ * The ScanBuilder then recognizes the stored bucket config and executes the appropriate tantivy4java bucket aggregation
+ * (DateHistogramAggregation, HistogramAggregation, RangeAggregation).
  */
 object V2BucketExpressionRule extends Rule[LogicalPlan] {
 
@@ -64,32 +65,24 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
   // Special marker prefix for bucket group columns
   val BUCKET_GROUP_MARKER = "__bucket_group__"
 
-  /**
-   * Retrieve stored bucket configuration for a relation.
-   */
+  /** Retrieve stored bucket configuration for a relation. */
   def getBucketConfig(relation: DataSourceV2Relation): Option[BucketAggregationConfig] = {
     val key = System.identityHashCode(relation)
     Option(bucketConfigStorage.get(key))
   }
 
-  /**
-   * Retrieve stored bucket configuration by relation hash code.
-   */
+  /** Retrieve stored bucket configuration by relation hash code. */
   def getBucketConfigByHash(relationHashCode: Int): Option[BucketAggregationConfig] =
     Option(bucketConfigStorage.get(relationHashCode))
 
-  /**
-   * Store bucket configuration for a relation.
-   */
+  /** Store bucket configuration for a relation. */
   def storeBucketConfig(relation: DataSourceV2Relation, config: BucketAggregationConfig): Unit = {
     val key = System.identityHashCode(relation)
     logger.debug(s"V2BucketExpressionRule: Storing bucket config for relation $key: ${config.description}")
     bucketConfigStorage.put(key, config)
   }
 
-  /**
-   * Clear bucket configuration for a relation.
-   */
+  /** Clear bucket configuration for a relation. */
   def clearBucketConfig(relation: DataSourceV2Relation): Unit = {
     val key = System.identityHashCode(relation)
     bucketConfigStorage.remove(key)
@@ -101,7 +94,9 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
     plan.transformUp {
       case agg @ Aggregate(groupingExpressions, aggregateExpressions, child) =>
         logger.debug(s"V2BucketExpressionRule: Found Aggregate node")
-        logger.debug(s"V2BucketExpressionRule: Grouping expressions: ${groupingExpressions.map(_.toString).mkString(", ")}")
+        logger.debug(
+          s"V2BucketExpressionRule: Grouping expressions: ${groupingExpressions.map(_.toString).mkString(", ")}"
+        )
 
         // Find bucket expressions in grouping expressions
         val bucketExprs = groupingExpressions.flatMap(findBucketExpression)
@@ -140,17 +135,19 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
               logger.info(s"V2BucketExpressionRule: Stored bucket config and set current relation: ${System.identityHashCode(relation)}")
 
               // Transform the aggregate to use the field reference instead of bucket expression
-              val transformedGrouping = groupingExpressions.map { expr =>
-                transformBucketExpression(expr, fieldRef)
-              }
+              val transformedGrouping = groupingExpressions.map(expr => transformBucketExpression(expr, fieldRef))
 
               // Transform aggregate expressions (SELECT list) to use field reference
               val transformedAggExprs = aggregateExpressions.map { expr =>
                 transformAggregateExpression(expr, bucketExpr, fieldRef)
               }
 
-              logger.debug(s"V2BucketExpressionRule: Transformed grouping: ${transformedGrouping.map(_.toString).mkString(", ")}")
-              logger.debug(s"V2BucketExpressionRule: Transformed aggregates: ${transformedAggExprs.map(_.toString).mkString(", ")}")
+              logger.debug(
+                s"V2BucketExpressionRule: Transformed grouping: ${transformedGrouping.map(_.toString).mkString(", ")}"
+              )
+              logger.debug(
+                s"V2BucketExpressionRule: Transformed aggregates: ${transformedAggExprs.map(_.toString).mkString(", ")}"
+              )
 
               Aggregate(transformedGrouping, transformedAggExprs, child)
 
@@ -162,9 +159,7 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
     }
   }
 
-  /**
-   * Find bucket expression within an expression tree.
-   */
+  /** Find bucket expression within an expression tree. */
   private def findBucketExpression(expr: Expression): Option[Expression] =
     expr match {
       case dh: DateHistogramExpression => Some(dh)
@@ -175,9 +170,7 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
         expr.children.flatMap(findBucketExpression).headOption
     }
 
-  /**
-   * Find the V2 relation in the plan tree.
-   */
+  /** Find the V2 relation in the plan tree. */
   private def findV2Relation(plan: LogicalPlan): Option[DataSourceV2Relation] =
     plan match {
       case relation: DataSourceV2Relation => Some(relation)
@@ -185,18 +178,14 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
       case _                              => plan.children.flatMap(findV2Relation).headOption
     }
 
-  /**
-   * Check if this is a compatible V2 DataSource (IndexTables4Spark).
-   */
+  /** Check if this is a compatible V2 DataSource (IndexTables4Spark). */
   private def isCompatibleV2DataSource(relation: DataSourceV2Relation): Boolean =
     relation.table.getClass.getName.contains("indextables") ||
       relation.table.getClass.getName.contains("tantivy4spark") ||
       relation.table.name().contains("indextables") ||
       relation.table.name().contains("tantivy4spark")
 
-  /**
-   * Extract bucket configuration and field reference from a bucket expression.
-   */
+  /** Extract bucket configuration and field reference from a bucket expression. */
   private def extractBucketConfig(expr: Expression): (BucketAggregationConfig, AttributeReference) =
     expr match {
       case dh: DateHistogramExpression =>
@@ -234,15 +223,14 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
         throw new IllegalArgumentException(s"Unsupported bucket expression type: ${expr.getClass.getName}")
     }
 
-  /**
-   * Extract field reference from a bucket expression's field argument.
-   */
+  /** Extract field reference from a bucket expression's field argument. */
   private def extractFieldReference(fieldExpr: Expression): AttributeReference =
     fieldExpr match {
       case attr: AttributeReference => attr
-      case _ =>
+      case _                        =>
         // If not already an AttributeReference, try to find one in the expression tree
-        fieldExpr.find(_.isInstanceOf[AttributeReference])
+        fieldExpr
+          .find(_.isInstanceOf[AttributeReference])
           .map(_.asInstanceOf[AttributeReference])
           .getOrElse {
             throw new IllegalArgumentException(
@@ -251,22 +239,18 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
           }
     }
 
-  /**
-   * Transform a grouping expression by replacing bucket expression with field reference.
-   */
+  /** Transform a grouping expression by replacing bucket expression with field reference. */
   private def transformBucketExpression(expr: Expression, fieldRef: AttributeReference): Expression =
     expr match {
       case _: DateHistogramExpression => fieldRef
       case _: HistogramExpression     => fieldRef
       case _: RangeExpression         => fieldRef
-      case other =>
+      case other                      =>
         // Recursively transform children
         other.withNewChildren(other.children.map(transformBucketExpression(_, fieldRef)))
     }
 
-  /**
-   * Transform aggregate expressions (SELECT list) by replacing bucket expression references.
-   */
+  /** Transform aggregate expressions (SELECT list) by replacing bucket expression references. */
   private def transformAggregateExpression(
     expr: NamedExpression,
     bucketExpr: Expression,
@@ -290,13 +274,11 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
         val transformed = transformBucketExpressionInTree(other, bucketExpr, fieldRef)
         transformed match {
           case ne: NamedExpression => ne
-          case _ => other
+          case _                   => other
         }
     }
 
-  /**
-   * Transform bucket expression references in an expression tree.
-   */
+  /** Transform bucket expression references in an expression tree. */
   private def transformBucketExpressionInTree(
     expr: Expression,
     bucketExpr: Expression,
@@ -316,9 +298,7 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
         }
     }
 
-  /**
-   * Check if two expressions represent the same bucket expression.
-   */
+  /** Check if two expressions represent the same bucket expression. */
   private def isSameBucketExpression(expr1: Expression, expr2: Expression): Boolean =
     (expr1, expr2) match {
       case (dh1: DateHistogramExpression, dh2: DateHistogramExpression) =>

@@ -325,14 +325,15 @@ object DriverSplitLocalityManager {
     knownHosts = availableHosts
   }
 
-  /** Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency.
-   * This ensures the hostname format matches what Spark uses for task scheduling.
+  /**
+   * Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency. This ensures the
+   * hostname format matches what Spark uses for task scheduling.
    */
   private def getCurrentHostname: String =
-    try {
+    try
       // Try to use BlockManager's host first - this is the canonical source for Spark scheduling
       org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
-    } catch {
+    catch {
       case _: Exception =>
         // Fallback to InetAddress if SparkEnv not available (e.g., during initialization)
         try
@@ -347,10 +348,14 @@ object DriverSplitLocalityManager {
   /**
    * Record that a split has been prewarmed on a specific host with specific components.
    *
-   * @param splitPath The split path that was prewarmed
-   * @param hostname The host where prewarming occurred
-   * @param segments The IndexComponents that were prewarmed
-   * @param fields The fields that were prewarmed (None = all fields)
+   * @param splitPath
+   *   The split path that was prewarmed
+   * @param hostname
+   *   The host where prewarming occurred
+   * @param segments
+   *   The IndexComponents that were prewarmed
+   * @param fields
+   *   The fields that were prewarmed (None = all fields)
    */
   def recordPrewarmCompletion(
     splitPath: String,
@@ -358,24 +363,30 @@ object DriverSplitLocalityManager {
     segments: Set[IndexComponent],
     fields: Option[Set[String]]
   ): Unit = {
-    prewarmState.put(splitPath, PrewarmSplitState(
-      hostname = hostname,
-      segments = segments,
-      fields = fields,
-      prewarmTimestamp = System.currentTimeMillis()
-    ))
+    prewarmState.put(
+      splitPath,
+      PrewarmSplitState(
+        hostname = hostname,
+        segments = segments,
+        fields = fields,
+        prewarmTimestamp = System.currentTimeMillis()
+      )
+    )
     // Remove from catch-up set since it's been prewarmed
     Option(hostsNeedingCatchUp.get(hostname)).foreach(_.remove(splitPath))
     logger.debug(s"Recorded prewarm completion for split $splitPath on $hostname (${segments.size} components)")
   }
 
   /**
-   * Get splits that need catch-up prewarming due to host reassignment or new splits.
-   * This is called by the prewarm system to identify splits that need additional warming.
+   * Get splits that need catch-up prewarming due to host reassignment or new splits. This is called by the prewarm
+   * system to identify splits that need additional warming.
    *
-   * @param currentHosts Currently available hosts
-   * @param targetSegments The segments to prewarm (to check if previously prewarmed with different segments)
-   * @return Map of hostname -> splits needing prewarm on that host
+   * @param currentHosts
+   *   Currently available hosts
+   * @param targetSegments
+   *   The segments to prewarm (to check if previously prewarmed with different segments)
+   * @return
+   *   Map of hostname -> splits needing prewarm on that host
    */
   def getSplitsNeedingCatchUp(
     currentHosts: Set[String],
@@ -387,37 +398,43 @@ object DriverSplitLocalityManager {
       currentHosts.foreach(host => result(host) = mutable.ArrayBuffer.empty)
 
       // Check each assigned split
-      splitAssignments.asScala.foreach { case (splitPath, assignedHost) =>
-        if (currentHosts.contains(assignedHost)) {
-          Option(prewarmState.get(splitPath)) match {
-            case Some(state) =>
-              // Check if prewarmed on a different host (needs catch-up)
-              if (state.hostname != assignedHost) {
+      splitAssignments.asScala.foreach {
+        case (splitPath, assignedHost) =>
+          if (currentHosts.contains(assignedHost)) {
+            Option(prewarmState.get(splitPath)) match {
+              case Some(state) =>
+                // Check if prewarmed on a different host (needs catch-up)
+                if (state.hostname != assignedHost) {
+                  result(assignedHost) += splitPath
+                  logger.debug(
+                    s"Split $splitPath needs catch-up: prewarmed on ${state.hostname}, now assigned to $assignedHost"
+                  )
+                }
+                // Check if prewarmed with different/fewer segments (needs catch-up for missing segments)
+                else if (!targetSegments.subsetOf(state.segments)) {
+                  result(assignedHost) += splitPath
+                  logger.debug(
+                    s"Split $splitPath needs catch-up: missing segments ${(targetSegments -- state.segments).map(_.name()).mkString(",")}"
+                  )
+                }
+              case None =>
+                // Never prewarmed - needs catch-up
                 result(assignedHost) += splitPath
-                logger.debug(s"Split $splitPath needs catch-up: prewarmed on ${state.hostname}, now assigned to $assignedHost")
-              }
-              // Check if prewarmed with different/fewer segments (needs catch-up for missing segments)
-              else if (!targetSegments.subsetOf(state.segments)) {
-                result(assignedHost) += splitPath
-                logger.debug(s"Split $splitPath needs catch-up: missing segments ${(targetSegments -- state.segments).map(_.name()).mkString(",")}")
-              }
-            case None =>
-              // Never prewarmed - needs catch-up
-              result(assignedHost) += splitPath
-              logger.debug(s"Split $splitPath needs catch-up: never prewarmed")
+                logger.debug(s"Split $splitPath needs catch-up: never prewarmed")
+            }
           }
-        }
       }
 
       // Also include explicitly tracked catch-up splits
-      hostsNeedingCatchUp.asScala.foreach { case (host, splits) =>
-        if (currentHosts.contains(host)) {
-          splits.asScala.foreach { splitPath =>
-            if (!result(host).contains(splitPath)) {
-              result(host) += splitPath
+      hostsNeedingCatchUp.asScala.foreach {
+        case (host, splits) =>
+          if (currentHosts.contains(host)) {
+            splits.asScala.foreach { splitPath =>
+              if (!result(host).contains(splitPath)) {
+                result(host) += splitPath
+              }
             }
           }
-        }
       }
 
       result.filter(_._2.nonEmpty).map { case (k, v) => k -> v.toSeq }.toMap
@@ -425,18 +442,13 @@ object DriverSplitLocalityManager {
       lock.readLock().unlock()
   }
 
-  /**
-   * Track that a split needs catch-up prewarm on a host.
-   * Called when splits are reassigned to new hosts.
-   */
+  /** Track that a split needs catch-up prewarm on a host. Called when splits are reassigned to new hosts. */
   def markSplitNeedsCatchUp(splitPath: String, hostname: String): Unit = {
     hostsNeedingCatchUp.computeIfAbsent(hostname, _ => ConcurrentHashMap.newKeySet[String]()).add(splitPath)
     logger.debug(s"Marked split $splitPath as needing catch-up on $hostname")
   }
 
-  /**
-   * Clear catch-up tracking for a host after successful prewarm.
-   */
+  /** Clear catch-up tracking for a host after successful prewarm. */
   def clearCatchUpForHost(hostname: String): Unit = {
     hostsNeedingCatchUp.remove(hostname)
     logger.debug(s"Cleared catch-up tracking for host $hostname")
@@ -445,9 +457,12 @@ object DriverSplitLocalityManager {
   /**
    * Get splits that are new (not previously known) and need prewarming.
    *
-   * @param currentSplits All splits in the current query
-   * @param targetSegments The segments to prewarm
-   * @return Seq of split paths that have never been prewarmed
+   * @param currentSplits
+   *   All splits in the current query
+   * @param targetSegments
+   *   The segments to prewarm
+   * @return
+   *   Seq of split paths that have never been prewarmed
    */
   def getNewSplitsNeedingPrewarm(
     currentSplits: Seq[String],
@@ -455,20 +470,16 @@ object DriverSplitLocalityManager {
   ): Seq[String] =
     currentSplits.filter { splitPath =>
       Option(prewarmState.get(splitPath)) match {
-        case None => true // Never prewarmed
+        case None        => true                                     // Never prewarmed
         case Some(state) => !targetSegments.subsetOf(state.segments) // Missing segments
       }
     }
 
-  /**
-   * Get prewarm state for a split.
-   */
+  /** Get prewarm state for a split. */
   def getPrewarmState(splitPath: String): Option[PrewarmSplitState] =
     Option(prewarmState.get(splitPath))
 
-  /**
-   * Check if prewarm catch-up is enabled via configuration.
-   */
+  /** Check if prewarm catch-up is enabled via configuration. */
   def isCatchUpEnabled(config: Map[String, String]): Boolean =
     config.getOrElse("spark.indextables.prewarm.catchUpNewHosts", "false").toBoolean
 }
@@ -484,4 +495,5 @@ case class PrewarmSplitState(
   hostname: String,
   segments: Set[IndexComponent],
   fields: Option[Set[String]],
-  prewarmTimestamp: Long) extends Serializable
+  prewarmTimestamp: Long)
+    extends Serializable

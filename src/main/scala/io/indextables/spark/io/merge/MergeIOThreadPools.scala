@@ -45,15 +45,11 @@ object MergeIOThreadPools {
   lazy val downloadCoordinationPool: ThreadPoolExecutor =
     createThreadPool("merge-download", DOWNLOAD_COORDINATION_POOL_SIZE)
 
-  /**
-   * Thread pool for upload operations.
-   */
+  /** Thread pool for upload operations. */
   lazy val uploadPool: ThreadPoolExecutor =
     createThreadPool("merge-upload", UPLOAD_POOL_SIZE)
 
-  /**
-   * Scheduled thread pool for retry delays and timeouts. Uses ScheduledThreadPoolExecutor for precise timing.
-   */
+  /** Scheduled thread pool for retry delays and timeouts. Uses ScheduledThreadPoolExecutor for precise timing. */
   lazy val scheduledPool: ScheduledThreadPoolExecutor = {
     val pool = new ScheduledThreadPoolExecutor(
       SCHEDULER_POOL_SIZE,
@@ -70,15 +66,11 @@ object MergeIOThreadPools {
     pool
   }
 
-  /**
-   * ExecutionContext backed by the download coordination pool. Useful for Scala Future operations.
-   */
+  /** ExecutionContext backed by the download coordination pool. Useful for Scala Future operations. */
   lazy val downloadExecutionContext: scala.concurrent.ExecutionContext =
     scala.concurrent.ExecutionContext.fromExecutor(downloadCoordinationPool)
 
-  /**
-   * Create a thread pool with daemon threads and CallerRunsPolicy for backpressure.
-   */
+  /** Create a thread pool with daemon threads and CallerRunsPolicy for backpressure. */
   private def createThreadPool(name: String, size: Int): ThreadPoolExecutor =
     new ThreadPoolExecutor(
       size, // core pool size
@@ -96,9 +88,7 @@ object MergeIOThreadPools {
       new ThreadPoolExecutor.CallerRunsPolicy() // Execute in caller thread if pool is full
     )
 
-  /**
-   * Get statistics for all thread pools.
-   */
+  /** Get statistics for all thread pools. */
   def getStatistics: MergeIOPoolStatistics =
     MergeIOPoolStatistics(
       downloadPoolStats = getPoolStats(downloadCoordinationPool),
@@ -126,9 +116,7 @@ object MergeIOThreadPools {
       maximumPoolSize = pool.getMaximumPoolSize
     )
 
-  /**
-   * Shutdown all thread pools gracefully. Waits up to 30 seconds for tasks to complete before forcing shutdown.
-   */
+  /** Shutdown all thread pools gracefully. Waits up to 30 seconds for tasks to complete before forcing shutdown. */
   def shutdown(): Unit = {
     logger.info("Shutting down merge I/O thread pools")
 
@@ -150,22 +138,16 @@ object MergeIOThreadPools {
     }
   }
 
-  /**
-   * Schedule a task to run after a delay. Returns a ScheduledFuture that can be cancelled.
-   */
+  /** Schedule a task to run after a delay. Returns a ScheduledFuture that can be cancelled. */
   def schedule(task: Runnable, delayMs: Long): ScheduledFuture[_] =
     scheduledPool.schedule(task, delayMs, TimeUnit.MILLISECONDS)
 
-  /**
-   * Schedule a task to run after a delay, returning the result. Returns a ScheduledFuture that can be cancelled.
-   */
+  /** Schedule a task to run after a delay, returning the result. Returns a ScheduledFuture that can be cancelled. */
   def schedule[T](task: Callable[T], delayMs: Long): ScheduledFuture[T] =
     scheduledPool.schedule(task, delayMs, TimeUnit.MILLISECONDS)
 }
 
-/**
- * Statistics for a single thread pool.
- */
+/** Statistics for a single thread pool. */
 case class PoolStats(
   activeCount: Int,
   completedTaskCount: Long,
@@ -179,9 +161,7 @@ case class PoolStats(
     else (activeCount.toDouble / maximumPoolSize) * 100
 }
 
-/**
- * Aggregated statistics for all merge I/O thread pools.
- */
+/** Aggregated statistics for all merge I/O thread pools. */
 case class MergeIOPoolStatistics(
   downloadPoolStats: PoolStats,
   uploadPoolStats: PoolStats,

@@ -339,17 +339,16 @@ class ParallelTransactionLogOperations(
   /**
    * Parse actions directly from a cloud storage file using full streaming.
    *
-   * This method provides the most memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method provides the most memory-efficient parsing by streaming data from cloud storage directly through
+   * decompression and into line-by-line parsing, without ever loading the entire file into memory.
    *
    * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
    */
   private def parseActionsFromStream(filePath: String): Seq[Action] = {
-    val rawStream = cloudProvider.openInputStream(filePath)
+    val rawStream           = cloudProvider.openInputStream(filePath)
     val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
-    val actions = ListBuffer[Action]()
+    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions             = ListBuffer[Action]()
 
     try {
       var line = reader.readLine()
@@ -375,9 +374,8 @@ class ParallelTransactionLogOperations(
         line = reader.readLine()
       }
       actions.toSeq
-    } finally {
+    } finally
       reader.close()
-    }
   }
 
   // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)

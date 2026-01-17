@@ -145,9 +145,9 @@ case class MergeSplitsCommand(
       }
 
     // Extract and merge configuration with proper precedence for transaction log access
-    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
-    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
+    val hadoopConf         = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs       = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs      = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val txLogMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
     // Resolve credentials from custom provider on driver if configured
@@ -338,37 +338,37 @@ case class SerializableAzureConfig(
 
 /** Serializable wrapper for AWS configuration that can be broadcast across executors. */
 /**
- * Simplified AWS configuration for merge operations.
- * Holds merged config map and resolves credentials on executor using CredentialProviderFactory.
+ * Simplified AWS configuration for merge operations. Holds merged config map and resolves credentials on executor using
+ * CredentialProviderFactory.
  */
 case class SerializableAwsConfig(
   configs: Map[String, String],
   tablePath: String,
   tempDirectoryPath: Option[String] = None,
   heapSize: java.lang.Long = java.lang.Long.valueOf(1073741824L),
-  debugEnabled: Boolean = false
-) extends Serializable {
+  debugEnabled: Boolean = false)
+    extends Serializable {
 
   private def getConfig(key: String): Option[String] =
     configs.get(key).orElse(configs.get(key.toLowerCase))
 
-  def accessKey: String = getConfig("spark.indextables.aws.accessKey").getOrElse("")
-  def secretKey: String = getConfig("spark.indextables.aws.secretKey").getOrElse("")
+  def accessKey: String            = getConfig("spark.indextables.aws.accessKey").getOrElse("")
+  def secretKey: String            = getConfig("spark.indextables.aws.secretKey").getOrElse("")
   def sessionToken: Option[String] = getConfig("spark.indextables.aws.sessionToken")
-  def region: String = getConfig("spark.indextables.aws.region").getOrElse("us-east-1")
-  def endpoint: Option[String] = getConfig("spark.indextables.s3.endpoint")
+  def region: String               = getConfig("spark.indextables.aws.region").getOrElse("us-east-1")
+  def endpoint: Option[String]     = getConfig("spark.indextables.s3.endpoint")
   def pathStyleAccess: Boolean = getConfig("spark.indextables.s3.pathStyleAccess").exists(_.equalsIgnoreCase("true"))
 
   /**
-   * Resolve AWS credentials using centralized CredentialProviderFactory.
-   * Priority: explicit credentials > custom provider class > default chain (returns None)
+   * Resolve AWS credentials using centralized CredentialProviderFactory. Priority: explicit credentials > custom
+   * provider class > default chain (returns None)
    */
   private def resolveAWSCredentials(): (Option[String], Option[String], Option[String]) = {
     import io.indextables.spark.utils.CredentialProviderFactory
 
     CredentialProviderFactory.resolveAWSCredentialsFromConfig(configs, tablePath) match {
       case Some(creds) => (Some(creds.accessKey), Some(creds.secretKey), creds.sessionToken)
-      case None => (None, None, None)
+      case None        => (None, None, None)
     }
   }
 
@@ -416,9 +416,9 @@ class MergeSplitsExecutor(
   private val logger = LoggerFactory.getLogger(classOf[MergeSplitsExecutor])
 
   /**
-   * Threshold for skipping already-large splits from merge consideration.
-   * Splits >= this size are excluded from merge groups to avoid merging files that are already close to target.
-   * Default: 45% of target size. Configurable via spark.indextables.merge.skipSplitThreshold (0.0 to 1.0).
+   * Threshold for skipping already-large splits from merge consideration. Splits >= this size are excluded from merge
+   * groups to avoid merging files that are already close to target. Default: 45% of target size. Configurable via
+   * spark.indextables.merge.skipSplitThreshold (0.0 to 1.0).
    */
   private val skipSplitThresholdPercent: Double = sparkSession.conf
     .getOption("spark.indextables.merge.skipSplitThreshold")
@@ -427,23 +427,25 @@ class MergeSplitsExecutor(
 
   private val skipSplitThreshold: Long = (targetSize * skipSplitThresholdPercent).toLong
 
-  logger.info(s"Skip split threshold: $skipSplitThreshold bytes (${(skipSplitThresholdPercent * 100).toInt}% of target size $targetSize)")
+  logger.info(
+    s"Skip split threshold: $skipSplitThreshold bytes (${(skipSplitThresholdPercent * 100).toInt}% of target size $targetSize)"
+  )
 
   /**
-   * Extract AWS configuration from SparkSession for merge operations.
-   * Merges configs from: overrideOptions > sparkSession > hadoopConfiguration
-   * Credentials are resolved on executor using CredentialProviderFactory (same as S3CloudStorageProvider).
+   * Extract AWS configuration from SparkSession for merge operations. Merges configs from: overrideOptions >
+   * sparkSession > hadoopConfiguration Credentials are resolved on executor using CredentialProviderFactory (same as
+   * S3CloudStorageProvider).
    */
   private def extractAwsConfig(): SerializableAwsConfig = {
     val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
 
     // Merge configs: hadoop < spark < overrideOptions (highest priority)
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val baseConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+    val baseConfigs   = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
     val mergedConfigs = overrideOptions match {
       case Some(overrides) => baseConfigs ++ overrides
-      case None => baseConfigs
+      case None            => baseConfigs
     }
 
     // Helper to get config with case-insensitive fallback
@@ -601,11 +603,17 @@ class MergeSplitsExecutor(
     }
 
     // Get effective maxSourceSplitsPerMerge (from parameter or config default)
-    val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge.orElse {
-      sparkSession.conf.getOption(
-        io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
-      ).map(_.toInt)
-    }.getOrElse(io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT)
+    val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge
+      .orElse {
+        sparkSession.conf
+          .getOption(
+            io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
+          )
+          .map(_.toInt)
+      }
+      .getOrElse(
+        io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT
+      )
 
     logger.info(s"Using MAX SOURCE SPLITS PER MERGE: $effectiveMaxSourceSplitsPerMerge")
 
@@ -647,11 +655,14 @@ class MergeSplitsExecutor(
     // 1. Primary: source split count (descending) - prioritize high-impact merges
     // 2. Secondary: oldest modification time (ascending) - tie-break with oldest first
     val prioritizedMergeGroups = mergeGroups.sortBy { g =>
-      val sourceCount = -g.files.length // Negative for descending order
-      val oldestTime = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
+      val sourceCount = -g.files.length                     // Negative for descending order
+      val oldestTime  = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
       (sourceCount, oldestTime)
     }
-    logger.info(s"Prioritized merge groups by source split count (ties broken by oldest): ${prioritizedMergeGroups.map(_.files.length).take(10).mkString(", ")}${if (prioritizedMergeGroups.length > 10) "..." else ""}")
+    logger.info(s"Prioritized merge groups by source split count (ties broken by oldest): ${prioritizedMergeGroups
+        .map(_.files.length)
+        .take(10)
+        .mkString(", ")}${if (prioritizedMergeGroups.length > 10) "..." else ""}")
 
     // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
     // Now takes the top N groups by source split count (highest impact merges first)
@@ -664,15 +675,15 @@ class MergeSplitsExecutor(
 
         val limitedFilesCount = limitedGroups.map(_.files.length).sum
         val totalFilesCount   = prioritizedMergeGroups.map(_.files.length).sum
-        val skippedGroups = prioritizedMergeGroups.drop(maxLimit)
+        val skippedGroups     = prioritizedMergeGroups.drop(maxLimit)
         logger.info(
           s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit highest-impact groups " +
-          s"(source splits range: ${limitedGroups.map(_.files.length).min}-${limitedGroups.map(_.files.length).max})"
+            s"(source splits range: ${limitedGroups.map(_.files.length).min}-${limitedGroups.map(_.files.length).max})"
         )
         if (skippedGroups.nonEmpty) {
           logger.info(
             s"Skipping ${skippedGroups.length} lower-impact groups with ${skippedGroups.map(_.files.length).sum} files " +
-            s"(source splits range: ${skippedGroups.map(_.files.length).min}-${skippedGroups.map(_.files.length).max})"
+              s"(source splits range: ${skippedGroups.map(_.files.length).min}-${skippedGroups.map(_.files.length).max})"
           )
         }
 
@@ -770,7 +781,7 @@ class MergeSplitsExecutor(
               // Refresh AWS credentials for this batch (credentials may have expired)
               // This calls the credential provider on the driver to get fresh credentials
               logger.info(s"Refreshing AWS credentials for batch $batchNum")
-              val batchAwsConfig = extractAwsConfig()
+              val batchAwsConfig     = extractAwsConfig()
               val broadcastAwsConfig = sparkSession.sparkContext.broadcast(batchAwsConfig)
 
               // Set descriptive names for Spark UI
@@ -1148,9 +1159,12 @@ class MergeSplitsExecutor(
    * OPTIMIZE. Only creates groups with 2+ files to satisfy tantivy4java merge requirements. CRITICAL: Ensures all files
    * in each group have identical partition values.
    *
-   * @param partitionValues partition values for the files in this group
-   * @param files files to group for merging
-   * @param maxSourceSplitsPerMerge maximum number of source splits that can be merged in a single merge operation
+   * @param partitionValues
+   *   partition values for the files in this group
+   * @param files
+   *   files to group for merging
+   * @param maxSourceSplitsPerMerge
+   *   maximum number of source splits that can be merged in a single merge operation
    */
   private def findMergeableGroups(
     partitionValues: Map[String, String],
@@ -1177,7 +1191,9 @@ class MergeSplitsExecutor(
     // Default: 45% of target size - prevents merging already-large splits
     val mergeableFiles = files.filter { file =>
       if (file.size >= skipSplitThreshold) {
-        logger.debug(s"Skipping file ${file.path} (size: ${file.size} bytes) - already at or above skip threshold ($skipSplitThreshold bytes, ${(skipSplitThresholdPercent * 100).toInt}% of target)")
+        logger.debug(
+          s"Skipping file ${file.path} (size: ${file.size} bytes) - already at or above skip threshold ($skipSplitThreshold bytes, ${(skipSplitThresholdPercent * 100).toInt}% of target)"
+        )
         false
       } else {
         true
@@ -1203,11 +1219,13 @@ class MergeSplitsExecutor(
 
       // Check if adding this file would exceed target size OR max source splits per merge
       val wouldExceedTargetSize = currentGroupSize > 0 && currentGroupSize + file.size > targetSize
-      val wouldExceedMaxSplits = currentGroup.length >= maxSourceSplitsPerMerge
+      val wouldExceedMaxSplits  = currentGroup.length >= maxSourceSplitsPerMerge
 
       if (wouldExceedTargetSize || wouldExceedMaxSplits) {
         if (wouldExceedMaxSplits) {
-          logger.debug(s"MERGE DEBUG: Adding ${file.path} would exceed max source splits per merge ($maxSourceSplitsPerMerge)")
+          logger.debug(
+            s"MERGE DEBUG: Adding ${file.path} would exceed max source splits per merge ($maxSourceSplitsPerMerge)"
+          )
         } else {
           logger.debug(s"MERGE DEBUG: Adding ${file.path} (${file.size} bytes) to current group ($currentGroupSize bytes) would exceed target ($targetSize bytes)")
         }
@@ -1325,11 +1343,17 @@ class MergeSplitsExecutor(
       }
 
       // Get effective maxSourceSplitsPerMerge for counting
-      val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge.orElse {
-        sparkSession.conf.getOption(
-          io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
-        ).map(_.toInt)
-      }.getOrElse(io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT)
+      val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge
+        .orElse {
+          sparkSession.conf
+            .getOption(
+              io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE
+            )
+            .map(_.toInt)
+        }
+        .getOrElse(
+          io.indextables.spark.config.IndexTables4SparkSQLConf.TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT
+        )
 
       // Count merge groups in each partition
       val totalGroups = filteredPartitions.map {
@@ -1561,10 +1585,12 @@ object MergeSplitsExecutor {
 
     // Determine temp directory for downloads
     val tempDir = awsConfig.tempDirectoryPath
-      .getOrElse(if (MergeSplitsCommand.isLocalDisk0Available()) "/local_disk0/tantivy4spark-merge"
-                 else System.getProperty("java.io.tmpdir"))
+      .getOrElse(
+        if (MergeSplitsCommand.isLocalDisk0Available()) "/local_disk0/tantivy4spark-merge"
+        else System.getProperty("java.io.tmpdir")
+      )
 
-    val mergeId = java.util.UUID.randomUUID().toString
+    val mergeId     = java.util.UUID.randomUUID().toString
     val downloadDir = new java.io.File(tempDir, s"merge-download-$mergeId")
     downloadDir.mkdirs()
 
@@ -1593,9 +1619,11 @@ object MergeSplitsExecutor {
             }
           } else {
             // Azure path
-            if (file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
-                file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
-                file.path.startsWith("abfss://")) {
+            if (
+              file.path.startsWith("azure://") || file.path.startsWith("wasb://") ||
+              file.path.startsWith("wasbs://") || file.path.startsWith("abfs://") ||
+              file.path.startsWith("abfss://")
+            ) {
               normalizeAzureUrl(file.path)
             } else {
               val normalizedBaseUri = normalizeAzureUrl(tablePathStr).replaceAll("/$", "")
@@ -1605,15 +1633,16 @@ object MergeSplitsExecutor {
         }
 
         // Create download requests
-        val downloadRequests = sourceUrls.zipWithIndex.map { case (sourceUrl, idx) =>
-          val localPath = new java.io.File(downloadDir, s"source-$idx.split").getAbsolutePath
-          io.indextables.spark.io.merge.DownloadRequest(
-            sourcePath = sourceUrl,
-            destinationPath = localPath,
-            expectedSize = mergeGroup.files(idx).size,
-            batchId = 0,
-            index = idx
-          )
+        val downloadRequests = sourceUrls.zipWithIndex.map {
+          case (sourceUrl, idx) =>
+            val localPath = new java.io.File(downloadDir, s"source-$idx.split").getAbsolutePath
+            io.indextables.spark.io.merge.DownloadRequest(
+              sourcePath = sourceUrl,
+              destinationPath = localPath,
+              expectedSize = mergeGroup.files(idx).size,
+              batchId = 0,
+              index = idx
+            )
         }
 
         // Create appropriate downloader based on protocol
@@ -1621,19 +1650,22 @@ object MergeSplitsExecutor {
         val downloader: io.indextables.spark.io.merge.AsyncDownloader = if (isS3Path) {
           io.indextables.spark.io.merge.S3AsyncDownloader.fromConfig(awsConfig.configs, tablePathStr)
         } else {
-          io.indextables.spark.io.merge.AzureAsyncDownloader.fromConfig(awsConfig.configs)
+          io.indextables.spark.io.merge.AzureAsyncDownloader
+            .fromConfig(awsConfig.configs)
             .getOrElse(throw new RuntimeException("Failed to create Azure downloader - check credentials"))
         }
 
         // Download all source splits
-        val ioConfig = io.indextables.spark.io.merge.MergeIOConfig.fromMap(awsConfig.configs)
+        val ioConfig        = io.indextables.spark.io.merge.MergeIOConfig.fromMap(awsConfig.configs)
         val downloadManager = io.indextables.spark.io.merge.CloudDownloadManager.getInstance(ioConfig)
         val downloadResults = downloadManager.submitBatch(downloadRequests, downloader, ioConfig.downloadRetries).get()
 
         // Check for failures
         val failures = downloadResults.filter(!_.success)
         if (failures.nonEmpty) {
-          val errorMsgs = failures.map(f => s"${f.request.sourcePath}: ${f.error.map(_.getMessage).getOrElse("unknown")}").mkString("; ")
+          val errorMsgs = failures
+            .map(f => s"${f.request.sourcePath}: ${f.error.map(_.getMessage).getOrElse("unknown")}")
+            .mkString("; ")
           throw new RuntimeException(s"Failed to download ${failures.length} source splits: $errorMsgs")
         }
 
@@ -1641,16 +1673,16 @@ object MergeSplitsExecutor {
         val totalDownloadBytes = downloadResults.map(_.bytesDownloaded).sum
         org.apache.spark.sql.indextables.OutputMetricsUpdater.incInputMetrics(totalDownloadBytes, downloadResults.length)
 
-        logger.info(s"[EXECUTOR] Phase 1 complete: Downloaded ${downloadResults.length} splits (${totalDownloadBytes} bytes)")
+        logger.info(
+          s"[EXECUTOR] Phase 1 complete: Downloaded ${downloadResults.length} splits ($totalDownloadBytes bytes)"
+        )
 
         // Return local paths
         downloadResults.map(_.localPath)
       } else {
         // Local paths - no download needed, just resolve the paths
         logger.info(s"[EXECUTOR] Phase 1: Using local paths (no download needed)")
-        mergeGroup.files.map { file =>
-          new org.apache.hadoop.fs.Path(tablePathStr, file.path).toUri.getPath
-        }
+        mergeGroup.files.map(file => new org.apache.hadoop.fs.Path(tablePathStr, file.path).toUri.getPath)
       }
 
       // ============ PHASE 2: LOCAL MERGE (tantivy4java) ============
@@ -1716,7 +1748,7 @@ object MergeSplitsExecutor {
           localOutputPath,
           destPath,
           awsConfig.configs,
-          tablePathStr,  // Pass tablePath for credential provider resolution
+          tablePathStr, // Pass tablePath for credential provider resolution
           maxRetries = 3
         )
 
@@ -1742,9 +1774,9 @@ object MergeSplitsExecutor {
       // Delete source temp files (downloaded splits) - only if we downloaded them
       if (isCloudPath) {
         localInputPaths.foreach { path =>
-          try {
+          try
             java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(path))
-          } catch {
+          catch {
             case e: Exception => logger.warn(s"Failed to delete temp source file: $path", e)
           }
         }
@@ -1752,23 +1784,25 @@ object MergeSplitsExecutor {
 
       // Delete merged temp file (after upload success) - only if we uploaded it
       if (isCloudPath) {
-        try {
+        try
           java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(localOutputPath))
-        } catch {
+        catch {
           case e: Exception => logger.warn(s"Failed to delete temp merged file: $localOutputPath", e)
         }
       }
 
       // Delete download directory
-      try {
+      try
         if (downloadDir.exists()) {
           org.apache.commons.io.FileUtils.deleteDirectory(downloadDir)
         }
-      } catch {
+      catch {
         case e: Exception => logger.warn(s"Failed to delete download directory: ${downloadDir.getAbsolutePath}", e)
       }
 
-      logger.info(s"[EXECUTOR] Merge complete: ${mergeGroup.files.length} splits -> $mergedPath ($finalMergedSize bytes)")
+      logger.info(
+        s"[EXECUTOR] Merge complete: ${mergeGroup.files.length} splits -> $mergedPath ($finalMergedSize bytes)"
+      )
 
       MergedSplitInfo(mergedPath, serializedMetadata.getUncompressedSizeBytes, serializedMetadata)
 
@@ -1776,11 +1810,11 @@ object MergeSplitsExecutor {
       case e: Exception =>
         // Cleanup on failure - scrub all temp files
         logger.error(s"[EXECUTOR] Merge failed, cleaning up temp files", e)
-        try {
+        try
           if (downloadDir.exists()) {
             org.apache.commons.io.FileUtils.deleteDirectory(downloadDir)
           }
-        } catch {
+        catch {
           case cleanupEx: Exception =>
             logger.warn(s"Failed to cleanup download directory on error: ${downloadDir.getAbsolutePath}", cleanupEx)
         }
@@ -1876,7 +1910,7 @@ case class SerializableSplitMetadata(
       numMergeOps.getOrElse(0),                                              // numMergeOps
       "doc-mapping-uid",                                                     // docMappingUid (NEW - required)
       docMappingJson.orNull,                                                 // docMappingJson (MOVED - for performance)
-      skippedSplits.map(s => new QuickwitSplit.SkippedSplit(s, "")).asJava    // skippedSplits
+      skippedSplits.map(s => new QuickwitSplit.SkippedSplit(s, "")).asJava   // skippedSplits
     )
   }
 }

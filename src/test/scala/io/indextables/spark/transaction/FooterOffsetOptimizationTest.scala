@@ -227,9 +227,9 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
             addAction.footerStartOffset.get.asInstanceOf[Number].longValue(),
             addAction.footerEndOffset.get.asInstanceOf[Number].longValue(),
             0L,
-            0,                                        // deleteOpstamp, numMergeOps
-            "doc-mapping-uid",                        // docMappingUid (NEW - required)
-            addAction.docMappingJson.getOrElse(""),   // docMappingJson (MOVED - for performance)
+            0,                                                            // deleteOpstamp, numMergeOps
+            "doc-mapping-uid",                                            // docMappingUid (NEW - required)
+            addAction.docMappingJson.getOrElse(""),                       // docMappingJson (MOVED - for performance)
             java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
           )
         catch {

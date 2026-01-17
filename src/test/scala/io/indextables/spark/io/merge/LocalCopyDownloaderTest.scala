@@ -20,23 +20,21 @@ package io.indextables.spark.io.merge
 import java.io.File
 import java.nio.file.Files
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
   private var tempDir: File = _
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     tempDir = Files.createTempDirectory("local-copy-test").toFile
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     if (tempDir != null && tempDir.exists()) {
       deleteRecursively(tempDir)
     }
-  }
 
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {
@@ -77,7 +75,7 @@ class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAf
 
     // Create source file
     val sourceFile = new File(tempDir, "source.txt")
-    val content = "Hello, World! This is test content for the local copy downloader."
+    val content    = "Hello, World! This is test content for the local copy downloader."
     Files.writeString(sourceFile.toPath, content)
 
     // Create destination path
@@ -181,7 +179,7 @@ class LocalCopyDownloaderTest extends AnyFunSuite with Matchers with BeforeAndAf
 
     // Create a larger source file (1MB)
     val sourceFile = new File(tempDir, "large.bin")
-    val content = Array.fill(1024 * 1024)(65.toByte) // 1MB of 'A'
+    val content    = Array.fill(1024 * 1024)(65.toByte) // 1MB of 'A'
     Files.write(sourceFile.toPath, content)
 
     val destFile = new File(tempDir, "large-copy.bin")

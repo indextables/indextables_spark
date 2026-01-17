@@ -25,13 +25,11 @@ import java.util.concurrent.CompletableFuture
 import scala.util.Try
 
 import io.indextables.spark.utils.CredentialProviderFactory
-
+import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials._
 import software.amazon.awssdk.regions.Region
-import software.amazon.awssdk.services.s3.S3AsyncClient
 import software.amazon.awssdk.services.s3.model.{GetObjectRequest, GetObjectResponse}
-
-import org.slf4j.LoggerFactory
+import software.amazon.awssdk.services.s3.S3AsyncClient
 
 /**
  * S3-specific async downloader using AWS SDK v2 async client.
@@ -66,7 +64,8 @@ class S3AsyncDownloader(s3AsyncClient: S3AsyncClient) extends AsyncDownloader {
 
     logger.debug(s"Starting async download: s3://$bucket/$key -> ${request.destinationPath}")
 
-    val getRequest = GetObjectRequest.builder()
+    val getRequest = GetObjectRequest
+      .builder()
       .bucket(bucket)
       .key(key)
       .build()
@@ -89,12 +88,14 @@ class S3AsyncDownloader(s3AsyncClient: S3AsyncClient) extends AsyncDownloader {
           } else {
             val fileSize = destFile.length()
             logger.debug(s"Downloaded s3://$bucket/$key ($fileSize bytes in ${durationMs}ms)")
-            resultFuture.complete(DownloadResult.success(
-              request = request,
-              localPath = destFile.getAbsolutePath,
-              bytesDownloaded = fileSize,
-              durationMs = durationMs
-            ))
+            resultFuture.complete(
+              DownloadResult.success(
+                request = request,
+                localPath = destFile.getAbsolutePath,
+                bytesDownloaded = fileSize,
+                durationMs = durationMs
+              )
+            )
           }
         }
       })
@@ -161,9 +162,8 @@ object S3AsyncDownloader {
   /**
    * Create an S3AsyncDownloader from a serializable config map.
    *
-   * This is useful when creating downloaders on executors from broadcast configuration.
-   * Uses CredentialProviderFactory to resolve credentials, supporting custom credential
-   * providers like Unity Catalog.
+   * This is useful when creating downloaders on executors from broadcast configuration. Uses CredentialProviderFactory
+   * to resolve credentials, supporting custom credential providers like Unity Catalog.
    *
    * @param configs
    *   Configuration map with AWS settings
@@ -202,9 +202,7 @@ object S3AsyncDownloader {
     }
   }
 
-  /**
-   * Create an S3AsyncClient with the given configuration.
-   */
+  /** Create an S3AsyncClient with the given configuration. */
   private def createS3AsyncClient(
     accessKey: Option[String],
     secretKey: Option[String],
@@ -253,9 +251,7 @@ object S3AsyncDownloader {
     builder.build()
   }
 
-  /**
-   * Create an AWS credentials provider from the given credentials.
-   */
+  /** Create an AWS credentials provider from the given credentials. */
   private def createCredentialsProvider(
     accessKey: Option[String],
     secretKey: Option[String],

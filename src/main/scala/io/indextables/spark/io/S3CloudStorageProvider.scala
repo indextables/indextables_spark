@@ -128,14 +128,13 @@ class S3CloudStorageProvider(
    * Create AWS SDK credentials provider using centralized credential resolution.
    *
    * Priority:
-   *   1. Explicit credentials (accessKey/secretKey/sessionToken) - uses StaticCredentialsProvider
-   *   2. Custom provider class - wraps in V1ToV2CredentialsProviderAdapter to preserve refresh logic
-   *   3. Default chain - uses DefaultCredentialsProvider
+   *   1. Explicit credentials (accessKey/secretKey/sessionToken) - uses StaticCredentialsProvider 2. Custom provider
+   *      class - wraps in V1ToV2CredentialsProviderAdapter to preserve refresh logic 3. Default chain - uses
+   *      DefaultCredentialsProvider
    *
-   * IMPORTANT: When a custom provider class is configured (like UnityCatalogAWSCredentialProvider),
-   * we wrap it in V1ToV2CredentialsProviderAdapter instead of extracting credentials statically.
-   * This preserves the provider's refresh logic and prevents "token expired" errors for long-running
-   * Spark jobs that exceed the credential TTL.
+   * IMPORTANT: When a custom provider class is configured (like UnityCatalogAWSCredentialProvider), we wrap it in
+   * V1ToV2CredentialsProviderAdapter instead of extracting credentials statically. This preserves the provider's
+   * refresh logic and prevents "token expired" errors for long-running Spark jobs that exceed the credential TTL.
    */
   private def createAwsCredentialsProvider(): software.amazon.awssdk.auth.credentials.AwsCredentialsProvider = {
     val normalizedTablePath = normalizeToTablePath(tablePath)
@@ -153,7 +152,7 @@ class S3CloudStorageProvider(
         }
         return StaticCredentialsProvider.create(credentials)
       case _ =>
-        // Continue to custom provider check
+      // Continue to custom provider check
     }
 
     // Priority 2: Custom provider class - wrap it to preserve refresh logic
@@ -177,8 +176,10 @@ class S3CloudStorageProvider(
             return v1Provider.asInstanceOf[software.amazon.awssdk.auth.credentials.AwsCredentialsProvider]
           } else {
             // Fallback: extract credentials statically (legacy behavior)
-            logger.warn(s"Provider $providerClassName is not a recognized AWS credential provider type, " +
-              "extracting credentials statically (refresh logic will not be preserved)")
+            logger.warn(
+              s"Provider $providerClassName is not a recognized AWS credential provider type, " +
+                "extracting credentials statically (refresh logic will not be preserved)"
+            )
             val creds = CredentialProviderFactory.extractCredentialsViaReflection(v1Provider)
             val credentials = if (creds.hasSessionToken) {
               AwsSessionCredentials.create(creds.accessKey, creds.secretKey, creds.sessionToken.get)
@@ -193,7 +194,7 @@ class S3CloudStorageProvider(
             logger.warn("Falling back to DefaultCredentialsProvider")
         }
       case None =>
-        // Continue to default chain
+      // Continue to default chain
     }
 
     // Priority 3: Default credentials provider chain
@@ -318,9 +319,9 @@ class S3CloudStorageProvider(
       // CRITICAL FIX: Use pagination to handle >1000 files
       // S3 listObjectsV2 returns max 1000 objects per request.
       // Without pagination, large directories would only return partial results.
-      val filesBuilder = Seq.newBuilder[CloudFileInfo]
+      val filesBuilder       = Seq.newBuilder[CloudFileInfo]
       val directoriesBuilder = Seq.newBuilder[CloudFileInfo]
-      var pageCount = 0
+      var pageCount          = 0
 
       val paginator = s3Client.listObjectsV2Paginator(request)
       paginator.forEach { response =>
@@ -356,11 +357,11 @@ class S3CloudStorageProvider(
         }
       }
 
-      val files = filesBuilder.result()
+      val files       = filesBuilder.result()
       val directories = directoriesBuilder.result()
-      val allResults = files ++ directories
+      val allResults  = files ++ directories
       logger.info(
-        s"S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix' (${pageCount} pages)"
+        s"S3 LIST RESULTS - Found ${files.size} files and ${directories.size} directories for prefix '$prefix' ($pageCount pages)"
       )
       files.foreach(f => logger.debug(s"  File: ${f.path}"))
       allResults

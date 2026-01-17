@@ -17,14 +17,14 @@
 
 package io.indextables.spark.sql
 
+import scala.jdk.CollectionConverters._
+
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.types.{LongType, StringType}
 
 import org.apache.hadoop.fs.Path
-
-import scala.jdk.CollectionConverters._
 
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{TransactionLogCheckpoint, TransactionLogFactory}
@@ -34,9 +34,8 @@ import org.slf4j.LoggerFactory
 /**
  * SQL command to truncate time travel data from an IndexTables table.
  *
- * This command removes all historical transaction log versions, keeping only the current
- * state (latest checkpoint). After truncation, time travel to earlier versions is no
- * longer possible.
+ * This command removes all historical transaction log versions, keeping only the current state (latest checkpoint).
+ * After truncation, time travel to earlier versions is no longer possible.
  *
  * Syntax:
  *   - TRUNCATE INDEXTABLES TIME TRAVEL '/path/to/table'
@@ -44,10 +43,9 @@ import org.slf4j.LoggerFactory
  *   - TRUNCATE TANTIVY4SPARK TIME TRAVEL table_name
  *
  * This command:
- *   1. Creates a checkpoint at the current version (if none exists)
- *   2. Deletes all transaction log version files older than the checkpoint
- *   3. Deletes all older checkpoint files (keeps only the latest)
- *   4. Preserves all data files (splits) - only metadata is affected
+ *   1. Creates a checkpoint at the current version (if none exists) 2. Deletes all transaction log version files older
+ *      than the checkpoint 3. Deletes all older checkpoint files (keeps only the latest) 4. Preserves all data files
+ *      (splits) - only metadata is affected
  *
  * Use this command to:
  *   - Reduce transaction log storage overhead
@@ -56,15 +54,15 @@ import org.slf4j.LoggerFactory
  */
 case class TruncateTimeTravelCommand(
   tablePath: String,
-  dryRun: Boolean = false
-) extends LeafRunnableCommand {
+  dryRun: Boolean = false)
+    extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[TruncateTimeTravelCommand])
 
   // Regex patterns for file detection (from PurgeOrphanedSplitsExecutor)
   private val VersionFilePattern = """^(\d{20})\.json$""".r
-  private val ManifestPattern = """^(\d{20})\.checkpoint\.json$""".r
-  private val PartFilePattern = """^(\d{20})\.checkpoint\.([a-f0-9]+)\.(\d{5})\.json$""".r
+  private val ManifestPattern    = """^(\d{20})\.checkpoint\.json$""".r
+  private val PartFilePattern    = """^(\d{20})\.checkpoint\.([a-f0-9]+)\.(\d{5})\.json$""".r
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("table_path", StringType)(),
@@ -83,8 +81,8 @@ case class TruncateTimeTravelCommand(
       logger.info(s"Truncating time travel data for table: $resolvedPath (dryRun=$dryRun)")
 
       // Extract and merge configuration with proper precedence (consistent with PURGE command)
-      val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-      val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+      val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+      val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
@@ -102,15 +100,17 @@ case class TruncateTimeTravelCommand(
         // Get current versions
         val versions = transactionLog.getVersions()
         if (versions.isEmpty) {
-          return Seq(Row(
-            resolvedPath.toString,
-            "ERROR",
-            0L,
-            0L,
-            0L,
-            0L,
-            "No transaction log versions found"
-          ))
+          return Seq(
+            Row(
+              resolvedPath.toString,
+              "ERROR",
+              0L,
+              0L,
+              0L,
+              0L,
+              "No transaction log versions found"
+            )
+          )
         }
 
         val currentVersion = versions.max
@@ -144,9 +144,9 @@ case class TruncateTimeTravelCommand(
           val allFiles = cloudProvider.listFiles(transactionLogPath.toString, recursive = false)
 
           // Categorize files
-          val versionFiles = scala.collection.mutable.ListBuffer[(Long, String)]()
+          val versionFiles    = scala.collection.mutable.ListBuffer[(Long, String)]()
           val checkpointFiles = scala.collection.mutable.ListBuffer[(Long, String)]()
-          val partFiles = scala.collection.mutable.ListBuffer[(Long, String, String)]() // (version, uuid, path)
+          val partFiles       = scala.collection.mutable.ListBuffer[(Long, String, String)]() // (version, uuid, path)
 
           allFiles.foreach { f =>
             val fileName = new Path(f.path).getName
@@ -170,120 +170,128 @@ case class TruncateTimeTravelCommand(
           // - Version files with version < checkpointVersion
           // - Checkpoint files with version < checkpointVersion
           // - Part files with version < checkpointVersion
-          val versionsToDelete = versionFiles.filter(_._1 < checkpointVersion)
+          val versionsToDelete    = versionFiles.filter(_._1 < checkpointVersion)
           val checkpointsToDelete = checkpointFiles.filter(_._1 < checkpointVersion)
-          val partsToDelete = partFiles.filter(_._1 < checkpointVersion)
+          val partsToDelete       = partFiles.filter(_._1 < checkpointVersion)
 
           val totalFilesToDelete = versionsToDelete.size + checkpointsToDelete.size + partsToDelete.size
 
           logger.info(s"Files to delete: ${versionsToDelete.size} versions, ${checkpointsToDelete.size} checkpoints, ${partsToDelete.size} parts")
 
           if (totalFilesToDelete == 0) {
-            return Seq(Row(
-              resolvedPath.toString,
-              if (dryRun) "DRY_RUN" else "SUCCESS",
-              checkpointVersion,
-              0L,
-              0L,
-              transactionLog.listFiles().size.toLong,
-              "No old transaction log files to delete - table already at minimal state"
-            ))
+            return Seq(
+              Row(
+                resolvedPath.toString,
+                if (dryRun) "DRY_RUN" else "SUCCESS",
+                checkpointVersion,
+                0L,
+                0L,
+                transactionLog.listFiles().size.toLong,
+                "No old transaction log files to delete - table already at minimal state"
+              )
+            )
           }
 
           if (dryRun) {
             // Preview mode - don't actually delete
             logger.info(s"DRY RUN: Would delete ${versionsToDelete.size} version files, ${checkpointsToDelete.size} checkpoint files, ${partsToDelete.size} checkpoint parts")
 
-            Seq(Row(
-              resolvedPath.toString,
-              "DRY_RUN",
-              checkpointVersion,
-              versionsToDelete.size.toLong,
-              (checkpointsToDelete.size + partsToDelete.size).toLong,
-              transactionLog.listFiles().size.toLong,
-              s"Would delete ${versionsToDelete.size} version files and ${checkpointsToDelete.size + partsToDelete.size} checkpoint files (DRY RUN - no changes made)"
-            ))
+            Seq(
+              Row(
+                resolvedPath.toString,
+                "DRY_RUN",
+                checkpointVersion,
+                versionsToDelete.size.toLong,
+                (checkpointsToDelete.size + partsToDelete.size).toLong,
+                transactionLog.listFiles().size.toLong,
+                s"Would delete ${versionsToDelete.size} version files and ${checkpointsToDelete.size + partsToDelete.size} checkpoint files (DRY RUN - no changes made)"
+              )
+            )
           } else {
             // Actually delete the files
-            var deletedVersions = 0L
+            var deletedVersions    = 0L
             var deletedCheckpoints = 0L
 
             // Delete version files
-            versionsToDelete.foreach { case (version, path) =>
-              try {
-                if (cloudProvider.deleteFile(path)) {
-                  deletedVersions += 1
-                  logger.debug(s"Deleted version file: v$version")
+            versionsToDelete.foreach {
+              case (version, path) =>
+                try
+                  if (cloudProvider.deleteFile(path)) {
+                    deletedVersions += 1
+                    logger.debug(s"Deleted version file: v$version")
+                  }
+                catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete version file v$version: ${e.getMessage}")
                 }
-              } catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to delete version file v$version: ${e.getMessage}")
-              }
             }
 
             // Delete checkpoint manifests/legacy checkpoints
-            checkpointsToDelete.foreach { case (version, path) =>
-              try {
-                if (cloudProvider.deleteFile(path)) {
-                  deletedCheckpoints += 1
-                  logger.debug(s"Deleted checkpoint file: v$version")
+            checkpointsToDelete.foreach {
+              case (version, path) =>
+                try
+                  if (cloudProvider.deleteFile(path)) {
+                    deletedCheckpoints += 1
+                    logger.debug(s"Deleted checkpoint file: v$version")
+                  }
+                catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete checkpoint file v$version: ${e.getMessage}")
                 }
-              } catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to delete checkpoint file v$version: ${e.getMessage}")
-              }
             }
 
             // Delete checkpoint parts
-            partsToDelete.foreach { case (version, uuid, path) =>
-              try {
-                if (cloudProvider.deleteFile(path)) {
-                  deletedCheckpoints += 1
-                  logger.debug(s"Deleted checkpoint part: v$version (uuid=$uuid)")
+            partsToDelete.foreach {
+              case (version, uuid, path) =>
+                try
+                  if (cloudProvider.deleteFile(path)) {
+                    deletedCheckpoints += 1
+                    logger.debug(s"Deleted checkpoint part: v$version (uuid=$uuid)")
+                  }
+                catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete checkpoint part v$version: ${e.getMessage}")
                 }
-              } catch {
-                case e: Exception =>
-                  logger.warn(s"Failed to delete checkpoint part v$version: ${e.getMessage}")
-              }
             }
 
-            logger.info(s"Truncation complete: deleted $deletedVersions version files, $deletedCheckpoints checkpoint files")
+            logger.info(
+              s"Truncation complete: deleted $deletedVersions version files, $deletedCheckpoints checkpoint files"
+            )
 
-            Seq(Row(
-              resolvedPath.toString,
-              "SUCCESS",
-              checkpointVersion,
-              deletedVersions,
-              deletedCheckpoints,
-              transactionLog.listFiles().size.toLong,
-              s"Successfully truncated time travel data. Deleted $deletedVersions version files and $deletedCheckpoints checkpoint files. Table now at v$checkpointVersion."
-            ))
+            Seq(
+              Row(
+                resolvedPath.toString,
+                "SUCCESS",
+                checkpointVersion,
+                deletedVersions,
+                deletedCheckpoints,
+                transactionLog.listFiles().size.toLong,
+                s"Successfully truncated time travel data. Deleted $deletedVersions version files and $deletedCheckpoints checkpoint files. Table now at v$checkpointVersion."
+              )
+            )
           }
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
     } catch {
       case e: Exception =>
         val errorMsg = s"Failed to truncate time travel data: ${e.getMessage}"
         logger.error(errorMsg, e)
-        Seq(Row(
-          tablePath,
-          "ERROR",
-          0L,
-          0L,
-          0L,
-          0L,
-          errorMsg
-        ))
+        Seq(
+          Row(
+            tablePath,
+            "ERROR",
+            0L,
+            0L,
+            0L,
+            0L,
+            errorMsg
+          )
+        )
     }
 
-  /**
-   * Create a checkpoint at the current version.
-   * Returns the checkpoint version.
-   */
+  /** Create a checkpoint at the current version. Returns the checkpoint version. */
   private def createCheckpointAtCurrentVersion(
     sparkSession: SparkSession,
     resolvedPath: Path,
@@ -291,7 +299,7 @@ case class TruncateTimeTravelCommand(
   ): Long = {
     val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
     try {
-      val versions = transactionLog.getVersions()
+      val versions       = transactionLog.getVersions()
       val currentVersion = versions.max
 
       // Get all current actions (file state)
@@ -318,12 +326,10 @@ case class TruncateTimeTravelCommand(
         checkpoint.close()
         logger.info(s"Created checkpoint at version $currentVersion")
         currentVersion
-      } finally {
+      } finally
         cloudProvider.close()
-      }
-    } finally {
+    } finally
       transactionLog.close()
-    }
   }
 
   /** Resolve table path from string path or table identifier. */

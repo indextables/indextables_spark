@@ -11,10 +11,9 @@ sealed trait ConfigSource {
 }
 
 case class OptionsConfigSource(options: java.util.Map[String, String]) extends ConfigSource {
-  override def get(key: String): Option[String] = {
+  override def get(key: String): Option[String] =
     // Try original key first, then lowercase version (for CaseInsensitiveStringMap compatibility)
     Option(options.get(key)).orElse(Option(options.get(key.toLowerCase)))
-  }
   override def name: String = "DataFrame options"
 }
 

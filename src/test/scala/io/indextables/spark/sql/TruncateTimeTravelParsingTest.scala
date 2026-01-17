@@ -18,20 +18,20 @@
 package io.indextables.spark.sql
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterAll
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 
-/**
- * Tests for TRUNCATE INDEXTABLES TIME TRAVEL SQL parsing.
- */
+/** Tests for TRUNCATE INDEXTABLES TIME TRAVEL SQL parsing. */
 class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
   private var spark: SparkSession = _
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    spark = SparkSession.builder()
+    spark = SparkSession
+      .builder()
       .appName("TruncateTimeTravelParsingTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
@@ -46,7 +46,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with path string") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test_table'"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test_table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -56,7 +56,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with S3 path") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL 's3://bucket/path/to/table'"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL 's3://bucket/path/to/table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -66,7 +66,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with Azure path") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL 'abfss://container@account.dfs.core.windows.net/path'"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL 'abfss://container@account.dfs.core.windows.net/path'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -76,7 +76,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with DRY RUN flag") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test_table' DRY RUN"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test_table' DRY RUN"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -86,7 +86,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with table identifier") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL my_table"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL my_table"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -96,7 +96,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with qualified table identifier") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL my_database.my_table"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL my_database.my_table"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -106,7 +106,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE TANTIVY4SPARK TIME TRAVEL should parse (alternate keyword)") {
-    val sql = "TRUNCATE TANTIVY4SPARK TIME TRAVEL '/tmp/test_table'"
+    val sql  = "TRUNCATE TANTIVY4SPARK TIME TRAVEL '/tmp/test_table'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -116,7 +116,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE TANTIVY4SPARK TIME TRAVEL with DRY RUN should parse") {
-    val sql = "TRUNCATE TANTIVY4SPARK TIME TRAVEL 's3://bucket/table' DRY RUN"
+    val sql  = "TRUNCATE TANTIVY4SPARK TIME TRAVEL 's3://bucket/table' DRY RUN"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -126,7 +126,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should be case-insensitive") {
-    val sql = "truncate indextables time travel '/tmp/test'"
+    val sql  = "truncate indextables time travel '/tmp/test'"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -135,7 +135,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL with mixed case DRY RUN") {
-    val sql = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test' Dry Run"
+    val sql  = "TRUNCATE INDEXTABLES TIME TRAVEL '/tmp/test' Dry Run"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 
@@ -145,7 +145,7 @@ class TruncateTimeTravelParsingTest extends AnyFunSuite with Matchers with Befor
   }
 
   test("TRUNCATE INDEXTABLES TIME TRAVEL should parse with double-quoted path") {
-    val sql = """TRUNCATE INDEXTABLES TIME TRAVEL "/tmp/test_table""""
+    val sql  = """TRUNCATE INDEXTABLES TIME TRAVEL "/tmp/test_table""""
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[TruncateTimeTravelCommand])
 

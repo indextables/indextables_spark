@@ -506,14 +506,14 @@ class DescribeTransactionLogExecutor(
    * legacy single-file checkpoints, this returns the checkpoint file path.
    */
   private def getCheckpointFilePath(txLog: TransactionLog, version: Long): String = {
-    val txLogPath       = new Path(txLog.getTablePath(), "_transaction_log")
-    val checkpointFile  = new Path(txLogPath, f"$version%020d.checkpoint.json")
-    val basePath        = checkpointFile.toString
+    val txLogPath      = new Path(txLog.getTablePath(), "_transaction_log")
+    val checkpointFile = new Path(txLogPath, f"$version%020d.checkpoint.json")
+    val basePath       = checkpointFile.toString
 
     // Check if this is a multi-part checkpoint
     txLog.getLastCheckpointInfo() match {
       case Some(info) if info.version == version && info.parts.isDefined =>
-        val numParts = info.parts.get
+        val numParts     = info.parts.get
         val checkpointId = info.checkpointId.getOrElse("unknown")
         s"$basePath (multi-part: $numParts parts, id=$checkpointId)"
       case _ =>

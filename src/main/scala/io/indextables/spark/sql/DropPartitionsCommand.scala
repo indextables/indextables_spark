@@ -100,8 +100,8 @@ case class DropPartitionsCommand(
       }
 
     // Extract and merge configuration with proper precedence
-    val hadoopConf = sparkSession.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConf    = sparkSession.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 

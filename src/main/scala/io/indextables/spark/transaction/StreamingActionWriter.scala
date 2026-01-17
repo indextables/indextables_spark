@@ -28,8 +28,8 @@ import org.slf4j.LoggerFactory
 /**
  * Utility for streaming writes of transaction log actions.
  *
- * This class addresses OOM issues that occur when writing large transaction logs with many actions (tens of thousands of
- * splits with large schemas). Instead of accumulating all JSON in a StringBuilder (which can exceed JVM array size
+ * This class addresses OOM issues that occur when writing large transaction logs with many actions (tens of thousands
+ * of splits with large schemas). Instead of accumulating all JSON in a StringBuilder (which can exceed JVM array size
  * limits), actions are written directly to a compressed output stream.
  *
  * Key features:

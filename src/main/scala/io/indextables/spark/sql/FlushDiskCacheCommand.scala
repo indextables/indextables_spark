@@ -34,10 +34,8 @@ import org.slf4j.LoggerFactory
  * Syntax: FLUSH INDEXTABLES DISK CACHE
  *
  * This command:
- *   1. Flushes all JVM-wide split cache managers (closes disk cache handles)
- *   2. Deletes all disk cache files on all executors
- *   3. Clears split locality assignments
- *   4. Clears prewarm state tracking
+ *   1. Flushes all JVM-wide split cache managers (closes disk cache handles) 2. Deletes all disk cache files on all
+ *      executors 3. Clears split locality assignments 4. Clears prewarm state tracking
  *
  * This is useful for:
  *   - Testing: Ensuring clean cache state between tests
@@ -60,16 +58,18 @@ case class FlushDiskCacheCommand() extends LeafRunnableCommand {
   override def run(sparkSession: SparkSession): Seq[Row] = {
     logger.info("Executing FLUSH INDEXTABLES DISK CACHE command")
 
-    val sc = sparkSession.sparkContext
+    val sc      = sparkSession.sparkContext
     val results = scala.collection.mutable.ArrayBuffer[Row]()
 
     // Get the disk cache path using the same resolution logic as SplitCacheConfig:
     // 1. Explicitly configured path (spark.indextables.cache.disk.path)
     // 2. Auto-detected default path (/local_disk0/tantivy4spark_slicecache if available)
-    val explicitPath = sparkSession.conf.getOption(IndexTables4SparkSQLConf.TANTIVY4SPARK_DISK_CACHE_PATH)
+    val explicitPath           = sparkSession.conf.getOption(IndexTables4SparkSQLConf.TANTIVY4SPARK_DISK_CACHE_PATH)
     val effectiveDiskCachePath = explicitPath.orElse(SplitCacheConfig.getDefaultDiskCachePath())
-    logger.info(s"Disk cache path - explicit: ${explicitPath.getOrElse("not configured")}, " +
-      s"effective: ${effectiveDiskCachePath.getOrElse("none")}")
+    logger.info(
+      s"Disk cache path - explicit: ${explicitPath.getOrElse("not configured")}, " +
+        s"effective: ${effectiveDiskCachePath.getOrElse("none")}"
+    )
 
     // Broadcast the effective path to executors
     val diskCachePathBroadcast = sc.broadcast(effectiveDiskCachePath)
@@ -85,7 +85,7 @@ case class FlushDiskCacheCommand() extends LeafRunnableCommand {
       val executorResults = sc
         .parallelize(1 to numExecutors, numExecutors)
         .mapPartitionsWithIndex { (index, _) =>
-          val executorId = s"executor-$index"
+          val executorId    = s"executor-$index"
           val diskCachePath = diskCachePathBroadcast.value
           Iterator(flushExecutorDiskCache(executorId, diskCachePath))
         }
@@ -107,9 +107,8 @@ case class FlushDiskCacheCommand() extends LeafRunnableCommand {
           0L,
           s"Disk cache flush failed: ${ex.getMessage}"
         )
-    } finally {
+    } finally
       diskCachePathBroadcast.destroy()
-    }
 
     results.toSeq
   }
@@ -249,7 +248,7 @@ case class FlushDiskCacheCommand() extends LeafRunnableCommand {
     }
 
   private def deleteDirectoryContents(dir: File): (Long, Long) = {
-    var bytesFreed = 0L
+    var bytesFreed   = 0L
     var filesDeleted = 0L
 
     if (dir.exists() && dir.isDirectory) {

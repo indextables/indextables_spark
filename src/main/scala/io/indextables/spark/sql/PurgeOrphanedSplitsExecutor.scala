@@ -78,7 +78,8 @@ class PurgeOrphanedSplitsExecutor(
     // Step 1: Get transaction log with resolved credentials
     val cloudConfigs = extractCloudStorageConfigs()
     import scala.jdk.CollectionConverters._
-    val txLog = TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
+    val txLog =
+      TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
 
     // Step 2: Determine which transaction log files will be deleted
     // Get the list of versions that will remain after cleanup (for time travel support)
@@ -193,18 +194,21 @@ class PurgeOrphanedSplitsExecutor(
   }
 
   /**
-   * Clean up old transaction log files using a pre-computed set of versions to delete.
-   * This eliminates the race condition by not recalculating which versions to delete.
+   * Clean up old transaction log files using a pre-computed set of versions to delete. This eliminates the race
+   * condition by not recalculating which versions to delete.
    *
-   * CRITICAL FIX: The original cleanupOldTransactionLogFiles() independently recalculated
-   * which versions to delete, which could differ from getTransactionLogVersionsToDelete()
-   * if time passed between the two calls (files aging past retention boundary).
+   * CRITICAL FIX: The original cleanupOldTransactionLogFiles() independently recalculated which versions to delete,
+   * which could differ from getTransactionLogVersionsToDelete() if time passed between the two calls (files aging past
+   * retention boundary).
    *
    * This method accepts the pre-computed versionsToDelete set to ensure consistency.
    *
-   * @param txLog The transaction log instance
-   * @param versionsToDelete Pre-computed set of versions to delete (from getTransactionLogVersionsToDelete)
-   * @return Number of transaction log files deleted (or would be deleted in DRY RUN)
+   * @param txLog
+   *   The transaction log instance
+   * @param versionsToDelete
+   *   Pre-computed set of versions to delete (from getTransactionLogVersionsToDelete)
+   * @return
+   *   Number of transaction log files deleted (or would be deleted in DRY RUN)
    */
   private def cleanupOldTransactionLogFilesWithVersions(
     txLog: io.indextables.spark.transaction.TransactionLog,
@@ -240,7 +244,7 @@ class PurgeOrphanedSplitsExecutor(
           val versionFileName = f"$version%020d.json"
           val versionFilePath = new Path(transactionLogPath, versionFileName).toString
 
-          try {
+          try
             if (dryRun) {
               logger.info(s"DRY RUN: Would delete transaction log file: $versionFileName")
               deletedCount += 1
@@ -250,7 +254,7 @@ class PurgeOrphanedSplitsExecutor(
                 logger.debug(s"Deleted transaction log file: $versionFileName")
               }
             }
-          } catch {
+          catch {
             case _: java.io.FileNotFoundException =>
               // Already deleted, continue
               logger.debug(s"Transaction log file already deleted: $versionFileName")
@@ -285,14 +289,16 @@ class PurgeOrphanedSplitsExecutor(
    * Clean up old checkpoint files based on retention policy.
    *
    * Handles both:
-   *   1. Legacy single-file checkpoints: `<version>.checkpoint.json`
-   *   2. Multi-part checkpoints: manifest + UUID-based part files
+   *   1. Legacy single-file checkpoints: `<version>.checkpoint.json` 2. Multi-part checkpoints: manifest + UUID-based
+   *      part files
    *
-   * For multi-part checkpoints, deletes both the manifest AND all referenced parts.
-   * Also cleans up orphaned part files (from failed checkpoint attempts).
+   * For multi-part checkpoints, deletes both the manifest AND all referenced parts. Also cleans up orphaned part files
+   * (from failed checkpoint attempts).
    *
-   * @param txLog The transaction log instance
-   * @return Number of checkpoint files deleted (or would be deleted in DRY RUN)
+   * @param txLog
+   *   The transaction log instance
+   * @return
+   *   Number of checkpoint files deleted (or would be deleted in DRY RUN)
    */
   private def cleanupOldCheckpointFiles(txLog: io.indextables.spark.transaction.TransactionLog): Long =
     try {
@@ -319,7 +325,9 @@ class PurgeOrphanedSplitsExecutor(
       }
 
       val latestVersion = latestCheckpointVersion.get
-      logger.info(s"Cleaning up old checkpoint files (preserving latest checkpoint at v$latestVersion, dryRun=$dryRun)...")
+      logger.info(
+        s"Cleaning up old checkpoint files (preserving latest checkpoint at v$latestVersion, dryRun=$dryRun)..."
+      )
 
       // Use CloudStorageProvider for multi-cloud support with credentials
       val cloudConfigs = extractCloudStorageConfigs()
@@ -354,7 +362,9 @@ class PurgeOrphanedSplitsExecutor(
           }
         }
 
-        logger.info(s"Found ${manifestFiles.size} checkpoint manifests/legacy checkpoints and ${partFiles.size} checkpoint parts")
+        logger.info(
+          s"Found ${manifestFiles.size} checkpoint manifests/legacy checkpoints and ${partFiles.size} checkpoint parts"
+        )
 
         var deletedCount = 0L
 
@@ -362,75 +372,84 @@ class PurgeOrphanedSplitsExecutor(
         val retainedCheckpointIds = scala.collection.mutable.Set[String]()
 
         // Process manifest/legacy checkpoint files
-        manifestFiles.foreach { case (checkpointVersion, checkpointFile) =>
-          val fileName = new Path(checkpointFile.path).getName
-          val fileAge = currentTime - checkpointFile.modificationTime
+        manifestFiles.foreach {
+          case (checkpointVersion, checkpointFile) =>
+            val fileName = new Path(checkpointFile.path).getName
+            val fileAge  = currentTime - checkpointFile.modificationTime
 
-          // Never delete the latest checkpoint, even if it's old
-          if (checkpointVersion == latestVersion) {
-            logger.debug(s"Preserving latest checkpoint: $fileName (v$checkpointVersion)")
+            // Never delete the latest checkpoint, even if it's old
+            if (checkpointVersion == latestVersion) {
+              logger.debug(s"Preserving latest checkpoint: $fileName (v$checkpointVersion)")
 
-            // If this is a manifest, track its checkpoint ID (uses file size heuristic to skip large legacy checkpoints)
-            tryReadManifest(provider, checkpointFile).foreach { manifest =>
-              retainedCheckpointIds += manifest.checkpointId
-              logger.debug(s"Tracking retained checkpoint ID: ${manifest.checkpointId}")
-            }
+              // If this is a manifest, track its checkpoint ID (uses file size heuristic to skip large legacy checkpoints)
+              tryReadManifest(provider, checkpointFile).foreach { manifest =>
+                retainedCheckpointIds += manifest.checkpointId
+                logger.debug(s"Tracking retained checkpoint ID: ${manifest.checkpointId}")
+              }
 
-          } else if (fileAge > logRetentionDuration) {
-            // Delete old checkpoint (manifest or legacy)
-            // Check if it's a manifest and get part files to delete (uses file size heuristic to skip large legacy checkpoints)
-            val partsToDelete = tryReadManifest(provider, checkpointFile) match {
-              case Some(manifest) =>
-                logger.debug(s"Checkpoint v$checkpointVersion is multi-part with ${manifest.parts.size} parts")
-                manifest.parts.map(p => s"${transactionLogPath.toString}/$p")
-              case None =>
-                Seq.empty[String]
-            }
+            } else if (fileAge > logRetentionDuration) {
+              // Delete old checkpoint (manifest or legacy)
+              // Check if it's a manifest and get part files to delete (uses file size heuristic to skip large legacy checkpoints)
+              val partsToDelete = tryReadManifest(provider, checkpointFile) match {
+                case Some(manifest) =>
+                  logger.debug(s"Checkpoint v$checkpointVersion is multi-part with ${manifest.parts.size} parts")
+                  manifest.parts.map(p => s"${transactionLogPath.toString}/$p")
+                case None =>
+                  Seq.empty[String]
+              }
 
-            if (dryRun) {
-              logger.info(s"DRY RUN: Would delete old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)")
-              deletedCount += 1
-              if (partsToDelete.nonEmpty) {
-                logger.info(s"DRY RUN: Would delete ${partsToDelete.size} part files for checkpoint v$checkpointVersion")
-                deletedCount += partsToDelete.size
+              if (dryRun) {
+                logger.info(
+                  s"DRY RUN: Would delete old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)"
+                )
+                deletedCount += 1
+                if (partsToDelete.nonEmpty) {
+                  logger.info(
+                    s"DRY RUN: Would delete ${partsToDelete.size} part files for checkpoint v$checkpointVersion"
+                  )
+                  deletedCount += partsToDelete.size
+                }
+              } else {
+                // Delete manifest/legacy checkpoint
+                try
+                  if (provider.deleteFile(checkpointFile.path)) {
+                    deletedCount += 1
+                    logger.debug(
+                      s"Deleted old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)"
+                    )
+                  }
+                catch {
+                  case _: java.io.FileNotFoundException =>
+                    logger.debug(s"Checkpoint file already deleted: $fileName")
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete checkpoint file $fileName: ${e.getMessage}")
+                }
+
+                // Delete associated part files
+                partsToDelete.foreach { partPath =>
+                  try
+                    if (provider.deleteFile(partPath)) {
+                      deletedCount += 1
+                      logger.debug(s"Deleted checkpoint part: ${new Path(partPath).getName}")
+                    }
+                  catch {
+                    case _: java.io.FileNotFoundException =>
+                      logger.debug(s"Checkpoint part already deleted: $partPath")
+                    case e: Exception =>
+                      logger.warn(s"Failed to delete checkpoint part $partPath: ${e.getMessage}")
+                  }
+                }
               }
             } else {
-              // Delete manifest/legacy checkpoint
-              try {
-                if (provider.deleteFile(checkpointFile.path)) {
-                  deletedCount += 1
-                  logger.debug(s"Deleted old checkpoint file: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s)")
-                }
-              } catch {
-                case _: java.io.FileNotFoundException =>
-                  logger.debug(s"Checkpoint file already deleted: $fileName")
-                case e: Exception =>
-                  logger.warn(s"Failed to delete checkpoint file $fileName: ${e.getMessage}")
-              }
+              logger.debug(
+                s"Keeping checkpoint: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
+              )
 
-              // Delete associated part files
-              partsToDelete.foreach { partPath =>
-                try {
-                  if (provider.deleteFile(partPath)) {
-                    deletedCount += 1
-                    logger.debug(s"Deleted checkpoint part: ${new Path(partPath).getName}")
-                  }
-                } catch {
-                  case _: java.io.FileNotFoundException =>
-                    logger.debug(s"Checkpoint part already deleted: $partPath")
-                  case e: Exception =>
-                    logger.warn(s"Failed to delete checkpoint part $partPath: ${e.getMessage}")
-                }
+              // Track checkpoint ID if it's a manifest within retention (uses file size heuristic to skip large legacy checkpoints)
+              tryReadManifest(provider, checkpointFile).foreach { manifest =>
+                retainedCheckpointIds += manifest.checkpointId
               }
             }
-          } else {
-            logger.debug(s"Keeping checkpoint: $fileName (v$checkpointVersion, age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)")
-
-            // Track checkpoint ID if it's a manifest within retention (uses file size heuristic to skip large legacy checkpoints)
-            tryReadManifest(provider, checkpointFile).foreach { manifest =>
-              retainedCheckpointIds += manifest.checkpointId
-            }
-          }
         }
 
         // Clean up orphaned part files (parts not belonging to any retained checkpoint)
@@ -439,24 +458,25 @@ class PurgeOrphanedSplitsExecutor(
         if (orphanedParts.nonEmpty) {
           logger.info(s"Found ${orphanedParts.size} orphaned checkpoint parts to clean up")
 
-          orphanedParts.foreach { case (version, uuid, partFile) =>
-            val fileName = new Path(partFile.path).getName
-            if (dryRun) {
-              logger.info(s"DRY RUN: Would delete orphaned checkpoint part: $fileName (v$version, uuid=$uuid)")
-              deletedCount += 1
-            } else {
-              try {
-                if (provider.deleteFile(partFile.path)) {
-                  deletedCount += 1
-                  logger.debug(s"Deleted orphaned checkpoint part: $fileName")
+          orphanedParts.foreach {
+            case (version, uuid, partFile) =>
+              val fileName = new Path(partFile.path).getName
+              if (dryRun) {
+                logger.info(s"DRY RUN: Would delete orphaned checkpoint part: $fileName (v$version, uuid=$uuid)")
+                deletedCount += 1
+              } else {
+                try
+                  if (provider.deleteFile(partFile.path)) {
+                    deletedCount += 1
+                    logger.debug(s"Deleted orphaned checkpoint part: $fileName")
+                  }
+                catch {
+                  case _: java.io.FileNotFoundException =>
+                    logger.debug(s"Orphaned part already deleted: $fileName")
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete orphaned part $fileName: ${e.getMessage}")
                 }
-              } catch {
-                case _: java.io.FileNotFoundException =>
-                  logger.debug(s"Orphaned part already deleted: $fileName")
-                case e: Exception =>
-                  logger.warn(s"Failed to delete orphaned part $fileName: ${e.getMessage}")
               }
-            }
           }
         }
 
@@ -585,21 +605,23 @@ class PurgeOrphanedSplitsExecutor(
    * Get ALL files referenced in ANY retained transaction file or checkpoint.
    *
    * For time travel support, we must preserve files from:
-   *   1. All retained checkpoints (those not being deleted)
-   *   2. All retained version files (those in versionsToKeep)
+   *   1. All retained checkpoints (those not being deleted) 2. All retained version files (those in versionsToKeep)
    *
-   * A file should NOT be deleted if it appears in ANY transaction file or
-   * checkpoint that still exists after the purge operation.
+   * A file should NOT be deleted if it appears in ANY transaction file or checkpoint that still exists after the purge
+   * operation.
    *
-   * @param txLog The transaction log instance
-   * @param versionsToKeep The version numbers that will be retained (not deleted)
-   * @return All AddActions from retained state
+   * @param txLog
+   *   The transaction log instance
+   * @param versionsToKeep
+   *   The version numbers that will be retained (not deleted)
+   * @return
+   *   All AddActions from retained state
    */
   private def getAllFilesFromRetainedState(
     txLog: io.indextables.spark.transaction.TransactionLog,
     versionsToKeep: Seq[Long]
   ): Seq[AddAction] = {
-    val allFilePaths = scala.collection.mutable.Set[String]()
+    val allFilePaths     = scala.collection.mutable.Set[String]()
     val filePathToAction = scala.collection.mutable.HashMap[String, AddAction]()
 
     // Step 1: Get files from ALL retained checkpoints
@@ -627,13 +649,14 @@ class PurgeOrphanedSplitsExecutor(
    * Get files from ALL retained checkpoints.
    *
    * A checkpoint is retained if:
-   *   1. It's the latest checkpoint (always preserved), OR
-   *   2. It's newer than the retention period
+   *   1. It's the latest checkpoint (always preserved), OR 2. It's newer than the retention period
    *
    * Handles both legacy single-file checkpoints and multi-part checkpoints with manifests.
    *
-   * @param txLog The transaction log instance
-   * @return All AddActions from retained checkpoints
+   * @param txLog
+   *   The transaction log instance
+   * @return
+   *   All AddActions from retained checkpoints
    */
   private def getFilesFromRetainedCheckpoints(
     txLog: io.indextables.spark.transaction.TransactionLog
@@ -648,12 +671,12 @@ class PurgeOrphanedSplitsExecutor(
         .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
     }
 
-    val currentTime = System.currentTimeMillis()
+    val currentTime             = System.currentTimeMillis()
     val latestCheckpointVersion = txLog.getLastCheckpointVersion()
 
     // Use CloudStorageProvider for multi-cloud support
     val cloudConfigs = extractCloudStorageConfigs()
-    val optionsMap = new java.util.HashMap[String, String]()
+    val optionsMap   = new java.util.HashMap[String, String]()
     cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
     val configOptions = new CaseInsensitiveStringMap(optionsMap)
 
@@ -681,7 +704,7 @@ class PurgeOrphanedSplitsExecutor(
 
       checkpointFiles.foreach { checkpointFile =>
         val fileName = new Path(checkpointFile.path).getName
-        val fileAge = currentTime - checkpointFile.modificationTime
+        val fileAge  = currentTime - checkpointFile.modificationTime
 
         // Extract version number from checkpoint filename using pattern
         val checkpointVersion = fileName match {
@@ -693,11 +716,13 @@ class PurgeOrphanedSplitsExecutor(
 
         // Determine if this checkpoint is retained
         val isLatestCheckpoint = latestCheckpointVersion.contains(checkpointVersion)
-        val isWithinRetention = fileAge <= logRetentionDuration
-        val isRetained = isLatestCheckpoint || isWithinRetention
+        val isWithinRetention  = fileAge <= logRetentionDuration
+        val isRetained         = isLatestCheckpoint || isWithinRetention
 
         if (checkpointVersion >= 0 && isRetained) {
-          logger.debug(s"Reading retained checkpoint: $fileName (latest=$isLatestCheckpoint, withinRetention=$isWithinRetention)")
+          logger.debug(
+            s"Reading retained checkpoint: $fileName (latest=$isLatestCheckpoint, withinRetention=$isWithinRetention)"
+          )
 
           // Read the checkpoint file and extract AddActions
           // readCheckpointFile handles both legacy and manifest-based checkpoints
@@ -719,17 +744,16 @@ class PurgeOrphanedSplitsExecutor(
       }
 
       filePathToAction.values.toSeq
-    } finally {
+    } finally
       provider.close()
-    }
   }
 
   /**
    * Read actions from a checkpoint file.
    *
    * Handles both:
-   *   1. Legacy single-file checkpoints (newline-delimited JSON actions)
-   *   2. Multi-part checkpoints (manifest file pointing to part files)
+   *   1. Legacy single-file checkpoints (newline-delimited JSON actions) 2. Multi-part checkpoints (manifest file
+   *      pointing to part files)
    *
    * Uses streaming to avoid OOM for large checkpoint files (>1GB).
    */
@@ -738,7 +762,7 @@ class PurgeOrphanedSplitsExecutor(
 
     // First, check if this is a manifest file by reading just the first line
     // Manifest files are small single-line JSON, so this is safe
-    val rawStream = provider.openInputStream(checkpointPath)
+    val rawStream       = provider.openInputStream(checkpointPath)
     val firstLineReader = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
     try {
       val firstLine = firstLineReader.readLine()
@@ -750,9 +774,8 @@ class PurgeOrphanedSplitsExecutor(
         // Legacy format - use streaming to read the checkpoint
         parseActionsFromStream(provider, checkpointPath)
       }
-    } finally {
+    } finally
       firstLineReader.close()
-    }
   }
 
   /**
@@ -774,22 +797,23 @@ class PurgeOrphanedSplitsExecutor(
     logger.debug(s"Reading multi-part checkpoint (id=${manifest.checkpointId}) with ${manifest.parts.size} parts in parallel using streaming")
 
     // Read all parts in parallel using streaming
-    val partFutures = manifest.parts.zipWithIndex.map { case (partFile, idx) =>
-      Future {
-        val partPath = s"$transactionLogPath/$partFile"
+    val partFutures = manifest.parts.zipWithIndex.map {
+      case (partFile, idx) =>
+        Future {
+          val partPath = s"$transactionLogPath/$partFile"
 
-        if (!provider.exists(partPath)) {
-          throw new java.io.FileNotFoundException(
-            s"Checkpoint part does not exist: $partPath (referenced in manifest)"
-          )
+          if (!provider.exists(partPath)) {
+            throw new java.io.FileNotFoundException(
+              s"Checkpoint part does not exist: $partPath (referenced in manifest)"
+            )
+          }
+
+          // Use streaming to avoid OOM for large part files
+          val partActions = parseActionsFromStream(provider, partPath)
+
+          logger.debug(s"Read ${partActions.length} actions from checkpoint part $partFile")
+          (idx, partActions)
         }
-
-        // Use streaming to avoid OOM for large part files
-        val partActions = parseActionsFromStream(provider, partPath)
-
-        logger.debug(s"Read ${partActions.length} actions from checkpoint part $partFile")
-        (idx, partActions)
-      }
     }
 
     // Wait for all parts and combine in order
@@ -803,17 +827,16 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Parse actions directly from a cloud storage file using full streaming.
    *
-   * This method provides memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method provides memory-efficient parsing by streaming data from cloud storage directly through decompression
+   * and into line-by-line parsing, without ever loading the entire file into memory.
    */
   private def parseActionsFromStream(provider: CloudStorageProvider, filePath: String): Seq[Action] = {
     import io.indextables.spark.util.JsonUtil
 
-    val rawStream = provider.openInputStream(filePath)
+    val rawStream           = provider.openInputStream(filePath)
     val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
-    val actions = ListBuffer[Action]()
+    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions             = ListBuffer[Action]()
 
     try {
       var line = reader.readLine()
@@ -840,35 +863,36 @@ class PurgeOrphanedSplitsExecutor(
         line = reader.readLine()
       }
       actions.toSeq
-    } finally {
+    } finally
       reader.close()
-    }
   }
 
-  /**
-   * Parse actions from newline-delimited JSON content.
-   */
+  /** Parse actions from newline-delimited JSON content. */
   // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
   private def parseActionsFromContent(content: String): Seq[Action] = {
     import io.indextables.spark.util.JsonUtil
 
-    content.split("\n").filter(_.nonEmpty).map { line =>
-      val jsonNode = JsonUtil.mapper.readTree(line)
+    content
+      .split("\n")
+      .filter(_.nonEmpty)
+      .map { line =>
+        val jsonNode = JsonUtil.mapper.readTree(line)
 
-      if (jsonNode.has("protocol")) {
-        JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
-      } else if (jsonNode.has("metaData")) {
-        JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
-      } else if (jsonNode.has("add")) {
-        JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
-      } else if (jsonNode.has("remove")) {
-        JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
-      } else if (jsonNode.has("mergeskip")) {
-        JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
-      } else {
-        throw new IllegalArgumentException(s"Unknown action type in line: $line")
+        if (jsonNode.has("protocol")) {
+          JsonUtil.mapper.treeToValue(jsonNode.get("protocol"), classOf[ProtocolAction])
+        } else if (jsonNode.has("metaData")) {
+          JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+        } else if (jsonNode.has("add")) {
+          JsonUtil.mapper.treeToValue(jsonNode.get("add"), classOf[AddAction])
+        } else if (jsonNode.has("remove")) {
+          JsonUtil.mapper.treeToValue(jsonNode.get("remove"), classOf[RemoveAction])
+        } else if (jsonNode.has("mergeskip")) {
+          JsonUtil.mapper.treeToValue(jsonNode.get("mergeskip"), classOf[SkipAction])
+        } else {
+          throw new IllegalArgumentException(s"Unknown action type in line: $line")
+        }
       }
-    }.toSeq
+      .toSeq
   }
 
   // Multi-part manifest files are small JSON metadata (typically < 1KB)
@@ -880,22 +904,28 @@ class PurgeOrphanedSplitsExecutor(
    * Try to read a checkpoint file as a manifest, using file size as a heuristic.
    *
    * This optimization avoids making network requests for large checkpoint files:
-   * - Multi-part manifests are always small (< 1KB) - they're just metadata pointing to part files
-   * - Single-part checkpoints can be any size - they contain action data directly
-   * - Legacy checkpoints can be any size - they contain action data in older format
+   *   - Multi-part manifests are always small (< 1KB) - they're just metadata pointing to part files
+   *   - Single-part checkpoints can be any size - they contain action data directly
+   *   - Legacy checkpoints can be any size - they contain action data in older format
    *
-   * If file size > 10KB, it's definitely NOT a multi-part manifest (no network read needed).
-   * If file size <= 10KB, read first line to check if it's a manifest.
+   * If file size > 10KB, it's definitely NOT a multi-part manifest (no network read needed). If file size <= 10KB, read
+   * first line to check if it's a manifest.
    *
-   * @param provider Cloud storage provider
-   * @param fileInfo File info including size
-   * @return Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
+   * @param provider
+   *   Cloud storage provider
+   * @param fileInfo
+   *   File info including size
+   * @return
+   *   Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
    */
-  private def tryReadManifest(provider: CloudStorageProvider, fileInfo: CloudFileInfo): Option[MultiPartCheckpointManifest] = {
+  private def tryReadManifest(provider: CloudStorageProvider, fileInfo: CloudFileInfo)
+    : Option[MultiPartCheckpointManifest] = {
     // Skip large files - they're definitely not multi-part manifests
     // (could be single-part checkpoint or legacy checkpoint, but either way no part files to track)
     if (fileInfo.size > MANIFEST_MAX_SIZE_BYTES) {
-      logger.debug(s"Skipping manifest check for large file (${fileInfo.size} bytes > ${MANIFEST_MAX_SIZE_BYTES}): ${fileInfo.path}")
+      logger.debug(
+        s"Skipping manifest check for large file (${fileInfo.size} bytes > $MANIFEST_MAX_SIZE_BYTES): ${fileInfo.path}"
+      )
       return None
     }
 
@@ -906,18 +936,20 @@ class PurgeOrphanedSplitsExecutor(
   /**
    * Safely read just the first line of a checkpoint file to check if it's a manifest.
    *
-   * This avoids loading entire legacy checkpoint files (which can be >1GB) into memory.
-   * Manifest files are single-line JSON that's very small, while legacy checkpoints
-   * are NDJSON with one action per line (potentially millions of lines).
+   * This avoids loading entire legacy checkpoint files (which can be >1GB) into memory. Manifest files are single-line
+   * JSON that's very small, while legacy checkpoints are NDJSON with one action per line (potentially millions of
+   * lines).
    *
-   * @return Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
+   * @return
+   *   Some(manifest) if the file is a multi-part checkpoint manifest, None otherwise
    */
-  private def tryReadManifestFromFirstLine(provider: CloudStorageProvider, filePath: String): Option[MultiPartCheckpointManifest] = {
+  private def tryReadManifestFromFirstLine(provider: CloudStorageProvider, filePath: String)
+    : Option[MultiPartCheckpointManifest] = {
     import io.indextables.spark.util.JsonUtil
     import scala.util.Try
 
     val rawStream = provider.openInputStream(filePath)
-    val reader = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
+    val reader    = new BufferedReader(new InputStreamReader(rawStream, "UTF-8"))
     try {
       val firstLine = reader.readLine()
       if (firstLine != null && firstLine.trim.startsWith("{") && firstLine.contains("\"checkpointId\"")) {
@@ -927,9 +959,8 @@ class PurgeOrphanedSplitsExecutor(
       }
     } catch {
       case _: Exception => None
-    } finally {
+    } finally
       reader.close()
-    }
   }
 
   /**

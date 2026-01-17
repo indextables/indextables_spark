@@ -144,12 +144,16 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         try {
           val maxSourceSplitsValue = parseAlphanumericInt(ctx.maxSourceSplitsPerMerge.getText)
           if (maxSourceSplitsValue < 2) {
-            throw new IllegalArgumentException(s"MAX SOURCE SPLITS PER MERGE must be at least 2, got: $maxSourceSplitsValue")
+            throw new IllegalArgumentException(
+              s"MAX SOURCE SPLITS PER MERGE must be at least 2, got: $maxSourceSplitsValue"
+            )
           }
           Some(maxSourceSplitsValue)
         } catch {
           case _: NumberFormatException =>
-            throw new NumberFormatException(s"Invalid MAX SOURCE SPLITS PER MERGE value: ${ctx.maxSourceSplitsPerMerge.getText}")
+            throw new NumberFormatException(
+              s"Invalid MAX SOURCE SPLITS PER MERGE value: ${ctx.maxSourceSplitsPerMerge.getText}"
+            )
         }
       } else {
         logger.debug("No MAX SOURCE SPLITS PER MERGE")

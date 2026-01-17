@@ -18,9 +18,8 @@
 package io.indextables.spark.expressions
 
 /**
- * Configuration for bucket aggregations extracted from GROUP BY expressions.
- * These configurations are used by the ScanBuilder to create appropriate
- * tantivy4java aggregations.
+ * Configuration for bucket aggregations extracted from GROUP BY expressions. These configurations are used by the
+ * ScanBuilder to create appropriate tantivy4java aggregations.
  */
 sealed trait BucketAggregationConfig extends Serializable {
 
@@ -34,25 +33,33 @@ sealed trait BucketAggregationConfig extends Serializable {
 /**
  * Configuration for date histogram bucket aggregation.
  *
- * @param fieldName The timestamp/date field to bucket
- * @param interval The bucket interval (e.g., "1h", "1d", "30m")
- * @param offset Optional offset to shift bucket boundaries
- * @param minDocCount Minimum document count for bucket to be returned
- * @param hardBoundsMin Optional minimum timestamp bound (epoch microseconds)
- * @param hardBoundsMax Optional maximum timestamp bound (epoch microseconds)
- * @param extendedBoundsMin Optional extended bounds minimum
- * @param extendedBoundsMax Optional extended bounds maximum
+ * @param fieldName
+ *   The timestamp/date field to bucket
+ * @param interval
+ *   The bucket interval (e.g., "1h", "1d", "30m")
+ * @param offset
+ *   Optional offset to shift bucket boundaries
+ * @param minDocCount
+ *   Minimum document count for bucket to be returned
+ * @param hardBoundsMin
+ *   Optional minimum timestamp bound (epoch microseconds)
+ * @param hardBoundsMax
+ *   Optional maximum timestamp bound (epoch microseconds)
+ * @param extendedBoundsMin
+ *   Optional extended bounds minimum
+ * @param extendedBoundsMax
+ *   Optional extended bounds maximum
  */
 case class DateHistogramConfig(
-    fieldName: String,
-    interval: String,
-    offset: Option[String] = None,
-    minDocCount: Long = 0,
-    hardBoundsMin: Option[Long] = None,
-    hardBoundsMax: Option[Long] = None,
-    extendedBoundsMin: Option[Long] = None,
-    extendedBoundsMax: Option[Long] = None
-) extends BucketAggregationConfig {
+  fieldName: String,
+  interval: String,
+  offset: Option[String] = None,
+  minDocCount: Long = 0,
+  hardBoundsMin: Option[Long] = None,
+  hardBoundsMax: Option[Long] = None,
+  extendedBoundsMin: Option[Long] = None,
+  extendedBoundsMax: Option[Long] = None)
+    extends BucketAggregationConfig {
 
   override def description: String = {
     val opts = Seq(
@@ -67,25 +74,33 @@ case class DateHistogramConfig(
 /**
  * Configuration for numeric histogram bucket aggregation.
  *
- * @param fieldName The numeric field to bucket
- * @param interval The fixed bucket width
- * @param offset Offset to shift bucket boundaries (default: 0.0)
- * @param minDocCount Minimum document count for bucket to be returned
- * @param hardBoundsMin Optional minimum bound
- * @param hardBoundsMax Optional maximum bound
- * @param extendedBoundsMin Optional extended bounds minimum
- * @param extendedBoundsMax Optional extended bounds maximum
+ * @param fieldName
+ *   The numeric field to bucket
+ * @param interval
+ *   The fixed bucket width
+ * @param offset
+ *   Offset to shift bucket boundaries (default: 0.0)
+ * @param minDocCount
+ *   Minimum document count for bucket to be returned
+ * @param hardBoundsMin
+ *   Optional minimum bound
+ * @param hardBoundsMax
+ *   Optional maximum bound
+ * @param extendedBoundsMin
+ *   Optional extended bounds minimum
+ * @param extendedBoundsMax
+ *   Optional extended bounds maximum
  */
 case class HistogramConfig(
-    fieldName: String,
-    interval: Double,
-    offset: Double = 0.0,
-    minDocCount: Long = 0,
-    hardBoundsMin: Option[Double] = None,
-    hardBoundsMax: Option[Double] = None,
-    extendedBoundsMin: Option[Double] = None,
-    extendedBoundsMax: Option[Double] = None
-) extends BucketAggregationConfig {
+  fieldName: String,
+  interval: Double,
+  offset: Double = 0.0,
+  minDocCount: Long = 0,
+  hardBoundsMin: Option[Double] = None,
+  hardBoundsMax: Option[Double] = None,
+  extendedBoundsMin: Option[Double] = None,
+  extendedBoundsMax: Option[Double] = None)
+    extends BucketAggregationConfig {
 
   override def description: String = {
     val opts = Seq(
@@ -100,26 +115,24 @@ case class HistogramConfig(
 /**
  * Configuration for range bucket aggregation.
  *
- * @param fieldName The numeric field to bucket
- * @param ranges Sequence of named ranges
+ * @param fieldName
+ *   The numeric field to bucket
+ * @param ranges
+ *   Sequence of named ranges
  */
 case class RangeConfig(
-    fieldName: String,
-    ranges: Seq[RangeBucket]
-) extends BucketAggregationConfig {
+  fieldName: String,
+  ranges: Seq[RangeBucket])
+    extends BucketAggregationConfig {
 
   override def description: String =
     s"Range($fieldName, ranges=[${ranges.map(_.toString).mkString(", ")}])"
 }
 
-/**
- * Utility object for creating bucket configurations from expressions.
- */
+/** Utility object for creating bucket configurations from expressions. */
 object BucketAggregationConfig {
 
-  /**
-   * Create a BucketAggregationConfig from a BucketExpression.
-   */
+  /** Create a BucketAggregationConfig from a BucketExpression. */
   def fromExpression(expr: BucketExpression): BucketAggregationConfig =
     expr match {
       case dh: DateHistogramExpression =>

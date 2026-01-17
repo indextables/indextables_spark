@@ -1078,8 +1078,8 @@ object FiltersToQueryConverter {
           case ts: java.sql.Timestamp =>
             // For timestamps, convert to UTC and use RFC3339 format: YYYY-MM-DDTHH:MM:SSZ
             // This matches how timestamps are indexed (using UTC) and tantivy's expected format
-            val instant = ts.toInstant()
-            val utcDateTime = instant.atOffset(ZoneOffset.UTC)
+            val instant        = ts.toInstant()
+            val utcDateTime    = instant.atOffset(ZoneOffset.UTC)
             val dateTimeString = utcDateTime.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
             queryLog(s"DATE conversion (Timestamp): $value -> $dateTimeString (RFC3339 UTC)")
             dateTimeString
@@ -1094,17 +1094,17 @@ object FiltersToQueryConverter {
             dateStr
           case daysSinceEpoch: Int =>
             // Convert days since epoch to LocalDate
-            val epochDate = LocalDate.of(1970, 1, 1)
+            val epochDate  = LocalDate.of(1970, 1, 1)
             val dateString = epochDate.plusDays(daysSinceEpoch.toLong).toString
             queryLog(s"DATE conversion (Days): $value -> $dateString")
             dateString
           case microseconds: Long =>
             // Spark timestamps are stored as microseconds since epoch
             // Convert to ISO datetime format
-            val seconds = microseconds / 1000000L
-            val nanos = ((microseconds % 1000000L) * 1000L).toInt
-            val instant = java.time.Instant.ofEpochSecond(seconds, nanos)
-            val localDateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
+            val seconds        = microseconds / 1000000L
+            val nanos          = ((microseconds % 1000000L) * 1000L).toInt
+            val instant        = java.time.Instant.ofEpochSecond(seconds, nanos)
+            val localDateTime  = LocalDateTime.ofInstant(instant, ZoneOffset.UTC)
             val dateTimeString = localDateTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             queryLog(s"DATE conversion (Long microseconds): $value -> $dateTimeString")
             dateTimeString
@@ -1211,23 +1211,26 @@ object FiltersToQueryConverter {
               import java.time.format.DateTimeFormatter
 
               // Parse the RFC3339 datetime string (may have Z or +00:00 suffix)
-              val (localDateTime, startStr) = if (dateTimeString.endsWith("Z") || dateTimeString.contains("+") || dateTimeString.contains("-")) {
-                // RFC3339 format with timezone - parse and extract local datetime
-                val offsetDateTime = OffsetDateTime.parse(dateTimeString, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-                val ldt = offsetDateTime.toLocalDateTime
-                (ldt, dateTimeString) // Use original RFC3339 string for query
-              } else {
-                // ISO_LOCAL_DATE_TIME format without timezone
-                val ldt = LocalDateTime.parse(dateTimeString, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                (ldt, dateTimeString)
-              }
+              val (localDateTime, startStr) =
+                if (dateTimeString.endsWith("Z") || dateTimeString.contains("+") || dateTimeString.contains("-")) {
+                  // RFC3339 format with timezone - parse and extract local datetime
+                  val offsetDateTime = OffsetDateTime.parse(dateTimeString, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                  val ldt            = offsetDateTime.toLocalDateTime
+                  (ldt, dateTimeString) // Use original RFC3339 string for query
+                } else {
+                  // ISO_LOCAL_DATE_TIME format without timezone
+                  val ldt = LocalDateTime.parse(dateTimeString, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                  (ldt, dateTimeString)
+                }
 
               // For equality matching, create a 1 microsecond range to match exact value
               // Add 1 nanosecond to get exclusive upper bound that still matches just this value
               val endDateTime = localDateTime.plusNanos(1000) // 1 microsecond
               val endStr = if (dateTimeString.endsWith("Z")) {
                 endDateTime.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-              } else if (dateTimeString.contains("+") || (dateTimeString.contains("-") && dateTimeString.lastIndexOf("-") > 10)) {
+              } else if (
+                dateTimeString.contains("+") || (dateTimeString.contains("-") && dateTimeString.lastIndexOf("-") > 10)
+              ) {
                 // Has timezone offset - preserve it
                 val offset = OffsetDateTime.parse(dateTimeString).getOffset
                 endDateTime.atOffset(offset).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
@@ -1319,10 +1322,10 @@ object FiltersToQueryConverter {
         // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
           val tantivyFieldType = fieldType match {
-            case FieldType.DATE     => "date"
-            case FieldType.INTEGER  => "i64"
-            case FieldType.FLOAT    => "f64"
-            case _                  => "str"
+            case FieldType.DATE    => "date"
+            case FieldType.INTEGER => "i64"
+            case FieldType.FLOAT   => "f64"
+            case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
             attribute,
@@ -1353,10 +1356,10 @@ object FiltersToQueryConverter {
         // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
           val tantivyFieldType = fieldType match {
-            case FieldType.DATE     => "date"
-            case FieldType.INTEGER  => "i64"
-            case FieldType.FLOAT    => "f64"
-            case _                  => "str"
+            case FieldType.DATE    => "date"
+            case FieldType.INTEGER => "i64"
+            case FieldType.FLOAT   => "f64"
+            case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
             attribute,
@@ -1421,10 +1424,10 @@ object FiltersToQueryConverter {
         // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
           val tantivyFieldType = fieldType match {
-            case FieldType.DATE     => "date"
-            case FieldType.INTEGER  => "i64"
-            case FieldType.FLOAT    => "f64"
-            case _                  => "str"
+            case FieldType.DATE    => "date"
+            case FieldType.INTEGER => "i64"
+            case FieldType.FLOAT   => "f64"
+            case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
             attribute,
@@ -1489,10 +1492,10 @@ object FiltersToQueryConverter {
         // Use SplitRangeQuery for DATE fields to avoid parseQuery datetime parsing issues
         try {
           val tantivyFieldType = fieldType match {
-            case FieldType.DATE     => "date"
-            case FieldType.INTEGER  => "i64"
-            case FieldType.FLOAT    => "f64"
-            case _                  => "str"
+            case FieldType.DATE    => "date"
+            case FieldType.INTEGER => "i64"
+            case FieldType.FLOAT   => "f64"
+            case _                 => "str"
           }
           val rangeQuery = new io.indextables.tantivy4java.split.SplitRangeQuery(
             attribute,

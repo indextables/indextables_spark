@@ -20,8 +20,8 @@ package io.indextables.spark.prewarm
 import java.io.File
 import java.nio.file.Files
 
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.SparkSession
 
 import io.indextables.spark.storage.GlobalSplitCacheManager
 import org.scalatest.funsuite.AnyFunSuite
@@ -37,7 +37,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmReadTimeIntegrationTest])
 
-  var spark: SparkSession = _
+  var spark: SparkSession   = _
   var tempTablePath: String = _
 
   override def beforeEach(): Unit = {
@@ -97,15 +97,17 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val ss = spark
     import ss.implicits._
 
-    val testData = (1 until numRecords + 1).map { i =>
-      (
-        i.toLong,
-        s"title_$i",
-        s"content for record $i",
-        s"category_${i % 5}",
-        i * 1.5
-      )
-    }.toDF("id", "title", "content", "category", "score")
+    val testData = (1 until numRecords + 1)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i",
+          s"content for record $i",
+          s"category_${i % 5}",
+          i * 1.5
+        )
+      }
+      .toDF("id", "title", "content", "category", "score")
 
     testData
       .coalesce(1)
@@ -134,7 +136,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
 
-    val count = df.filter(col("category") === "category_2").count()
+    val count    = df.filter(col("category") === "category_2").count()
     val duration = System.currentTimeMillis() - startTime
 
     logger.info(s"Read with prewarm completed in ${duration}ms, found $count records")
@@ -366,7 +368,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val df1 = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
-    val count1 = df1.filter(col("category") === "category_0").count()
+    val count1    = df1.filter(col("category") === "category_0").count()
     val duration1 = System.currentTimeMillis() - start1
 
     // Second read - should use cached data
@@ -374,7 +376,7 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val df2 = spark.read
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .load(tempTablePath)
-    val count2 = df2.filter(col("category") === "category_1").count()
+    val count2    = df2.filter(col("category") === "category_1").count()
     val duration2 = System.currentTimeMillis() - start2
 
     logger.info(s"First read: ${duration1}ms, $count1 records")
@@ -399,13 +401,15 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     try {
       // Create partitioned data
-      val testData = (1 until 201).map { i =>
-        (
-          i.toLong,
-          s"content_$i",
-          s"region_${i % 3}"
-        )
-      }.toDF("id", "content", "region")
+      val testData = (1 until 201)
+        .map { i =>
+          (
+            i.toLong,
+            s"content_$i",
+            s"region_${i % 3}"
+          )
+        }
+        .toDF("id", "content", "region")
 
       testData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -450,10 +454,13 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
       .load(tempTablePath)
 
     // Execute query that benefits from both prewarm and batch optimization
-    val result = df.filter(col("score") > 100.0).agg(
-      count("*").as("cnt"),
-      sum("score").as("total_score")
-    ).collect()
+    val result = df
+      .filter(col("score") > 100.0)
+      .agg(
+        count("*").as("cnt"),
+        sum("score").as("total_score")
+      )
+      .collect()
 
     assert(result.length > 0, "Query with prewarm + batch optimization should return results")
 
@@ -512,7 +519,8 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Time a range query (benefits from both fast field prewarm and batch opt)
     val startTime = System.currentTimeMillis()
-    val result = df.filter(col("score") > 100.0 && col("score") < 500.0)
+    val result = df
+      .filter(col("score") > 100.0 && col("score") < 500.0)
       .select("id", "content", "score")
       .collect()
     val duration = System.currentTimeMillis() - startTime
@@ -522,7 +530,8 @@ class PrewarmReadTimeIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Second run should be faster (cached)
     val startTime2 = System.currentTimeMillis()
-    val result2 = df.filter(col("score") > 200.0 && col("score") < 400.0)
+    val result2 = df
+      .filter(col("score") > 200.0 && col("score") < 400.0)
       .select("id", "score")
       .collect()
     val duration2 = System.currentTimeMillis() - startTime2

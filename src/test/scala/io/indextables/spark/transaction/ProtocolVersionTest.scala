@@ -449,7 +449,7 @@ class ProtocolVersionTest extends TestBase {
       val tablePath = new Path(tempPath)
       val options = new CaseInsensitiveStringMap(
         Map(
-          "spark.indextables.checkpoint.enabled" -> "true",
+          "spark.indextables.checkpoint.enabled"  -> "true",
           "spark.indextables.checkpoint.interval" -> "3"
         ).asJava
       )

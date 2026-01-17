@@ -58,9 +58,12 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *
    * Detection: If the key suffix is in knownValues, use new syntax; otherwise use old syntax.
    *
-   * @param prefix The option prefix (e.g., "spark.indextables.indexing.typemap.")
-   * @param knownValues Set of known values that trigger new syntax parsing
-   * @return Map[String, String] where key=field name (lowercase), value=configured value (lowercase)
+   * @param prefix
+   *   The option prefix (e.g., "spark.indextables.indexing.typemap.")
+   * @param knownValues
+   *   Set of known values that trigger new syntax parsing
+   * @return
+   *   Map[String, String] where key=field name (lowercase), value=configured value (lowercase)
    */
   private def parseDualSyntaxConfig(prefix: String, knownValues: Set[String]): Map[String, String] = {
     import scala.jdk.CollectionConverters._
@@ -73,7 +76,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .filter { case (key, _) => key.startsWith(prefix) }
       .foreach {
         case (key, value) =>
-          val suffix = key.substring(prefix.length).toLowerCase
+          val suffix     = key.substring(prefix.length).toLowerCase
           val valueLower = value.toLowerCase
 
           if (knownValues.contains(suffix)) {
@@ -131,17 +134,16 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    * Get tokenizer override configuration. Maps field names to their tokenizer types.
    *
    * Supports both syntaxes:
-   * - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
-   * - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
+   *   - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
+   *   - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
    */
   def getTokenizerOverrides: Map[String, String] =
     parseDualSyntaxConfig("spark.indextables.indexing.tokenizer.", ValidTokenizers)
 
   /**
-   * Get the default index record option for text fields.
-   * Controls what information is stored in the inverted index for text fields.
-   * Options: "basic" (doc IDs only), "freq" (doc IDs + term frequency), "position" (doc IDs + freq + positions)
-   * Default: "position" (required for phrase queries and exact phrase matching)
+   * Get the default index record option for text fields. Controls what information is stored in the inverted index for
+   * text fields. Options: "basic" (doc IDs only), "freq" (doc IDs + term frequency), "position" (doc IDs + freq +
+   * positions) Default: "position" (required for phrase queries and exact phrase matching)
    */
   def getDefaultIndexRecordOption: String =
     Option(options.get("spark.indextables.indexing.text.indexRecordOption"))
@@ -280,7 +282,7 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
 
     // Helper to check field existence (case-insensitive)
     // For nested paths like "user.age", only the root field "user" needs to exist in the schema
-    def checkField(fieldName: String, configType: String): Unit = {
+    def checkField(fieldName: String, configType: String): Unit =
       if (fieldName.nonEmpty) {
         // Extract the root field name (before the first dot, if any)
         val rootFieldName = fieldName.split('.').head.toLowerCase
@@ -288,42 +290,27 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
           errors += s"$configType field '$fieldName' does not exist in schema"
         }
       }
-    }
 
     // Check typemap fields
-    getFieldTypeMapping.keys.foreach { fieldName =>
-      checkField(fieldName, "typemap")
-    }
+    getFieldTypeMapping.keys.foreach(fieldName => checkField(fieldName, "typemap"))
 
     // Check fastfields
-    getFastFields.foreach { fieldName =>
-      checkField(fieldName, "fastfields")
-    }
+    getFastFields.foreach(fieldName => checkField(fieldName, "fastfields"))
 
     // Check nonfastfields
-    getNonFastFields.foreach { fieldName =>
-      checkField(fieldName, "nonfastfields")
-    }
+    getNonFastFields.foreach(fieldName => checkField(fieldName, "nonfastfields"))
 
     // Check storeonlyfields
-    getStoreOnlyFields.foreach { fieldName =>
-      checkField(fieldName, "storeonlyfields")
-    }
+    getStoreOnlyFields.foreach(fieldName => checkField(fieldName, "storeonlyfields"))
 
     // Check indexonlyfields
-    getIndexOnlyFields.foreach { fieldName =>
-      checkField(fieldName, "indexonlyfields")
-    }
+    getIndexOnlyFields.foreach(fieldName => checkField(fieldName, "indexonlyfields"))
 
     // Check tokenizer overrides
-    getTokenizerOverrides.keys.foreach { fieldName =>
-      checkField(fieldName, "tokenizer")
-    }
+    getTokenizerOverrides.keys.foreach(fieldName => checkField(fieldName, "tokenizer"))
 
     // Check indexrecordoption fields
-    getIndexRecordOptionOverrides.keys.foreach { fieldName =>
-      checkField(fieldName, "indexrecordoption")
-    }
+    getIndexRecordOptionOverrides.keys.foreach(fieldName => checkField(fieldName, "indexrecordoption"))
 
     if (errors.nonEmpty) {
       val availableFields = schema.fieldNames.sorted.mkString(", ")

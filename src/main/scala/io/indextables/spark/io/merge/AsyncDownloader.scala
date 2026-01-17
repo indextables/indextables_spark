@@ -42,19 +42,13 @@ trait AsyncDownloader extends AutoCloseable {
    */
   def downloadAsync(request: DownloadRequest): CompletableFuture[DownloadResult]
 
-  /**
-   * Get the protocol this downloader handles (e.g., "s3", "azure", "file").
-   */
+  /** Get the protocol this downloader handles (e.g., "s3", "azure", "file"). */
   def protocol: String
 
-  /**
-   * Check if this downloader can handle the given path.
-   */
+  /** Check if this downloader can handle the given path. */
   def canHandle(path: String): Boolean
 
-  /**
-   * Close any resources held by this downloader.
-   */
+  /** Close any resources held by this downloader. */
   override def close(): Unit = {}
 }
 
@@ -79,9 +73,7 @@ case class DownloadRequest(
   batchId: Long,
   index: Int) {
 
-  /**
-   * Create a copy with a new batch ID (used when submitting to the queue).
-   */
+  /** Create a copy with a new batch ID (used when submitting to the queue). */
   def withBatchId(newBatchId: Long): DownloadRequest =
     copy(batchId = newBatchId)
 }
@@ -91,7 +83,11 @@ object DownloadRequest {
   /**
    * Create a download request with default batch ID and index. Useful for single downloads outside of batch context.
    */
-  def apply(sourcePath: String, destinationPath: String, expectedSize: Long): DownloadRequest =
+  def apply(
+    sourcePath: String,
+    destinationPath: String,
+    expectedSize: Long
+  ): DownloadRequest =
     DownloadRequest(
       sourcePath = sourcePath,
       destinationPath = destinationPath,
@@ -128,15 +124,11 @@ case class DownloadResult(
   error: Option[Throwable],
   retryCount: Int = 0) {
 
-  /**
-   * Create a copy indicating a retry was attempted.
-   */
+  /** Create a copy indicating a retry was attempted. */
   def withRetry: DownloadResult =
     copy(retryCount = retryCount + 1)
 
-  /**
-   * Get a human-readable description of the result.
-   */
+  /** Get a human-readable description of the result. */
   def describe: String =
     if (success) {
       s"Downloaded ${request.sourcePath} -> $localPath ($bytesDownloaded bytes in ${durationMs}ms)"
@@ -147,9 +139,7 @@ case class DownloadResult(
 
 object DownloadResult {
 
-  /**
-   * Create a successful download result.
-   */
+  /** Create a successful download result. */
   def success(
     request: DownloadRequest,
     localPath: String,
@@ -167,9 +157,7 @@ object DownloadResult {
       retryCount = retryCount
     )
 
-  /**
-   * Create a failed download result.
-   */
+  /** Create a failed download result. */
   def failure(
     request: DownloadRequest,
     error: Throwable,
@@ -205,9 +193,7 @@ case class DownloadBatch(
   submissionTime: Long,
   downloads: Seq[DownloadRequest]) {
 
-  /**
-   * Number of downloads in this batch.
-   */
+  /** Number of downloads in this batch. */
   def size: Int = downloads.size
 }
 
@@ -232,27 +218,19 @@ case class DownloadMetrics(
   totalRetries: Long,
   failedDownloads: Long) {
 
-  /**
-   * Average download throughput in bytes per second.
-   */
+  /** Average download throughput in bytes per second. */
   def avgBytesPerSecond: Double =
     if (totalTimeMs > 0) totalBytes.toDouble / totalTimeMs * 1000 else 0
 
-  /**
-   * Average download time per file in milliseconds.
-   */
+  /** Average download time per file in milliseconds. */
   def avgTimePerFileMs: Double =
     if (totalFiles > 0) totalTimeMs.toDouble / totalFiles else 0
 
-  /**
-   * Retry rate as a percentage.
-   */
+  /** Retry rate as a percentage. */
   def retryRate: Double =
     if (totalFiles > 0) totalRetries.toDouble / totalFiles * 100 else 0
 
-  /**
-   * Merge with another metrics instance.
-   */
+  /** Merge with another metrics instance. */
   def merge(other: DownloadMetrics): DownloadMetrics =
     DownloadMetrics(
       totalBytes = totalBytes + other.totalBytes,
@@ -265,8 +243,6 @@ case class DownloadMetrics(
 
 object DownloadMetrics {
 
-  /**
-   * Empty metrics instance.
-   */
+  /** Empty metrics instance. */
   val empty: DownloadMetrics = DownloadMetrics(0, 0, 0, 0, 0)
 }

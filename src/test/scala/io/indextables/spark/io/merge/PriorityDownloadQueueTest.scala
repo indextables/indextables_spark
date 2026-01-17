@@ -20,17 +20,16 @@ package io.indextables.spark.io.merge
 import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
 
   var queue: PriorityDownloadQueue = _
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     queue = new PriorityDownloadQueue()
-  }
 
   test("empty queue returns None on poll") {
     queue.poll() shouldBe None
@@ -129,7 +128,7 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
 
   test("empty batch is ignored") {
     val batchId = queue.nextBatchId()
-    val batch = DownloadBatch(batchId, System.currentTimeMillis(), Seq.empty)
+    val batch   = DownloadBatch(batchId, System.currentTimeMillis(), Seq.empty)
     queue.submitBatch(batch)
 
     queue.isEmpty shouldBe true
@@ -137,17 +136,17 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
   }
 
   test("concurrent poll from multiple threads") {
-    val batchId = queue.nextBatchId()
+    val batchId     = queue.nextBatchId()
     val numRequests = 100
     val requests = (0 until numRequests).map { i =>
       DownloadRequest(s"s3://bucket/file$i.split", s"/tmp/file$i.split", 1000L, batchId, i)
     }
     queue.submitBatch(DownloadBatch(batchId, System.currentTimeMillis(), requests))
 
-    val executor = Executors.newFixedThreadPool(10)
+    val executor    = Executors.newFixedThreadPool(10)
     val polledItems = new java.util.concurrent.ConcurrentLinkedQueue[DownloadRequest]()
-    val latch = new CountDownLatch(numRequests)
-    val stopSignal = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val latch       = new CountDownLatch(numRequests)
+    val stopSignal  = new java.util.concurrent.atomic.AtomicBoolean(false)
 
     // Start 10 threads polling concurrently
     (0 until 10).foreach { _ =>
@@ -155,7 +154,7 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
         override def run(): Unit = {
           var emptyPolls = 0
           // Keep polling until stop signal or too many consecutive empty polls
-          while (!stopSignal.get() && emptyPolls < 50) {
+          while (!stopSignal.get() && emptyPolls < 50)
             queue.poll() match {
               case Some(req) =>
                 polledItems.add(req)
@@ -166,7 +165,6 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
                 // Brief pause before retry to avoid tight spinning
                 Thread.sleep(1)
             }
-          }
         }
       })
     }
@@ -188,12 +186,22 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
 
   test("getStats returns correct statistics") {
     val batchId1 = queue.nextBatchId()
-    queue.submitBatch(DownloadBatch(batchId1, System.currentTimeMillis(),
-      (0 until 5).map(i => DownloadRequest(s"s3://b/f$i", s"/t/f$i", 100L, batchId1, i))))
+    queue.submitBatch(
+      DownloadBatch(
+        batchId1,
+        System.currentTimeMillis(),
+        (0 until 5).map(i => DownloadRequest(s"s3://b/f$i", s"/t/f$i", 100L, batchId1, i))
+      )
+    )
 
     val batchId2 = queue.nextBatchId()
-    queue.submitBatch(DownloadBatch(batchId2, System.currentTimeMillis(),
-      (0 until 3).map(i => DownloadRequest(s"s3://b/g$i", s"/t/g$i", 100L, batchId2, i))))
+    queue.submitBatch(
+      DownloadBatch(
+        batchId2,
+        System.currentTimeMillis(),
+        (0 until 3).map(i => DownloadRequest(s"s3://b/g$i", s"/t/g$i", 100L, batchId2, i))
+      )
+    )
 
     val stats = queue.getStats
     stats.totalPending shouldBe 8
@@ -204,8 +212,13 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
 
   test("clear removes all batches") {
     val batchId = queue.nextBatchId()
-    queue.submitBatch(DownloadBatch(batchId, System.currentTimeMillis(),
-      (0 until 10).map(i => DownloadRequest(s"s3://b/f$i", s"/t/f$i", 100L, batchId, i))))
+    queue.submitBatch(
+      DownloadBatch(
+        batchId,
+        System.currentTimeMillis(),
+        (0 until 10).map(i => DownloadRequest(s"s3://b/f$i", s"/t/f$i", 100L, batchId, i))
+      )
+    )
 
     queue.pendingDownloads shouldBe 10
 
@@ -223,7 +236,7 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
   }
 
   test("concurrent poll and cancel maintains correct pendingCount") {
-    val batchId = queue.nextBatchId()
+    val batchId     = queue.nextBatchId()
     val numRequests = 1000
     val requests = (0 until numRequests).map { i =>
       DownloadRequest(s"s3://bucket/file$i.split", s"/tmp/file$i.split", 1000L, batchId, i)
@@ -232,43 +245,38 @@ class PriorityDownloadQueueTest extends AnyFunSuite with Matchers with BeforeAnd
 
     queue.pendingDownloads shouldBe numRequests
 
-    val executor = Executors.newFixedThreadPool(10)
-    val polledCount = new AtomicInteger(0)
+    val executor       = Executors.newFixedThreadPool(10)
+    val polledCount    = new AtomicInteger(0)
     val cancelledCount = new AtomicInteger(0)
-    val startLatch = new CountDownLatch(1)
-    val doneLatch = new CountDownLatch(11) // 10 pollers + 1 canceller
+    val startLatch     = new CountDownLatch(1)
+    val doneLatch      = new CountDownLatch(11) // 10 pollers + 1 canceller
 
     // Start 10 threads polling concurrently
     (0 until 10).foreach { _ =>
       executor.submit(new Runnable {
-        override def run(): Unit = {
+        override def run(): Unit =
           try {
             startLatch.await() // Wait for all threads to be ready
             var continue = true
-            while (continue) {
+            while (continue)
               queue.poll() match {
                 case Some(_) => polledCount.incrementAndGet()
-                case None => continue = false
+                case None    => continue = false
               }
-            }
-          } finally {
+          } finally
             doneLatch.countDown()
-          }
-        }
       })
     }
 
     // Start 1 thread that will cancel after a brief delay
     executor.submit(new Runnable {
-      override def run(): Unit = {
+      override def run(): Unit =
         try {
           startLatch.await()
           Thread.sleep(5) // Let some polls happen first
           cancelledCount.set(queue.cancelBatch(batchId))
-        } finally {
+        } finally
           doneLatch.countDown()
-        }
-      }
     })
 
     // Start all threads simultaneously

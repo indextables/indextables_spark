@@ -25,8 +25,8 @@ import scala.jdk.CollectionConverters._
 
 import org.apache.spark.sql.functions._
 
-import io.indextables.spark.RealAzureTestBase
 import io.indextables.spark.storage.GlobalSplitCacheManager
+import io.indextables.spark.RealAzureTestBase
 
 /**
  * Validates that prewarming ALL fields and ALL segments on Azure Blob Storage eliminates cache misses.
@@ -35,23 +35,20 @@ import io.indextables.spark.storage.GlobalSplitCacheManager
  * created, proving that all required data was prewarmed.
  *
  * Key validation approach:
- *   1. Write test data to Azure Blob Storage
- *   2. Execute FLUSH to ensure clean cache state
- *   3. Execute PREWARM with ALL segments including DOC_STORE
- *   4. Record cache stats (total_bytes, components_cached)
- *   5. Execute multiple queries that exercise different code paths
- *   6. Verify cache stats haven't increased (no new cache entries)
+ *   1. Write test data to Azure Blob Storage 2. Execute FLUSH to ensure clean cache state 3. Execute PREWARM with ALL
+ *      segments including DOC_STORE 4. Record cache stats (total_bytes, components_cached) 5. Execute multiple queries
+ *      that exercise different code paths 6. Verify cache stats haven't increased (no new cache entries)
  *
  * Credentials are loaded from multiple sources with the following priority:
- *   1. System properties: test.azure.storageAccount, test.azure.accountKey
- *   2. ~/.azure/credentials file (matches tantivy4java pattern)
- *   3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
+ *   1. System properties: test.azure.storageAccount, test.azure.accountKey 2. ~/.azure/credentials file (matches
+ *      tantivy4java pattern) 3. Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  */
 class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
 
   // Generate unique test run ID to avoid conflicts
-  private val testRunId    = UUID.randomUUID().toString.substring(0, 8)
-  private val testBasePath = s"abfss://${testContainer}@${getStorageAccount.getOrElse("unknown")}.dfs.core.windows.net/prewarm-cache-validation-$testRunId"
+  private val testRunId = UUID.randomUUID().toString.substring(0, 8)
+  private val testBasePath =
+    s"abfss://$testContainer@${getStorageAccount.getOrElse("unknown")}.dfs.core.windows.net/prewarm-cache-validation-$testRunId"
 
   // Disk cache path for local validation
   private var diskCachePath: String = _
@@ -72,14 +69,14 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
   }
 
   override def afterAll(): Unit =
-    try {
+    try
       // Clean up local disk cache directory
       if (diskCachePath != null) {
         deleteRecursively(new File(diskCachePath))
       }
-      // Note: Azure test directory cleanup would require Azure SDK
-      // For now, rely on container lifecycle policies or manual cleanup
-    } finally
+    // Note: Azure test directory cleanup would require Azure SDK
+    // For now, rely on container lifecycle policies or manual cleanup
+    finally
       super.afterAll()
 
   private def deleteRecursively(file: File): Unit = {
@@ -89,9 +86,7 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
     file.delete()
   }
 
-  /**
-   * List all files in the disk cache directory for debugging.
-   */
+  /** List all files in the disk cache directory for debugging. */
   private def listDiskCacheContents(label: String): Unit = {
     val cacheDir = new File(diskCachePath)
     if (cacheDir.exists() && cacheDir.isDirectory) {
@@ -107,14 +102,13 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
           val uuidPattern = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}".r
           uuidPattern.findFirstIn(name).getOrElse("other")
         }
-        byPrefix.toSeq.sortBy(_._1).foreach { case (prefix, groupFiles) =>
-          println(s"   Split $prefix: ${groupFiles.length} files")
-          groupFiles.sortBy(_.getName).take(10).foreach { f =>
-            println(s"     - ${f.getName} (${f.length()} bytes)")
-          }
-          if (groupFiles.length > 10) {
-            println(s"     ... and ${groupFiles.length - 10} more files")
-          }
+        byPrefix.toSeq.sortBy(_._1).foreach {
+          case (prefix, groupFiles) =>
+            println(s"   Split $prefix: ${groupFiles.length} files")
+            groupFiles.sortBy(_.getName).take(10).foreach(f => println(s"     - ${f.getName} (${f.length()} bytes)"))
+            if (groupFiles.length > 10) {
+              println(s"     ... and ${groupFiles.length - 10} more files")
+            }
         }
       }
     } else {
@@ -122,17 +116,14 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
     }
   }
 
-  private def listFilesRecursively(dir: File): Seq[File] = {
+  private def listFilesRecursively(dir: File): Seq[File] =
     if (dir.isDirectory) {
       Option(dir.listFiles()).map(_.toSeq).getOrElse(Seq.empty).flatMap { f =>
         if (f.isDirectory) listFilesRecursively(f) else Seq(f)
       }
     } else Seq.empty
-  }
 
-  /**
-   * Helper to get disk cache stats from DESCRIBE command.
-   */
+  /** Helper to get disk cache stats from DESCRIBE command. */
   private def getDiskCacheStats(): Option[(Long, Long)] =
     try {
       val result = spark.sql("DESCRIBE INDEXTABLES DISK CACHE").collect()
@@ -156,7 +147,8 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
 
     val storageAccount = getStorageAccount.get
     val accountKey     = getAccountKey.get
-    val testPath       = s"abfss://${testContainer}@${storageAccount}.dfs.core.windows.net/prewarm-test-$testRunId/complete-prewarm"
+    val testPath =
+      s"abfss://$testContainer@$storageAccount.dfs.core.windows.net/prewarm-test-$testRunId/complete-prewarm"
 
     // Enable disk cache for tracking
     spark.conf.set("spark.indextables.cache.disk.enabled", "true")
@@ -168,16 +160,18 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
 
     // Step 1: Create test data with multiple field types
     println("Step 1: Creating test data on Azure Blob Storage...")
-    val testData = (1 until 501).map { i =>
-      (
-        i.toLong,
-        s"title_$i with some searchable content",
-        s"This is the full text content for record $i with various words",
-        s"category_${i % 10}",
-        i * 1.5,
-        s"2024-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}"
-      )
-    }.toDF("id", "title", "content", "category", "score", "date_str")
+    val testData = (1 until 501)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i with some searchable content",
+          s"This is the full text content for record $i with various words",
+          s"category_${i % 10}",
+          i * 1.5,
+          s"2024-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}"
+        )
+      }
+      .toDF("id", "title", "content", "category", "score", "date_str")
 
     testData
       .coalesce(2) // Create 2 splits for better test coverage
@@ -307,7 +301,9 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
         } else if (prewarmCoveragePercent >= 80.0) {
           println(s"✅ EXCELLENT: Prewarm cached $prewarmCoveragePercent% of required components")
         } else {
-          println(s"✅ GOOD: Prewarm cached $prewarmCoveragePercent% of required components (some additional loads expected)")
+          println(
+            s"✅ GOOD: Prewarm cached $prewarmCoveragePercent% of required components (some additional loads expected)"
+          )
         }
 
       case (None, _) =>
@@ -327,7 +323,7 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
 
     val storageAccount = getStorageAccount.get
     val accountKey     = getAccountKey.get
-    val testPath       = s"abfss://${testContainer}@${storageAccount}.dfs.core.windows.net/prewarm-test-$testRunId/field-specific"
+    val testPath = s"abfss://$testContainer@$storageAccount.dfs.core.windows.net/prewarm-test-$testRunId/field-specific"
 
     // Enable disk cache
     spark.conf.set("spark.indextables.cache.disk.enabled", "true")
@@ -337,9 +333,9 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
     import ss.implicits._
 
     // Create test data
-    val testData = (1 until 301).map { i =>
-      (i.toLong, s"title_$i", s"category_${i % 5}", i * 2.0)
-    }.toDF("id", "title", "category", "score")
+    val testData = (1 until 301)
+      .map(i => (i.toLong, s"title_$i", s"category_${i % 5}", i * 2.0))
+      .toDF("id", "title", "category", "score")
 
     testData
       .coalesce(1)
@@ -399,7 +395,7 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
 
     val storageAccount = getStorageAccount.get
     val accountKey     = getAccountKey.get
-    val testPath       = s"abfss://${testContainer}@${storageAccount}.dfs.core.windows.net/prewarm-test-$testRunId/duration"
+    val testPath       = s"abfss://$testContainer@$storageAccount.dfs.core.windows.net/prewarm-test-$testRunId/duration"
 
     // Enable disk cache
     spark.conf.set("spark.indextables.cache.disk.enabled", "true")
@@ -409,9 +405,8 @@ class RealAzurePrewarmCacheValidationTest extends RealAzureTestBase {
     import ss.implicits._
 
     // Create test data
-    val testData = (1 until 1001).map { i =>
-      (i.toLong, s"title_$i", s"content_$i", i * 1.5)
-    }.toDF("id", "title", "content", "score")
+    val testData =
+      (1 until 1001).map(i => (i.toLong, s"title_$i", s"content_$i", i * 1.5)).toDF("id", "title", "content", "score")
 
     testData
       .coalesce(2)

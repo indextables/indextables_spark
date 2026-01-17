@@ -29,11 +29,11 @@ import org.apache.spark.SparkContext
 
 import io.indextables.spark.search.SplitSearchEngine
 import io.indextables.spark.storage.{DriverSplitLocalityManager, SplitCacheConfig}
-import io.indextables.spark.util.ConfigUtils
 import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.util.ConfigUtils
+import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import io.indextables.tantivy4java.split.SplitSearcher
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
-import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
 /**
@@ -112,16 +112,23 @@ object PreWarmManager {
   }
 
   /**
-   * Execute pre-warming with specific component selection for all splits that will be queried.
-   * This is the enhanced version that supports segment/field selection from configuration.
+   * Execute pre-warming with specific component selection for all splits that will be queried. This is the enhanced
+   * version that supports segment/field selection from configuration.
    *
-   * @param sc SparkContext for distributed execution
-   * @param addActions Sequence of splits to prewarm
-   * @param segments Set of IndexComponents to prewarm (e.g., TERM, FASTFIELD, POSTINGS)
-   * @param fields Optional sequence of field names to prewarm (None = all fields)
-   * @param splitsPerTask Number of splits to batch per Spark task (default: 2)
-   * @param config Configuration map for cache and storage settings
-   * @return PreWarmResult with warmup statistics
+   * @param sc
+   *   SparkContext for distributed execution
+   * @param addActions
+   *   Sequence of splits to prewarm
+   * @param segments
+   *   Set of IndexComponents to prewarm (e.g., TERM, FASTFIELD, POSTINGS)
+   * @param fields
+   *   Optional sequence of field names to prewarm (None = all fields)
+   * @param splitsPerTask
+   *   Number of splits to batch per Spark task (default: 2)
+   * @param config
+   *   Configuration map for cache and storage settings
+   * @return
+   *   PreWarmResult with warmup statistics
    */
   def executePreWarmWithComponents(
     sc: SparkContext,
@@ -167,7 +174,7 @@ object PreWarmManager {
         }
     }.toSeq
 
-    logger.info(s"Created ${componentPrewarmTasks.length} prewarm tasks (${splitsPerTask} splits per task)")
+    logger.info(s"Created ${componentPrewarmTasks.length} prewarm tasks ($splitsPerTask splits per task)")
 
     // Broadcast config for executor access
     val broadcastConfig = sc.broadcast(config)
@@ -180,29 +187,26 @@ object PreWarmManager {
 
     // Create (task, preferredLocations) tuples for makeRDD
     // This ensures prewarm tasks run on the same hosts where queries will execute
-    val tasksWithLocations = componentPrewarmTasks.map { task =>
-      (task, Seq(task.hostname))
-    }
+    val tasksWithLocations = componentPrewarmTasks.map(task => (task, Seq(task.hostname)))
 
     val taskResults =
       try
         sc.makeRDD(tasksWithLocations)
           .setName(s"Prewarm Cache: ${addActions.length} splits")
-          .map { task =>
-            executeComponentPrewarmTask(task, broadcastConfig)
-          }
+          .map(task => executeComponentPrewarmTask(task, broadcastConfig))
           .collect()
           .toSeq
       finally
         sc.clearJobGroup()
 
     // Aggregate results by hostname
-    val warmupAssignments = taskResults.groupBy(_.hostname).map {
-      case (hostname, results) => hostname -> results.map(_.splitsPrewarmed).sum
-    }
+    val warmupAssignments =
+      taskResults.groupBy(_.hostname).map { case (hostname, results) => hostname -> results.map(_.splitsPrewarmed).sum }
 
     val endTime = System.currentTimeMillis()
-    logger.info(s"Component-based prewarm completed in ${endTime - startTime}ms: ${warmupAssignments.map { case (h, c) => s"$h: $c splits" }.mkString(", ")}")
+    logger.info(s"Component-based prewarm completed in ${endTime - startTime}ms: ${warmupAssignments
+        .map { case (h, c) => s"$h: $c splits" }
+        .mkString(", ")}")
 
     PreWarmResult(
       warmupInitiated = true,
@@ -212,16 +216,16 @@ object PreWarmManager {
   }
 
   /**
-   * Execute a component-based prewarm task on an executor.
-   * Supports both full-component preloading and field-specific preloading.
+   * Execute a component-based prewarm task on an executor. Supports both full-component preloading and field-specific
+   * preloading.
    */
   private def executeComponentPrewarmTask(
     task: ComponentPrewarmTask,
     broadcastConfig: Broadcast[Map[String, String]]
   ): ComponentPrewarmTaskResult = {
-    val taskStartTime = System.currentTimeMillis()
-    val actualHostname = getCurrentHostname
-    val config = broadcastConfig.value
+    val taskStartTime      = System.currentTimeMillis()
+    val actualHostname     = getCurrentHostname
+    val config             = broadcastConfig.value
     val failOnMissingField = config.getOrElse("spark.indextables.prewarm.failOnMissingField", "true").toBoolean
 
     // Check if we're on the expected host - skip prewarm if not
@@ -243,7 +247,7 @@ object PreWarmManager {
 
     try {
       var prewarmedCount = 0
-      var skippedFields = scala.collection.mutable.Set[String]()
+      var skippedFields  = scala.collection.mutable.Set[String]()
 
       task.addActions.foreach { addAction =>
         // Create cache configuration
@@ -272,7 +276,7 @@ object PreWarmManager {
                 if (failOnMissingField) {
                   throw new IllegalArgumentException(
                     s"Fields not found in split ${addAction.path}: ${invalidFields.mkString(", ")}. " +
-                    s"Available fields: ${availableFields.mkString(", ")}"
+                      s"Available fields: ${availableFields.mkString(", ")}"
                   )
                 } else {
                   logger.warn(s"Skipping missing fields for split ${addAction.path}: ${invalidFields.mkString(", ")}")
@@ -283,7 +287,9 @@ object PreWarmManager {
               if (validFields.nonEmpty) {
                 // Preload each component for the valid fields
                 val futures = task.segments.map { component =>
-                  logger.debug(s"Preloading ${component.name()} for fields ${validFields.mkString(",")} in split ${addAction.path}")
+                  logger.debug(
+                    s"Preloading ${component.name()} for fields ${validFields.mkString(",")} in split ${addAction.path}"
+                  )
                   splitSearcher.preloadFields(component, validFields: _*)
                 }
                 // Wait for all to complete
@@ -346,23 +352,24 @@ object PreWarmManager {
     }
   }
 
-  /**
-   * Extract field names from AddAction metadata (docMappingJson).
-   */
+  /** Extract field names from AddAction metadata (docMappingJson). */
   private def extractFieldsFromMetadata(addAction: AddAction): Set[String] =
     addAction.docMappingJson match {
       case Some(json) =>
         try {
           // Parse docMappingJson to extract field names
           // Format: {"field_mappings":[{"name":"field1",...},{"name":"field2",...}]}
-          val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
-          val root = mapper.readTree(json)
+          val mapper        = new com.fasterxml.jackson.databind.ObjectMapper()
+          val root          = mapper.readTree(json)
           val fieldMappings = root.path("field_mappings")
           if (fieldMappings.isArray) {
             import scala.jdk.CollectionConverters._
-            fieldMappings.elements().asScala.flatMap { fm =>
-              Option(fm.path("name").asText(null))
-            }.map(_.toLowerCase).toSet
+            fieldMappings
+              .elements()
+              .asScala
+              .flatMap(fm => Option(fm.path("name").asText(null)))
+              .map(_.toLowerCase)
+              .toSet
           } else {
             Set.empty[String]
           }
@@ -462,9 +469,7 @@ object PreWarmManager {
     sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
 
     // Create (task, preferredLocations) tuples for makeRDD
-    val tasksWithLocations = preWarmTasks.map { task =>
-      (task, Seq(task.preferredHostname))
-    }
+    val tasksWithLocations = preWarmTasks.map(task => (task, Seq(task.preferredHostname)))
 
     val taskResults =
       try
@@ -566,9 +571,8 @@ object PreWarmManager {
   /**
    * Create a SplitCacheConfig from broadcast configuration.
    *
-   * Delegates to ConfigUtils.createSplitCacheConfig to ensure consistent configuration
-   * across all code paths (reads, aggregates, prewarm). This includes disk cache settings,
-   * batch optimization, and all cloud provider credentials.
+   * Delegates to ConfigUtils.createSplitCacheConfig to ensure consistent configuration across all code paths (reads,
+   * aggregates, prewarm). This includes disk cache settings, batch optimization, and all cloud provider credentials.
    */
   private def createCacheConfigFromBroadcast(configMap: Map[String, String], tablePath: String): SplitCacheConfig =
     ConfigUtils.createSplitCacheConfig(configMap, Some(tablePath))
@@ -634,7 +638,7 @@ object PreWarmManager {
       addAction.numMergeOps.getOrElse(0),                           // numMergeOps (Int is OK for this field)
       "doc-mapping-uid",                                            // docMappingUid (NEW - required)
       addAction.docMappingJson.orNull,                              // docMappingJson (MOVED - for performance)
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()      // skippedSplits
+      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
     )
     SplitSearchEngine.fromSplitFileWithMetadata(readSchema, actualPath, splitMetadata, cacheConfig)
   }
@@ -653,14 +657,15 @@ object PreWarmManager {
   ): String =
     s"$splitPath|$hostname|$queryHash"
 
-  /** Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency.
-   * This ensures the hostname format matches what Spark uses for task scheduling.
+  /**
+   * Get current hostname for this JVM using BlockManager's blockManagerId.host for consistency. This ensures the
+   * hostname format matches what Spark uses for task scheduling.
    */
   private def getCurrentHostname: String =
-    try {
+    try
       // Try to use BlockManager's host first - this is the canonical source for Spark scheduling
       org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
-    } catch {
+    catch {
       case _: Exception =>
         // Fallback to InetAddress if SparkEnv not available
         try
@@ -694,8 +699,8 @@ case class PreWarmTask(
 case class PreWarmTaskResult(
   splitPath: String,
   hostname: String,
-  assignedHost: String = "",   // Expected host from assignment
-  wrongHost: Boolean = false,  // True if task ran on wrong host (skipped prewarm)
+  assignedHost: String = "",  // Expected host from assignment
+  wrongHost: Boolean = false, // True if task ran on wrong host (skipped prewarm)
   success: Boolean,
   errorMessage: Option[String])
 
@@ -724,10 +729,10 @@ case class ComponentPrewarmTask(
 /** Result from a component-based prewarm task execution. */
 case class ComponentPrewarmTaskResult(
   hostname: String,
-  assignedHost: String = "",   // Expected host from assignment
-  wrongHost: Boolean = false,  // True if task ran on wrong host (skipped prewarm)
+  assignedHost: String = "",  // Expected host from assignment
+  wrongHost: Boolean = false, // True if task ran on wrong host (skipped prewarm)
   splitsPrewarmed: Int,
-  splitPaths: Seq[String] = Seq.empty,  // Split paths for retry tracking
+  splitPaths: Seq[String] = Seq.empty, // Split paths for retry tracking
   durationMs: Long,
   success: Boolean,
   errorMessage: Option[String],

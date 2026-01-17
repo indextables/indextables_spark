@@ -37,10 +37,8 @@ import org.slf4j.LoggerFactory
  *   - CHECKPOINT TANTIVY4SPARK '/path/to/table'
  *
  * This command:
- *   1. Reads the current transaction log state
- *   2. Creates a checkpoint at the current version
- *   3. Upgrades the table to V3 protocol (always)
- *   4. Returns status information about the checkpoint
+ *   1. Reads the current transaction log state 2. Creates a checkpoint at the current version 3. Upgrades the table to
+ *      V3 protocol (always) 4. Returns status information about the checkpoint
  *
  * Use this command to:
  *   - Force V3 protocol upgrade on existing tables
@@ -81,15 +79,17 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         // Get current version and all actions
         val versions = transactionLog.getVersions()
         if (versions.isEmpty) {
-          return Seq(Row(
-            resolvedPath.toString,
-            "ERROR: No transaction log versions found",
-            0L,
-            0L,
-            0L,
-            0L,
-            false
-          ))
+          return Seq(
+            Row(
+              resolvedPath.toString,
+              "ERROR: No transaction log versions found",
+              0L,
+              0L,
+              0L,
+              0L,
+              false
+            )
+          )
         }
 
         val currentVersion = versions.max
@@ -102,7 +102,9 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         // Build complete action list for checkpoint
         val allActions = Seq(protocol) ++ Seq(metadata) ++ allFiles
 
-        logger.info(s"Creating checkpoint at version $currentVersion with ${allActions.length} actions (${allFiles.length} files)")
+        logger.info(
+          s"Creating checkpoint at version $currentVersion with ${allActions.length} actions (${allFiles.length} files)"
+        )
 
         // Create checkpoint handler directly (TransactionLogCheckpoint handles V3 upgrade)
         val transactionLogPath = new Path(resolvedPath, "_transaction_log")
@@ -118,8 +120,8 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
 
           // Get updated checkpoint info
           val checkpointInfo = checkpoint.getLastCheckpointInfo()
-          val isMultiPart = checkpointInfo.exists(_.parts.isDefined)
-          val numActions = checkpointInfo.map(_.size).getOrElse(allActions.length.toLong)
+          val isMultiPart    = checkpointInfo.exists(_.parts.isDefined)
+          val numActions     = checkpointInfo.map(_.size).getOrElse(allActions.length.toLong)
 
           // Re-read protocol from the newly created checkpoint to get the upgraded version
           val newProtocolVersion = checkpointInfo
@@ -128,34 +130,36 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
 
           logger.info(s"Checkpoint created successfully at version $currentVersion with protocol V$newProtocolVersion")
 
-          Seq(Row(
-            resolvedPath.toString,
-            "SUCCESS",
-            currentVersion,
-            numActions,
-            allFiles.length.toLong,
-            newProtocolVersion,
-            isMultiPart
-          ))
-        } finally {
+          Seq(
+            Row(
+              resolvedPath.toString,
+              "SUCCESS",
+              currentVersion,
+              numActions,
+              allFiles.length.toLong,
+              newProtocolVersion,
+              isMultiPart
+            )
+          )
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
     } catch {
       case e: Exception =>
         val errorMsg = s"Failed to create checkpoint: ${e.getMessage}"
         logger.error(errorMsg, e)
-        Seq(Row(
-          tablePath,
-          s"ERROR: ${e.getMessage}",
-          0L,
-          0L,
-          0L,
-          0L,
-          false
-        ))
+        Seq(
+          Row(
+            tablePath,
+            s"ERROR: ${e.getMessage}",
+            0L,
+            0L,
+            0L,
+            0L,
+            false
+          )
+        )
     }
 
   /** Resolve table path from string path or table identifier. */

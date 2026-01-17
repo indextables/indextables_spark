@@ -21,15 +21,14 @@ import java.io.File
 import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.funsuite.AnyFunSuite
 
-/**
- * Tests to verify that prewarm command tracks and reports locality correctly.
- */
+import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
+
+/** Tests to verify that prewarm command tracks and reports locality correctly. */
 class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEach {
 
-  var spark: SparkSession = _
+  var spark: SparkSession   = _
   var tempTablePath: String = _
 
   override def beforeEach(): Unit = {
@@ -68,7 +67,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Create test data
     val data = (1 to 100).map(i => (i.toLong, s"title_$i", s"content for document $i", i * 1.5))
-    val df = data.toDF("id", "title", "content", "score")
+    val df   = data.toDF("id", "title", "content", "score")
 
     // Write to IndexTables
     df.write
@@ -105,22 +104,27 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
     // In local mode, host and assigned_host should match (all hits, no misses)
     val results = prewarmResult.collect()
     results.foreach { row =>
-      val host = row.getAs[String]("host")
-      val assignedHost = row.getAs[String]("assigned_host")
-      val localityHits = row.getAs[Int]("locality_hits")
-      val localityMisses = row.getAs[Int]("locality_misses")
-      val retries = row.getAs[Int]("retries")
+      val host               = row.getAs[String]("host")
+      val assignedHost       = row.getAs[String]("assigned_host")
+      val localityHits       = row.getAs[Int]("locality_hits")
+      val localityMisses     = row.getAs[Int]("locality_misses")
+      val retries            = row.getAs[Int]("retries")
       val failedSplitsByHost = row.getAs[String]("failed_splits_by_host")
 
       println(s"Host: $host, Assigned: $assignedHost, Hits: $localityHits, Misses: $localityMisses, Retries: $retries")
 
       // In local mode, tasks should run on the assigned host (all hits)
       assert(localityMisses == 0, s"In local mode, should have no locality misses. Host=$host, Misses=$localityMisses")
-      assert(localityHits > 0 || row.getAs[String]("status") == "no_splits",
-        s"Should have locality hits or be no_splits status")
+      assert(
+        localityHits > 0 || row.getAs[String]("status") == "no_splits",
+        s"Should have locality hits or be no_splits status"
+      )
       // In local mode, no retries should be needed
       assert(retries == 0, s"In local mode, should have no retries. Retries=$retries")
-      assert(failedSplitsByHost == null, s"In local mode, should have no failed splits. FailedSplits=$failedSplitsByHost")
+      assert(
+        failedSplitsByHost == null,
+        s"In local mode, should have no failed splits. FailedSplits=$failedSplitsByHost"
+      )
     }
   }
 
@@ -130,7 +134,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Create test data
     val data = (1 to 50).map(i => (i.toLong, s"value_$i"))
-    val df = data.toDF("id", "value")
+    val df   = data.toDF("id", "value")
 
     // Write to IndexTables
     df.write
@@ -140,7 +144,7 @@ class PrewarmLocalityVerificationTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Run prewarm
     val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$tempTablePath'")
-    val results = prewarmResult.collect()
+    val results       = prewarmResult.collect()
 
     // All results should have zero locality misses in local mode
     results.foreach { row =>

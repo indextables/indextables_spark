@@ -110,9 +110,11 @@ class DescribeEnvironmentCommandTest extends AnyFunSuite with Matchers with Befo
     result.createOrReplaceTempView("env_props_spark_test")
 
     // Filter to spark properties from driver using SQL
-    val sparkProps = spark.sql(
-      "SELECT * FROM env_props_spark_test WHERE role = 'driver' AND property_type = 'spark'"
-    ).collect()
+    val sparkProps = spark
+      .sql(
+        "SELECT * FROM env_props_spark_test WHERE role = 'driver' AND property_type = 'spark'"
+      )
+      .collect()
 
     sparkProps.length should be >= 1
 
@@ -127,9 +129,11 @@ class DescribeEnvironmentCommandTest extends AnyFunSuite with Matchers with Befo
     result.createOrReplaceTempView("env_props_redact_test")
 
     // Filter to spark properties from driver using SQL
-    val sparkProps = spark.sql(
-      "SELECT * FROM env_props_redact_test WHERE role = 'driver' AND property_type = 'spark'"
-    ).collect()
+    val sparkProps = spark
+      .sql(
+        "SELECT * FROM env_props_redact_test WHERE role = 'driver' AND property_type = 'spark'"
+      )
+      .collect()
 
     // Find the secretKey property - should be redacted
     val secretKeyProp = sparkProps.find(_.getString(3) == "spark.test.secretKey")
@@ -147,9 +151,11 @@ class DescribeEnvironmentCommandTest extends AnyFunSuite with Matchers with Befo
     result.createOrReplaceTempView("env_props_hadoop_test")
 
     // Filter to hadoop properties from driver using SQL
-    val hadoopProps = spark.sql(
-      "SELECT * FROM env_props_hadoop_test WHERE role = 'driver' AND property_type = 'hadoop'"
-    ).collect()
+    val hadoopProps = spark
+      .sql(
+        "SELECT * FROM env_props_hadoop_test WHERE role = 'driver' AND property_type = 'hadoop'"
+      )
+      .collect()
 
     hadoopProps.length should be >= 1
 
