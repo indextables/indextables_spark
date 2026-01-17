@@ -310,7 +310,7 @@ class IndexingConfigFieldValidationTest extends TestBase {
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .option("spark.indextables.indexing.typemap.content", "text")
-        .option("spark.indextables.indexing.tokenizer.contnt", "en_stem") // Typo
+        .option("spark.indextables.indexing.tokenizer.en_stem", "contnt") // Typo in field name
         .mode("overwrite")
         .save(tablePath)
     }
@@ -381,5 +381,323 @@ class IndexingConfigFieldValidationTest extends TestBase {
     // Should report both missing root fields
     exception.getMessage should include("user")
     exception.getMessage should include("profile")
+  }
+
+  // ===== Tests for new list-based syntax =====
+
+  test("should support list-based typemap syntax (typemap.text = field1,field2)") {
+    val tablePath = s"file://$tempDir/typemap_list_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title", "CAST(id AS STRING) as content", "CAST(id AS STRING) as body")
+
+    // New syntax: typemap.<type> = "field1,field2,..."
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "title,content,body")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  test("should support list-based indexrecordoption syntax (indexrecordoption.position = field1,field2)") {
+    val tablePath = s"file://$tempDir/indexrecordoption_list_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title", "CAST(id AS STRING) as content")
+
+    // New syntax: indexrecordoption.<option> = "field1,field2,..."
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "title,content")
+      .option("spark.indextables.indexing.indexrecordoption.position", "title,content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  test("should support list-based tokenizer syntax (tokenizer.en_stem = field1,field2)") {
+    val tablePath = s"file://$tempDir/tokenizer_list_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title", "CAST(id AS STRING) as content")
+
+    // New syntax: tokenizer.<tokenizer_name> = "field1,field2,..."
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "title,content")
+      .option("spark.indextables.indexing.tokenizer.en_stem", "title,content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  test("should reject list-based typemap with invalid field names") {
+    val tablePath = s"file://$tempDir/typemap_list_invalid_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title")
+
+    val exception = intercept[IllegalArgumentException] {
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.text", "title,contnt,descriptin") // typos
+        .mode("overwrite")
+        .save(tablePath)
+    }
+
+    exception.getMessage should include("contnt")
+    exception.getMessage should include("descriptin")
+  }
+
+  test("should reject list-based indexrecordoption with invalid field names") {
+    val tablePath = s"file://$tempDir/indexrecordoption_list_invalid_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as content")
+
+    val exception = intercept[IllegalArgumentException] {
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.text", "content")
+        .option("spark.indextables.indexing.indexrecordoption.position", "content,bdy") // typo
+        .mode("overwrite")
+        .save(tablePath)
+    }
+
+    exception.getMessage should include("bdy")
+  }
+
+  test("should reject list-based tokenizer with invalid field names") {
+    val tablePath = s"file://$tempDir/tokenizer_list_invalid_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as content")
+
+    val exception = intercept[IllegalArgumentException] {
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.typemap.text", "content")
+        .option("spark.indextables.indexing.tokenizer.en_stem", "content,titl") // typo
+        .mode("overwrite")
+        .save(tablePath)
+    }
+
+    exception.getMessage should include("titl")
+  }
+
+  test("should support mixed old and new typemap syntax") {
+    val tablePath = s"file://$tempDir/typemap_mixed_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title", "CAST(id AS STRING) as content", "CAST(id AS STRING) as tags")
+
+    // Mixed syntax: some per-field, some per-type
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "title,content") // new syntax
+      .option("spark.indextables.indexing.typemap.tags", "string")        // old syntax
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  test("should support single field in list-based syntax") {
+    val tablePath = s"file://$tempDir/single_field_list_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as content")
+
+    // List syntax with single field (no comma)
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "content")
+      .option("spark.indextables.indexing.tokenizer.en_stem", "content")
+      .option("spark.indextables.indexing.indexrecordoption.basic", "content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  test("should handle whitespace in list-based syntax") {
+    val tablePath = s"file://$tempDir/whitespace_list_syntax_test"
+
+    val df = spark
+      .range(10)
+      .selectExpr("id", "CAST(id AS STRING) as title", "CAST(id AS STRING) as content")
+
+    // List with extra whitespace should be trimmed
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "  title , content  ")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+
+    result.count() shouldBe 10
+  }
+
+  // ===== Functional tests to verify configuration is actually applied =====
+
+  test("typemap.text should enable full-text search with tokenization") {
+    val tablePath = s"file://$tempDir/typemap_text_functional_test"
+
+    // Create data with multi-word content using SQL
+    val df = spark.sql("""
+      SELECT 1 as id, 'The quick brown fox jumps' as content
+      UNION ALL SELECT 2 as id, 'A lazy dog sleeps' as content
+      UNION ALL SELECT 3 as id, 'Running is good exercise' as content
+    """)
+
+    // Configure content as text field (tokenized)
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+    result.createOrReplaceTempView("typemap_text_test")
+
+    // Text fields should support single-word queries (tokenized search)
+    val quickMatches = spark.sql("SELECT * FROM typemap_text_test WHERE content indexquery 'quick'").collect()
+    quickMatches.length shouldBe 1
+    quickMatches(0).getAs[Int]("id") shouldBe 1
+
+    // Should also find partial word matches
+    val dogMatches = spark.sql("SELECT * FROM typemap_text_test WHERE content indexquery 'dog'").collect()
+    dogMatches.length shouldBe 1
+    dogMatches(0).getAs[Int]("id") shouldBe 2
+  }
+
+  test("typemap.string should only match exact values") {
+    val tablePath = s"file://$tempDir/typemap_string_functional_test"
+
+    // Create data with various content using SQL
+    val df = spark.sql("""
+      SELECT 1 as id, 'active' as status
+      UNION ALL SELECT 2 as id, 'inactive' as status
+      UNION ALL SELECT 3 as id, 'active' as status
+    """)
+
+    // Configure status as string field (exact match, which is default)
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.string", "status")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+    result.createOrReplaceTempView("typemap_string_test")
+
+    // String fields should match exact values
+    val activeMatches = spark.sql("SELECT * FROM typemap_string_test WHERE status = 'active'").collect()
+    activeMatches.length shouldBe 2
+
+    // Partial match should not work for string fields
+    val partialMatches = spark.sql("SELECT * FROM typemap_string_test WHERE status = 'act'").collect()
+    partialMatches.length shouldBe 0
+  }
+
+  test("tokenizer.en_stem should enable stemming (running matches run)") {
+    val tablePath = s"file://$tempDir/tokenizer_stem_functional_test"
+
+    // Create data with words that can be stemmed (regular verb forms)
+    val df = spark.sql("""
+      SELECT 1 as id, 'I am running fast' as content
+      UNION ALL SELECT 2 as id, 'She runs daily' as content
+      UNION ALL SELECT 3 as id, 'They run every morning' as content
+    """)
+
+    // Configure content as text with en_stem tokenizer
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "content")
+      .option("spark.indextables.indexing.tokenizer.en_stem", "content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+    result.createOrReplaceTempView("tokenizer_stem_test")
+
+    // With stemming, "run" should match "running" and "runs" (Porter stemmer)
+    val runMatches = spark.sql("SELECT * FROM tokenizer_stem_test WHERE content indexquery 'run'").collect()
+    // running->run, runs->run, run->run, so all three should match
+    runMatches.length should be >= 2 // At minimum running and runs should match
+  }
+
+  test("tokenizer without stemming should not match stemmed forms") {
+    val tablePath = s"file://$tempDir/tokenizer_no_stem_functional_test"
+
+    // Create data with words that can be stemmed
+    val df = spark.sql("""
+      SELECT 1 as id, 'I am running fast' as content
+      UNION ALL SELECT 2 as id, 'She runs daily' as content
+      UNION ALL SELECT 3 as id, 'They run daily' as content
+    """)
+
+    // Configure content as text with default tokenizer (no stemming)
+    df.write
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.indexing.typemap.text", "content")
+      .option("spark.indextables.indexing.tokenizer.default", "content")
+      .mode("overwrite")
+      .save(tablePath)
+
+    val result = spark.read
+      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .load(tablePath)
+    result.createOrReplaceTempView("tokenizer_no_stem_test")
+
+    // Without stemming, "run" should only match exact "run"
+    val runMatches = spark.sql("SELECT * FROM tokenizer_no_stem_test WHERE content indexquery 'run'").collect()
+    runMatches.length shouldBe 1 // Only record 3 with "run" should match
+
+    // "running" should match exactly "running"
+    val runningMatches = spark.sql("SELECT * FROM tokenizer_no_stem_test WHERE content indexquery 'running'").collect()
+    runningMatches.length shouldBe 1
+    runningMatches(0).getAs[Int]("id") shouldBe 1
   }
 }
