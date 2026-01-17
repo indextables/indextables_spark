@@ -279,8 +279,8 @@ class MergeSplitsPartitionTest extends TestBase with BeforeAndAfterEach {
       new Path(tempTablePath),
       Seq.empty,
       5L * 1024L * 1024L * 1024L, // 5GB
-      None, // maxDestSplits
-      None, // maxSourceSplitsPerMerge
+      None,                       // maxDestSplits
+      None,                       // maxSourceSplitsPerMerge
       false
     )
 

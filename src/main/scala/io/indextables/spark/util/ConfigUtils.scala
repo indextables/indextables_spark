@@ -270,14 +270,12 @@ object ConfigUtils {
   /**
    * Resolve AWS credentials from a custom credential provider on the driver.
    *
-   * This method checks if `spark.indextables.aws.credentialsProviderClass` is configured.
-   * If so, it instantiates the provider on the driver and calls getCredentials() to obtain
-   * actual AWS credentials. The returned config map contains the resolved credentials
-   * in the standard `aws.accessKey`, `aws.secretKey`, and `aws.sessionToken` keys.
+   * This method checks if `spark.indextables.aws.credentialsProviderClass` is configured. If so, it instantiates the
+   * provider on the driver and calls getCredentials() to obtain actual AWS credentials. The returned config map
+   * contains the resolved credentials in the standard `aws.accessKey`, `aws.secretKey`, and `aws.sessionToken` keys.
    *
-   * This enables workers to receive actual credentials without needing to run the
-   * credential provider themselves (which may require driver-only resources like
-   * Databricks API tokens).
+   * This enables workers to receive actual credentials without needing to run the credential provider themselves (which
+   * may require driver-only resources like Databricks API tokens).
    *
    * @param config
    *   Configuration map containing spark.indextables.* settings
@@ -314,7 +312,7 @@ object ConfigUtils {
         // Add session token if present
         creds.sessionToken match {
           case Some(token) => updatedConfig + ("spark.indextables.aws.sessionToken" -> token)
-          case None => updatedConfig
+          case None        => updatedConfig
         }
       case None =>
         // No credentials resolved (no provider configured or using default chain)

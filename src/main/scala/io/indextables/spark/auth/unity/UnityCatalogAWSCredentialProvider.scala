@@ -17,8 +17,8 @@
 
 package io.indextables.spark.auth.unity
 
-import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.net.URI
 import java.time.Duration
 import java.time.Instant
 
@@ -35,9 +35,8 @@ import org.slf4j.LoggerFactory
 /**
  * AWS Credential Provider that integrates with Databricks Unity Catalog via HTTP API.
  *
- * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API.
- * It implements intelligent caching with expiration tracking and automatic fallback from READ_WRITE
- * to READ permissions.
+ * This provider fetches temporary AWS credentials from Unity Catalog's temporary path credentials API. It implements
+ * intelligent caching with expiration tracking and automatic fallback from READ_WRITE to READ permissions.
  *
  * Configuration:
  *   - spark.indextables.databricks.workspaceUrl: Databricks workspace URL (required)
@@ -77,10 +76,8 @@ class UnityCatalogAWSCredentialProvider(uri: URI, conf: Configuration) extends A
    * Get AWS credentials for the configured URI.
    *
    * This method:
-   *   1. Checks the cache for valid credentials (not near expiration)
-   *   2. If cached and valid, returns them
-   *   3. Otherwise, fetches fresh credentials with READ_WRITE/READ fallback
-   *   4. Caches the new credentials
+   *   1. Checks the cache for valid credentials (not near expiration) 2. If cached and valid, returns them 3.
+   *      Otherwise, fetches fresh credentials with READ_WRITE/READ fallback 4. Caches the new credentials
    */
   override def getCredentials(): AWSCredentials = {
     val path     = extractPath(uri)
@@ -91,7 +88,9 @@ class UnityCatalogAWSCredentialProvider(uri: URI, conf: Configuration) extends A
     // Check cache first
     val cached = globalCredentialsCache.getIfPresent(cacheKey)
     if (cached != null && !isNearExpiration(cached)) {
-      logger.debug(s"Using cached credentials for path: $path (expires at ${Instant.ofEpochMilli(cached.expirationTime)})")
+      logger.debug(
+        s"Using cached credentials for path: $path (expires at ${Instant.ofEpochMilli(cached.expirationTime)})"
+      )
       logCacheStats()
       return cached.toAWSCredentials
     }
@@ -322,9 +321,7 @@ object UnityCatalogAWSCredentialProvider {
   @volatile private var globalCredentialsCache: Cache[String, CachedCredentials] = _
   private val initLock                                                           = new Object
 
-  /**
-   * Resolve Databricks configuration from Hadoop/Spark configuration.
-   */
+  /** Resolve Databricks configuration from Hadoop/Spark configuration. */
   private def resolveConfig(conf: Configuration): (String, String) = {
     val sources: Seq[ConfigSource] = Seq(
       HadoopConfigSource(conf, "spark.indextables.databricks"),
@@ -351,10 +348,7 @@ object UnityCatalogAWSCredentialProvider {
     (workspaceUrl, token)
   }
 
-  /**
-   * Initialize the process-global credentials cache.
-   * Uses double-checked locking for thread safety.
-   */
+  /** Initialize the process-global credentials cache. Uses double-checked locking for thread safety. */
   private def initializeGlobalCache(conf: Configuration): Unit =
     if (globalCredentialsCache == null) {
       initLock.synchronized {
@@ -374,8 +368,7 @@ object UnityCatalogAWSCredentialProvider {
   /**
    * Build a cache key that includes token identity for multi-user support.
    *
-   * Format: tokenHash:path
-   * This ensures different API tokens get separate cached credentials.
+   * Format: tokenHash:path This ensures different API tokens get separate cached credentials.
    */
   private def buildCacheKey(token: String, path: String): String = {
     // Use hash of token to avoid storing the full token in memory
@@ -417,9 +410,7 @@ object UnityCatalogAWSCredentialProvider {
       }
     }
 
-  /**
-   * Internal case class for cached credentials with expiration tracking.
-   */
+  /** Internal case class for cached credentials with expiration tracking. */
   private[unity] case class CachedCredentials(
     accessKeyId: String,
     secretAccessKey: String,

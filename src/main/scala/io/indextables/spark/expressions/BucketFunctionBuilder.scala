@@ -20,15 +20,16 @@ package io.indextables.spark.expressions
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.types.{Decimal, DecimalType, DoubleType, LongType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
+
 import org.slf4j.LoggerFactory
 
 /**
  * Builder for bucket aggregation function expressions.
  *
  * Handles parsing of function arguments for:
- * - indextables_date_histogram(column, interval, [offset], [min_doc_count])
- * - indextables_histogram(column, interval, [offset], [min_doc_count])
- * - indextables_range(column, name1, from1, to1, name2, from2, to2, ...)
+ *   - indextables_date_histogram(column, interval, [offset], [min_doc_count])
+ *   - indextables_histogram(column, interval, [offset], [min_doc_count])
+ *   - indextables_range(column, name1, from1, to1, name2, from2, to2, ...)
  */
 object BucketFunctionBuilder {
 
@@ -37,10 +38,8 @@ object BucketFunctionBuilder {
   /**
    * Build a DateHistogramExpression from function arguments.
    *
-   * Syntax:
-   *   indextables_date_histogram(column, interval)
-   *   indextables_date_histogram(column, interval, offset)
-   *   indextables_date_histogram(column, interval, offset, min_doc_count)
+   * Syntax: indextables_date_histogram(column, interval) indextables_date_histogram(column, interval, offset)
+   * indextables_date_histogram(column, interval, offset, min_doc_count)
    */
   def buildDateHistogram(args: Seq[Expression]): DateHistogramExpression = {
     logger.debug(s"Building DateHistogramExpression from ${args.length} arguments")
@@ -65,7 +64,9 @@ object BucketFunctionBuilder {
       0L
     }
 
-    logger.debug(s"Created DateHistogramExpression: field=$field, interval=$interval, offset=$offset, minDocCount=$minDocCount")
+    logger.debug(
+      s"Created DateHistogramExpression: field=$field, interval=$interval, offset=$offset, minDocCount=$minDocCount"
+    )
 
     DateHistogramExpression(
       field = field,
@@ -78,10 +79,8 @@ object BucketFunctionBuilder {
   /**
    * Build a HistogramExpression from function arguments.
    *
-   * Syntax:
-   *   indextables_histogram(column, interval)
-   *   indextables_histogram(column, interval, offset)
-   *   indextables_histogram(column, interval, offset, min_doc_count)
+   * Syntax: indextables_histogram(column, interval) indextables_histogram(column, interval, offset)
+   * indextables_histogram(column, interval, offset, min_doc_count)
    */
   def buildHistogram(args: Seq[Expression]): HistogramExpression = {
     logger.debug(s"Building HistogramExpression from ${args.length} arguments")
@@ -106,7 +105,9 @@ object BucketFunctionBuilder {
       0L
     }
 
-    logger.debug(s"Created HistogramExpression: field=$field, interval=$interval, offset=$offset, minDocCount=$minDocCount")
+    logger.debug(
+      s"Created HistogramExpression: field=$field, interval=$interval, offset=$offset, minDocCount=$minDocCount"
+    )
 
     HistogramExpression(
       field = field,
@@ -119,11 +120,9 @@ object BucketFunctionBuilder {
   /**
    * Build a RangeExpression from function arguments.
    *
-   * Syntax:
-   *   indextables_range(column, name1, from1, to1, name2, from2, to2, ...)
+   * Syntax: indextables_range(column, name1, from1, to1, name2, from2, to2, ...)
    *
-   * Each range is specified as 3 consecutive arguments: name, from, to
-   * Use NULL for unbounded from/to values.
+   * Each range is specified as 3 consecutive arguments: name, from, to Use NULL for unbounded from/to values.
    */
   def buildRange(args: Seq[Expression]): RangeExpression = {
     logger.debug(s"Building RangeExpression from ${args.length} arguments")
@@ -143,24 +142,28 @@ object BucketFunctionBuilder {
     val field     = args(0)
     val rangeArgs = args.drop(1)
 
-    val ranges = rangeArgs.grouped(3).zipWithIndex.map {
-      case (Seq(nameExpr, fromExpr, toExpr), idx) =>
-        val name = extractStringLiteral(nameExpr, s"range[$idx].name")
-        val from = extractOptionalDouble(fromExpr)
-        val to   = extractOptionalDouble(toExpr)
+    val ranges = rangeArgs
+      .grouped(3)
+      .zipWithIndex
+      .map {
+        case (Seq(nameExpr, fromExpr, toExpr), idx) =>
+          val name = extractStringLiteral(nameExpr, s"range[$idx].name")
+          val from = extractOptionalDouble(fromExpr)
+          val to   = extractOptionalDouble(toExpr)
 
-        require(
-          from.isDefined || to.isDefined,
-          s"Range '$name' must have at least one bound defined (from or to)"
-        )
+          require(
+            from.isDefined || to.isDefined,
+            s"Range '$name' must have at least one bound defined (from or to)"
+          )
 
-        RangeBucket(name, from, to)
+          RangeBucket(name, from, to)
 
-      case (other, idx) =>
-        throw new IllegalArgumentException(
-          s"Invalid range arguments at index $idx: expected 3 arguments (name, from, to), got ${other.length}"
-        )
-    }.toSeq
+        case (other, idx) =>
+          throw new IllegalArgumentException(
+            s"Invalid range arguments at index $idx: expected 3 arguments (name, from, to), got ${other.length}"
+          )
+      }
+      .toSeq
 
     logger.debug(s"Created RangeExpression: field=$field, ranges=${ranges.map(_.toString).mkString(", ")}")
 
@@ -171,8 +174,8 @@ object BucketFunctionBuilder {
 
   private def extractStringLiteral(expr: Expression, paramName: String): String =
     expr match {
-      case Literal(value: UTF8String, StringType) => value.toString
-      case Literal(value: String, StringType)     => value
+      case Literal(value: UTF8String, StringType)      => value.toString
+      case Literal(value: String, StringType)          => value
       case Literal(value, StringType) if value != null => value.toString
       case _ =>
         throw new IllegalArgumentException(
@@ -184,17 +187,17 @@ object BucketFunctionBuilder {
     expr match {
       // Spark's Decimal type (used for SQL numeric literals like 50.0)
       case Literal(value: Decimal, _: DecimalType) => value.toDouble
-      case Literal(value: Decimal, _) => value.toDouble
+      case Literal(value: Decimal, _)              => value.toDouble
       // Java BigDecimal
       case Literal(value: java.math.BigDecimal, _) => value.doubleValue()
       // Scala BigDecimal
       case Literal(value: scala.math.BigDecimal, _) => value.toDouble
       // Standard numeric types
-      case Literal(value: Number, _) => value.doubleValue()
+      case Literal(value: Number, _)                    => value.doubleValue()
       case Literal(value: java.lang.Double, DoubleType) => value.doubleValue()
-      case Literal(value: java.lang.Float, _) => value.doubleValue()
-      case Literal(value: java.lang.Integer, _) => value.doubleValue()
-      case Literal(value: java.lang.Long, _) => value.doubleValue()
+      case Literal(value: java.lang.Float, _)           => value.doubleValue()
+      case Literal(value: java.lang.Integer, _)         => value.doubleValue()
+      case Literal(value: java.lang.Long, _)            => value.doubleValue()
       case _ =>
         throw new IllegalArgumentException(
           s"$paramName must be a numeric literal, got: $expr (${expr.getClass.getSimpleName})"
@@ -205,15 +208,15 @@ object BucketFunctionBuilder {
     expr match {
       // Spark's Decimal type
       case Literal(value: Decimal, _: DecimalType) => value.toLong
-      case Literal(value: Decimal, _) => value.toLong
+      case Literal(value: Decimal, _)              => value.toLong
       // Java BigDecimal
       case Literal(value: java.math.BigDecimal, _) => value.longValue()
       // Scala BigDecimal
       case Literal(value: scala.math.BigDecimal, _) => value.toLong
       // Standard numeric types
-      case Literal(value: Number, _) => value.longValue()
+      case Literal(value: Number, _)                => value.longValue()
       case Literal(value: java.lang.Long, LongType) => value.longValue()
-      case Literal(value: java.lang.Integer, _) => value.longValue()
+      case Literal(value: java.lang.Integer, _)     => value.longValue()
       case _ =>
         throw new IllegalArgumentException(
           s"$paramName must be a numeric literal, got: $expr (${expr.getClass.getSimpleName})"
@@ -225,17 +228,17 @@ object BucketFunctionBuilder {
       case Literal(null, _) => None
       // Spark's Decimal type (used for SQL numeric literals like 50.0)
       case Literal(value: Decimal, _: DecimalType) => Some(value.toDouble)
-      case Literal(value: Decimal, _) => Some(value.toDouble)
+      case Literal(value: Decimal, _)              => Some(value.toDouble)
       // Java BigDecimal
       case Literal(value: java.math.BigDecimal, _) => Some(value.doubleValue())
       // Scala BigDecimal
       case Literal(value: scala.math.BigDecimal, _) => Some(value.toDouble)
       // Standard numeric types
-      case Literal(value: Number, _) => Some(value.doubleValue())
-      case Literal(value: java.lang.Double, _) => Some(value.doubleValue())
-      case Literal(value: java.lang.Float, _) => Some(value.doubleValue())
+      case Literal(value: Number, _)            => Some(value.doubleValue())
+      case Literal(value: java.lang.Double, _)  => Some(value.doubleValue())
+      case Literal(value: java.lang.Float, _)   => Some(value.doubleValue())
       case Literal(value: java.lang.Integer, _) => Some(value.doubleValue())
-      case Literal(value: java.lang.Long, _) => Some(value.doubleValue())
-      case _ => None  // Treat non-literal as unbounded
+      case Literal(value: java.lang.Long, _)    => Some(value.doubleValue())
+      case _                                    => None // Treat non-literal as unbounded
     }
 }

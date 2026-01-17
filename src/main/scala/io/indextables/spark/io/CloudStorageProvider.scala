@@ -112,8 +112,8 @@ trait CloudStorageProvider extends Closeable {
     // Default implementation: buffer to byte array and use writeFileIfNotExists
     // Providers can override with optimized implementations
     import java.io.ByteArrayOutputStream
-    val baos = new ByteArrayOutputStream(contentLength.map(_.toInt).getOrElse(64 * 1024))
-    val buffer = new Array[Byte](8192)
+    val baos      = new ByteArrayOutputStream(contentLength.map(_.toInt).getOrElse(64 * 1024))
+    val buffer    = new Array[Byte](8192)
     var bytesRead = inputStream.read(buffer)
     while (bytesRead != -1) {
       baos.write(buffer, 0, bytesRead)
@@ -250,12 +250,12 @@ object CloudStorageProviderFactory {
   /**
    * Enrich Hadoop configuration with Spark configuration values.
    *
-   * Uses ConfigNormalization to dynamically extract ALL spark.indextables.* keys from
-   * the Spark session, including databricks keys for Unity Catalog integration:
-   * - spark.indextables.databricks.workspaceUrl
-   * - spark.indextables.databricks.apiToken
-   * - spark.indextables.databricks.credential.refreshBuffer.minutes
-   * - etc.
+   * Uses ConfigNormalization to dynamically extract ALL spark.indextables.* keys from the Spark session, including
+   * databricks keys for Unity Catalog integration:
+   *   - spark.indextables.databricks.workspaceUrl
+   *   - spark.indextables.databricks.apiToken
+   *   - spark.indextables.databricks.credential.refreshBuffer.minutes
+   *   - etc.
    */
   private def enrichHadoopConfWithSparkConf(hadoopConf: Configuration): Configuration =
     try {
@@ -273,15 +273,16 @@ object CloudStorageProviderFactory {
           logger.info(s"Enriching Hadoop config with ${sparkConfigs.size} spark.indextables.* keys from Spark session")
 
           // Copy all extracted configurations to Hadoop config
-          sparkConfigs.foreach { case (key, value) =>
-            try {
-              enriched.set(key, value)
-              val maskedValue = io.indextables.spark.util.CredentialRedaction.redactValue(key, value)
-              logger.debug(s"Copied Spark config to Hadoop conf: $key = $maskedValue")
-            } catch {
-              case ex: Exception =>
-                logger.warn(s"Failed to copy Spark config key $key: ${ex.getMessage}")
-            }
+          sparkConfigs.foreach {
+            case (key, value) =>
+              try {
+                enriched.set(key, value)
+                val maskedValue = io.indextables.spark.util.CredentialRedaction.redactValue(key, value)
+                logger.debug(s"Copied Spark config to Hadoop conf: $key = $maskedValue")
+              } catch {
+                case ex: Exception =>
+                  logger.warn(s"Failed to copy Spark config key $key: ${ex.getMessage}")
+              }
           }
 
           // Log summary of key config categories copied

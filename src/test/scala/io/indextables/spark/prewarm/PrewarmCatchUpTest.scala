@@ -32,16 +32,14 @@ import org.slf4j.LoggerFactory
  * Tests for prewarm catch-up behavior when new hosts are added or splits are discovered.
  *
  * Verifies that:
- *   1. Prewarm state is tracked per split
- *   2. New hosts trigger catch-up prewarming
- *   3. New splits discovered in transaction log trigger catch-up
- *   4. State tracking is consistent across operations
+ *   1. Prewarm state is tracked per split 2. New hosts trigger catch-up prewarming 3. New splits discovered in
+ *      transaction log trigger catch-up 4. State tracking is consistent across operations
  */
 class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCatchUpTest])
 
-  var spark: SparkSession = _
+  var spark: SparkSession   = _
   var tempTablePath: String = _
 
   override def beforeEach(): Unit = {
@@ -105,15 +103,17 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     val ss = spark
     import ss.implicits._
 
-    val testData = (1 until numRecords + 1).map { i =>
-      (
-        i.toLong,
-        s"title_$i",
-        s"content for record $i",
-        s"category_${i % 5}",
-        i * 1.5
-      )
-    }.toDF("id", "title", "content", "category", "score")
+    val testData = (1 until numRecords + 1)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i",
+          s"content for record $i",
+          s"category_${i % 5}",
+          i * 1.5
+        )
+      }
+      .toDF("id", "title", "content", "category", "score")
 
     testData
       .coalesce(1)
@@ -132,9 +132,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("recordPrewarmCompletion should track prewarm state for splits") {
     val testSplitPath = "s3://bucket/table/split_001.split"
-    val testHost = "executor-1"
-    val segments = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
-    val fields = Some(Set("title", "content"))
+    val testHost      = "executor-1"
+    val segments      = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
+    val fields        = Some(Set("title", "content"))
 
     // Record prewarm completion
     DriverSplitLocalityManager.recordPrewarmCompletion(testSplitPath, testHost, segments, fields)
@@ -151,9 +151,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("getSplitsNeedingCatchUp should identify splits on new hosts") {
     val testSplitPath = "s3://bucket/table/split_002.split"
-    val originalHost = "executor-1"
-    val newHost = "executor-2"
-    val segments = Set(IndexComponent.TERM)
+    val originalHost  = "executor-1"
+    val newHost       = "executor-2"
+    val segments      = Set(IndexComponent.TERM)
 
     // Record prewarm on original host
     DriverSplitLocalityManager.recordPrewarmCompletion(testSplitPath, originalHost, segments, None)
@@ -171,16 +171,15 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     val splitsForNewHost = needsCatchUp.getOrElse(newHost, Seq.empty)
     logger.info(s"Splits needing catch-up on $newHost: $splitsForNewHost")
 
-    assert(splitsForNewHost.contains(testSplitPath),
-      s"Split should need catch-up on new host $newHost")
+    assert(splitsForNewHost.contains(testSplitPath), s"Split should need catch-up on new host $newHost")
 
     logger.info("getSplitsNeedingCatchUp for new host test passed")
   }
 
   test("markSplitNeedsCatchUp should flag split for re-prewarming") {
     val testSplitPath = "s3://bucket/table/split_003.split"
-    val host = "executor-1"
-    val segments = Set(IndexComponent.TERM)
+    val host          = "executor-1"
+    val segments      = Set(IndexComponent.TERM)
 
     // Record initial prewarm
     DriverSplitLocalityManager.recordPrewarmCompletion(testSplitPath, host, segments, None)
@@ -200,8 +199,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     val splitsForHost = needsCatchUp.getOrElse(host, Seq.empty)
     logger.info(s"Splits marked for catch-up: $splitsForHost")
 
-    assert(splitsForHost.contains(testSplitPath),
-      "Split marked for catch-up should be returned")
+    assert(splitsForHost.contains(testSplitPath), "Split marked for catch-up should be returned")
 
     logger.info("markSplitNeedsCatchUp test passed")
   }
@@ -215,16 +213,17 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
       "s3://bucket/table/split_c.split"
     )
     val originalHosts = Set("executor-0", "executor-1")
-    val newHosts = Set("executor-0", "executor-1", "executor-2", "executor-3")
-    val segments = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
+    val newHosts      = Set("executor-0", "executor-1", "executor-2", "executor-3")
+    val segments      = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
 
     // Assign splits initially to original hosts
     DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, originalHosts)
 
     // Record prewarm on original hosts
-    splitPaths.zipWithIndex.foreach { case (path, idx) =>
-      val host = if (idx % 2 == 0) "executor-0" else "executor-1"
-      DriverSplitLocalityManager.recordPrewarmCompletion(path, host, segments, None)
+    splitPaths.zipWithIndex.foreach {
+      case (path, idx) =>
+        val host = if (idx % 2 == 0) "executor-0" else "executor-1"
+        DriverSplitLocalityManager.recordPrewarmCompletion(path, host, segments, None)
     }
 
     // Reassign with expanded host set - this simulates scale-out
@@ -327,9 +326,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
     val ss = spark
     import ss.implicits._
 
-    val newData = (101 until 201).map { i =>
-      (i.toLong, s"title_$i", s"new content $i", s"category_${i % 5}", i * 1.5)
-    }.toDF("id", "title", "content", "category", "score")
+    val newData = (101 until 201)
+      .map(i => (i.toLong, s"title_$i", s"new content $i", s"category_${i % 5}", i * 1.5))
+      .toDF("id", "title", "content", "category", "score")
 
     newData.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -364,9 +363,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("prewarm state should persist across multiple operations") {
     val splitPath = "s3://test/split_persist.split"
-    val host = "executor-0"
-    val segments = Set(IndexComponent.TERM, IndexComponent.POSTINGS)
-    val fields = Some(Set("title"))
+    val host      = "executor-0"
+    val segments  = Set(IndexComponent.TERM, IndexComponent.POSTINGS)
+    val fields    = Some(Set("title"))
 
     // Record initial prewarm
     DriverSplitLocalityManager.recordPrewarmCompletion(splitPath, host, segments, fields)
@@ -390,8 +389,8 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("getNewSplitsNeedingPrewarm should identify never-prewarmed splits") {
     val prewarmedSplit = "s3://bucket/split_prewarmed.split"
-    val newSplit = "s3://bucket/split_new.split"
-    val segments = Set(IndexComponent.TERM)
+    val newSplit       = "s3://bucket/split_new.split"
+    val segments       = Set(IndexComponent.TERM)
 
     // Prewarm only one split
     DriverSplitLocalityManager.recordPrewarmCompletion(prewarmedSplit, "host-1", segments, None)
@@ -411,7 +410,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("getNewSplitsNeedingPrewarm should identify splits with missing segments") {
-    val splitPath = "s3://bucket/split_partial.split"
+    val splitPath         = "s3://bucket/split_partial.split"
     val prewarmedSegments = Set(IndexComponent.TERM)
     val requestedSegments = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
 
@@ -426,8 +425,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
     logger.info(s"Splits needing additional prewarm: $needsPrewarm")
 
-    assert(needsPrewarm.contains(splitPath),
-      "Split with missing segments should need prewarm")
+    assert(needsPrewarm.contains(splitPath), "Split with missing segments should need prewarm")
 
     logger.info("getNewSplitsNeedingPrewarm missing segments test passed")
   }
@@ -435,9 +433,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
   // === Concurrent Access Tests ===
 
   test("prewarm state tracking should be thread-safe") {
-    val numThreads = 10
+    val numThreads         = 10
     val numSplitsPerThread = 100
-    val segments = Set(IndexComponent.TERM)
+    val segments           = Set(IndexComponent.TERM)
 
     import scala.concurrent.ExecutionContext.Implicits.global
     import scala.concurrent.{Await, Future}
@@ -447,7 +445,7 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
       Future {
         (0 until numSplitsPerThread).foreach { splitId =>
           val splitPath = s"s3://bucket/thread_$threadId/split_$splitId.split"
-          val host = s"executor-${threadId % 4}"
+          val host      = s"executor-${threadId % 4}"
 
           DriverSplitLocalityManager.recordPrewarmCompletion(splitPath, host, segments, None)
         }
@@ -466,8 +464,8 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("clear should reset prewarm state") {
     val splitPath = "s3://bucket/table/split_clear.split"
-    val host = "executor-0"
-    val segments = Set(IndexComponent.TERM)
+    val host      = "executor-0"
+    val segments  = Set(IndexComponent.TERM)
 
     // Record state
     DriverSplitLocalityManager.recordPrewarmCompletion(splitPath, host, segments, None)
@@ -493,9 +491,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
   // === isCatchUpEnabled Tests ===
 
   test("isCatchUpEnabled should respect configuration") {
-    val configEnabled = Map("spark.indextables.prewarm.catchUpNewHosts" -> "true")
+    val configEnabled  = Map("spark.indextables.prewarm.catchUpNewHosts" -> "true")
     val configDisabled = Map("spark.indextables.prewarm.catchUpNewHosts" -> "false")
-    val configDefault = Map.empty[String, String]
+    val configDefault  = Map.empty[String, String]
 
     assert(DriverSplitLocalityManager.isCatchUpEnabled(configEnabled), "Should be enabled when set to true")
     assert(!DriverSplitLocalityManager.isCatchUpEnabled(configDisabled), "Should be disabled when set to false")
@@ -508,9 +506,9 @@ class PrewarmCatchUpTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("clearCatchUpForHost should remove catch-up tracking for specific host") {
     val splitPath = "s3://bucket/split_catchup.split"
-    val host1 = "executor-1"
-    val host2 = "executor-2"
-    val segments = Set(IndexComponent.TERM)
+    val host1     = "executor-1"
+    val host2     = "executor-2"
+    val segments  = Set(IndexComponent.TERM)
 
     // Mark splits for catch-up on multiple hosts
     DriverSplitLocalityManager.markSplitNeedsCatchUp(splitPath, host1)

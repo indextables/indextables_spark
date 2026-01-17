@@ -17,31 +17,30 @@
 
 package io.indextables.spark.transaction
 
-import java.util.UUID
 import java.util.concurrent.{CountDownLatch, CyclicBarrier, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.RealS3TestBase
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.compression.{CompressionUtils, GzipCompressionCodec}
+import io.indextables.spark.RealS3TestBase
 
 /**
  * Real S3 tests for transaction log concurrent write retry logic.
  *
- * These tests validate the retry mechanism on actual S3 infrastructure,
- * including S3's conditional put semantics (If-None-Match: *).
+ * These tests validate the retry mechanism on actual S3 infrastructure, including S3's conditional put semantics
+ * (If-None-Match: *).
  *
- * IMPORTANT: These tests require AWS credentials and will create/delete
- * real objects in S3. Configure via:
+ * IMPORTANT: These tests require AWS credentials and will create/delete real objects in S3. Configure via:
  *   - ~/.aws/credentials file
  *   - Environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
  *   - System properties: test.s3.bucket, test.s3.prefix
@@ -56,10 +55,12 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
   private val testPrefix = Option(System.getProperty("test.s3.prefix")).getOrElse("retry-tests")
 
   private def getTestSchema(): StructType =
-    StructType(Seq(
-      StructField("id", LongType, nullable = false),
-      StructField("value", StringType, nullable = true)
-    ))
+    StructType(
+      Seq(
+        StructField("id", LongType, nullable = false),
+        StructField("value", StringType, nullable = true)
+      )
+    )
 
   private def createAddAction(index: Int): AddAction =
     AddAction(
@@ -76,7 +77,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
     s"s3a://$testBucket/$testPrefix/test-$testId"
   }
 
-  private def cleanupPath(path: String): Unit = {
+  private def cleanupPath(path: String): Unit =
     try {
       val cloudProvider = CloudStorageProviderFactory.createProvider(
         path,
@@ -87,21 +88,20 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         // Delete all files in the path
         val files = cloudProvider.listFiles(path)
         files.foreach { file =>
-          try { cloudProvider.deleteFile(file.path) } catch { case _: Exception => }
+          try cloudProvider.deleteFile(file.path)
+          catch { case _: Exception => }
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     } catch {
       case e: Exception =>
         println(s"Warning: Failed to cleanup test path $path: ${e.getMessage}")
     }
-  }
 
   test("S3: metrics should be recorded for successful writes without conflicts") {
     assume(hasAwsCredentials(), "AWS credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -111,7 +111,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         transactionLog.initialize(getTestSchema())
 
         val addAction = createAddAction(1)
-        val version = transactionLog.addFiles(Seq(addAction))
+        val version   = transactionLog.addFiles(Seq(addAction))
         version shouldBe 1L
 
         // Metrics should be present
@@ -122,18 +122,16 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         metrics.get.finalVersion shouldBe 1L
 
         println(s"S3 write succeeded: attempts=${metrics.get.attemptsMade}, version=${metrics.get.finalVersion}")
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("S3: concurrent appends from multiple threads should all succeed with retry") {
     assume(hasAwsCredentials(), "AWS credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -143,13 +141,13 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         transactionLog.initialize(getTestSchema())
 
         val numConcurrentWrites = 5
-        val successCount = new AtomicInteger(0)
-        val failureCount = new AtomicInteger(0)
-        val totalConflicts = new AtomicInteger(0)
-        val errors = new ListBuffer[Throwable]()
-        val versions = new ListBuffer[Long]()
-        val allMetrics = new ListBuffer[TxRetryMetrics]()
-        val latch = new CountDownLatch(numConcurrentWrites)
+        val successCount        = new AtomicInteger(0)
+        val failureCount        = new AtomicInteger(0)
+        val totalConflicts      = new AtomicInteger(0)
+        val errors              = new ListBuffer[Throwable]()
+        val versions            = new ListBuffer[Long]()
+        val allMetrics          = new ListBuffer[TxRetryMetrics]()
+        val latch               = new CountDownLatch(numConcurrentWrites)
 
         implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(
           Executors.newFixedThreadPool(numConcurrentWrites)
@@ -162,7 +160,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
             startLatch.await()
             try {
               val addAction = createAddAction(i)
-              val version = transactionLog.addFiles(Seq(addAction))
+              val version   = transactionLog.addFiles(Seq(addAction))
               synchronized {
                 versions += version
                 transactionLog.getLastRetryMetrics().foreach { m =>
@@ -174,10 +172,9 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
             } catch {
               case e: Exception =>
                 failureCount.incrementAndGet()
-                synchronized { errors += e }
-            } finally {
+                synchronized(errors += e)
+            } finally
               latch.countDown()
-            }
           }
         }
 
@@ -216,18 +213,16 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.size shouldBe numConcurrentWrites
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("S3: commitMergeSplits should record metrics") {
     assume(hasAwsCredentials(), "AWS credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -275,15 +270,11 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.exists(_.path == "merged.split") shouldBe true
-        addActions.foreach { add =>
-          files.exists(_.path == add.path) shouldBe false
-        }
-      } finally {
+        addActions.foreach(add => files.exists(_.path == add.path) shouldBe false)
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("S3: writeFileIfNotExists should return false when object already exists") {
@@ -319,18 +310,16 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         actualContent shouldBe "first write"
 
         println("S3 SUCCESS: writeFileIfNotExists correctly returns false when object exists")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("S3: concurrent writes should all eventually succeed via retry") {
     assume(hasAwsCredentials(), "AWS credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -341,12 +330,12 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
 
         // Use more concurrent writes to increase conflict likelihood on S3
         val numConcurrentWrites = 10
-        val successCount = new AtomicInteger(0)
-        val failureCount = new AtomicInteger(0)
-        val totalConflicts = new AtomicInteger(0)
-        val versions = new ListBuffer[Long]()
-        val allMetrics = new ListBuffer[TxRetryMetrics]()
-        val latch = new CountDownLatch(numConcurrentWrites)
+        val successCount        = new AtomicInteger(0)
+        val failureCount        = new AtomicInteger(0)
+        val totalConflicts      = new AtomicInteger(0)
+        val versions            = new ListBuffer[Long]()
+        val allMetrics          = new ListBuffer[TxRetryMetrics]()
+        val latch               = new CountDownLatch(numConcurrentWrites)
 
         implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(
           Executors.newFixedThreadPool(numConcurrentWrites)
@@ -358,7 +347,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
             startLatch.await()
             try {
               val addAction = createAddAction(i)
-              val version = transactionLog.addFiles(Seq(addAction))
+              val version   = transactionLog.addFiles(Seq(addAction))
               synchronized {
                 versions += version
                 transactionLog.getLastRetryMetrics().foreach { m =>
@@ -370,10 +359,9 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
             } catch {
               case e: Exception =>
                 failureCount.incrementAndGet()
-                synchronized { println(s"S3 Error: ${e.getMessage}") }
-            } finally {
+                synchronized(println(s"S3 Error: ${e.getMessage}"))
+            } finally
               latch.countDown()
-            }
           }
         }
 
@@ -402,12 +390,10 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.size shouldBe numConcurrentWrites
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("S3 FORCED CONFLICT: out-of-band file upload should trigger retry") {
@@ -421,14 +407,15 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
     // which would update the version counter. S3's conditional put will detect the conflict.
     assume(hasAwsCredentials(), "AWS credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
       // Create TransactionLog with protocol checking DISABLED
       val options = new CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.protocol.checkEnabled", "false"
+          "spark.indextables.protocol.checkEnabled",
+          "false"
         )
       )
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
@@ -438,7 +425,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
 
         // Step 1: Do a real write to initialize versionCounter
         val addAction1 = createAddAction(100)
-        val version1 = transactionLog.addFiles(Seq(addAction1))
+        val version1   = transactionLog.addFiles(Seq(addAction1))
         println(s"S3 Step 1: First write completed at version $version1")
         version1 shouldBe 1L
 
@@ -447,8 +434,8 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
 
         // Step 2: Pre-create the NEXT version file out-of-band directly on S3
         val transactionLogDir = new Path(testPath, "_transaction_log")
-        val conflictVersion = version1 + 1
-        val conflictFile = new Path(transactionLogDir, f"$conflictVersion%020d.json")
+        val conflictVersion   = version1 + 1
+        val conflictFile      = new Path(transactionLogDir, f"$conflictVersion%020d.json")
 
         val cloudProvider = CloudStorageProviderFactory.createProvider(
           testPath,
@@ -457,7 +444,8 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
         )
 
         try {
-          val dummyContent = s"""{"add":{"path":"S3_OUT_OF_BAND_FILE.split","partitionValues":{},"size":888,"modificationTime":1700000000000,"dataChange":true}}"""
+          val dummyContent =
+            s"""{"add":{"path":"S3_OUT_OF_BAND_FILE.split","partitionValues":{},"size":888,"modificationTime":1700000000000,"dataChange":true}}"""
           val compressedContent = CompressionUtils.writeTransactionFile(
             dummyContent.getBytes("UTF-8"),
             Some(new GzipCompressionCodec())
@@ -473,7 +461,7 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
           // S3's writeFileIfNotExists will return FALSE (object exists via If-None-Match)
           // Retry logic MUST kick in
           val addAction2 = createAddAction(200)
-          val version2 = transactionLog.addFiles(Seq(addAction2))
+          val version2   = transactionLog.addFiles(Seq(addAction2))
 
           println(s"S3 Step 3: Second write completed at version $version2")
 
@@ -501,14 +489,11 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
           files.exists(_.path == "file200.split") shouldBe true
           files.exists(_.path == "S3_OUT_OF_BAND_FILE.split") shouldBe true
           println("S3 Verified: All files present in transaction log")
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 }

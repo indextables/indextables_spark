@@ -37,8 +37,10 @@ class MultiPartCheckpointTest extends TestBase {
         // Create checkpoint with small actionsPerPart for testing
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "100",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "100",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -46,9 +48,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Create 50 actions (less than actionsPerPart=100)
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 48).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 48).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
 
@@ -58,7 +58,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Check _last_checkpoint
         val lastCheckpointInfo = checkpoint.getLastCheckpointInfo()
         lastCheckpointInfo shouldBe defined
-        lastCheckpointInfo.get.parts shouldBe None // Single-part checkpoint
+        lastCheckpointInfo.get.parts shouldBe None        // Single-part checkpoint
         lastCheckpointInfo.get.checkpointId shouldBe None // No checkpoint ID for single-part
 
         // Verify single checkpoint file exists (not a manifest)
@@ -89,8 +89,10 @@ class MultiPartCheckpointTest extends TestBase {
         // Create checkpoint with small actionsPerPart for testing
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "50",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "50",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -98,9 +100,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Create 200 actions (will need multiple parts at 50 per part)
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 198).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 198).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
 
@@ -120,15 +120,14 @@ class MultiPartCheckpointTest extends TestBase {
 
         // Read manifest and verify parts exist
         val manifestContent = new String(cloudProvider.readFile(manifestPath), "UTF-8")
-        val manifest = io.indextables.spark.util.JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
+        val manifest =
+          io.indextables.spark.util.JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
 
         manifest.checkpointId shouldBe lastCheckpointInfo.get.checkpointId.get
         manifest.parts.length shouldBe lastCheckpointInfo.get.parts.get
 
         // Verify all part files exist
-        manifest.parts.foreach { partFile =>
-          cloudProvider.exists(s"$transactionLogPath/$partFile") shouldBe true
-        }
+        manifest.parts.foreach(partFile => cloudProvider.exists(s"$transactionLogPath/$partFile") shouldBe true)
 
         // Read checkpoint and verify all actions recovered
         val restored = checkpoint.getActionsFromCheckpoint()
@@ -138,7 +137,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Verify specific action types
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         val restoredMetadata = restored.get.collectFirst { case m: MetadataAction => m }
-        val restoredAdds = restored.get.collect { case a: AddAction => a }
+        val restoredAdds     = restored.get.collect { case a: AddAction => a }
 
         restoredProtocol shouldBe defined
         restoredMetadata shouldBe defined
@@ -163,8 +162,10 @@ class MultiPartCheckpointTest extends TestBase {
 
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "30",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "30",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -218,8 +219,10 @@ class MultiPartCheckpointTest extends TestBase {
         // Disable multi-part
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "10",
-            "spark.indextables.checkpoint.multiPart.enabled", "false"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "10",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "false"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -227,9 +230,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Create 100 actions (would be multi-part if enabled)
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 98).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 98).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
 
@@ -239,7 +240,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Check _last_checkpoint
         val lastCheckpointInfo = checkpoint.getLastCheckpointInfo()
         lastCheckpointInfo shouldBe defined
-        lastCheckpointInfo.get.parts shouldBe None // Single-part even with many actions
+        lastCheckpointInfo.get.parts shouldBe None        // Single-part even with many actions
         lastCheckpointInfo.get.checkpointId shouldBe None // No checkpoint ID for single-part
 
         // Verify single checkpoint file exists
@@ -269,8 +270,10 @@ class MultiPartCheckpointTest extends TestBase {
 
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "100",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "100",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -285,9 +288,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Total: 5 parts
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 448).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 448).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
 
@@ -323,8 +324,10 @@ class MultiPartCheckpointTest extends TestBase {
 
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "50",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "50",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -332,16 +335,14 @@ class MultiPartCheckpointTest extends TestBase {
         // Create multi-part checkpoint
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 150).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 150).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
         checkpoint.createCheckpoint(60L, allActions)
 
         // Get the manifest to find a part file to delete
         val lastCheckpointInfo = checkpoint.getLastCheckpointInfo()
-        val checkpointId = lastCheckpointInfo.get.checkpointId.get
+        val checkpointId       = lastCheckpointInfo.get.checkpointId.get
 
         // Delete one of the parts (part 2)
         val partToDelete = f"00000000000000000060.checkpoint.$checkpointId.00002.json"
@@ -371,9 +372,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Create a legacy checkpoint manually (without parts or checkpointId field)
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 5).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 5).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
 
@@ -396,12 +395,12 @@ class MultiPartCheckpointTest extends TestBase {
         )
 
         // Read with new checkpoint code
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+        val options    = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         val lastCheckpointInfo = checkpoint.getLastCheckpointInfo()
         lastCheckpointInfo shouldBe defined
-        lastCheckpointInfo.get.parts shouldBe None // Legacy: no parts field
+        lastCheckpointInfo.get.parts shouldBe None        // Legacy: no parts field
         lastCheckpointInfo.get.checkpointId shouldBe None // Legacy: no checkpointId field
 
         val restored = checkpoint.getActionsFromCheckpoint()
@@ -411,7 +410,7 @@ class MultiPartCheckpointTest extends TestBase {
         // Verify content
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         val restoredMetadata = restored.get.collectFirst { case m: MetadataAction => m }
-        val restoredAdds = restored.get.collect { case a: AddAction => a }
+        val restoredAdds     = restored.get.collect { case a: AddAction => a }
 
         restoredProtocol shouldBe defined
         restoredMetadata shouldBe defined
@@ -436,8 +435,10 @@ class MultiPartCheckpointTest extends TestBase {
 
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "50",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "50",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -445,17 +446,16 @@ class MultiPartCheckpointTest extends TestBase {
         // Create multi-part checkpoint
         val protocolAction = createTestProtocolAction()
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 100).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 100).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(protocolAction, metadataAction) ++ addActions
         checkpoint.createCheckpoint(80L, allActions)
 
         // Read manifest and verify format field
-        val manifestPath = s"$transactionLogPath/00000000000000000080.checkpoint.json"
+        val manifestPath    = s"$transactionLogPath/00000000000000000080.checkpoint.json"
         val manifestContent = new String(cloudProvider.readFile(manifestPath), "UTF-8")
-        val manifest = io.indextables.spark.util.JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
+        val manifest =
+          io.indextables.spark.util.JsonUtil.mapper.readValue(manifestContent, classOf[MultiPartCheckpointManifest])
 
         manifest.format shouldBe "json" // Default format
       } finally
@@ -477,9 +477,9 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.createDirectory(transactionLogPath.toString)
 
         // Step 1: Create a legacy V2 checkpoint manually (no schema dedup)
-        val v2Protocol = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
+        val v2Protocol     = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
         val metadataAction = createTestMetadataAction()
-        val largeSchema = """{"fields":[{"name":"field1","type":"text"}]}"""
+        val largeSchema    = """{"fields":[{"name":"field1","type":"text"}]}"""
         val addActionsV2 = (1 to 5).map { i =>
           // V2 checkpoint stores docMappingJson inline (no dedup)
           createTestAddAction(s"v2_file$i.split").copy(docMappingJson = Some(largeSchema))
@@ -502,7 +502,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.writeFile(s"$transactionLogPath/_last_checkpoint", v2LastCheckpoint.getBytes("UTF-8"))
 
         // Step 2: Read V2 checkpoint with new code
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+        val options    = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         val restoredV2 = checkpoint.getActionsFromCheckpoint()
@@ -511,9 +511,7 @@ class MultiPartCheckpointTest extends TestBase {
 
         // V2 checkpoint should still have docMappingJson inline
         val v2Adds = restoredV2.get.collect { case a: AddAction => a }
-        v2Adds.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-        }
+        v2Adds.foreach(add => add.docMappingJson shouldBe Some(largeSchema))
 
         // Step 3: Create new V3 checkpoint with same data + new data
         val v3Protocol = ProtocolAction(minReaderVersion = 3, minWriterVersion = 3)
@@ -560,18 +558,18 @@ class MultiPartCheckpointTest extends TestBase {
 
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "50",
-            "spark.indextables.checkpoint.multiPart.enabled", "true"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "50",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "true"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         // Start with V2 protocol
-        val v2Protocol = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
+        val v2Protocol     = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
         val metadataAction = createTestMetadataAction()
-        val addActions = (1 to 150).map { i =>
-          createTestAddAction(s"file$i.split")
-        }
+        val addActions     = (1 to 150).map(i => createTestAddAction(s"file$i.split"))
 
         val allActions: Seq[Action] = Seq(v2Protocol, metadataAction) ++ addActions
         checkpoint.createCheckpoint(90L, allActions)
@@ -611,16 +609,18 @@ class MultiPartCheckpointTest extends TestBase {
         // Single-part checkpoint but with schema deduplication
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.checkpoint.actionsPerPart", "1000",
-            "spark.indextables.checkpoint.multiPart.enabled", "false"
+            "spark.indextables.checkpoint.actionsPerPart",
+            "1000",
+            "spark.indextables.checkpoint.multiPart.enabled",
+            "false"
           )
         )
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         // Start with V2 protocol but with docMappingJson (triggers schema dedup)
-        val v2Protocol = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
+        val v2Protocol     = ProtocolAction(minReaderVersion = 2, minWriterVersion = 2)
         val metadataAction = createTestMetadataAction()
-        val largeSchema = """{"fields":[{"name":"field1","type":"text"}]}"""
+        val largeSchema    = """{"fields":[{"name":"field1","type":"text"}]}"""
         val addActions = (1 to 10).map { i =>
           createTestAddAction(s"file$i.split").copy(docMappingJson = Some(largeSchema))
         }

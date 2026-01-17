@@ -109,8 +109,12 @@ class IndexTables4SparkScan(
     logger.debug(s"PLAN PARTITIONS: After data skipping: ${filteredActions.length} splits remaining (started with ${addActions.length})")
 
     // Check if pre-warm is enabled (supports both old and new config paths)
-    val isPreWarmEnabled = config.getOrElse("spark.indextables.prewarm.enabled",
-      config.getOrElse("spark.indextables.cache.prewarm.enabled", "false")).toBoolean
+    val isPreWarmEnabled = config
+      .getOrElse(
+        "spark.indextables.prewarm.enabled",
+        config.getOrElse("spark.indextables.cache.prewarm.enabled", "false")
+      )
+      .toBoolean
 
     // Execute pre-warm phase if enabled
     if (isPreWarmEnabled && filteredActions.nonEmpty) {
@@ -128,7 +132,7 @@ class IndexTables4SparkScan(
 
         // Parse field configuration (empty = all fields)
         val fieldConfig = config.getOrElse("spark.indextables.prewarm.fields", "")
-        val fields = if (fieldConfig.isEmpty) None else Some(fieldConfig.split(",").map(_.trim).toSeq)
+        val fields      = if (fieldConfig.isEmpty) None else Some(fieldConfig.split(",").map(_.trim).toSeq)
 
         // Parse parallelism (splits per task)
         val splitsPerTask = config.getOrElse("spark.indextables.prewarm.splitsPerTask", "2").toInt
@@ -138,15 +142,18 @@ class IndexTables4SparkScan(
         val prewarmActions = if (partitionFilterConfig.nonEmpty) {
           try {
             val metadata = transactionLog.getMetadata()
-            val partitionSchema = StructType(metadata.partitionColumns.map(name =>
-              org.apache.spark.sql.types.StructField(name, org.apache.spark.sql.types.StringType, nullable = true)))
+            val partitionSchema = StructType(
+              metadata.partitionColumns.map(name =>
+                org.apache.spark.sql.types.StructField(name, org.apache.spark.sql.types.StringType, nullable = true)
+              )
+            )
 
             if (partitionSchema.nonEmpty) {
               val predicates = Seq(partitionFilterConfig)
-              val parsedPredicates = PartitionPredicateUtils.parseAndValidatePredicates(
-                predicates, partitionSchema, sparkSession)
-              val filtered = PartitionPredicateUtils.filterAddActionsByPredicates(
-                filteredActions, partitionSchema, parsedPredicates)
+              val parsedPredicates =
+                PartitionPredicateUtils.parseAndValidatePredicates(predicates, partitionSchema, sparkSession)
+              val filtered =
+                PartitionPredicateUtils.filterAddActionsByPredicates(filteredActions, partitionSchema, parsedPredicates)
               logger.info(s"Prewarm partition filter applied: ${filtered.length} of ${filteredActions.length} splits match '$partitionFilterConfig'")
               filtered
             } else {

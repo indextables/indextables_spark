@@ -141,14 +141,17 @@ object SchemaMapping {
   object Read {
 
     /**
-     * Build a cached map of field names to Tantivy field types.
-     * Call this once before processing a batch of documents to avoid per-field JNI calls.
+     * Build a cached map of field names to Tantivy field types. Call this once before processing a batch of documents
+     * to avoid per-field JNI calls.
      *
-     * @param splitSchema Schema from the split file (tantivy4java Schema)
-     * @param sparkSchema Target Spark schema (from transaction log)
-     * @return Map of field name to FieldType
+     * @param splitSchema
+     *   Schema from the split file (tantivy4java Schema)
+     * @param sparkSchema
+     *   Target Spark schema (from transaction log)
+     * @return
+     *   Map of field name to FieldType
      */
-    def buildFieldTypeCache(splitSchema: Schema, sparkSchema: StructType): Map[String, FieldType] = {
+    def buildFieldTypeCache(splitSchema: Schema, sparkSchema: StructType): Map[String, FieldType] =
       sparkSchema.fields.flatMap { field =>
         try {
           val fieldInfo = splitSchema.getFieldInfo(field.name)
@@ -159,7 +162,6 @@ object SchemaMapping {
             None
         }
       }.toMap
-    }
 
     /**
      * Convert data from split schema to Spark schema
@@ -186,9 +188,8 @@ object SchemaMapping {
     }
 
     /**
-     * Convert data from split schema to Spark schema using a pre-computed field type cache.
-     * This is the fast path - call buildFieldTypeCache once before processing a batch of documents,
-     * then call this method for each document.
+     * Convert data from split schema to Spark schema using a pre-computed field type cache. This is the fast path -
+     * call buildFieldTypeCache once before processing a batch of documents, then call this method for each document.
      *
      * @param splitDocument
      *   Document from tantivy4java split
@@ -424,14 +425,14 @@ object SchemaMapping {
                     case _: Exception => throw new IllegalArgumentException(s"Cannot parse date string: $s")
                   }
               }
-            case other                => throw new IllegalArgumentException(s"Cannot convert $other to Date")
+            case other => throw new IllegalArgumentException(s"Cannot convert $other to Date")
           }
 
         // DATE -> TimestampType (DATE fields may return LocalDateTime or microseconds)
         case (FieldType.DATE, TimestampType) =>
           rawValue match {
-            case l: java.lang.Long    => l.longValue() // Already in microseconds
-            case i: java.lang.Integer => i.longValue() // Convert to Long
+            case l: java.lang.Long            => l.longValue() // Already in microseconds
+            case i: java.lang.Integer         => i.longValue() // Convert to Long
             case ldt: java.time.LocalDateTime =>
               // Convert LocalDateTime to microseconds since epoch
               TimestampUtils.toMicros(ldt)

@@ -37,7 +37,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommandTest])
 
-  var spark: SparkSession = _
+  var spark: SparkSession   = _
   var tempTablePath: String = _
 
   override def beforeEach(): Unit = {
@@ -83,15 +83,17 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     val ss = spark
     import ss.implicits._
 
-    val testData = (1 until numRecords + 1).map { i =>
-      (
-        i.toLong,
-        s"title_$i",
-        s"content for record $i with some text",
-        s"category_${i % 5}",
-        i * 1.5
-      )
-    }.toDF("id", "title", "content", "category", "score")
+    val testData = (1 until numRecords + 1)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i",
+          s"content for record $i with some text",
+          s"category_${i % 5}",
+          i * 1.5
+        )
+      }
+      .toDF("id", "title", "content", "category", "score")
 
     testData
       .coalesce(1)
@@ -123,8 +125,10 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Should not include "all" since specific fields were requested
     assert(fieldsOutput != "all", "Fields should not be 'all' when specific fields requested")
-    assert(fieldsOutput.contains("title") || fieldsOutput.contains("category"),
-      s"Fields should include requested fields, got: $fieldsOutput")
+    assert(
+      fieldsOutput.contains("title") || fieldsOutput.contains("category"),
+      s"Fields should include requested fields, got: $fieldsOutput"
+    )
 
     val status = prewarmRows.head.getAs[String]("status")
     assert(status == "success" || status == "partial", s"Status should be success or partial, got: $status")
@@ -136,7 +140,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     createTestData(100)
 
     val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$tempTablePath'")
-    val prewarmRows = prewarmResult.collect()
+    val prewarmRows   = prewarmResult.collect()
 
     assert(prewarmRows.length > 0, "Prewarm should return results")
 
@@ -168,8 +172,10 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     // Status may be success (validation skipped) or partial (fields skipped)
     val status = prewarmRows.head.getAs[String]("status")
     logger.info(s"Prewarm with nonexistent field status: $status")
-    assert(status == "success" || status == "partial" || status == "error",
-      s"Status should indicate how the request was handled, got: $status")
+    assert(
+      status == "success" || status == "partial" || status == "error",
+      s"Status should indicate how the request was handled, got: $status"
+    )
 
     logger.info("PREWARM handles missing fields gracefully test passed")
   }
@@ -194,8 +200,10 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       case e: Exception =>
         // If exception thrown, field validation was active
         logger.info(s"Exception with failOnMissingField=true: ${e.getMessage}")
-        assert(e.getMessage.contains("fake_field") || e.getMessage.toLowerCase.contains("field"),
-          s"Exception should mention the missing field: ${e.getMessage}")
+        assert(
+          e.getMessage.contains("fake_field") || e.getMessage.toLowerCase.contains("field"),
+          s"Exception should mention the missing field: ${e.getMessage}"
+        )
     }
 
     spark.conf.unset("spark.indextables.prewarm.failOnMissingField")
@@ -223,16 +231,20 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       logger.info(s"Status with skipped fields: $status")
 
       // Status should be partial when fields are skipped
-      assert(status == "partial" || status == "success",
-        s"Status should be partial or success when fields skipped, got: $status")
+      assert(
+        status == "partial" || status == "success",
+        s"Status should be partial or success when fields skipped, got: $status"
+      )
 
       val skippedFields = prewarmRows.head.getAs[String]("skipped_fields")
       logger.info(s"Skipped fields: $skippedFields")
 
       // Should report skipped fields
       if (skippedFields != null && skippedFields.nonEmpty) {
-        assert(skippedFields.contains("nonexistent_field"),
-          s"Skipped fields should include 'nonexistent_field', got: $skippedFields")
+        assert(
+          skippedFields.contains("nonexistent_field"),
+          s"Skipped fields should include 'nonexistent_field', got: $skippedFields"
+        )
       }
 
       logger.info("PREWARM warn-skip mode test passed")
@@ -260,8 +272,10 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       logger.info(s"Fields actually prewarmed: $fieldsOutput")
 
       // The valid fields should be in the output
-      assert(fieldsOutput.contains("title") || fieldsOutput.contains("category"),
-        s"Fields output should include valid fields, got: $fieldsOutput")
+      assert(
+        fieldsOutput.contains("title") || fieldsOutput.contains("category"),
+        s"Fields output should include valid fields, got: $fieldsOutput"
+      )
 
       logger.info("PREWARM partial fields test passed")
     } finally
@@ -281,13 +295,12 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     assert(prewarmRows.length > 0, "Prewarm should return results")
 
     val segments = prewarmRows.head.getAs[String]("segments")
-    val fields = prewarmRows.head.getAs[String]("fields")
+    val fields   = prewarmRows.head.getAs[String]("fields")
 
     logger.info(s"Segments: $segments, Fields: $fields")
 
     assert(segments.contains("TERM"), s"Should prewarm TERM segment, got: $segments")
-    assert(fields.contains("title") || fields != "all",
-      s"Should prewarm specific fields, got: $fields")
+    assert(fields.contains("title") || fields != "all", s"Should prewarm specific fields, got: $fields")
 
     logger.info("PREWARM segments + fields combination test passed")
   }
@@ -321,14 +334,16 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       import ss.implicits._
 
       // Create minimal data then drop it to create structure
-      Seq((1L, "test")).toDF("id", "content").write
+      Seq((1L, "test"))
+        .toDF("id", "content")
+        .write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
         .mode("overwrite")
         .save(emptyPath)
 
       // Try to prewarm - should succeed even with minimal data
       val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$emptyPath'")
-      val prewarmRows = prewarmResult.collect()
+      val prewarmRows   = prewarmResult.collect()
 
       assert(prewarmRows.length > 0, "Should return results even for minimal table")
 
@@ -336,8 +351,10 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       logger.info(s"Empty table prewarm status: $status")
 
       // Either success with small data or no_splits
-      assert(status == "success" || status == "no_splits" || status == "partial",
-        s"Status should handle minimal data gracefully, got: $status")
+      assert(
+        status == "success" || status == "no_splits" || status == "partial",
+        s"Status should handle minimal data gracefully, got: $status"
+      )
     } finally
       deleteRecursively(new File(emptyPath))
 
@@ -364,19 +381,26 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     createTestData(50)
 
     val prewarmResult = spark.sql(s"PREWARM INDEXTABLES CACHE '$tempTablePath'")
-    val schema = prewarmResult.schema
+    val schema        = prewarmResult.schema
 
     // Verify all columns exist
     val columnNames = schema.fieldNames.toSet
     val expectedColumns = Set(
-      "host", "assigned_host", "locality_hits", "locality_misses",
-      "splits_prewarmed", "segments", "fields", "duration_ms", "status",
-      "skipped_fields", "retries", "failed_splits_by_host"
+      "host",
+      "assigned_host",
+      "locality_hits",
+      "locality_misses",
+      "splits_prewarmed",
+      "segments",
+      "fields",
+      "duration_ms",
+      "status",
+      "skipped_fields",
+      "retries",
+      "failed_splits_by_host"
     )
 
-    expectedColumns.foreach { col =>
-      assert(columnNames.contains(col), s"Schema should include '$col' column")
-    }
+    expectedColumns.foreach(col => assert(columnNames.contains(col), s"Schema should include '$col' column"))
 
     // Verify types
     val rows = prewarmResult.collect()
@@ -440,10 +464,11 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     // This test would have caught the missing recordPrewarmCompletion call
     // The fields output should reflect field-specific preloading was used
     val fieldsOutput = prewarmRows.head.getAs[String]("fields")
-    assert(fieldsOutput != "all",
-      s"Fields should be specific when ON FIELDS clause used, got: $fieldsOutput")
-    assert(fieldsOutput.contains("title") || fieldsOutput.contains("category"),
-      s"Fields output should include requested fields, got: $fieldsOutput")
+    assert(fieldsOutput != "all", s"Fields should be specific when ON FIELDS clause used, got: $fieldsOutput")
+    assert(
+      fieldsOutput.contains("title") || fieldsOutput.contains("category"),
+      s"Fields output should include requested fields, got: $fieldsOutput"
+    )
 
     logger.info("PREWARM ON FIELDS prewarm state tracking test passed")
   }
@@ -460,8 +485,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // This test ensures the distinction between field-specific and full preloading is maintained
     val fieldsOutput = prewarmRows.head.getAs[String]("fields")
-    assert(fieldsOutput == "all",
-      s"Fields should be 'all' when no ON FIELDS clause, got: $fieldsOutput")
+    assert(fieldsOutput == "all", s"Fields should be 'all' when no ON FIELDS clause, got: $fieldsOutput")
 
     logger.info("PREWARM all fields (no ON FIELDS) test passed")
   }
@@ -484,15 +508,16 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       logger.info(s"Prewarm completed with status: $status (field validation may be unavailable)")
 
       // If status is "error", that's also acceptable - validation was available and worked
-      assert(status == "success" || status == "partial" || status.startsWith("error"),
-        s"Unexpected status: $status")
+      assert(status == "success" || status == "partial" || status.startsWith("error"), s"Unexpected status: $status")
     } catch {
       case e: Exception =>
         // This is expected if field validation is working
         logger.info(s"Field validation correctly threw exception: ${e.getMessage}")
-        assert(e.getMessage.toLowerCase.contains("field") ||
-          e.getMessage.contains("this_field_does_not_exist_xyz"),
-          s"Exception should mention the invalid field: ${e.getMessage}")
+        assert(
+          e.getMessage.toLowerCase.contains("field") ||
+            e.getMessage.contains("this_field_does_not_exist_xyz"),
+          s"Exception should mention the invalid field: ${e.getMessage}"
+        )
     }
 
     logger.info("PREWARM fail-fast field validation test passed")
@@ -512,7 +537,7 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
       assert(prewarmRows.length > 0, "Prewarm should return results")
 
-      val status = prewarmRows.head.getAs[String]("status")
+      val status        = prewarmRows.head.getAs[String]("status")
       val skippedFields = prewarmRows.head.getAs[String]("skipped_fields")
 
       logger.info(s"Status: $status, Skipped fields: $skippedFields")
@@ -523,12 +548,13 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       if (skippedFields != null && skippedFields.nonEmpty) {
         // Field validation worked - check skipped fields reported
         assert(status == "partial", s"Status should be 'partial' when fields skipped, got: $status")
-        assert(skippedFields.contains("invalid_field_abc"),
-          s"Should report invalid_field_abc as skipped, got: $skippedFields")
+        assert(
+          skippedFields.contains("invalid_field_abc"),
+          s"Should report invalid_field_abc as skipped, got: $skippedFields"
+        )
       } else {
         // Field validation not available - still valid (best-effort)
-        assert(status == "success" || status == "partial",
-          s"Should succeed when validation unavailable, got: $status")
+        assert(status == "success" || status == "partial", s"Should succeed when validation unavailable, got: $status")
       }
     } finally
       spark.conf.unset("spark.indextables.prewarm.failOnMissingField")
@@ -558,7 +584,9 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     val targetSegments = Set(IndexComponent.TERM, IndexComponent.FASTFIELD)
 
     val catchUpNeeded = DriverSplitLocalityManager.getSplitsNeedingCatchUp(availableHosts, targetSegments)
-    logger.info(s"Catch-up needed after prewarm: ${catchUpNeeded.map { case (h, s) => s"$h: ${s.size} splits" }.mkString(", ")}")
+    logger.info(
+      s"Catch-up needed after prewarm: ${catchUpNeeded.map { case (h, s) => s"$h: ${s.size} splits" }.mkString(", ")}"
+    )
 
     // Note: In local mode, catch-up detection may vary, but this test validates
     // that recordPrewarmCompletion is being called by checking the state is tracked
@@ -576,18 +604,19 @@ class PrewarmCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     assert(prewarmRows.length > 0, "Prewarm should return results")
 
     val segments = prewarmRows.head.getAs[String]("segments")
-    val fields = prewarmRows.head.getAs[String]("fields")
+    val fields   = prewarmRows.head.getAs[String]("fields")
 
     logger.info(s"Segments: $segments, Fields: $fields")
 
     // This test ensures field-specific preloading is used for each segment type
     // If preloadFields() wasn't being called, the fields would be "all"
-    assert(fields != "all",
-      s"Should use field-specific preloading when ON FIELDS specified, got fields: $fields")
+    assert(fields != "all", s"Should use field-specific preloading when ON FIELDS specified, got fields: $fields")
 
     // Verify segments were prewarmed
-    assert(segments.contains("TERM") || segments.contains("FASTFIELD") || segments.contains("POSTINGS"),
-      s"Should include requested segments, got: $segments")
+    assert(
+      segments.contains("TERM") || segments.contains("FASTFIELD") || segments.contains("POSTINGS"),
+      s"Should include requested segments, got: $segments"
+    )
 
     logger.info("PREWARM multi-segment with fields test passed")
   }

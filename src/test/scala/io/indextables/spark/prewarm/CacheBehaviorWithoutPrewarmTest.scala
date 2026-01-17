@@ -21,22 +21,23 @@ import java.io.File
 import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
+
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 
 /**
  * Test to verify that the L2 disk cache works correctly WITHOUT prewarming:
- * - First query should populate the cache
- * - Second identical query should get 100% cache hits (no new components)
+ *   - First query should populate the cache
+ *   - Second identical query should get 100% cache hits (no new components)
  */
 class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEach {
 
   private val logger = LoggerFactory.getLogger(classOf[CacheBehaviorWithoutPrewarmTest])
 
   var spark: SparkSession = _
-  var testDir: String = _
-  var cacheDir: String = _
+  var testDir: String     = _
+  var cacheDir: String    = _
 
   override def beforeEach(): Unit = {
     testDir = Files.createTempDirectory("cache_behavior_test_").toFile.getAbsolutePath
@@ -90,7 +91,7 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
 
     // Create test data
     val data = (1 to 100).map(i => (i.toLong, s"title_$i", s"content for document $i", i * 1.5))
-    val df = data.toDF("id", "title", "content", "score")
+    val df   = data.toDF("id", "title", "content", "score")
 
     // Write to IndexTables
     logger.info("Writing test data...")
@@ -98,7 +99,7 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
       .option("spark.indextables.indexing.typemap.content", "text")
-      .option("spark.indextables.indexing.fastfields", "id,score")  // Add id as fast field for range queries
+      .option("spark.indextables.indexing.fastfields", "id,score") // Add id as fast field for range queries
       .save(testDir)
 
     // Read with prewarm DISABLED
@@ -117,30 +118,34 @@ class CacheBehaviorWithoutPrewarmTest extends AnyFunSuite with BeforeAndAfterEac
     val count1 = readDf.filter($"id" > 50).count()
     println(s"First query result: $count1 rows")
 
-    val cacheAfterQuery1 = countCacheFiles()
+    val cacheAfterQuery1     = countCacheFiles()
     val componentsFromQuery1 = cacheAfterQuery1 - cacheBeforeQuery1
     println(s"📁 Cache files AFTER first query: $cacheAfterQuery1")
     println(s"📊 Components cached by first query: $componentsFromQuery1")
 
     // Verify first query populated cache
-    assert(cacheAfterQuery1 > cacheBeforeQuery1,
-      s"First query should populate cache. Before: $cacheBeforeQuery1, After: $cacheAfterQuery1")
+    assert(
+      cacheAfterQuery1 > cacheBeforeQuery1,
+      s"First query should populate cache. Before: $cacheBeforeQuery1, After: $cacheAfterQuery1"
+    )
 
     // Second query - should hit cache (no new components)
     println("=== Second query (should hit cache) ===")
     val count2 = readDf.filter($"id" > 50).count()
     println(s"Second query result: $count2 rows")
 
-    val cacheAfterQuery2 = countCacheFiles()
+    val cacheAfterQuery2        = countCacheFiles()
     val newComponentsFromQuery2 = cacheAfterQuery2 - cacheAfterQuery1
     println(s"📁 Cache files AFTER second query: $cacheAfterQuery2")
     println(s"📊 New components after second query: $newComponentsFromQuery2")
 
     // Verify second query got cache hits
-    assert(cacheAfterQuery2 == cacheAfterQuery1,
+    assert(
+      cacheAfterQuery2 == cacheAfterQuery1,
       s"Second query should get 100% cache hits (no new components). " +
         s"After query 1: $cacheAfterQuery1, After query 2: $cacheAfterQuery2, " +
-        s"New components: $newComponentsFromQuery2")
+        s"New components: $newComponentsFromQuery2"
+    )
 
     // Both queries should return same result
     assert(count1 == count2, s"Both queries should return same count: $count1 vs $count2")

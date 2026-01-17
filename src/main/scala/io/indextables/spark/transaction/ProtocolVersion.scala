@@ -37,26 +37,26 @@ object ProtocolVersion {
 
   // Feature support (for version 3+)
   val SUPPORTED_READER_FEATURES: Set[String] = Set(
-    "skippedFiles",         // SkipAction support
-    "extendedMetadata",     // Extended AddAction metadata
-    "footerOffsets",        // Footer offset optimization
-    "multiPartCheckpoint",  // Multi-part checkpoint files with UUID manifest
-    "schemaDeduplication"   // docMappingRef-based schema deduplication
+    "skippedFiles",        // SkipAction support
+    "extendedMetadata",    // Extended AddAction metadata
+    "footerOffsets",       // Footer offset optimization
+    "multiPartCheckpoint", // Multi-part checkpoint files with UUID manifest
+    "schemaDeduplication"  // docMappingRef-based schema deduplication
   )
 
   val SUPPORTED_WRITER_FEATURES: Set[String] = Set(
-    "skippedFiles",         // SkipAction support
-    "extendedMetadata",     // Extended AddAction metadata
-    "footerOffsets",        // Footer offset optimization
-    "checkpoint",           // Checkpoint support
-    "optimizeWrite",        // Optimized write operations
-    "multiPartCheckpoint",  // Multi-part checkpoint files with UUID manifest
-    "schemaDeduplication"   // docMappingRef-based schema deduplication
+    "skippedFiles",        // SkipAction support
+    "extendedMetadata",    // Extended AddAction metadata
+    "footerOffsets",       // Footer offset optimization
+    "checkpoint",          // Checkpoint support
+    "optimizeWrite",       // Optimized write operations
+    "multiPartCheckpoint", // Multi-part checkpoint files with UUID manifest
+    "schemaDeduplication"  // docMappingRef-based schema deduplication
   )
 
   // Feature flags introduced in V3
   val FEATURE_MULTI_PART_CHECKPOINT = "multiPartCheckpoint"
-  val FEATURE_SCHEMA_DEDUPLICATION = "schemaDeduplication"
+  val FEATURE_SCHEMA_DEDUPLICATION  = "schemaDeduplication"
 
   /** Features that require V3 reader */
   val V3_READER_FEATURES: Set[String] = Set(
@@ -105,8 +105,10 @@ object ProtocolVersion {
   /**
    * Check if a table uses V3 features based on its protocol.
    *
-   * @param protocol The table's protocol action
-   * @return true if the table requires V3 reader
+   * @param protocol
+   *   The table's protocol action
+   * @return
+   *   true if the table requires V3 reader
    */
   def usesV3Features(protocol: ProtocolAction): Boolean =
     protocol.minReaderVersion >= 3
@@ -114,8 +116,10 @@ object ProtocolVersion {
   /**
    * Validate that the current system can read a table with the given protocol.
    *
-   * @param protocol The table's protocol action
-   * @throws ProtocolVersionException if the table requires a newer reader
+   * @param protocol
+   *   The table's protocol action
+   * @throws ProtocolVersionException
+   *   if the table requires a newer reader
    */
   def validateReaderVersion(protocol: ProtocolAction): Unit =
     if (!isReaderVersionSupported(protocol.minReaderVersion)) {
@@ -128,8 +132,10 @@ object ProtocolVersion {
   /**
    * Validate that the current system can write to a table with the given protocol.
    *
-   * @param protocol The table's protocol action
-   * @throws ProtocolVersionException if the table requires a newer writer
+   * @param protocol
+   *   The table's protocol action
+   * @throws ProtocolVersionException
+   *   if the table requires a newer writer
    */
   def validateWriterVersion(protocol: ProtocolAction): Unit =
     if (!isWriterVersionSupported(protocol.minWriterVersion)) {
@@ -142,8 +148,10 @@ object ProtocolVersion {
   /**
    * Get the minimum required reader version for a set of features.
    *
-   * @param features Set of feature names being used
-   * @return The minimum reader version required
+   * @param features
+   *   Set of feature names being used
+   * @return
+   *   The minimum reader version required
    */
   def getMinReaderVersionForFeatures(features: Set[String]): Int = {
     val usesV3 = features.exists(V3_READER_FEATURES.contains)

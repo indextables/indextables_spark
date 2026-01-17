@@ -22,15 +22,16 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.ArrayBuffer
 
-import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.apache.hadoop.conf.Configuration
+
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Unit tests for UnityCatalogAWSCredentialProvider using a mock HTTP server.
- * Does not require Spark - purely tests the HTTP credential fetching logic.
+ * Unit tests for UnityCatalogAWSCredentialProvider using a mock HTTP server. Does not require Spark - purely tests the
+ * HTTP credential fetching logic.
  */
 class UnityCatalogAWSCredentialProviderTest
     extends AnyFunSuite
@@ -38,12 +39,16 @@ class UnityCatalogAWSCredentialProviderTest
     with BeforeAndAfterAll
     with BeforeAndAfterEach {
 
-  private var mockServer: HttpServer     = _
-  private var serverPort: Int            = _
-  private var hadoopConf: Configuration  = _
+  private var mockServer: HttpServer               = _
+  private var serverPort: Int                      = _
+  private var hadoopConf: Configuration            = _
   private val requestLog: ArrayBuffer[MockRequest] = ArrayBuffer.empty
 
-  case class MockRequest(method: String, path: String, body: String, headers: Map[String, String])
+  case class MockRequest(
+    method: String,
+    path: String,
+    body: String,
+    headers: Map[String, String])
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -69,9 +74,9 @@ class UnityCatalogAWSCredentialProviderTest
     requestLog.clear()
     UnityCatalogAWSCredentialProvider.clearCache()
     // Remove any existing handlers (ignore errors if not present)
-    try {
+    try
       mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
-    } catch {
+    catch {
       case _: IllegalArgumentException => // Context doesn't exist, ignore
     }
   }
@@ -83,19 +88,22 @@ class UnityCatalogAWSCredentialProviderTest
 
   private def setupMockHandler(responseCode: Int, responseBody: String): Unit = {
     // Remove existing handler first
-    try {
+    try
       mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
-    } catch {
+    catch {
       case _: IllegalArgumentException => // Context doesn't exist, ignore
     }
 
     val handler = new HttpHandler {
       override def handle(exchange: HttpExchange): Unit = {
-        val method  = exchange.getRequestMethod
-        val path    = exchange.getRequestURI.getPath
-        val body    = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters.mapAsScalaMapConverter(exchange.getRequestHeaders).asScala
-          .map { case (k, v) => k -> v.get(0) }.toMap
+        val method = exchange.getRequestMethod
+        val path   = exchange.getRequestURI.getPath
+        val body   = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters
+          .mapAsScalaMapConverter(exchange.getRequestHeaders)
+          .asScala
+          .map { case (k, v) => k -> v.get(0) }
+          .toMap
 
         requestLog += MockRequest(method, path, body, headers)
 
@@ -110,19 +118,22 @@ class UnityCatalogAWSCredentialProviderTest
 
   private def setupMockHandlerWithCallback(callback: MockRequest => (Int, String)): Unit = {
     // Remove existing handler first
-    try {
+    try
       mockServer.removeContext("/api/2.1/unity-catalog/temporary-path-credentials")
-    } catch {
+    catch {
       case _: IllegalArgumentException => // Context doesn't exist, ignore
     }
 
     val handler = new HttpHandler {
       override def handle(exchange: HttpExchange): Unit = {
-        val method  = exchange.getRequestMethod
-        val path    = exchange.getRequestURI.getPath
-        val body    = new String(exchange.getRequestBody.readAllBytes())
-        val headers = scala.jdk.CollectionConverters.mapAsScalaMapConverter(exchange.getRequestHeaders).asScala
-          .map { case (k, v) => k -> v.get(0) }.toMap
+        val method = exchange.getRequestMethod
+        val path   = exchange.getRequestURI.getPath
+        val body   = new String(exchange.getRequestBody.readAllBytes())
+        val headers = scala.jdk.CollectionConverters
+          .mapAsScalaMapConverter(exchange.getRequestHeaders)
+          .asScala
+          .map { case (k, v) => k -> v.get(0) }
+          .toMap
 
         val request = MockRequest(method, path, body, headers)
         requestLog += request

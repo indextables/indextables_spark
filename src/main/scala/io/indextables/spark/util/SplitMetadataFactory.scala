@@ -72,7 +72,7 @@ object SplitMetadataFactory {
       0,                                                                 // numMergeOps
       "doc-mapping-uid",                                                 // docMappingUid
       addAction.docMappingJson.orNull,                                   // docMappingJson - REAL VALUE from AddAction
-      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()           // skippedSplits
+      java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]()      // skippedSplits
     )
   }
 

@@ -396,7 +396,9 @@ class IndexTables4SparkSimpleAggregateReader(
       }
       val hadoopConf = new org.apache.hadoop.conf.Configuration()
       val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
-        resolvedPath, optionsMap, hadoopConf
+        resolvedPath,
+        optionsMap,
+        hadoopConf
       )
 
       logger.debug(s"SIMPLE AGGREGATE EXECUTION: Resolved split path: $splitPath")

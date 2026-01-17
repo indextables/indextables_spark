@@ -17,18 +17,18 @@
 
 package io.indextables.spark.sql
 
-import io.indextables.spark.TestBase
 import io.indextables.spark.util.ConfigNormalization
+import io.indextables.spark.TestBase
 import org.slf4j.LoggerFactory
 
 /**
  * Tests for credential propagation in merge operations with Unity Catalog.
  *
  * Scenario being tested:
- * - Provider class and workspace URL are at CLUSTER-SCOPED (session level) Spark properties
- * - API token is at SESSION-SCOPED Spark property
- * - Reads, writes, and purges work fine
- * - Merges FAIL with missing credentials
+ *   - Provider class and workspace URL are at CLUSTER-SCOPED (session level) Spark properties
+ *   - API token is at SESSION-SCOPED Spark property
+ *   - Reads, writes, and purges work fine
+ *   - Merges FAIL with missing credentials
  *
  * This tests the full credential resolution flow in MergeSplitsExecutor.extractAwsConfig().
  */
@@ -37,8 +37,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   private val logger = LoggerFactory.getLogger(classOf[MergeWithWriteOptionsCredentialTest])
 
   // Fake workspace URL - connection will fail but we can verify config propagation
-  private val fakeWorkspaceUrl = "http://localhost:19876"
-  private val fakeApiToken = "test-databricks-token-12345"
+  private val fakeWorkspaceUrl  = "http://localhost:19876"
+  private val fakeApiToken      = "test-databricks-token-12345"
   private val testProviderClass = "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider"
 
   override def beforeEach(): Unit = {
@@ -65,13 +65,13 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * DIAGNOSTIC TEST: Verify session-level configs are visible to MergeSplitsExecutor.
-   * This traces through the exact config extraction path used by extractAwsConfig.
+   * DIAGNOSTIC TEST: Verify session-level configs are visible to MergeSplitsExecutor. This traces through the exact
+   * config extraction path used by extractAwsConfig.
    */
   test("DIAGNOSTIC: Session configs should be visible to MergeSplitsExecutor") {
     // Extract configs exactly like MergeSplitsExecutor.extractAwsConfig does
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
@@ -82,8 +82,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // Check for Databricks configs
     val providerClass = mergedConfigs.get("spark.indextables.aws.credentialsProviderClass")
-    val workspaceUrl = mergedConfigs.get("spark.indextables.databricks.workspaceUrl")
-    val apiToken = mergedConfigs.get("spark.indextables.databricks.apiToken")
+    val workspaceUrl  = mergedConfigs.get("spark.indextables.databricks.workspaceUrl")
+    val apiToken      = mergedConfigs.get("spark.indextables.databricks.apiToken")
 
     logger.info(s"credentialsProviderClass: $providerClass")
     logger.info(s"databricks.workspaceUrl: $workspaceUrl")
@@ -98,8 +98,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test MERGE SPLITS SQL command with session-level Unity Catalog configs.
-   * This replicates the exact user scenario.
+   * Test MERGE SPLITS SQL command with session-level Unity Catalog configs. This replicates the exact user scenario.
    */
   test("MERGE SPLITS SQL command should use session-level Unity Catalog configs") {
     // Create a local table with multiple splits
@@ -119,24 +118,22 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     val result = spark.sql(s"MERGE SPLITS '$localPath' TARGET SIZE 100M").collect()
 
     logger.info(s"MERGE SPLITS completed with ${result.length} rows")
-    result.foreach { row =>
-      logger.info(s"  Result: ${row.toString}")
-    }
+    result.foreach(row => logger.info(s"  Result: ${row.toString}"))
 
     // Verify merge completed successfully
     result should not be empty
   }
 
   /**
-   * Test that directly invokes extractAwsConfig logic with session-level configs.
-   * This isolates the credential extraction to understand what's happening.
+   * Test that directly invokes extractAwsConfig logic with session-level configs. This isolates the credential
+   * extraction to understand what's happening.
    */
   test("extractAwsConfig logic should find session-level configs") {
     import scala.jdk.CollectionConverters._
 
     // Create a local table
     val localPath = tempDir + "/extract_aws_test"
-    val df = spark.createDataFrame(Seq((1, "value1"))).toDF("id", "value")
+    val df        = spark.createDataFrame(Seq((1, "value1"))).toDF("id", "value")
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .mode("overwrite")
@@ -169,11 +166,11 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test credential resolution directly using ConfigUtils.
-   * This verifies that resolveCredentialsFromProviderOnDriver gets the right configs.
+   * Test credential resolution directly using ConfigUtils. This verifies that resolveCredentialsFromProviderOnDriver
+   * gets the right configs.
    *
-   * Note: With centralized credential resolution, provider failures return None
-   * (graceful fallback) instead of throwing exceptions.
+   * Note: With centralized credential resolution, provider failures return None (graceful fallback) instead of throwing
+   * exceptions.
    */
   test("ConfigUtils.resolveCredentialsFromProviderOnDriver should receive all session configs") {
     import io.indextables.spark.util.ConfigUtils
@@ -183,8 +180,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     CredentialProviderFactory.clearCache()
 
     // Extract configs like MergeSplitsExecutor does
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
@@ -194,10 +191,11 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     mergedConfigs should contain key "spark.indextables.databricks.apiToken"
 
     // Remove any explicit credentials to force provider invocation
-    val configsNoExplicitCreds = mergedConfigs.filterNot { case (k, _) =>
-      k.toLowerCase.contains("accesskey") ||
-      k.toLowerCase.contains("secretkey") ||
-      k.toLowerCase.contains("sessiontoken")
+    val configsNoExplicitCreds = mergedConfigs.filterNot {
+      case (k, _) =>
+        k.toLowerCase.contains("accesskey") ||
+        k.toLowerCase.contains("secretkey") ||
+        k.toLowerCase.contains("sessiontoken")
     }
 
     // With centralized resolution, provider failures return the original config unchanged
@@ -214,7 +212,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   private def getFullErrorMessage(t: Throwable): String = {
-    val sb = new StringBuilder
+    val sb                 = new StringBuilder
     var current: Throwable = t
     while (current != null) {
       sb.append(current.getClass.getName).append(": ").append(current.getMessage).append("\n")
@@ -224,8 +222,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test that MergeSplitsExecutor.extractAwsConfig properly includes overrideOptions
-   * when looking up credential provider configs (for merge-on-write scenario).
+   * Test that MergeSplitsExecutor.extractAwsConfig properly includes overrideOptions when looking up credential
+   * provider configs (for merge-on-write scenario).
    */
   test("extractAwsConfig should include overrideOptions when provided") {
     import scala.jdk.CollectionConverters._
@@ -237,11 +235,11 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // Create write options with Databricks configs
     val writeOptionsMap = Map(
-      "spark.indextables.databricks.workspaceUrl" -> fakeWorkspaceUrl,
-      "spark.indextables.databricks.apiToken" -> fakeApiToken,
+      "spark.indextables.databricks.workspaceUrl"      -> fakeWorkspaceUrl,
+      "spark.indextables.databricks.apiToken"          -> fakeApiToken,
       "spark.indextables.aws.credentialsProviderClass" -> testProviderClass,
-      "spark.indextables.aws.region" -> "us-west-2",
-      "spark.indextables.databricks.retry.attempts" -> "1"
+      "spark.indextables.aws.region"                   -> "us-west-2",
+      "spark.indextables.databricks.retry.attempts"    -> "1"
     )
 
     // Verify configs are NOT in session
@@ -288,11 +286,10 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test the full merge-on-write flow with write options containing credential configs.
-   * This replicates the exact user scenario:
-   * 1. Set Databricks configs via write options (not session)
-   * 2. Write data with merge-on-write enabled
-   * 3. Merge should be able to access the configs
+   * Test the full merge-on-write flow with write options containing credential configs. This replicates the exact user
+   * scenario:
+   *   1. Set Databricks configs via write options (not session) 2. Write data with merge-on-write enabled 3. Merge
+   *      should be able to access the configs
    */
   test("merge-on-write should propagate write options to merge executor") {
     val localPath = tempDir + "/merge_on_write_options_test"
@@ -314,7 +311,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     df2.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.targetSize", "1K") // Very small to force merge
+      .option("spark.indextables.mergeOnWrite.targetSize", "1K")            // Very small to force merge
       .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Low threshold to trigger merge
       // Include Databricks configs in write options
       .option("spark.indextables.databricks.workspaceUrl", fakeWorkspaceUrl)
@@ -336,9 +333,8 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test that verifies the config merging logic in extractAwsConfig.
-   * This directly tests that overrideOptions are merged with mergedConfigs
-   * before credential resolution.
+   * Test that verifies the config merging logic in extractAwsConfig. This directly tests that overrideOptions are
+   * merged with mergedConfigs before credential resolution.
    */
   test("configForResolution should include both session configs and overrideOptions") {
     import scala.jdk.CollectionConverters._
@@ -353,15 +349,15 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // Create override options with different values (Databricks configs only here)
     val overrideOptions = Map(
-      "spark.indextables.databricks.workspaceUrl" -> fakeWorkspaceUrl,
-      "spark.indextables.databricks.apiToken" -> fakeApiToken,
+      "spark.indextables.databricks.workspaceUrl"      -> fakeWorkspaceUrl,
+      "spark.indextables.databricks.apiToken"          -> fakeApiToken,
       "spark.indextables.aws.credentialsProviderClass" -> testProviderClass,
-      "spark.indextables.aws.region" -> "us-west-2" // Override session value
+      "spark.indextables.aws.region"                   -> "us-west-2" // Override session value
     )
 
     // Extract configs like MergeSplitsExecutor does
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
@@ -385,19 +381,17 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     logger.info(s"  - Session region: us-east-1, Override region: us-west-2, Result: ${configForResolution.get("spark.indextables.aws.region")}")
   }
 
-  /**
-   * Test that SerializableAwsConfig correctly receives all configs including Databricks keys.
-   */
+  /** Test that SerializableAwsConfig correctly receives all configs including Databricks keys. */
   test("SerializableAwsConfig should include Databricks configs from overrideOptions") {
     import scala.jdk.CollectionConverters._
 
     val testConfigs = Map(
-      "spark.indextables.databricks.workspaceUrl" -> fakeWorkspaceUrl,
-      "spark.indextables.databricks.apiToken" -> fakeApiToken,
+      "spark.indextables.databricks.workspaceUrl"      -> fakeWorkspaceUrl,
+      "spark.indextables.databricks.apiToken"          -> fakeApiToken,
       "spark.indextables.aws.credentialsProviderClass" -> testProviderClass,
-      "spark.indextables.aws.accessKey" -> "test-access-key",
-      "spark.indextables.aws.secretKey" -> "test-secret-key",
-      "spark.indextables.aws.region" -> "us-west-2"
+      "spark.indextables.aws.accessKey"                -> "test-access-key",
+      "spark.indextables.aws.secretKey"                -> "test-secret-key",
+      "spark.indextables.aws.region"                   -> "us-west-2"
     )
 
     // Create SerializableAwsConfig with merged configs (new simplified approach)
@@ -421,13 +415,11 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
   }
 
   /**
-   * Test that exercises the full credential resolution path with write options.
-   * This simulates what happens when MergeSplitsExecutor.extractAwsConfig is called
-   * with overrideOptions containing the credential provider config.
+   * Test that exercises the full credential resolution path with write options. This simulates what happens when
+   * MergeSplitsExecutor.extractAwsConfig is called with overrideOptions containing the credential provider config.
    *
-   * Note: With centralized credential resolution, provider failures return None
-   * (fall back to default provider chain) instead of throwing exceptions.
-   * This test verifies that the provider is correctly invoked with merged config.
+   * Note: With centralized credential resolution, provider failures return None (fall back to default provider chain)
+   * instead of throwing exceptions. This test verifies that the provider is correctly invoked with merged config.
    */
   test("credential resolution should use merged config including overrideOptions") {
     import io.indextables.spark.util.ConfigUtils
@@ -444,25 +436,26 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // Create a config map that simulates what would be in overrideOptions
     val overrideOptions = Map(
-      "spark.indextables.databricks.workspaceUrl" -> fakeWorkspaceUrl,
-      "spark.indextables.databricks.apiToken" -> fakeApiToken,
+      "spark.indextables.databricks.workspaceUrl"      -> fakeWorkspaceUrl,
+      "spark.indextables.databricks.apiToken"          -> fakeApiToken,
       "spark.indextables.aws.credentialsProviderClass" -> testProviderClass,
-      "spark.indextables.databricks.retry.attempts" -> "1" // Reduce retries for faster test
+      "spark.indextables.databricks.retry.attempts"    -> "1" // Reduce retries for faster test
     )
 
     // Extract mergedConfigs like MergeSplitsExecutor does
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
     // Remove any explicit credentials from merged config to force provider invocation
     // (centralized resolution prioritizes explicit credentials over provider)
     val mergedConfigsNoExplicitCreds = mergedConfigs
-      .filterNot { case (k, _) =>
-        k.toLowerCase.contains("accesskey") ||
-        k.toLowerCase.contains("secretkey") ||
-        k.toLowerCase.contains("sessiontoken")
+      .filterNot {
+        case (k, _) =>
+          k.toLowerCase.contains("accesskey") ||
+          k.toLowerCase.contains("secretkey") ||
+          k.toLowerCase.contains("sessiontoken")
       }
 
     // Apply the fix: merge overrideOptions with mergedConfigs
@@ -488,19 +481,20 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
 
     // The logger.warn output shows the provider was invoked and failed gracefully
 
-    logger.info("Verified: Credential resolution invoked Unity Catalog provider (which failed as expected with fake URL)")
+    logger.info(
+      "Verified: Credential resolution invoked Unity Catalog provider (which failed as expected with fake URL)"
+    )
     logger.info("Provider returned None, indicating graceful fallback to default provider chain")
   }
 
   /**
-   * Regression test: Verify that the original bug scenario is fixed.
-   * The bug was that Databricks configs in write options were not being
-   * passed to credential resolution in extractAwsConfig.
+   * Regression test: Verify that the original bug scenario is fixed. The bug was that Databricks configs in write
+   * options were not being passed to credential resolution in extractAwsConfig.
    *
    * After centralization refactoring:
-   * - Config merging happens BEFORE creating SerializableAwsConfig
-   * - SerializableAwsConfig holds merged configs (including overrideOptions)
-   * - Credential resolution uses CredentialProviderFactory.resolveAWSCredentialsFromConfig
+   *   - Config merging happens BEFORE creating SerializableAwsConfig
+   *   - SerializableAwsConfig holds merged configs (including overrideOptions)
+   *   - Credential resolution uses CredentialProviderFactory.resolveAWSCredentialsFromConfig
    */
   test("REGRESSION: extractAwsConfig must merge overrideOptions before credential resolution") {
     // Read the source file and verify the fix is in place
@@ -524,8 +518,7 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
       content should include("def resolveAWSCredentials()")
 
       logger.info("REGRESSION TEST PASSED: Config merging and centralized credential resolution are in place")
-    } finally {
+    } finally
       sourceFile.close()
-    }
   }
 }

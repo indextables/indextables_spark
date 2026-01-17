@@ -30,8 +30,7 @@ import org.slf4j.LoggerFactory
 /**
  * SQL command to describe environment configuration across all executors.
  *
- * Syntax: DESCRIBE INDEXTABLES ENVIRONMENT
- *         DESCRIBE TANTIVY4SPARK ENVIRONMENT
+ * Syntax: DESCRIBE INDEXTABLES ENVIRONMENT DESCRIBE TANTIVY4SPARK ENVIRONMENT
  *
  * Returns a DataFrame with Spark and Hadoop configuration properties from driver and all workers:
  *   - host: Host address of the executor
@@ -40,8 +39,8 @@ import org.slf4j.LoggerFactory
  *   - property_name: Configuration property name
  *   - property_value: Configuration property value (sensitive values are redacted)
  *
- * Note: Sensitive configuration values (containing "secret", "key", "password", "token",
- * "credential", or "session") are automatically redacted for security.
+ * Note: Sensitive configuration values (containing "secret", "key", "password", "token", "credential", or "session")
+ * are automatically redacted for security.
  */
 case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
 
@@ -93,25 +92,27 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
           }
 
           // Build rows for Spark properties
-          val sparkRows = sparkProps.map { case (name, value) =>
-            Row(
-              host,
-              "worker",
-              "spark",
-              name,
-              CredentialRedaction.redactValue(name, value)
-            )
+          val sparkRows = sparkProps.map {
+            case (name, value) =>
+              Row(
+                host,
+                "worker",
+                "spark",
+                name,
+                CredentialRedaction.redactValue(name, value)
+              )
           }
 
           // Build rows for Hadoop properties
-          val hadoopRows = hadoopProps.map { case (name, value) =>
-            Row(
-              host,
-              "worker",
-              "hadoop",
-              name,
-              CredentialRedaction.redactValue(name, value)
-            )
+          val hadoopRows = hadoopProps.map {
+            case (name, value) =>
+              Row(
+                host,
+                "worker",
+                "hadoop",
+                name,
+                CredentialRedaction.redactValue(name, value)
+              )
           }
 
           (sparkRows ++ hadoopRows).iterator
@@ -120,26 +121,31 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
         .toSeq
 
       // Build driver rows for Spark properties
-      val driverSparkRows = sparkConf.map { case (name, value) =>
-        Row(
-          driverHostPort,
-          "driver",
-          "spark",
-          name,
-          CredentialRedaction.redactValue(name, value)
-        )
+      val driverSparkRows = sparkConf.map {
+        case (name, value) =>
+          Row(
+            driverHostPort,
+            "driver",
+            "spark",
+            name,
+            CredentialRedaction.redactValue(name, value)
+          )
       }.toSeq
 
       // Build driver rows for Hadoop properties
-      val driverHadoopRows = hadoopConf.iterator().asScala.map { entry =>
-        Row(
-          driverHostPort,
-          "driver",
-          "hadoop",
-          entry.getKey,
-          CredentialRedaction.redactValue(entry.getKey, entry.getValue)
-        )
-      }.toSeq
+      val driverHadoopRows = hadoopConf
+        .iterator()
+        .asScala
+        .map { entry =>
+          Row(
+            driverHostPort,
+            "driver",
+            "hadoop",
+            entry.getKey,
+            CredentialRedaction.redactValue(entry.getKey, entry.getValue)
+          )
+        }
+        .toSeq
 
       // Return driver rows first, then executor rows
       driverSparkRows ++ driverHadoopRows ++ executorRows
@@ -148,25 +154,30 @@ case class DescribeEnvironmentCommand() extends LeafRunnableCommand {
       case e: Exception =>
         logger.warn(s"Failed to collect executor configuration, returning driver-only: ${e.getMessage}")
         // Fallback to driver-only configuration
-        val driverSparkRows = sparkConf.map { case (name, value) =>
-          Row(
-            driverHostPort,
-            "driver",
-            "spark",
-            name,
-            CredentialRedaction.redactValue(name, value)
-          )
+        val driverSparkRows = sparkConf.map {
+          case (name, value) =>
+            Row(
+              driverHostPort,
+              "driver",
+              "spark",
+              name,
+              CredentialRedaction.redactValue(name, value)
+            )
         }.toSeq
 
-        val driverHadoopRows = hadoopConf.iterator().asScala.map { entry =>
-          Row(
-            driverHostPort,
-            "driver",
-            "hadoop",
-            entry.getKey,
-            CredentialRedaction.redactValue(entry.getKey, entry.getValue)
-          )
-        }.toSeq
+        val driverHadoopRows = hadoopConf
+          .iterator()
+          .asScala
+          .map { entry =>
+            Row(
+              driverHostPort,
+              "driver",
+              "hadoop",
+              entry.getKey,
+              CredentialRedaction.redactValue(entry.getKey, entry.getValue)
+            )
+          }
+          .toSeq
 
         driverSparkRows ++ driverHadoopRows
     }

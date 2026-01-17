@@ -35,54 +35,63 @@ import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
 /**
- * Exception thrown when a transaction log write fails due to concurrent write conflict
- * after all retry attempts have been exhausted.
+ * Exception thrown when a transaction log write fails due to concurrent write conflict after all retry attempts have
+ * been exhausted.
  *
- * @param message Descriptive error message
- * @param version The version number that experienced the conflict
- * @param attemptsMade Number of retry attempts that were made
- * @param cause The underlying cause (if any)
+ * @param message
+ *   Descriptive error message
+ * @param version
+ *   The version number that experienced the conflict
+ * @param attemptsMade
+ *   Number of retry attempts that were made
+ * @param cause
+ *   The underlying cause (if any)
  */
 class TransactionConflictException(
   message: String,
   val version: Long,
   val attemptsMade: Int,
-  cause: Throwable = null
-) extends RuntimeException(message, cause)
+  cause: Throwable = null)
+    extends RuntimeException(message, cause)
 
 /**
  * Configuration for transaction log write retry behavior.
  *
- * @param maxAttempts Maximum number of retry attempts (default: 10)
- * @param baseDelayMs Initial backoff delay in milliseconds (default: 100)
- * @param maxDelayMs Maximum backoff delay cap in milliseconds (default: 5000)
+ * @param maxAttempts
+ *   Maximum number of retry attempts (default: 10)
+ * @param baseDelayMs
+ *   Initial backoff delay in milliseconds (default: 100)
+ * @param maxDelayMs
+ *   Maximum backoff delay cap in milliseconds (default: 5000)
  */
 case class TxRetryConfig(
   maxAttempts: Int = 10,
   baseDelayMs: Long = 100,
-  maxDelayMs: Long = 5000
-)
+  maxDelayMs: Long = 5000)
 
 /**
  * Metrics from the most recent write operation with retry.
  *
- * @param attemptsMade Total number of attempts made (1 = no retry needed)
- * @param conflictsEncountered Number of conflicts encountered (attemptsMade - 1 if successful)
- * @param finalVersion The version number that was successfully written
- * @param conflictedVersions List of version numbers where conflicts were detected
+ * @param attemptsMade
+ *   Total number of attempts made (1 = no retry needed)
+ * @param conflictsEncountered
+ *   Number of conflicts encountered (attemptsMade - 1 if successful)
+ * @param finalVersion
+ *   The version number that was successfully written
+ * @param conflictedVersions
+ *   List of version numbers where conflicts were detected
  */
 case class TxRetryMetrics(
   attemptsMade: Int,
   conflictsEncountered: Int,
   finalVersion: Long,
-  conflictedVersions: Seq[Long]
-)
+  conflictedVersions: Seq[Long])
 
 object TransactionLog {
   // Configuration keys for retry behavior
-  val RETRY_MAX_ATTEMPTS = "spark.indextables.transaction.retry.maxAttempts"
+  val RETRY_MAX_ATTEMPTS  = "spark.indextables.transaction.retry.maxAttempts"
   val RETRY_BASE_DELAY_MS = "spark.indextables.transaction.retry.baseDelayMs"
-  val RETRY_MAX_DELAY_MS = "spark.indextables.transaction.retry.maxDelayMs"
+  val RETRY_MAX_DELAY_MS  = "spark.indextables.transaction.retry.maxDelayMs"
 
   // Thread-local storage for write-time options
   // This allows writes to pass their DataFrameWriter options (including compression settings) to TransactionLog
@@ -158,7 +167,7 @@ class TransactionLog(
   // Tracks which schemas have been written to MetadataAction.configuration
   // Initialized lazily from existing table state on first write
   @volatile private var schemaRegistryCache: Option[Map[String, String]] = None
-  private val schemaRegistryLock = new Object()
+  private val schemaRegistryLock                                         = new Object()
 
   // Retry metrics tracking for testing and monitoring
   // Stores metrics from the most recent write operation with retry
@@ -167,10 +176,11 @@ class TransactionLog(
   def getTablePath(): Path = tablePath
 
   /**
-   * Get metrics from the most recent write operation with retry.
-   * Useful for testing and monitoring concurrent write behavior.
+   * Get metrics from the most recent write operation with retry. Useful for testing and monitoring concurrent write
+   * behavior.
    *
-   * @return The retry metrics from the last write, or None if no writes have occurred
+   * @return
+   *   The retry metrics from the last write, or None if no writes have occurred
    */
   def getLastRetryMetrics(): Option[TxRetryMetrics] = lastRetryMetrics
 
@@ -232,8 +242,8 @@ class TransactionLog(
   /**
    * Add multiple files in a single transaction (like Delta Lake). This creates one JSON file with multiple ADD entries.
    *
-   * This method uses automatic retry on concurrent write conflict, making it safe for concurrent append operations
-   * from multiple processes.
+   * This method uses automatic retry on concurrent write conflict, making it safe for concurrent append operations from
+   * multiple processes.
    */
   def addFiles(addActions: Seq[AddAction]): Long = {
     if (addActions.isEmpty) {
@@ -252,18 +262,18 @@ class TransactionLog(
    * Add files in overwrite mode - removes all existing files and adds new ones. This is similar to Delta Lake's
    * overwrite mode.
    *
-   * This method uses automatic retry on concurrent write conflict. On each retry attempt, the list of files
-   * to remove is recalculated to include any files that may have been added by competing writers.
+   * This method uses automatic retry on concurrent write conflict. On each retry attempt, the list of files to remove
+   * is recalculated to include any files that may have been added by competing writers.
    */
   def overwriteFiles(addActions: Seq[AddAction]): Long = {
     if (addActions.isEmpty) {
       logger.warn("Overwrite operation with no files to add")
     }
 
-    val retryConfig = getRetryConfig()
-    var attempt = 1
+    val retryConfig         = getRetryConfig()
+    var attempt             = 1
     var lastConflictVersion = -1L
-    val conflictedVersions = scala.collection.mutable.ListBuffer[Long]()
+    val conflictedVersions  = scala.collection.mutable.ListBuffer[Long]()
 
     while (attempt <= retryConfig.maxAttempts) {
       // Get current version for this attempt
@@ -288,8 +298,8 @@ class TransactionLog(
       }
 
       val allActions: Seq[Action] = removeActions ++ addActions
-      val versionFile = new Path(transactionLogPath, f"$version%020d.json")
-      val versionFilePath = versionFile.toString
+      val versionFile             = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFilePath         = versionFile.toString
 
       // Apply schema deduplication
       val (deduplicatedActions, metadataUpdate) = applySchemaDeduplicationForWrite(allActions)
@@ -299,7 +309,7 @@ class TransactionLog(
           if (hasMetadataInActions) {
             deduplicatedActions.map {
               case _: MetadataAction => updatedMetadata
-              case other => other
+              case other             => other
             }
           } else {
             updatedMetadata +: deduplicatedActions
@@ -308,7 +318,7 @@ class TransactionLog(
           deduplicatedActions
       }
 
-      val codec = getCompressionCodec()
+      val codec           = getCompressionCodec()
       val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
 
       val writeSucceeded = StreamingActionWriter.writeActionsStreaming(
@@ -327,12 +337,14 @@ class TransactionLog(
         cache.foreach(_.invalidateVersionDependentCaches())
 
         // Store retry metrics for testing and monitoring
-        lastRetryMetrics = Some(TxRetryMetrics(
-          attemptsMade = attempt,
-          conflictsEncountered = attempt - 1,
-          finalVersion = version,
-          conflictedVersions = conflictedVersions.toSeq
-        ))
+        lastRetryMetrics = Some(
+          TxRetryMetrics(
+            attemptsMade = attempt,
+            conflictsEncountered = attempt - 1,
+            finalVersion = version,
+            conflictedVersions = conflictedVersions.toSeq
+          )
+        )
 
         if (attempt > 1) {
           logger.info(s"Overwrite operation: removed ${removeActions.length} files, added ${addActions.length} files in version $version after $attempt attempts")
@@ -455,8 +467,8 @@ class TransactionLog(
   /**
    * Restore schemas in AddActions if they use schema references (docMappingRef).
    *
-   * This handles schema deduplication by replacing docMappingRef with docMappingJson using the schema registry stored in
-   * MetadataAction.configuration.
+   * This handles schema deduplication by replacing docMappingRef with docMappingJson using the schema registry stored
+   * in MetadataAction.configuration.
    *
    * @throws IllegalStateException
    *   if schema restoration fails
@@ -471,7 +483,7 @@ class TransactionLog(
     }
 
     // Get MetadataAction which contains the schema registry
-    val metadata = getMetadata()
+    val metadata       = getMetadata()
     val schemaRegistry = metadata.configuration
 
     // Check if registry has any schemas
@@ -572,8 +584,8 @@ class TransactionLog(
    * Atomically commit a set of REMOVE and ADD actions in a single transaction. This is used for operations like MERGE
    * SPLITS where we need to atomically replace old split files with merged ones.
    *
-   * This method uses automatic retry on concurrent write conflict. Merge operations are idempotent since
-   * RemoveActions for already-removed files are no-ops.
+   * This method uses automatic retry on concurrent write conflict. Merge operations are idempotent since RemoveActions
+   * for already-removed files are no-ops.
    *
    * @param removeActions
    *   Files to remove
@@ -616,13 +628,14 @@ class TransactionLog(
    * Apply schema deduplication to actions before writing to transaction log.
    *
    * This method:
-   * 1. Gets the current schema registry (initializes from table if needed)
-   * 2. Identifies new schemas that need registration
-   * 3. Deduplicates AddActions (replaces docMappingJson with docMappingRef)
-   * 4. Returns deduplicated actions + optional MetadataAction update
+   *   1. Gets the current schema registry (initializes from table if needed) 2. Identifies new schemas that need
+   *      registration 3. Deduplicates AddActions (replaces docMappingJson with docMappingRef) 4. Returns deduplicated
+   *      actions + optional MetadataAction update
    *
-   * @param actions Actions to write
-   * @return Tuple of (deduplicated actions, optional metadata update with new schemas)
+   * @param actions
+   *   Actions to write
+   * @return
+   *   Tuple of (deduplicated actions, optional metadata update with new schemas)
    */
   private def applySchemaDeduplicationForWrite(
     actions: Seq[Action]
@@ -631,7 +644,7 @@ class TransactionLog(
     // Skip deduplication if no AddActions with schemas
     val hasSchemas = actions.exists {
       case add: AddAction if add.docMappingJson.isDefined => true
-      case _ => false
+      case _                                              => false
     }
 
     if (!hasSchemas) {
@@ -652,9 +665,7 @@ class TransactionLog(
       SchemaDeduplication.deduplicateSchemas(actions, registryAsConfiguration)
 
     // Check if new schemas were found (keys not in existing registry)
-    val newSchemas = newSchemaRegistry.filterNot {
-      case (key, _) => registryAsConfiguration.contains(key)
-    }
+    val newSchemas = newSchemaRegistry.filterNot { case (key, _) => registryAsConfiguration.contains(key) }
 
     if (newSchemas.nonEmpty) {
       // Log new schemas being registered
@@ -662,15 +673,16 @@ class TransactionLog(
       logger.info(s"Schema deduplication: found ${newSchemas.size} new schemas to register: ${newHashes.mkString(", ")}")
 
       // Get current metadata to merge new schemas
-      val currentMetadata = try {
-        getMetadata()
-      } catch {
-        case _: RuntimeException =>
-          // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
-          // but handle gracefully by skipping deduplication
-          logger.warn("No existing metadata found during write - skipping schema deduplication")
-          return (actions, None)
-      }
+      val currentMetadata =
+        try
+          getMetadata()
+        catch {
+          case _: RuntimeException =>
+            // No metadata yet - this shouldn't happen in normal write path (initialize is called first)
+            // but handle gracefully by skipping deduplication
+            logger.warn("No existing metadata found during write - skipping schema deduplication")
+            return (actions, None)
+        }
 
       // Merge new schemas into metadata configuration
       val updatedConfiguration =
@@ -690,20 +702,21 @@ class TransactionLog(
    * Write actions with automatic retry on concurrent write conflict.
    *
    * This method handles version assignment and retry logic internally:
-   * 1. Assigns a version number
-   * 2. Attempts to write the actions
-   * 3. On conflict (file already exists), refreshes version from disk and retries
-   * 4. Uses exponential backoff with jitter between retries
+   *   1. Assigns a version number 2. Attempts to write the actions 3. On conflict (file already exists), refreshes
+   *      version from disk and retries 4. Uses exponential backoff with jitter between retries
    *
-   * @param actions The actions to write (without version - version is assigned internally)
-   * @return The version number that was successfully written
-   * @throws TransactionConflictException if all retry attempts fail
+   * @param actions
+   *   The actions to write (without version - version is assigned internally)
+   * @return
+   *   The version number that was successfully written
+   * @throws TransactionConflictException
+   *   if all retry attempts fail
    */
   private def writeActionsWithRetry(actions: Seq[Action]): Long = {
-    val retryConfig = getRetryConfig()
-    var attempt = 1
+    val retryConfig         = getRetryConfig()
+    var attempt             = 1
     var lastConflictVersion = -1L
-    val conflictedVersions = scala.collection.mutable.ListBuffer[Long]()
+    val conflictedVersions  = scala.collection.mutable.ListBuffer[Long]()
 
     while (attempt <= retryConfig.maxAttempts) {
       // Get next version - on first attempt uses local counter, on retry reads from disk first
@@ -715,7 +728,7 @@ class TransactionLog(
         versionCounter.incrementAndGet()
       }
 
-      val versionFile = new Path(transactionLogPath, f"$version%020d.json")
+      val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
       val versionFilePath = versionFile.toString
 
       // Apply schema deduplication fresh on each attempt
@@ -729,7 +742,7 @@ class TransactionLog(
           if (hasMetadataInActions) {
             deduplicatedActions.map {
               case _: MetadataAction => updatedMetadata
-              case other => other
+              case other             => other
             }
           } else {
             updatedMetadata +: deduplicatedActions
@@ -738,7 +751,7 @@ class TransactionLog(
           deduplicatedActions
       }
 
-      val codec = getCompressionCodec()
+      val codec           = getCompressionCodec()
       val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
 
       // Attempt the write with conditional check (ifNotExists=true)
@@ -759,16 +772,20 @@ class TransactionLog(
         cache.foreach(_.invalidateVersionDependentCaches())
 
         // Store retry metrics for testing and monitoring
-        lastRetryMetrics = Some(TxRetryMetrics(
-          attemptsMade = attempt,
-          conflictsEncountered = attempt - 1,
-          finalVersion = version,
-          conflictedVersions = conflictedVersions.toSeq
-        ))
+        lastRetryMetrics = Some(
+          TxRetryMetrics(
+            attemptsMade = attempt,
+            conflictsEncountered = attempt - 1,
+            finalVersion = version,
+            conflictedVersions = conflictedVersions.toSeq
+          )
+        )
 
         if (attempt > 1) {
           logger.info(
-            s"Written ${actionsToWrite.length} actions to version $version$compressionInfo after $attempt attempts (conflict on version $lastConflictVersion): ${actionsToWrite.map(_.getClass.getSimpleName).mkString(", ")}"
+            s"Written ${actionsToWrite.length} actions to version $version$compressionInfo after $attempt attempts (conflict on version $lastConflictVersion): ${actionsToWrite
+                .map(_.getClass.getSimpleName)
+                .mkString(", ")}"
           )
         } else {
           logger.info(
@@ -810,11 +827,8 @@ class TransactionLog(
     )
   }
 
-  /**
-   * Handle checkpoint creation after a successful write.
-   * Extracted to keep writeActionsWithRetry readable.
-   */
-  private def handleCheckpointCreation(version: Long): Unit = {
+  /** Handle checkpoint creation after a successful write. Extracted to keep writeActionsWithRetry readable. */
+  private def handleCheckpointCreation(version: Long): Unit =
     checkpoint.foreach { cp =>
       if (cp.shouldCreateCheckpoint(version)) {
         try {
@@ -826,13 +840,12 @@ class TransactionLog(
         }
       }
     }
-  }
 
   /**
    * Write actions to a specific version (internal method without retry).
    *
-   * This method is used for initialization (version 0) where retry doesn't make sense,
-   * and for protocol upgrades. For normal data writes, use writeActionsWithRetry instead.
+   * This method is used for initialization (version 0) where retry doesn't make sense, and for protocol upgrades. For
+   * normal data writes, use writeActionsWithRetry instead.
    */
   private def writeActions(version: Long, actions: Seq[Action]): Unit = {
     val versionFile     = new Path(transactionLogPath, f"$version%020d.json")
@@ -851,7 +864,7 @@ class TransactionLog(
           // Replace existing MetadataAction with updated one
           deduplicatedActions.map {
             case _: MetadataAction => updatedMetadata
-            case other => other
+            case other             => other
           }
         } else {
           // Prepend MetadataAction to actions
@@ -1097,12 +1110,13 @@ class TransactionLog(
   /**
    * Get the current schema registry, initializing from existing table state if needed.
    *
-   * This method is thread-safe and ensures the registry is initialized only once.
-   * The registry is extracted from MetadataAction.configuration.
+   * This method is thread-safe and ensures the registry is initialized only once. The registry is extracted from
+   * MetadataAction.configuration.
    *
-   * @return Schema registry map (hash -> schema JSON)
+   * @return
+   *   Schema registry map (hash -> schema JSON)
    */
-  private def getSchemaRegistry(): Map[String, String] = {
+  private def getSchemaRegistry(): Map[String, String] =
     schemaRegistryCache match {
       case Some(registry) => registry
       case None =>
@@ -1110,54 +1124,55 @@ class TransactionLog(
           // Double-check pattern
           schemaRegistryCache match {
             case Some(registry) => registry
-            case None =>
+            case None           =>
               // Initialize from existing MetadataAction.configuration
-              val registry = try {
-                val metadata = getMetadata()
-                val extracted = SchemaDeduplication.extractSchemaRegistry(metadata.configuration)
-                logger.info(s"Initialized schema registry with ${extracted.size} existing schemas")
-                extracted
-              } catch {
-                case _: RuntimeException =>
-                  // No metadata yet (new table), return empty registry
-                  logger.debug("No existing metadata, initializing empty schema registry")
-                  Map.empty[String, String]
-              }
+              val registry =
+                try {
+                  val metadata  = getMetadata()
+                  val extracted = SchemaDeduplication.extractSchemaRegistry(metadata.configuration)
+                  logger.info(s"Initialized schema registry with ${extracted.size} existing schemas")
+                  extracted
+                } catch {
+                  case _: RuntimeException =>
+                    // No metadata yet (new table), return empty registry
+                    logger.debug("No existing metadata, initializing empty schema registry")
+                    Map.empty[String, String]
+                }
               schemaRegistryCache = Some(registry)
               registry
           }
         }
     }
-  }
 
   /**
    * Update the schema registry cache with new schemas.
    *
-   * This method is called after writing a MetadataAction with new schema entries.
-   * It updates the in-memory cache to reflect the newly written schemas.
+   * This method is called after writing a MetadataAction with new schema entries. It updates the in-memory cache to
+   * reflect the newly written schemas.
    *
-   * @param newSchemas New schema entries (hash -> schema JSON)
+   * @param newSchemas
+   *   New schema entries (hash -> schema JSON)
    */
-  private def updateSchemaRegistry(newSchemas: Map[String, String]): Unit = {
+  private def updateSchemaRegistry(newSchemas: Map[String, String]): Unit =
     schemaRegistryLock.synchronized {
       val currentRegistry = schemaRegistryCache.getOrElse(Map.empty)
       schemaRegistryCache = Some(currentRegistry ++ newSchemas)
-      logger.debug(s"Updated schema registry: added ${newSchemas.size} new schemas, total ${schemaRegistryCache.get.size}")
+      logger.debug(
+        s"Updated schema registry: added ${newSchemas.size} new schemas, total ${schemaRegistryCache.get.size}"
+      )
     }
-  }
 
   /**
    * Invalidate the schema registry cache.
    *
-   * This should be called when the MetadataAction.configuration is updated
-   * outside of the normal write flow (e.g., during cache invalidation or external modifications).
+   * This should be called when the MetadataAction.configuration is updated outside of the normal write flow (e.g.,
+   * during cache invalidation or external modifications).
    */
-  private def invalidateSchemaRegistry(): Unit = {
+  private def invalidateSchemaRegistry(): Unit =
     schemaRegistryLock.synchronized {
       schemaRegistryCache = None
       logger.debug("Invalidated schema registry cache")
     }
-  }
 
   /** Get the current protocol action from the transaction log. */
   def getProtocol(): ProtocolAction =
@@ -1445,25 +1460,23 @@ class TransactionLog(
     versionCounter.incrementAndGet()
   }
 
-  /**
-   * Get retry configuration from options.
-   */
-  private def getRetryConfig(): TxRetryConfig = {
+  /** Get retry configuration from options. */
+  private def getRetryConfig(): TxRetryConfig =
     TxRetryConfig(
       maxAttempts = options.getInt(TransactionLog.RETRY_MAX_ATTEMPTS, 10),
       baseDelayMs = options.getLong(TransactionLog.RETRY_BASE_DELAY_MS, 100),
       maxDelayMs = options.getLong(TransactionLog.RETRY_MAX_DELAY_MS, 5000)
     )
-  }
 
   /**
    * Refresh the version counter from disk to handle concurrent writes from other JVMs.
    *
-   * This method reads the actual version files from storage to determine the latest version,
-   * ignoring the JVM-local version counter. This is necessary when a concurrent write from
-   * another process has created a version file that our local counter didn't know about.
+   * This method reads the actual version files from storage to determine the latest version, ignoring the JVM-local
+   * version counter. This is necessary when a concurrent write from another process has created a version file that our
+   * local counter didn't know about.
    *
-   * @return The latest version number found on disk
+   * @return
+   *   The latest version number found on disk
    */
   private def refreshVersionCounterFromDisk(): Long = {
     // Invalidate version-related caches to force re-read from storage
@@ -1471,7 +1484,7 @@ class TransactionLog(
 
     // Read versions directly from storage
     val versions = getVersions()
-    val latest = if (versions.nonEmpty) versions.max else -1L
+    val latest   = if (versions.nonEmpty) versions.max else -1L
 
     // Update our local counter to match
     versionCounter.set(latest)
@@ -1485,13 +1498,16 @@ class TransactionLog(
    *
    * Uses the same pattern as CloudDownloadManager for consistency.
    *
-   * @param attempt The current attempt number (1-based)
-   * @param config The retry configuration
-   * @return The delay in milliseconds to wait before the next attempt
+   * @param attempt
+   *   The current attempt number (1-based)
+   * @param config
+   *   The retry configuration
+   * @return
+   *   The delay in milliseconds to wait before the next attempt
    */
   private def calculateRetryDelay(attempt: Int, config: TxRetryConfig): Long = {
     val exponentialDelay = config.baseDelayMs * math.pow(2, attempt - 1).toLong
-    val cappedDelay = math.min(exponentialDelay, config.maxDelayMs)
+    val cappedDelay      = math.min(exponentialDelay, config.maxDelayMs)
     // Add 10% jitter to prevent thundering herd
     val jitter = (cappedDelay * 0.1 * scala.util.Random.nextDouble()).toLong
     cappedDelay + jitter
@@ -1617,17 +1633,16 @@ class TransactionLog(
   /**
    * Parse actions directly from a cloud storage file using full streaming.
    *
-   * This method provides the most memory-efficient parsing by streaming data from
-   * cloud storage directly through decompression and into line-by-line parsing,
-   * without ever loading the entire file into memory.
+   * This method provides the most memory-efficient parsing by streaming data from cloud storage directly through
+   * decompression and into line-by-line parsing, without ever loading the entire file into memory.
    *
    * Flow: CloudStorage InputStream -> Decompressing InputStream -> BufferedReader -> Line parsing
    */
   private def parseActionsFromStream(filePath: String): Seq[Action] = {
-    val rawStream = cloudProvider.openInputStream(filePath)
+    val rawStream           = cloudProvider.openInputStream(filePath)
     val decompressingStream = CompressionUtils.createDecompressingInputStream(rawStream)
-    val reader = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
-    val actions = ListBuffer[Action]()
+    val reader              = new BufferedReader(new InputStreamReader(decompressingStream, "UTF-8"))
+    val actions             = ListBuffer[Action]()
 
     try {
       var line = reader.readLine()
@@ -1654,14 +1669,13 @@ class TransactionLog(
         line = reader.readLine()
       }
       actions.toSeq
-    } finally {
+    } finally
       reader.close()
-    }
   }
 
   /**
-   * Get all skipped files from the transaction log using checkpoint-aware reading.
-   * This is optimized to read from checkpoint + incremental versions, not all versions.
+   * Get all skipped files from the transaction log using checkpoint-aware reading. This is optimized to read from
+   * checkpoint + incremental versions, not all versions.
    */
   def getSkippedFiles(): Seq[SkipAction] = {
     val skips = ListBuffer[SkipAction]()

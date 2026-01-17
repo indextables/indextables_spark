@@ -44,9 +44,7 @@ object CloudDownloadManager {
   @volatile private var instance: CloudDownloadManager = _
   private val instanceLock                             = new Object
 
-  /**
-   * Get or create the singleton instance with default configuration.
-   */
+  /** Get or create the singleton instance with default configuration. */
   def getInstance: CloudDownloadManager =
     getInstance(MergeIOConfig.default)
 
@@ -68,9 +66,7 @@ object CloudDownloadManager {
       }
     }
 
-  /**
-   * Reset the singleton instance. Useful for testing or reconfiguration.
-   */
+  /** Reset the singleton instance. Useful for testing or reconfiguration. */
   def reset(): Unit =
     instanceLock.synchronized {
       if (instance != null) {
@@ -138,7 +134,7 @@ class CloudDownloadManager(config: MergeIOConfig) {
       return CompletableFuture.completedFuture(Seq.empty)
     }
 
-    val batchId = downloadQueue.nextBatchId()
+    val batchId    = downloadQueue.nextBatchId()
     val completion = new BatchCompletion(batchId, requests.size)
     batchCompletions.put(batchId, completion)
 
@@ -148,8 +144,9 @@ class CloudDownloadManager(config: MergeIOConfig) {
     val batch = DownloadBatch(
       batchId = batchId,
       submissionTime = System.currentTimeMillis(),
-      downloads = requests.zipWithIndex.map { case (req, idx) =>
-        req.copy(batchId = batchId, index = idx)
+      downloads = requests.zipWithIndex.map {
+        case (req, idx) =>
+          req.copy(batchId = batchId, index = idx)
       }
     )
 
@@ -158,9 +155,7 @@ class CloudDownloadManager(config: MergeIOConfig) {
 
     // Start workers to process the queue
     val workersToStart = math.min(requests.size, config.maxConcurrentDownloads - activeWorkers.get())
-    (0 until workersToStart).foreach { _ =>
-      startDownloadWorker(downloader, retries)
-    }
+    (0 until workersToStart).foreach(_ => startDownloadWorker(downloader, retries))
 
     // Return future that completes when all downloads in this batch are done
     completion.future.thenApply { results =>
@@ -182,23 +177,19 @@ class CloudDownloadManager(config: MergeIOConfig) {
 
     CompletableFuture.runAsync(
       new Runnable {
-        override def run(): Unit = {
-          try {
+        override def run(): Unit =
+          try
             processDownloads(downloader, retries)
-          } finally {
+          finally
             activeWorkers.decrementAndGet()
-          }
-        }
       },
       MergeIOThreadPools.downloadCoordinationPool
     )
   }
 
-  /**
-   * Main download processing loop for a worker.
-   */
+  /** Main download processing loop for a worker. */
   private def processDownloads(downloader: AsyncDownloader, maxRetries: Int): Unit =
-    while (running.get()) {
+    while (running.get())
       // Try to get a download request
       downloadQueue.poll() match {
         case Some(request) =>
@@ -224,19 +215,15 @@ class CloudDownloadManager(config: MergeIOConfig) {
             if (completion != null) {
               completion.recordResult(result)
             }
-          } finally {
+          } finally
             concurrencySemaphore.release()
-          }
 
         case None =>
           // Queue is empty, exit this worker
           return
       }
-    }
 
-  /**
-   * Process a single download with retry logic.
-   */
+  /** Process a single download with retry logic. */
   private def processDownloadWithRetry(
     request: DownloadRequest,
     downloader: AsyncDownloader,
@@ -249,16 +236,20 @@ class CloudDownloadManager(config: MergeIOConfig) {
       val result = downloader.downloadAsync(request).get(5, TimeUnit.MINUTES)
 
       if (result.success) {
-        logger.debug(s"Downloaded ${request.sourcePath} -> ${result.localPath} " +
-          s"(${result.bytesDownloaded} bytes in ${result.durationMs}ms)")
+        logger.debug(
+          s"Downloaded ${request.sourcePath} -> ${result.localPath} " +
+            s"(${result.bytesDownloaded} bytes in ${result.durationMs}ms)"
+        )
         result
       } else if (remainingRetries > 0) {
         // Failed but can retry
-        logger.warn(s"Download failed for ${request.sourcePath}, retrying " +
-          s"($remainingRetries retries remaining): ${result.error.map(_.getMessage).getOrElse("unknown error")}")
+        logger.warn(
+          s"Download failed for ${request.sourcePath}, retrying " +
+            s"($remainingRetries retries remaining): ${result.error.map(_.getMessage).getOrElse("unknown error")}"
+        )
 
         // Calculate backoff delay
-        val attempt  = config.downloadRetries - remainingRetries + 1
+        val attempt = config.downloadRetries - remainingRetries + 1
         val delayMs = calculateBackoffDelay(attempt)
 
         // Wait before retry
@@ -269,8 +260,10 @@ class CloudDownloadManager(config: MergeIOConfig) {
         retryResult.copy(retryCount = retryResult.retryCount + 1)
       } else {
         // Failed and no more retries
-        logger.error(s"Download failed for ${request.sourcePath} after all retries: " +
-          s"${result.error.map(_.getMessage).getOrElse("unknown error")}")
+        logger.error(
+          s"Download failed for ${request.sourcePath} after all retries: " +
+            s"${result.error.map(_.getMessage).getOrElse("unknown error")}"
+        )
         result
       }
     } catch {
@@ -278,10 +271,12 @@ class CloudDownloadManager(config: MergeIOConfig) {
         val duration = System.currentTimeMillis() - startTime
 
         if (remainingRetries > 0) {
-          logger.warn(s"Download exception for ${request.sourcePath}, retrying " +
-            s"($remainingRetries retries remaining): ${e.getMessage}")
+          logger.warn(
+            s"Download exception for ${request.sourcePath}, retrying " +
+              s"($remainingRetries retries remaining): ${e.getMessage}"
+          )
 
-          val attempt  = config.downloadRetries - remainingRetries + 1
+          val attempt = config.downloadRetries - remainingRetries + 1
           val delayMs = calculateBackoffDelay(attempt)
           Thread.sleep(delayMs)
 
@@ -294,9 +289,7 @@ class CloudDownloadManager(config: MergeIOConfig) {
     }
   }
 
-  /**
-   * Calculate exponential backoff delay with jitter.
-   */
+  /** Calculate exponential backoff delay with jitter. */
   private def calculateBackoffDelay(attempt: Int): Long = {
     val exponentialDelay = config.retryBaseDelayMs * math.pow(2, attempt - 1).toLong
     val cappedDelay      = math.min(exponentialDelay, config.retryMaxDelayMs)
@@ -327,9 +320,7 @@ class CloudDownloadManager(config: MergeIOConfig) {
     }
   }
 
-  /**
-   * Get current download metrics.
-   */
+  /** Get current download metrics. */
   def getMetrics: DownloadMetrics =
     DownloadMetrics(
       totalBytes = totalBytesDownloaded.get(),
@@ -339,27 +330,19 @@ class CloudDownloadManager(config: MergeIOConfig) {
       failedDownloads = totalFailures.get()
     )
 
-  /**
-   * Get queue statistics.
-   */
+  /** Get queue statistics. */
   def getQueueStats: PriorityQueueStats =
     downloadQueue.getStats
 
-  /**
-   * Get the number of currently active download workers.
-   */
+  /** Get the number of currently active download workers. */
   def activeWorkerCount: Int =
     activeWorkers.get()
 
-  /**
-   * Get the number of available download slots.
-   */
+  /** Get the number of available download slots. */
   def availableSlots: Int =
     concurrencySemaphore.availablePermits()
 
-  /**
-   * Shutdown the download manager.
-   */
+  /** Shutdown the download manager. */
   def shutdown(): Unit = {
     running.set(false)
     downloadQueue.clear()
@@ -375,15 +358,13 @@ class CloudDownloadManager(config: MergeIOConfig) {
  */
 private class BatchCompletion(val batchId: Long, val totalCount: Int) {
 
-  private val results         = new ConcurrentHashMap[Int, DownloadResult]()
+  private val results        = new ConcurrentHashMap[Int, DownloadResult]()
   private val completedCount = new AtomicInteger(0)
   private val failed         = new AtomicBoolean(false)
 
   val future: CompletableFuture[Seq[DownloadResult]] = new CompletableFuture[Seq[DownloadResult]]()
 
-  /**
-   * Record a download result and complete the future if all downloads are done.
-   */
+  /** Record a download result and complete the future if all downloads are done. */
   def recordResult(result: DownloadResult): Unit = {
     results.put(result.request.index, result)
 
@@ -395,9 +376,7 @@ private class BatchCompletion(val batchId: Long, val totalCount: Int) {
 
     if (completed >= totalCount) {
       // All downloads complete, resolve the future
-      val orderedResults = (0 until totalCount).map { idx =>
-        results.get(idx)
-      }.toSeq
+      val orderedResults = (0 until totalCount).map(idx => results.get(idx)).toSeq
 
       if (failed.get()) {
         // At least one download failed - we still complete successfully with results

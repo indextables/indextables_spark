@@ -280,17 +280,23 @@ object CredentialProviderFactory {
 
   /**
    * Resolve AWS credentials with standard priority:
-   * 1. Explicit credentials (if present - driver may have already resolved them)
-   * 2. Custom provider class (if configured)
-   * 3. Return None (caller should use default provider chain)
+   *   1. Explicit credentials (if present - driver may have already resolved them) 2. Custom provider class (if
+   *      configured) 3. Return None (caller should use default provider chain)
    *
-   * @param accessKey Explicit access key (may be empty/null)
-   * @param secretKey Explicit secret key (may be empty/null)
-   * @param sessionToken Explicit session token (optional)
-   * @param providerClassName Custom credential provider class (optional)
-   * @param tablePath Table path for provider constructor
-   * @param hadoopConf Hadoop configuration for provider
-   * @return Some(credentials) if resolved, None if should use default chain
+   * @param accessKey
+   *   Explicit access key (may be empty/null)
+   * @param secretKey
+   *   Explicit secret key (may be empty/null)
+   * @param sessionToken
+   *   Explicit session token (optional)
+   * @param providerClassName
+   *   Custom credential provider class (optional)
+   * @param tablePath
+   *   Table path for provider constructor
+   * @param hadoopConf
+   *   Hadoop configuration for provider
+   * @return
+   *   Some(credentials) if resolved, None if should use default chain
    */
   def resolveAWSCredentials(
     accessKey: Option[String],
@@ -312,9 +318,9 @@ object CredentialProviderFactory {
     providerClassName.filter(_.nonEmpty) match {
       case Some(className) =>
         try {
-          val uri = new URI(tablePath)
+          val uri      = new URI(tablePath)
           val provider = createCredentialProvider(className, uri, hadoopConf)
-          val creds = extractCredentialsViaReflection(provider)
+          val creds    = extractCredentialsViaReflection(provider)
           logger.debug(s"Resolved credentials from provider $className: accessKey=${creds.accessKey.take(4)}...")
           Some(creds)
         } catch {
@@ -329,8 +335,8 @@ object CredentialProviderFactory {
   }
 
   /**
-   * Resolve AWS credentials from a config map with standard priority.
-   * Convenience method that extracts values from config map.
+   * Resolve AWS credentials from a config map with standard priority. Convenience method that extracts values from
+   * config map.
    */
   def resolveAWSCredentialsFromConfig(
     configs: Map[String, String],

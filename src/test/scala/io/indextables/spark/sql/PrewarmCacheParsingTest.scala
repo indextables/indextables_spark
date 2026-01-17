@@ -57,8 +57,8 @@ class PrewarmCacheParsingTest extends AnyFunSuite with BeforeAndAfterEach {
 
     val cmd = plan.asInstanceOf[PrewarmCacheCommand]
     assert(cmd.tablePath == "/tmp/test_table")
-    assert(cmd.segments.isEmpty) // Use defaults
-    assert(cmd.fields.isEmpty)   // All fields
+    assert(cmd.segments.isEmpty)   // Use defaults
+    assert(cmd.fields.isEmpty)     // All fields
     assert(cmd.splitsPerTask == 2) // Default
     assert(cmd.wherePredicates.isEmpty)
   }
@@ -127,7 +127,8 @@ class PrewarmCacheParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("PREWARM should parse all segment aliases") {
-    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test' FOR SEGMENTS (TERM, FASTFIELD, POSTING_LISTS, FIELDNORM, DOC_STORE)"
+    val sql =
+      "PREWARM INDEXTABLES CACHE '/tmp/test' FOR SEGMENTS (TERM, FASTFIELD, POSTING_LISTS, FIELDNORM, DOC_STORE)"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PrewarmCacheCommand])
 
@@ -206,7 +207,7 @@ class PrewarmCacheParsingTest extends AnyFunSuite with BeforeAndAfterEach {
   // === Combined Clause Tests ===
 
   test("PREWARM should parse with segments and fields") {
-    val sql = "PREWARM INDEXTABLES CACHE '/tmp/test' FOR SEGMENTS (TERM_DICT, POSTINGS) ON FIELDS (title, content)"
+    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test' FOR SEGMENTS (TERM_DICT, POSTINGS) ON FIELDS (title, content)"
     val plan = spark.sessionState.sqlParser.parsePlan(sql)
     assert(plan.isInstanceOf[PrewarmCacheCommand])
 

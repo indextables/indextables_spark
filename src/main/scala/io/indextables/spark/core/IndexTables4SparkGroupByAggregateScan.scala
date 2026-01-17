@@ -37,27 +37,27 @@ import org.apache.spark.sql.types.{
 }
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.unsafe.types.UTF8String
 
 import io.indextables.spark.expressions.{
   BucketAggregationConfig,
   DateHistogramConfig,
   HistogramConfig,
-  RangeConfig,
-  RangeBucket
+  RangeBucket,
+  RangeConfig
 }
 import io.indextables.spark.transaction.TransactionLog
 import io.indextables.tantivy4java.aggregation._
 import io.indextables.tantivy4java.split.{SplitCacheManager, SplitMatchAllQuery}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
-import org.apache.spark.unsafe.types.UTF8String
 import org.slf4j.LoggerFactory
 
 /**
  * Specialized scan for GROUP BY aggregation operations. Implements distributed GROUP BY aggregation using tantivy's
  * terms aggregation capabilities.
  *
- * Also supports bucket aggregations (DateHistogram, Histogram, Range) when bucketConfig is provided.
- * In bucket mode, the groupByColumns array contains a single element with the bucket field name.
+ * Also supports bucket aggregations (DateHistogram, Histogram, Range) when bucketConfig is provided. In bucket mode,
+ * the groupByColumns array contains a single element with the bucket field name.
  */
 class IndexTables4SparkGroupByAggregateScan(
   sparkSession: SparkSession,
@@ -114,7 +114,7 @@ class IndexTables4SparkGroupByAggregateScan(
   override def description(): String = {
     val groupByDesc = groupByColumns.mkString(", ")
     val aggDesc     = aggregation.aggregateExpressions.map(_.toString).mkString(", ")
-    val bucketDesc = bucketConfig.map(bc => s", bucket=${bc.description}").getOrElse("")
+    val bucketDesc  = bucketConfig.map(bc => s", bucket=${bc.description}").getOrElse("")
     s"IndexTables4SparkGroupByAggregateScan[groupBy=[$groupByDesc], aggregations=[$aggDesc]$bucketDesc]"
   }
 
@@ -348,7 +348,7 @@ class IndexTables4SparkGroupByAggregatePartition(
   val indexQueryFilters: Array[Any] = Array.empty,
   val preferredHost: Option[String] = None,
   val bucketConfig: Option[BucketAggregationConfig] = None,
-  val partitionColumns: Set[String] = Set.empty, // Partition columns for optimization
+  val partitionColumns: Set[String] = Set.empty,             // Partition columns for optimization
   val splitPartitionValues: Map[String, String] = Map.empty) // Partition values from split metadata
     extends InputPartition {
 
@@ -531,308 +531,315 @@ class IndexTables4SparkGroupByAggregateReader(
     import io.indextables.tantivy4java.aggregation.TermsAggregation
 
     // Separate GROUP BY columns into partition columns (values from split metadata) and data columns (need Tantivy)
-    val partitionColumns = partition.partitionColumns
-    val allGroupByColumns = partition.groupByColumns
+    val partitionColumns                        = partition.partitionColumns
+    val allGroupByColumns                       = partition.groupByColumns
     val (partitionGroupByCols, dataGroupByCols) = allGroupByColumns.partition(partitionColumns.contains)
 
     if (partitionGroupByCols.nonEmpty) {
       logger.info(s"GROUP BY OPTIMIZATION: Partition columns in GROUP BY: ${partitionGroupByCols.mkString(", ")}")
-      logger.info(s"GROUP BY OPTIMIZATION: Data columns requiring Tantivy aggregation: ${dataGroupByCols.mkString(", ")}")
+      logger.info(
+        s"GROUP BY OPTIMIZATION: Data columns requiring Tantivy aggregation: ${dataGroupByCols.mkString(", ")}"
+      )
       logger.info(s"GROUP BY OPTIMIZATION: Split partition values: ${partition.splitPartitionValues}")
     }
 
     // Support both single and multi-column GROUP BY
     if (partition.groupByColumns.length >= 1) {
-        // Use only data columns for Tantivy aggregation (optimization: skip partition columns)
-        val groupByColumns = if (dataGroupByCols.isEmpty) {
-          // All columns are partition columns - no Tantivy aggregation needed
-          // Just return count for this split with partition values
-          logger.info(s"GROUP BY OPTIMIZATION: All GROUP BY columns are partition columns - using simplified aggregation")
-          Array.empty[String]
-        } else {
-          dataGroupByCols
-        }
+      // Use only data columns for Tantivy aggregation (optimization: skip partition columns)
+      val groupByColumns = if (dataGroupByCols.isEmpty) {
+        // All columns are partition columns - no Tantivy aggregation needed
+        // Just return count for this split with partition values
+        logger.info(s"GROUP BY OPTIMIZATION: All GROUP BY columns are partition columns - using simplified aggregation")
+        Array.empty[String]
+      } else {
+        dataGroupByCols
+      }
 
-        // Handle case where all GROUP BY columns are partition columns
-        if (groupByColumns.isEmpty) {
-          return executePartitionOnlyAggregation(searcher, splitSearchEngine, allGroupByColumns)
-        }
+      // Handle case where all GROUP BY columns are partition columns
+      if (groupByColumns.isEmpty) {
+        return executePartitionOnlyAggregation(searcher, splitSearchEngine, allGroupByColumns)
+      }
 
-        logger.debug(s"GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
+      logger.debug(s"GROUP BY EXECUTION: Creating TermsAggregation for ${groupByColumns.length} column(s): ${groupByColumns.mkString(", ")}")
 
-        val (termsAgg, isMultiDimensional) = if (groupByColumns.length == 1) {
-          // Single column GROUP BY - use field directly
-          val groupByColumn = groupByColumns(0)
-          logger.debug(s"GROUP BY EXECUTION: Single-dimensional GROUP BY on '$groupByColumn'")
-          (new TermsAggregation("group_by_terms", groupByColumn, 1000, 0), false)
-        } else {
-          // Multi-column GROUP BY - use new MultiTermsAggregation
-          logger.debug(s"GROUP BY EXECUTION: Multi-dimensional GROUP BY on ${groupByColumns.length} fields: ${groupByColumns.mkString(", ")}")
-          logger.debug(s"GROUP BY EXECUTION: Using native MultiTermsAggregation")
+      val (termsAgg, isMultiDimensional) = if (groupByColumns.length == 1) {
+        // Single column GROUP BY - use field directly
+        val groupByColumn = groupByColumns(0)
+        logger.debug(s"GROUP BY EXECUTION: Single-dimensional GROUP BY on '$groupByColumn'")
+        (new TermsAggregation("group_by_terms", groupByColumn, 1000, 0), false)
+      } else {
+        // Multi-column GROUP BY - use new MultiTermsAggregation
+        logger.debug(s"GROUP BY EXECUTION: Multi-dimensional GROUP BY on ${groupByColumns.length} fields: ${groupByColumns.mkString(", ")}")
+        logger.debug(s"GROUP BY EXECUTION: Using native MultiTermsAggregation")
 
-          // Create MultiTermsAggregation with the field array
-          val multiTermsAgg =
-            new io.indextables.tantivy4java.aggregation.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
-          logger.info(
-            s"GROUP BY EXECUTION: Created MultiTermsAggregation for fields: ${groupByColumns.mkString(", ")}"
-          )
-          (multiTermsAgg, true)
-        }
+        // Create MultiTermsAggregation with the field array
+        val multiTermsAgg =
+          new io.indextables.tantivy4java.aggregation.MultiTermsAggregation("group_by_terms", groupByColumns, 1000, 0)
+        logger.info(
+          s"GROUP BY EXECUTION: Created MultiTermsAggregation for fields: ${groupByColumns.mkString(", ")}"
+        )
+        (multiTermsAgg, true)
+      }
 
-        logger.debug(s"GROUP BY EXECUTION: Using TermsAggregation for GROUP BY with ${partition.aggregation.aggregateExpressions.length} aggregations")
+      logger.debug(s"GROUP BY EXECUTION: Using TermsAggregation for GROUP BY with ${partition.aggregation.aggregateExpressions.length} aggregations")
 
-        // Add sub-aggregations for each metric aggregation using the new API
-        import org.apache.spark.sql.connector.expressions.aggregate._
-        partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
-          case (aggExpr, index) =>
-            aggExpr match {
-              case _: Count | _: CountStar =>
-                // COUNT is handled via bucket doc count - no sub-aggregation needed
-                logger.debug(s"GROUP BY EXECUTION: COUNT aggregation at index $index will use bucket doc count")
+      // Add sub-aggregations for each metric aggregation using the new API
+      import org.apache.spark.sql.connector.expressions.aggregate._
+      partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
+        case (aggExpr, index) =>
+          aggExpr match {
+            case _: Count | _: CountStar =>
+              // COUNT is handled via bucket doc count - no sub-aggregation needed
+              logger.debug(s"GROUP BY EXECUTION: COUNT aggregation at index $index will use bucket doc count")
 
-              case sum: Sum =>
-                val fieldName = getFieldName(sum.column)
-                logger.debug(s"GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
-                termsAgg match {
-                  case terms: TermsAggregation =>
-                    terms.addSubAggregation(
-                      s"sum_$index",
-                      new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
-                    )
-                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(
-                      s"sum_$index",
-                      new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
-                    )
-                }
+            case sum: Sum =>
+              val fieldName = getFieldName(sum.column)
+              logger.debug(s"GROUP BY EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(
+                    s"sum_$index",
+                    new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
+                  )
+                case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(
+                    s"sum_$index",
+                    new io.indextables.tantivy4java.aggregation.SumAggregation(fieldName)
+                  )
+              }
 
-              case avg: Avg =>
-                // AVG should be automatically transformed by Spark into SUM + COUNT when supportCompletePushDown=false
-                val fieldName = getFieldName(avg.column)
-                throw new IllegalStateException(
-                  s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
-                    s"This indicates supportCompletePushDown() may not be returning false correctly. " +
-                    s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
-                )
+            case avg: Avg =>
+              // AVG should be automatically transformed by Spark into SUM + COUNT when supportCompletePushDown=false
+              val fieldName = getFieldName(avg.column)
+              throw new IllegalStateException(
+                s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT. " +
+                  s"This indicates supportCompletePushDown() may not be returning false correctly. " +
+                  s"Check the SupportsPushDownAggregates implementation in IndexTables4SparkScanBuilder."
+              )
 
-              case min: Min =>
-                val fieldName = getFieldName(min.column)
-                logger.debug(s"GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
-                termsAgg match {
-                  case terms: TermsAggregation =>
-                    terms.addSubAggregation(
-                      s"min_$index",
-                      new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
-                    )
-                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(
-                      s"min_$index",
-                      new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
-                    )
-                }
+            case min: Min =>
+              val fieldName = getFieldName(min.column)
+              logger.debug(s"GROUP BY EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(
+                    s"min_$index",
+                    new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
+                  )
+                case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(
+                    s"min_$index",
+                    new io.indextables.tantivy4java.aggregation.MinAggregation(fieldName)
+                  )
+              }
 
-              case max: Max =>
-                val fieldName = getFieldName(max.column)
-                logger.debug(s"GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
-                termsAgg match {
-                  case terms: TermsAggregation =>
-                    terms.addSubAggregation(
-                      s"max_$index",
-                      new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
-                    )
-                  case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
-                    multiTerms.addSubAggregation(
-                      s"max_$index",
-                      new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
-                    )
-                }
+            case max: Max =>
+              val fieldName = getFieldName(max.column)
+              logger.debug(s"GROUP BY EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
+              termsAgg match {
+                case terms: TermsAggregation =>
+                  terms.addSubAggregation(
+                    s"max_$index",
+                    new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
+                  )
+                case multiTerms: io.indextables.tantivy4java.aggregation.MultiTermsAggregation =>
+                  multiTerms.addSubAggregation(
+                    s"max_$index",
+                    new io.indextables.tantivy4java.aggregation.MaxAggregation(fieldName)
+                  )
+              }
 
-              case other =>
-                logger.debug(s"GROUP BY EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+            case other =>
+              logger.debug(s"GROUP BY EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+          }
+      }
+
+      // Merge IndexQuery filters with pushed filters
+      logger.debug(s"GROUP BY EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
+      partition.pushedFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: Pushed Filter: $f"))
+      partition.indexQueryFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: IndexQuery Filter: $f"))
+
+      // Combine pushed filters and IndexQuery filters
+      val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+
+      val query = if (allFilters.nonEmpty) {
+        logger.debug(s"GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
+
+        // Get the split field names for schema validation
+        // CRITICAL: Schema must be closed to prevent native memory leak
+        val splitFieldNames = {
+          var schema: io.indextables.tantivy4java.core.Schema = null
+          try {
+            import scala.collection.JavaConverters._
+            schema = splitSearchEngine.getSchema()
+            if (schema != null) {
+              Some(schema.getFieldNames().asScala.toSet)
+            } else {
+              logger.warn(s"GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
+              None
+            }
+          } catch {
+            case e: Exception =>
+              logger.warn(s"GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
+              None
+          } finally
+            if (schema != null) {
+              schema.close() // Prevent native memory leak
             }
         }
 
-        // Merge IndexQuery filters with pushed filters
-        logger.debug(s"GROUP BY EXECUTION: Merging ${partition.pushedFilters.length} pushed filters and ${partition.indexQueryFilters.length} IndexQuery filters")
-        partition.pushedFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: Pushed Filter: $f"))
-        partition.indexQueryFilters.foreach(f => logger.debug(s"GROUP BY EXECUTION: IndexQuery Filter: $f"))
+        // Create options from broadcast config
+        import scala.jdk.CollectionConverters._
+        val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
 
-        // Combine pushed filters and IndexQuery filters
-        val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
+        // Convert filters to query with schema validation
+        val convertedQuery = FiltersToQueryConverter.convertToSplitQuery(
+          allFilters,
+          splitSearchEngine,
+          splitFieldNames,
+          Some(optionsFromBroadcast)
+        )
+        logger.debug(s"GROUP BY EXECUTION: Converted filters to query: ${convertedQuery.getClass.getSimpleName}")
+        convertedQuery
+      } else {
+        logger.debug(s"GROUP BY EXECUTION: No filters, using match-all query")
+        new SplitMatchAllQuery()
+      }
 
-        val query = if (allFilters.nonEmpty) {
-          logger.debug(s"GROUP BY EXECUTION: Converting ${allFilters.length} total filters to query")
+      logger.debug(s"GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
 
-          // Get the split field names for schema validation
-          // CRITICAL: Schema must be closed to prevent native memory leak
-          val splitFieldNames = {
-            var schema: io.indextables.tantivy4java.core.Schema = null
-            try {
-              import scala.collection.JavaConverters._
-              schema = splitSearchEngine.getSchema()
-              if (schema != null) {
-                Some(schema.getFieldNames().asScala.toSet)
-              } else {
-                logger.warn(s"GROUP BY EXECUTION: Schema is null, proceeding without field name validation")
-                None
-              }
-            } catch {
-              case e: Exception =>
-                logger.warn(s"GROUP BY EXECUTION: Failed to get field names from schema: ${e.getMessage}")
-                None
-            } finally
-              if (schema != null) {
-                schema.close() // Prevent native memory leak
-              }
-          }
+      val result = searcher.search(query, 0, "group_by_terms", termsAgg)
 
-          // Create options from broadcast config
-          import scala.jdk.CollectionConverters._
-          val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
+      if (result.hasAggregations()) {
+        logger.debug(s"GROUP BY EXECUTION: TermsAggregation completed successfully")
 
-          // Convert filters to query with schema validation
-          val convertedQuery = FiltersToQueryConverter.convertToSplitQuery(
-            allFilters,
-            splitSearchEngine,
-            splitFieldNames,
-            Some(optionsFromBroadcast)
+        // Debug: Try to get available aggregation names
+        try {
+          val aggregationNames = (0 until 10).map(i => s"agg_$i").filter(name => result.getAggregation(name) != null)
+          logger.info(
+            s"GROUP BY EXECUTION: Available aggregation names (agg_X): ${aggregationNames.mkString(", ")}"
           )
-          logger.debug(s"GROUP BY EXECUTION: Converted filters to query: ${convertedQuery.getClass.getSimpleName}")
-          convertedQuery
-        } else {
-          logger.debug(s"GROUP BY EXECUTION: No filters, using match-all query")
-          new SplitMatchAllQuery()
+        } catch {
+          case e: Exception =>
+            logger.warn(s"GROUP BY EXECUTION: Error checking agg_X names: ${e.getMessage}")
         }
 
-        logger.debug(s"GROUP BY EXECUTION: Executing TermsAggregation with sub-aggregations and filter query")
+        // Try the standard name first, then fallback
+        var aggregationResult = result.getAggregation("agg_0")
+        if (aggregationResult == null) {
+          logger.debug(s"GROUP BY EXECUTION: No aggregation result found for 'agg_0', trying 'group_by_terms'")
+          aggregationResult = result.getAggregation("group_by_terms")
+        }
 
-        val result = searcher.search(query, 0, "group_by_terms", termsAgg)
+        if (aggregationResult == null) {
+          logger.debug(s"GROUP BY EXECUTION: No aggregation result found for 'agg_0' or 'group_by_terms'")
+          return Array.empty[InternalRow]
+        }
 
-        if (result.hasAggregations()) {
-          logger.debug(s"GROUP BY EXECUTION: TermsAggregation completed successfully")
+        if (isMultiDimensional) {
+          // Handle MultiTermsResult for multi-dimensional GROUP BY
+          logger.debug(s"GROUP BY EXECUTION: Processing MultiTermsResult for multi-dimensional GROUP BY")
 
-          // Debug: Try to get available aggregation names
-          try {
-            val aggregationNames = (0 until 10).map(i => s"agg_$i").filter(name => result.getAggregation(name) != null)
-            logger.info(
-              s"GROUP BY EXECUTION: Available aggregation names (agg_X): ${aggregationNames.mkString(", ")}"
-            )
-          } catch {
-            case e: Exception =>
-              logger.warn(s"GROUP BY EXECUTION: Error checking agg_X names: ${e.getMessage}")
-          }
+          // The aggregationResult is a TermsResult containing the nested structure
+          // We need to wrap it in a MultiTermsResult to flatten the nested buckets
+          val termsResult = aggregationResult.asInstanceOf[TermsResult]
+          val multiTermsResult =
+            new io.indextables.tantivy4java.aggregation.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
+          val multiBuckets = multiTermsResult.getBuckets
 
-          // Try the standard name first, then fallback
-          var aggregationResult = result.getAggregation("agg_0")
-          if (aggregationResult == null) {
-            logger.debug(s"GROUP BY EXECUTION: No aggregation result found for 'agg_0', trying 'group_by_terms'")
-            aggregationResult = result.getAggregation("group_by_terms")
-          }
-
-          if (aggregationResult == null) {
-            logger.debug(s"GROUP BY EXECUTION: No aggregation result found for 'agg_0' or 'group_by_terms'")
+          if (multiBuckets == null) {
+            logger.debug(s"GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
             return Array.empty[InternalRow]
           }
 
-          if (isMultiDimensional) {
-            // Handle MultiTermsResult for multi-dimensional GROUP BY
-            logger.debug(s"GROUP BY EXECUTION: Processing MultiTermsResult for multi-dimensional GROUP BY")
+          logger.debug(s"GROUP BY EXECUTION: Found ${multiBuckets.size()} multi-dimensional groups")
 
-            // The aggregationResult is a TermsResult containing the nested structure
-            // We need to wrap it in a MultiTermsResult to flatten the nested buckets
-            val termsResult = aggregationResult.asInstanceOf[TermsResult]
-            val multiTermsResult =
-              new io.indextables.tantivy4java.aggregation.MultiTermsResult("group_by_terms", termsResult, groupByColumns)
-            val multiBuckets = multiTermsResult.getBuckets
+          // Convert multi-dimensional buckets to InternalRow
+          val rows = multiBuckets.asScala
+            .filter(_ != null)
+            .map { multiBucket =>
+              try {
+                val fieldValues = multiBucket.getFieldValues()
+                // Build full GROUP BY values with partition values injected
+                val groupByValues = buildFullGroupByValues(
+                  allGroupByColumns,
+                  groupByColumns,
+                  partitionGroupByCols,
+                  fieldValues,
+                  partition.splitPartitionValues
+                )
+                val aggregationValues =
+                  calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
 
-            if (multiBuckets == null) {
-              logger.debug(s"GROUP BY EXECUTION: MultiTermsResult.getBuckets() returned null")
-              return Array.empty[InternalRow]
-            }
+                val keyString = fieldValues.mkString("|")
+                logger.debug(
+                  s"GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents"
+                )
 
-            logger.debug(s"GROUP BY EXECUTION: Found ${multiBuckets.size()} multi-dimensional groups")
-
-            // Convert multi-dimensional buckets to InternalRow
-            val rows = multiBuckets.asScala
-              .filter(_ != null)
-              .map { multiBucket =>
-                try {
-                  val fieldValues = multiBucket.getFieldValues()
-                  // Build full GROUP BY values with partition values injected
-                  val groupByValues = buildFullGroupByValues(
-                    allGroupByColumns, groupByColumns, partitionGroupByCols,
-                    fieldValues, partition.splitPartitionValues
-                  )
-                  val aggregationValues =
-                    calculateAggregationValuesFromMultiTermsBucket(multiBucket, partition.aggregation)
-
-                  val keyString = fieldValues.mkString("|")
-                  logger.debug(
-                    s"GROUP BY EXECUTION: Multi-dimensional group '$keyString' has ${multiBucket.getDocCount} documents"
-                  )
-
-                  // Combine multi-dimensional GROUP BY values with aggregation results
-                  InternalRow.fromSeq(groupByValues ++ aggregationValues)
-                } catch {
-                  case e: Exception =>
-                    logger.warn(s"GROUP BY EXECUTION: Error processing multi-dimensional bucket: ${e.getMessage}", e)
-                    // Return empty row in case of error
-                    InternalRow.empty
-                }
+                // Combine multi-dimensional GROUP BY values with aggregation results
+                InternalRow.fromSeq(groupByValues ++ aggregationValues)
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"GROUP BY EXECUTION: Error processing multi-dimensional bucket: ${e.getMessage}", e)
+                  // Return empty row in case of error
+                  InternalRow.empty
               }
-              .toArray
-
-            logger.debug(s"GROUP BY EXECUTION: Generated ${rows.length} multi-dimensional GROUP BY result rows")
-            rows
-
-          } else {
-            // Handle regular TermsResult for single-dimensional GROUP BY
-            val termsResult = aggregationResult.asInstanceOf[TermsResult]
-            val buckets     = termsResult.getBuckets
-
-            if (buckets == null) {
-              logger.debug(s"GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
-              return Array.empty[InternalRow]
             }
+            .toArray
 
-            logger.debug(s"GROUP BY EXECUTION: Found ${buckets.size()} groups")
-
-            // Convert buckets to InternalRow
-            val rows = buckets.asScala
-              .filter(_ != null)
-              .map { bucket =>
-                try {
-                  val bucketKeyValue = convertBucketKeyToSpark(bucket, groupByColumns(0))
-                  // Build full GROUP BY values with partition values injected
-                  val groupByValues = buildFullGroupByValues(
-                    allGroupByColumns, groupByColumns, partitionGroupByCols,
-                    Array(if (bucketKeyValue == null) "" else bucketKeyValue.toString),
-                    partition.splitPartitionValues
-                  )
-                  val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
-
-                  val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
-                  logger.debug(s"GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
-
-                  // Combine GROUP BY value with aggregation results
-                  InternalRow.fromSeq(groupByValues ++ aggregationValues)
-                } catch {
-                  case e: Exception =>
-                    logger.warn(s"GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
-                    // Return empty row in case of error
-                    InternalRow.empty
-                }
-              }
-              .toArray
-
-            logger.debug(s"GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
-            rows
-          }
+          logger.debug(s"GROUP BY EXECUTION: Generated ${rows.length} multi-dimensional GROUP BY result rows")
+          rows
 
         } else {
-          logger.debug(s"GROUP BY EXECUTION: No aggregation results returned")
-          Array.empty[InternalRow]
+          // Handle regular TermsResult for single-dimensional GROUP BY
+          val termsResult = aggregationResult.asInstanceOf[TermsResult]
+          val buckets     = termsResult.getBuckets
+
+          if (buckets == null) {
+            logger.debug(s"GROUP BY EXECUTION: TermsResult.getBuckets() returned null")
+            return Array.empty[InternalRow]
+          }
+
+          logger.debug(s"GROUP BY EXECUTION: Found ${buckets.size()} groups")
+
+          // Convert buckets to InternalRow
+          val rows = buckets.asScala
+            .filter(_ != null)
+            .map { bucket =>
+              try {
+                val bucketKeyValue = convertBucketKeyToSpark(bucket, groupByColumns(0))
+                // Build full GROUP BY values with partition values injected
+                val groupByValues = buildFullGroupByValues(
+                  allGroupByColumns,
+                  groupByColumns,
+                  partitionGroupByCols,
+                  Array(if (bucketKeyValue == null) "" else bucketKeyValue.toString),
+                  partition.splitPartitionValues
+                )
+                val aggregationValues = calculateAggregationValuesFromSubAggregations(bucket, partition.aggregation)
+
+                val keyString = if (bucket.getKeyAsString != null) bucket.getKeyAsString else "null"
+                logger.debug(s"GROUP BY EXECUTION: Group '$keyString' has ${bucket.getDocCount} documents")
+
+                // Combine GROUP BY value with aggregation results
+                InternalRow.fromSeq(groupByValues ++ aggregationValues)
+              } catch {
+                case e: Exception =>
+                  logger.warn(s"GROUP BY EXECUTION: Error processing bucket: ${e.getMessage}", e)
+                  // Return empty row in case of error
+                  InternalRow.empty
+              }
+            }
+            .toArray
+
+          logger.debug(s"GROUP BY EXECUTION: Generated ${rows.length} GROUP BY result rows")
+          rows
         }
+
+      } else {
+        logger.debug(s"GROUP BY EXECUTION: No aggregation results returned")
+        Array.empty[InternalRow]
+      }
 
     } else {
       logger.debug(
@@ -884,7 +891,7 @@ class IndexTables4SparkGroupByAggregateReader(
     addSubAggregationsToDateHistogram(agg)
 
     // Build and execute query
-    val query = buildFilterQuery(splitSearchEngine)
+    val query  = buildFilterQuery(splitSearchEngine)
     val result = searcher.search(query, 10, "bucket_agg", agg)
 
     if (!result.hasAggregations()) {
@@ -908,7 +915,9 @@ class IndexTables4SparkGroupByAggregateReader(
     hc: HistogramConfig
   ): Array[org.apache.spark.sql.catalyst.InternalRow] = {
 
-    logger.debug(s"BUCKET EXECUTION: Creating HistogramAggregation for field '${hc.fieldName}' with interval ${hc.interval}")
+    logger.debug(
+      s"BUCKET EXECUTION: Creating HistogramAggregation for field '${hc.fieldName}' with interval ${hc.interval}"
+    )
 
     val agg = new HistogramAggregation("bucket_agg", hc.fieldName, hc.interval)
     if (hc.offset != 0.0) agg.setOffset(hc.offset)
@@ -949,12 +958,12 @@ class IndexTables4SparkGroupByAggregateReader(
     rc.ranges.foreach { range =>
       // RangeAggregation uses addRange(key, from, to) where null represents unbounded
       val fromVal: java.lang.Double = range.from.map(Double.box).orNull
-      val toVal: java.lang.Double = range.to.map(Double.box).orNull
+      val toVal: java.lang.Double   = range.to.map(Double.box).orNull
       agg.addRange(range.key, fromVal, toVal)
     }
 
     // Build and execute query
-    val query = buildFilterQuery(splitSearchEngine)
+    val query  = buildFilterQuery(splitSearchEngine)
     val result = searcher.search(query, 10, "bucket_agg", agg)
 
     if (!result.hasAggregations()) {
@@ -1044,14 +1053,20 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Build filter query for bucket aggregation. */
-  private def buildFilterQuery(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine): io.indextables.tantivy4java.split.SplitQuery = {
+  private def buildFilterQuery(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine)
+    : io.indextables.tantivy4java.split.SplitQuery = {
     val allFilters = partition.pushedFilters ++ partition.indexQueryFilters
     if (allFilters.nonEmpty) {
       logger.debug(s"BUCKET EXECUTION: Converting ${allFilters.length} filters to query")
       val splitFieldNames = getSplitFieldNames(splitSearchEngine)
       import scala.jdk.CollectionConverters._
       val optionsFromBroadcast = new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
-      FiltersToQueryConverter.convertToSplitQuery(allFilters, splitSearchEngine, splitFieldNames, Some(optionsFromBroadcast))
+      FiltersToQueryConverter.convertToSplitQuery(
+        allFilters,
+        splitSearchEngine,
+        splitFieldNames,
+        Some(optionsFromBroadcast)
+      )
     } else {
       logger.debug(s"BUCKET EXECUTION: No filters, using match-all query")
       new SplitMatchAllQuery()
@@ -1059,7 +1074,8 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Get split field names for schema validation. */
-  private def getSplitFieldNames(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine): Option[Set[String]] = {
+  private def getSplitFieldNames(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine)
+    : Option[Set[String]] = {
     var schema: io.indextables.tantivy4java.core.Schema = null
     try {
       import scala.collection.JavaConverters._
@@ -1069,9 +1085,8 @@ class IndexTables4SparkGroupByAggregateReader(
       case e: Exception =>
         logger.warn(s"BUCKET EXECUTION: Failed to get field names: ${e.getMessage}")
         None
-    } finally {
+    } finally
       if (schema != null) schema.close()
-    }
   }
 
   /** Process DateHistogram aggregation result into InternalRows. */
@@ -1080,13 +1095,16 @@ class IndexTables4SparkGroupByAggregateReader(
     val buckets = result.getBuckets
     if (buckets == null) return Array.empty[InternalRow]
 
-    buckets.asScala.filter(_ != null).map { bucket =>
-      // DateHistogram returns epoch milliseconds, Spark TimestampType expects microseconds
-      val keyMillis = bucket.getKey.toLong
-      val keyMicros = keyMillis * 1000L  // Convert milliseconds to microseconds
-      val aggregationValues = calculateBucketAggregationValues(bucket)
-      InternalRow.fromSeq(Seq(keyMicros) ++ aggregationValues)
-    }.toArray
+    buckets.asScala
+      .filter(_ != null)
+      .map { bucket =>
+        // DateHistogram returns epoch milliseconds, Spark TimestampType expects microseconds
+        val keyMillis         = bucket.getKey.toLong
+        val keyMicros         = keyMillis * 1000L // Convert milliseconds to microseconds
+        val aggregationValues = calculateBucketAggregationValues(bucket)
+        InternalRow.fromSeq(Seq(keyMicros) ++ aggregationValues)
+      }
+      .toArray
   }
 
   /** Process Histogram aggregation result into InternalRows. */
@@ -1097,13 +1115,16 @@ class IndexTables4SparkGroupByAggregateReader(
 
     logger.debug(s"BUCKET EXECUTION: Processing ${buckets.size()} histogram buckets")
 
-    buckets.asScala.filter(_ != null).map { bucket =>
-      // Histogram returns double for bucket key
-      val key = bucket.getKey
-      val aggregationValues = calculateBucketAggregationValues(bucket)
-      logger.debug(s"BUCKET EXECUTION: Histogram bucket key=$key, docCount=${bucket.getDocCount}")
-      InternalRow.fromSeq(Seq(key) ++ aggregationValues)
-    }.toArray
+    buckets.asScala
+      .filter(_ != null)
+      .map { bucket =>
+        // Histogram returns double for bucket key
+        val key               = bucket.getKey
+        val aggregationValues = calculateBucketAggregationValues(bucket)
+        logger.debug(s"BUCKET EXECUTION: Histogram bucket key=$key, docCount=${bucket.getDocCount}")
+        InternalRow.fromSeq(Seq(key) ++ aggregationValues)
+      }
+      .toArray
   }
 
   /** Process Range aggregation result into InternalRows. */
@@ -1112,12 +1133,15 @@ class IndexTables4SparkGroupByAggregateReader(
     val buckets = result.getBuckets
     if (buckets == null) return Array.empty[InternalRow]
 
-    buckets.asScala.filter(_ != null).map { bucket =>
-      // Range returns string key (range name)
-      val key = UTF8String.fromString(bucket.getKey)
-      val aggregationValues = calculateRangeBucketAggregationValues(bucket)
-      InternalRow.fromSeq(Seq(key) ++ aggregationValues)
-    }.toArray
+    buckets.asScala
+      .filter(_ != null)
+      .map { bucket =>
+        // Range returns string key (range name)
+        val key               = UTF8String.fromString(bucket.getKey)
+        val aggregationValues = calculateRangeBucketAggregationValues(bucket)
+        InternalRow.fromSeq(Seq(key) ++ aggregationValues)
+      }
+      .toArray
   }
 
   /** Calculate aggregation values from a DateHistogram/Histogram bucket. */
@@ -1224,36 +1248,33 @@ class IndexTables4SparkGroupByAggregateReader(
     bucket: io.indextables.tantivy4java.aggregation.DateHistogramResult.DateHistogramBucket,
     index: Int,
     sum: org.apache.spark.sql.connector.expressions.aggregate.Sum
-  ): Any = {
+  ): Any =
     try {
       val sumResult = bucket.getSubAggregation(s"sum_$index", classOf[SumResult])
       if (sumResult != null) convertSumValue(sumResult.getSum, sum) else 0L
     } catch { case _: Exception => 0L }
-  }
 
   /** Extract MIN value from DateHistogram bucket. */
   private def extractMinFromBucket(
     bucket: io.indextables.tantivy4java.aggregation.DateHistogramResult.DateHistogramBucket,
     index: Int,
     min: org.apache.spark.sql.connector.expressions.aggregate.Min
-  ): Any = {
+  ): Any =
     try {
       val minResult = bucket.getSubAggregation(s"min_$index", classOf[MinResult])
       if (minResult != null) convertMinMaxValue(minResult.getMin, min) else 0.0
     } catch { case _: Exception => 0.0 }
-  }
 
   /** Extract MAX value from DateHistogram bucket. */
   private def extractMaxFromBucket(
     bucket: io.indextables.tantivy4java.aggregation.DateHistogramResult.DateHistogramBucket,
     index: Int,
     max: org.apache.spark.sql.connector.expressions.aggregate.Max
-  ): Any = {
+  ): Any =
     try {
       val maxResult = bucket.getSubAggregation(s"max_$index", classOf[MaxResult])
       if (maxResult != null) convertMinMaxValue(maxResult.getMax, max) else 0.0
     } catch { case _: Exception => 0.0 }
-  }
 
   /** Convert SUM value to appropriate type. */
   private def convertSumValue(value: Double, sum: org.apache.spark.sql.connector.expressions.aggregate.Sum): Any = {
@@ -1261,21 +1282,25 @@ class IndexTables4SparkGroupByAggregateReader(
     val fieldType = getFieldType(fieldName)
     fieldType match {
       case IntegerType | LongType => java.lang.Long.valueOf(Math.round(value))
-      case _ => java.lang.Double.valueOf(value)
+      case _                      => java.lang.Double.valueOf(value)
     }
   }
 
   /** Convert MIN/MAX value to appropriate type. */
-  private def convertMinMaxValue(value: Double, aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc): Any = {
+  private def convertMinMaxValue(
+    value: Double,
+    aggExpr: org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc
+  ): Any = {
     val column = aggExpr.children().headOption.getOrElse(return value)
-    val fieldName = if (column.getClass.getSimpleName == "FieldReference") column.toString
-                    else io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
+    val fieldName =
+      if (column.getClass.getSimpleName == "FieldReference") column.toString
+      else io.indextables.spark.util.ExpressionUtils.extractFieldName(column)
     val fieldType = getFieldType(fieldName)
     fieldType match {
       case IntegerType => java.lang.Integer.valueOf(Math.round(value).toInt)
-      case LongType => java.lang.Long.valueOf(Math.round(value))
-      case FloatType => java.lang.Float.valueOf(value.toFloat)
-      case _ => java.lang.Double.valueOf(value)
+      case LongType    => java.lang.Long.valueOf(Math.round(value))
+      case FloatType   => java.lang.Float.valueOf(value.toFloat)
+      case _           => java.lang.Double.valueOf(value)
     }
   }
 
@@ -1834,16 +1859,21 @@ class IndexTables4SparkGroupByAggregateReader(
     }
 
   /**
-   * Build full GROUP BY values array by combining partition values from split metadata
-   * with data values from Tantivy aggregation results. This maintains the correct
-   * column order as expected by Spark.
+   * Build full GROUP BY values array by combining partition values from split metadata with data values from Tantivy
+   * aggregation results. This maintains the correct column order as expected by Spark.
    *
-   * @param allGroupByColumns All GROUP BY columns in original order
-   * @param dataGroupByCols Data columns (non-partition) that were aggregated by Tantivy
-   * @param partitionGroupByCols Partition columns whose values come from split metadata
-   * @param dataFieldValues Values from Tantivy bucket for data columns
-   * @param splitPartitionValues Partition values from split metadata
-   * @return Array of Spark-compatible values in the correct column order
+   * @param allGroupByColumns
+   *   All GROUP BY columns in original order
+   * @param dataGroupByCols
+   *   Data columns (non-partition) that were aggregated by Tantivy
+   * @param partitionGroupByCols
+   *   Partition columns whose values come from split metadata
+   * @param dataFieldValues
+   *   Values from Tantivy bucket for data columns
+   * @param splitPartitionValues
+   *   Partition values from split metadata
+   * @return
+   *   Array of Spark-compatible values in the correct column order
    */
   private def buildFullGroupByValues(
     allGroupByColumns: Array[String],
@@ -1870,9 +1900,8 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /**
-   * Execute aggregation when all GROUP BY columns are partition columns.
-   * In this case, we don't need Tantivy terms aggregation - just count documents
-   * and return a single row with partition values from split metadata.
+   * Execute aggregation when all GROUP BY columns are partition columns. In this case, we don't need Tantivy terms
+   * aggregation - just count documents and return a single row with partition values from split metadata.
    */
   private def executePartitionOnlyAggregation(
     searcher: io.indextables.tantivy4java.split.SplitSearcher,
@@ -1888,7 +1917,7 @@ class IndexTables4SparkGroupByAggregateReader(
 
     // Execute a simple count aggregation to get document count matching filters
     val countAgg = new io.indextables.tantivy4java.aggregation.CountAggregation("count_agg")
-    val result = searcher.search(query, 0, "count_agg", countAgg)
+    val result   = searcher.search(query, 0, "count_agg", countAgg)
 
     val docCount = if (result.hasAggregations()) {
       val countResult = result.getAggregation("count_agg")
@@ -1908,7 +1937,7 @@ class IndexTables4SparkGroupByAggregateReader(
     // Build GROUP BY values from partition metadata
     val groupByValues = allGroupByColumns.map { colName =>
       val fieldType = getFieldType(colName)
-      val valueStr = partition.splitPartitionValues.getOrElse(colName, "")
+      val valueStr  = partition.splitPartitionValues.getOrElse(colName, "")
       convertStringValueToSpark(valueStr, fieldType)
     }
 
@@ -1923,16 +1952,16 @@ class IndexTables4SparkGroupByAggregateReader(
             // For SUM on partition-only aggregation, we need to run a SUM aggregation
             val fieldName = getFieldName(sum.column)
             try {
-              val sumAgg = new io.indextables.tantivy4java.aggregation.SumAggregation("sum_agg", fieldName)
+              val sumAgg    = new io.indextables.tantivy4java.aggregation.SumAggregation("sum_agg", fieldName)
               val sumResult = searcher.search(query, 0, "sum_agg", sumAgg)
               if (sumResult.hasAggregations()) {
                 val agg = sumResult.getAggregation("sum_agg")
                 if (agg != null) {
-                  val sumValue = agg.asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult].getSum
+                  val sumValue  = agg.asInstanceOf[io.indextables.tantivy4java.aggregation.SumResult].getSum
                   val fieldType = getFieldType(fieldName)
                   fieldType match {
                     case IntegerType | LongType => java.lang.Long.valueOf(Math.round(sumValue))
-                    case _ => java.lang.Double.valueOf(sumValue)
+                    case _                      => java.lang.Double.valueOf(sumValue)
                   }
                 } else 0L
               } else 0L
@@ -1941,7 +1970,7 @@ class IndexTables4SparkGroupByAggregateReader(
           case min: Min =>
             val fieldName = getFieldName(min.column)
             try {
-              val minAgg = new io.indextables.tantivy4java.aggregation.MinAggregation("min_agg", fieldName)
+              val minAgg    = new io.indextables.tantivy4java.aggregation.MinAggregation("min_agg", fieldName)
               val minResult = searcher.search(query, 0, "min_agg", minAgg)
               if (minResult.hasAggregations()) {
                 val agg = minResult.getAggregation("min_agg")
@@ -1955,7 +1984,7 @@ class IndexTables4SparkGroupByAggregateReader(
           case max: Max =>
             val fieldName = getFieldName(max.column)
             try {
-              val maxAgg = new io.indextables.tantivy4java.aggregation.MaxAggregation("max_agg", fieldName)
+              val maxAgg    = new io.indextables.tantivy4java.aggregation.MaxAggregation("max_agg", fieldName)
               val maxResult = searcher.search(query, 0, "max_agg", maxAgg)
               if (maxResult.hasAggregations()) {
                 val agg = maxResult.getAggregation("max_agg")

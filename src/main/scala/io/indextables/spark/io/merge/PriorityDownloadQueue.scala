@@ -49,9 +49,7 @@ class PriorityDownloadQueue {
   // Track total pending downloads for monitoring
   private val pendingCount = new AtomicLong(0)
 
-  /**
-   * Generate a new unique batch ID. Lower IDs have higher priority.
-   */
+  /** Generate a new unique batch ID. Lower IDs have higher priority. */
   def nextBatchId(): Long =
     batchIdGenerator.incrementAndGet()
 
@@ -73,9 +71,7 @@ class PriorityDownloadQueue {
     val queue = new ConcurrentLinkedQueue[DownloadRequest]()
 
     // Add all downloads with the batch ID
-    batch.downloads.foreach { request =>
-      queue.offer(request.withBatchId(batch.batchId))
-    }
+    batch.downloads.foreach(request => queue.offer(request.withBatchId(batch.batchId)))
 
     // Add to the batch map
     batches.put(batch.batchId, queue)
@@ -98,7 +94,7 @@ class PriorityDownloadQueue {
     var entry = batches.firstEntry()
 
     while (entry != null) {
-      val queue  = entry.getValue
+      val queue   = entry.getValue
       val batchId = entry.getKey
 
       // Try to poll from this batch's queue
@@ -150,30 +146,23 @@ class PriorityDownloadQueue {
     }
   }
 
-  /**
-   * Get the number of pending downloads across all batches.
-   */
+  /** Get the number of pending downloads across all batches. */
   def pendingDownloads: Long =
     pendingCount.get()
 
-  /**
-   * Get the number of active batches (batches with pending downloads).
-   */
+  /** Get the number of active batches (batches with pending downloads). */
   def activeBatches: Int =
     batches.size()
 
-  /**
-   * Check if the queue is empty.
-   */
+  /** Check if the queue is empty. */
   def isEmpty: Boolean =
     batches.isEmpty
 
-  /**
-   * Get statistics about the current queue state.
-   */
+  /** Get statistics about the current queue state. */
   def getStats: PriorityQueueStats = {
-    val batchStats = batches.asScala.map { case (batchId, queue) =>
-      BatchStats(batchId, queue.size())
+    val batchStats = batches.asScala.map {
+      case (batchId, queue) =>
+        BatchStats(batchId, queue.size())
     }.toSeq
 
     PriorityQueueStats(
@@ -183,9 +172,7 @@ class PriorityDownloadQueue {
     )
   }
 
-  /**
-   * Clear all batches from the queue.
-   */
+  /** Clear all batches from the queue. */
   def clear(): Unit = {
     batches.clear()
     pendingCount.set(0)
@@ -193,22 +180,16 @@ class PriorityDownloadQueue {
   }
 }
 
-/**
- * Statistics for a single batch in the queue.
- */
+/** Statistics for a single batch in the queue. */
 case class BatchStats(batchId: Long, pendingDownloads: Int)
 
-/**
- * Statistics for the entire priority queue.
- */
+/** Statistics for the entire priority queue. */
 case class PriorityQueueStats(
   totalPending: Long,
   activeBatches: Int,
   batchStats: Seq[BatchStats]) {
 
-  /**
-   * Get the batch ID with highest priority (lowest ID).
-   */
+  /** Get the batch ID with highest priority (lowest ID). */
   def highestPriorityBatchId: Option[Long] =
     batchStats.headOption.map(_.batchId)
 

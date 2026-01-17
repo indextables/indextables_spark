@@ -78,7 +78,7 @@ object IndexTables4SparkSQLConf {
   /////////////////////
 
   /** Maximum number of source splits that can be merged in a single merge operation (default: 1000) */
-  val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE = "spark.indextables.merge.maxSourceSplitsPerMerge"
+  val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE         = "spark.indextables.merge.maxSourceSplitsPerMerge"
   val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT = 1000
 
   /////////////////////
@@ -90,23 +90,23 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_MERGE_DOWNLOAD_MAX_CONCURRENCY_PER_CORE_DEFAULT = 8
 
   /** Memory budget for download operations (default: 2GB) */
-  val TANTIVY4SPARK_MERGE_DOWNLOAD_MEMORY_BUDGET = "spark.indextables.merge.download.memoryBudget"
+  val TANTIVY4SPARK_MERGE_DOWNLOAD_MEMORY_BUDGET         = "spark.indextables.merge.download.memoryBudget"
   val TANTIVY4SPARK_MERGE_DOWNLOAD_MEMORY_BUDGET_DEFAULT = "2G"
 
   /** Number of retry attempts for failed downloads (default: 3) */
-  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRIES = "spark.indextables.merge.download.retries"
+  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRIES         = "spark.indextables.merge.download.retries"
   val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRIES_DEFAULT = 3
 
   /** Maximum concurrent upload threads for merged splits (default: 6) */
-  val TANTIVY4SPARK_MERGE_UPLOAD_MAX_CONCURRENCY = "spark.indextables.merge.upload.maxConcurrency"
+  val TANTIVY4SPARK_MERGE_UPLOAD_MAX_CONCURRENCY         = "spark.indextables.merge.upload.maxConcurrency"
   val TANTIVY4SPARK_MERGE_UPLOAD_MAX_CONCURRENCY_DEFAULT = 6
 
   /** Base delay in milliseconds for exponential backoff on retries (default: 1000) */
-  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_BASE_DELAY_MS = "spark.indextables.merge.download.retryBaseDelayMs"
+  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_BASE_DELAY_MS         = "spark.indextables.merge.download.retryBaseDelayMs"
   val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_BASE_DELAY_MS_DEFAULT = 1000L
 
   /** Maximum delay in milliseconds for exponential backoff on retries (default: 30000) */
-  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_MAX_DELAY_MS = "spark.indextables.merge.download.retryMaxDelayMs"
+  val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_MAX_DELAY_MS         = "spark.indextables.merge.download.retryMaxDelayMs"
   val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_MAX_DELAY_MS_DEFAULT = 30000L
 
   /////////////////////

@@ -17,15 +17,15 @@
 
 package io.indextables.spark.transaction
 
-import io.indextables.spark.TestBase
 import org.apache.hadoop.fs.Path
+
+import io.indextables.spark.TestBase
 
 /**
  * Reproduction tests for schema deduplication bugs.
  *
- * Bug #2: Schema hash calculation uses string serialization which is not canonical.
- *         Two semantically identical JSON schemas with different property ordering
- *         produce different hashes, causing duplicate schema registry entries.
+ * Bug #2: Schema hash calculation uses string serialization which is not canonical. Two semantically identical JSON
+ * schemas with different property ordering produce different hashes, causing duplicate schema registry entries.
  */
 class SchemaDeduplicationBugReproductionTest extends TestBase {
 
@@ -135,8 +135,9 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
         )
 
         println(s"DEBUG: Registry size: ${registry.size}")
-        registry.foreach { case (k, v) =>
-          println(s"DEBUG: Registry entry: $k -> ${v.take(50)}...")
+        registry.foreach {
+          case (k, v) =>
+            println(s"DEBUG: Registry entry: $k -> ${v.take(50)}...")
         }
 
         // BUG: With current implementation, registry.size == 2 (duplicate entries)
@@ -146,9 +147,8 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
         // Both AddActions should reference the same hash
         val refs = deduplicated.collect { case a: AddAction => a.docMappingRef }.flatten
         refs.distinct.size shouldBe 1
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -162,9 +162,9 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
 
     // Simulate a registry with duplicate schemas (same content, different old hashes)
     // These represent schemas that were hashed before the canonical fix
-    val schema1 = """{"name":"field1","type":"i64","fast":true}"""
-    val schema2 = """{"fast":true,"name":"field1","type":"i64"}"""  // Same schema, different order
-    val schema3 = """{"type":"i64","name":"field1","fast":true}"""  // Same schema, different order
+    val schema1         = """{"name":"field1","type":"i64","fast":true}"""
+    val schema2         = """{"fast":true,"name":"field1","type":"i64"}""" // Same schema, different order
+    val schema3         = """{"type":"i64","name":"field1","fast":true}""" // Same schema, different order
     val differentSchema = """{"name":"field2","type":"text","fast":false}"""
 
     // Old hashes (simulating pre-fix behavior where each would have a different hash)
@@ -209,18 +209,43 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
 
     // All AddActions that referenced the duplicate schemas should now reference the same canonical hash
     val addActionRefs = consolidatedActions.collect { case a: AddAction => a.docMappingRef }.flatten
-    val uniqueRefs = addActionRefs.distinct
+    val uniqueRefs    = addActionRefs.distinct
 
     println(s"DEBUG: Unique refs after consolidation: ${uniqueRefs.mkString(", ")}")
 
     // file1, file2, file3, file4 all referenced semantically identical schemas
     // They should now all reference the same canonical hash
     // file5 references a different schema
-    val file1Ref = consolidatedActions.find(_.asInstanceOf[AddAction].path == "file1.split").get.asInstanceOf[AddAction].docMappingRef.get
-    val file2Ref = consolidatedActions.find(_.asInstanceOf[AddAction].path == "file2.split").get.asInstanceOf[AddAction].docMappingRef.get
-    val file3Ref = consolidatedActions.find(_.asInstanceOf[AddAction].path == "file3.split").get.asInstanceOf[AddAction].docMappingRef.get
-    val file4Ref = consolidatedActions.find(_.asInstanceOf[AddAction].path == "file4.split").get.asInstanceOf[AddAction].docMappingRef.get
-    val file5Ref = consolidatedActions.find(_.asInstanceOf[AddAction].path == "file5.split").get.asInstanceOf[AddAction].docMappingRef.get
+    val file1Ref = consolidatedActions
+      .find(_.asInstanceOf[AddAction].path == "file1.split")
+      .get
+      .asInstanceOf[AddAction]
+      .docMappingRef
+      .get
+    val file2Ref = consolidatedActions
+      .find(_.asInstanceOf[AddAction].path == "file2.split")
+      .get
+      .asInstanceOf[AddAction]
+      .docMappingRef
+      .get
+    val file3Ref = consolidatedActions
+      .find(_.asInstanceOf[AddAction].path == "file3.split")
+      .get
+      .asInstanceOf[AddAction]
+      .docMappingRef
+      .get
+    val file4Ref = consolidatedActions
+      .find(_.asInstanceOf[AddAction].path == "file4.split")
+      .get
+      .asInstanceOf[AddAction]
+      .docMappingRef
+      .get
+    val file5Ref = consolidatedActions
+      .find(_.asInstanceOf[AddAction].path == "file5.split")
+      .get
+      .asInstanceOf[AddAction]
+      .docMappingRef
+      .get
 
     // All identical schemas should map to the same canonical hash
     file1Ref shouldBe file2Ref
@@ -287,9 +312,9 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
     // With the fix, all three should produce the same hash:
     // - Object key order is normalized (existing behavior)
     // - Array element order for named objects is normalized (new behavior)
-    hash1 shouldBe hash2  // Array elements sorted by "name" field
-    hash1 shouldBe hash3  // Object keys sorted alphabetically
-    hash2 shouldBe hash3  // Transitive equality
+    hash1 shouldBe hash2 // Array elements sorted by "name" field
+    hash1 shouldBe hash3 // Object keys sorted alphabetically
+    hash2 shouldBe hash3 // Transitive equality
   }
 
   test("BUG #3 FIXED: consolidation works for field arrays with different element order") {
@@ -314,9 +339,12 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
     val oldHashes = permutations.zipWithIndex.map { case (_, i) => s"oldHash${('A' + i).toChar}" }
 
     // Create a registry with these "duplicate" schemas (simulating legacy data)
-    val legacyRegistry = oldHashes.zip(permutations).map {
-      case (hash, schema) => s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}$hash" -> schema
-    }.toMap ++ (1 to 6).map(i => s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}padding$i" -> s"""[{"name":"pad$i"}]""").toMap
+    val legacyRegistry = oldHashes
+      .zip(permutations)
+      .map { case (hash, schema) => s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}$hash" -> schema }
+      .toMap ++ (1 to 6)
+      .map(i => s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}padding$i" -> s"""[{"name":"pad$i"}]""")
+      .toMap
 
     // Create AddActions referencing these hashes
     val addActions: Seq[Action] = oldHashes.zipWithIndex.map {
@@ -332,7 +360,7 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
 
     // Verify all permutations now produce the same hash
     val uniqueHashes = permutations.map(SchemaDeduplication.computeSchemaHash).distinct
-    uniqueHashes.size shouldBe 1  // All 6 permutations -> 1 canonical hash
+    uniqueHashes.size shouldBe 1 // All 6 permutations -> 1 canonical hash
 
     // Run consolidation
     val (consolidatedActions, consolidatedRegistry, duplicatesRemoved) =
@@ -378,7 +406,7 @@ class SchemaDeduplicationBugReproductionTest extends TestBase {
     println(s"DEBUG: Generated ${permutations.size} permutations of ${fields.size} fields")
 
     // Compute hashes for all permutations
-    val hashes = permutations.map(SchemaDeduplication.computeSchemaHash)
+    val hashes       = permutations.map(SchemaDeduplication.computeSchemaHash)
     val uniqueHashes = hashes.distinct
 
     println(s"DEBUG: Unique hashes: ${uniqueHashes.size}")

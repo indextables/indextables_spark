@@ -21,8 +21,9 @@ import java.io.File
 import java.nio.file.Files
 
 import org.apache.spark.sql.SparkSession
-import org.scalatest.BeforeAndAfterEach
+
 import org.scalatest.funsuite.AnyFunSuite
+import org.scalatest.BeforeAndAfterEach
 import org.slf4j.LoggerFactory
 
 /**
@@ -40,7 +41,7 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
   var spark: SparkSession = _
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     spark = SparkSession
       .builder()
       .master("local[2]")
@@ -48,20 +49,18 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
       .config("spark.ui.enabled", "false")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       .getOrCreate()
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     if (spark != null) {
       spark.stop()
       spark = null
     }
-  }
 
   // ===== Parsing Tests =====
 
   test("FLUSH INDEXTABLES DISK CACHE should parse correctly") {
     val result = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     assert(rows.nonEmpty, "FLUSH command should return results")
     logger.info(s"FLUSH INDEXTABLES DISK CACHE returned ${rows.length} rows")
@@ -69,7 +68,7 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
   test("FLUSH TANTIVY4SPARK DISK CACHE should parse correctly (alternate syntax)") {
     val result = spark.sql("FLUSH TANTIVY4SPARK DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     assert(rows.nonEmpty, "FLUSH command with TANTIVY4SPARK keyword should return results")
     logger.info(s"FLUSH TANTIVY4SPARK DISK CACHE returned ${rows.length} rows")
@@ -101,15 +100,17 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
     )
 
     val actualColumns = schema.fieldNames.toSet
-    assert(expectedColumns.subsetOf(actualColumns),
-      s"Schema should contain expected columns. Expected: $expectedColumns, Actual: $actualColumns")
+    assert(
+      expectedColumns.subsetOf(actualColumns),
+      s"Schema should contain expected columns. Expected: $expectedColumns, Actual: $actualColumns"
+    )
 
     logger.info(s"FLUSH command schema: ${schema.fieldNames.mkString(", ")}")
   }
 
   test("FLUSH command should return driver results") {
     val result = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     // Should have at least driver-side results
     val driverRows = rows.filter(_.getAs[String]("executor_id") == "driver")
@@ -128,17 +129,19 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
   test("FLUSH without configured disk cache should return skipped status") {
     // No disk cache path configured
     val result = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     val diskCacheRows = rows.filter(_.getAs[String]("cache_type").contains("disk_cache"))
     diskCacheRows.foreach { row =>
-      val status = row.getAs[String]("status")
+      val status  = row.getAs[String]("status")
       val message = row.getAs[String]("message")
       logger.info(s"Disk cache status: $status, message: $message")
 
       // Without configured path, should be skipped or report no path
-      assert(status == "skipped" || status == "success",
-        s"Without configured path, status should be skipped or success, got: $status")
+      assert(
+        status == "skipped" || status == "success",
+        s"Without configured path, status should be skipped or success, got: $status"
+      )
     }
   }
 
@@ -167,22 +170,22 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
       try {
         val result = testSpark.sql("FLUSH INDEXTABLES DISK CACHE")
-        val rows = result.collect()
+        val rows   = result.collect()
 
         logger.info(s"FLUSH with configured path results: ${rows.map(_.toString).mkString(", ")}")
 
         // Should have driver disk cache result
         val driverDiskCacheRows = rows.filter { row =>
           row.getAs[String]("executor_id") == "driver" &&
-            row.getAs[String]("cache_type") == "disk_cache_files"
+          row.getAs[String]("cache_type") == "disk_cache_files"
         }
 
         assert(driverDiskCacheRows.nonEmpty, "Should have driver disk_cache_files result")
 
         val diskCacheRow = driverDiskCacheRows.head
-        val status = diskCacheRow.getAs[String]("status")
+        val status       = diskCacheRow.getAs[String]("status")
         val filesDeleted = diskCacheRow.getAs[Long]("files_deleted")
-        val bytesFreed = diskCacheRow.getAs[Long]("bytes_freed")
+        val bytesFreed   = diskCacheRow.getAs[Long]("bytes_freed")
 
         logger.info(s"Disk cache flush: status=$status, files=$filesDeleted, bytes=$bytesFreed")
 
@@ -193,9 +196,8 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
         // Verify the file was actually deleted
         assert(!dummyFile.exists(), "Dummy file should have been deleted")
 
-      } finally {
+      } finally
         testSpark.stop()
-      }
 
     } finally {
       // Cleanup
@@ -216,7 +218,7 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Add some state to locality manager via assignSplitsForQuery
     val testSplits = Seq("test-split-1", "test-split-2", "test-split-3")
-    val testHosts = Set("host1", "host2")
+    val testHosts  = Set("host1", "host2")
     DriverSplitLocalityManager.assignSplitsForQuery(testSplits, testHosts)
 
     val statsBefore = DriverSplitLocalityManager.getStats()
@@ -225,19 +227,21 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Execute FLUSH
     val result = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     // Check locality manager result
     val localityRows = rows.filter { row =>
       row.getAs[String]("executor_id") == "driver" &&
-        row.getAs[String]("cache_type") == "locality_manager"
+      row.getAs[String]("cache_type") == "locality_manager"
     }
 
     assert(localityRows.nonEmpty, "Should have locality_manager result")
 
     val localityRow = localityRows.head
-    assert(localityRow.getAs[String]("status") == "success",
-      s"Locality manager flush should succeed, got: ${localityRow.getAs[String]("status")}")
+    assert(
+      localityRow.getAs[String]("status") == "success",
+      s"Locality manager flush should succeed, got: ${localityRow.getAs[String]("status")}"
+    )
 
     // Verify state was cleared
     val statsAfter = DriverSplitLocalityManager.getStats()
@@ -251,19 +255,21 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
 
     // Execute FLUSH
     val result = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows = result.collect()
+    val rows   = result.collect()
 
     // Check split cache result
     val splitCacheRows = rows.filter { row =>
       row.getAs[String]("executor_id") == "driver" &&
-        row.getAs[String]("cache_type") == "split_cache"
+      row.getAs[String]("cache_type") == "split_cache"
     }
 
     assert(splitCacheRows.nonEmpty, "Should have split_cache result")
 
     val splitCacheRow = splitCacheRows.head
-    assert(splitCacheRow.getAs[String]("status") == "success",
-      s"Split cache flush should succeed, got: ${splitCacheRow.getAs[String]("status")}")
+    assert(
+      splitCacheRow.getAs[String]("status") == "success",
+      s"Split cache flush should succeed, got: ${splitCacheRow.getAs[String]("status")}"
+    )
 
     logger.info(s"Split cache flush message: ${splitCacheRow.getAs[String]("message")}")
   }
@@ -271,18 +277,17 @@ class FlushDiskCacheCommandTest extends AnyFunSuite with BeforeAndAfterEach {
   test("FLUSH should be idempotent - multiple calls should succeed") {
     // First flush
     val result1 = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows1 = result1.collect()
+    val rows1   = result1.collect()
     assert(rows1.nonEmpty, "First FLUSH should return results")
 
     // Second flush immediately after
     val result2 = spark.sql("FLUSH INDEXTABLES DISK CACHE")
-    val rows2 = result2.collect()
+    val rows2   = result2.collect()
     assert(rows2.nonEmpty, "Second FLUSH should also return results")
 
     // Both should have success or skipped status (not failed)
     val allStatuses = (rows1 ++ rows2).map(_.getAs[String]("status")).toSet
-    assert(!allStatuses.contains("failed"),
-      s"Neither flush should fail. Statuses: $allStatuses")
+    assert(!allStatuses.contains("failed"), s"Neither flush should fail. Statuses: $allStatuses")
   }
 
   private def deleteRecursively(file: File): Unit = {

@@ -509,12 +509,12 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     // Verify table has data
-    val beforeRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val beforeCount = beforeRead.count()
     assert(beforeCount > 0, "Table should have data")
 
     // List transaction log files to verify multi-part checkpoint exists
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
+    val txLogPath  = new Path(s"$tablePath/_transaction_log")
     val txLogFiles = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
 
     // Check for checkpoint manifest (multi-part) or single-file checkpoint
@@ -523,7 +523,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Check for part files (UUID pattern: checkpoint.<uuid>.<partnum>.json)
     val partFilePattern = """.*\.checkpoint\.[a-f0-9]+\.\d{5}\.json""".r
-    val hasPartFiles = txLogFiles.exists(f => partFilePattern.findFirstIn(f).isDefined)
+    val hasPartFiles    = txLogFiles.exists(f => partFilePattern.findFirstIn(f).isDefined)
     println(s"Transaction log files: ${txLogFiles.mkString(", ")}")
     println(s"Has multi-part checkpoint: $hasPartFiles")
 
@@ -534,7 +534,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     fs.setTimes(orphanedSplit, oldTime, -1)
 
     // Run PURGE
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
+    val result  = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 7 DAYS").collect()
     val metrics = result(0).getStruct(1)
 
     // Verify orphaned file was deleted
@@ -542,12 +542,12 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     assert(metrics.getLong(2) >= 1, "Should have deleted at least 1 orphaned file")
 
     // Verify table still works after purge
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val afterCount = afterRead.count()
     assert(afterCount == beforeCount, s"Data count should be unchanged: expected $beforeCount, got $afterCount")
 
     // Verify checkpoint files were NOT deleted
-    val txLogFilesAfter = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
+    val txLogFilesAfter      = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
     val checkpointFilesAfter = txLogFilesAfter.filter(_.contains("checkpoint"))
     assert(checkpointFilesAfter.nonEmpty, "Checkpoint files should still exist after purge")
 
@@ -586,8 +586,8 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     // List checkpoint files after first batch
-    val txLogPath = new Path(s"$tablePath/_transaction_log")
-    val firstBatchFiles = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
+    val txLogPath            = new Path(s"$tablePath/_transaction_log")
+    val firstBatchFiles      = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
     val firstCheckpointFiles = firstBatchFiles.filter(_.contains("checkpoint"))
     println(s"After first batch - checkpoint files: ${firstCheckpointFiles.mkString(", ")}")
 
@@ -601,7 +601,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     // List all checkpoint files after second batch
-    val secondBatchFiles = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
+    val secondBatchFiles   = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
     val allCheckpointFiles = secondBatchFiles.filter(_.contains("checkpoint"))
     println(s"After second batch - all checkpoint files: ${allCheckpointFiles.mkString(", ")}")
 
@@ -609,13 +609,15 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     val partFilePattern = """(\d+)\.checkpoint\.([a-f0-9]+)\.\d{5}\.json""".r
     val manifestPattern = """(\d+)\.checkpoint\.json""".r
 
-    val partFilesByVersion = allCheckpointFiles.flatMap { f =>
-      partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f))
-    }.groupBy(_._1).mapValues(_.map(_._2).toSet)
+    val partFilesByVersion = allCheckpointFiles
+      .flatMap(f => partFilePattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))
+      .groupBy(_._1)
+      .mapValues(_.map(_._2).toSet)
 
-    val manifestsByVersion = allCheckpointFiles.flatMap { f =>
-      manifestPattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f))
-    }.groupBy(_._1).mapValues(_.map(_._2).toSet)
+    val manifestsByVersion = allCheckpointFiles
+      .flatMap(f => manifestPattern.findFirstMatchIn(f).map(m => (m.group(1).toLong, f)))
+      .groupBy(_._1)
+      .mapValues(_.map(_._2).toSet)
 
     println(s"Part files by version: $partFilesByVersion")
     println(s"Manifests by version: $manifestsByVersion")
@@ -625,14 +627,12 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
 
     // Set old modification time on ALL transaction log files to make them eligible for purge
     val oldTime = System.currentTimeMillis() - (10L * 24 * 60 * 60 * 1000) // 10 days ago
-    allTxLogFiles.foreach { fileStatus =>
-      fs.setTimes(fileStatus.getPath, oldTime, -1)
-    }
+    allTxLogFiles.foreach(fileStatus => fs.setTimes(fileStatus.getPath, oldTime, -1))
 
     // Read _last_checkpoint to find the latest checkpoint version
     val lastCheckpointPath = new Path(txLogPath, "_last_checkpoint")
     val lastCheckpointContent = if (fs.exists(lastCheckpointPath)) {
-      val is = fs.open(lastCheckpointPath)
+      val is      = fs.open(lastCheckpointPath)
       val content = scala.io.Source.fromInputStream(is).mkString
       is.close()
       content
@@ -649,24 +649,27 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     println(s"Latest version: $latestVersion, Older versions: $olderVersions")
 
     // Verify table has data before purge
-    val beforeRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val beforeRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val beforeCount = beforeRead.count()
     assert(beforeCount == 10, s"Table should have 10 rows, got $beforeCount")
 
     // Run PURGE with transaction log retention
-    val result = spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
+    val result =
+      spark.sql(s"PURGE INDEXTABLE '$tablePath' OLDER THAN 1 HOURS TRANSACTION LOG RETENTION 1 HOURS").collect()
     val metrics = result(0).getStruct(1)
     println(s"PURGE result: status=${metrics.getString(0)}, txLogFilesDeleted=${metrics.getLong(5)}")
 
     // List remaining checkpoint files after purge
-    val remainingFiles = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
+    val remainingFiles           = fs.listStatus(txLogPath).map(_.getPath.getName).toSet
     val remainingCheckpointFiles = remainingFiles.filter(_.contains("checkpoint"))
     println(s"Remaining checkpoint files after purge: ${remainingCheckpointFiles.mkString(", ")}")
 
     // Verify latest checkpoint files still exist
     val latestManifest = f"$latestVersion%020d.checkpoint.json"
-    assert(remainingCheckpointFiles.contains(latestManifest) || remainingCheckpointFiles.contains("_last_checkpoint"),
-      s"Latest checkpoint manifest ($latestManifest) or _last_checkpoint should still exist")
+    assert(
+      remainingCheckpointFiles.contains(latestManifest) || remainingCheckpointFiles.contains("_last_checkpoint"),
+      s"Latest checkpoint manifest ($latestManifest) or _last_checkpoint should still exist"
+    )
 
     // If we had older versions, verify some transaction log cleanup happened
     if (olderVersions.nonEmpty) {
@@ -677,7 +680,7 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
     }
 
     // Most importantly: verify table still works after purge
-    val afterRead = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
+    val afterRead  = spark.read.format("io.indextables.spark.core.IndexTables4SparkTableProvider").load(tablePath)
     val afterCount = afterRead.count()
     assert(afterCount == beforeCount, s"Data count should be unchanged: expected $beforeCount, got $afterCount")
 

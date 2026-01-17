@@ -106,24 +106,24 @@ class SimpleTermQueryTest extends TestBase {
         }
 
         val metadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
-          matchingFile.path.split("/").last.replace(".split", ""),    // splitId from filename
-          "tantivy4spark-index",                                      // indexUid (NEW - required)
-          0L,                                                         // partitionId (NEW - required)
-          "tantivy4spark-source",                                     // sourceId (NEW - required)
-          "tantivy4spark-node",                                       // nodeId (NEW - required)
-          toLongSafeOption(matchingFile.numRecords),                  // numDocs
-          toLongSafeOption(matchingFile.uncompressedSizeBytes),       // uncompressedSizeBytes
-          matchingFile.timeRangeStart.map(Instant.parse).orNull,      // timeRangeStart
-          matchingFile.timeRangeEnd.map(Instant.parse).orNull,        // timeRangeEnd
-          System.currentTimeMillis() / 1000,                          // createTimestamp (NEW - required)
-          "Mature",                                                   // maturity (NEW - required)
-          matchingFile.splitTags.getOrElse(Set.empty[String]).asJava, // tags
-          toLongSafeOption(matchingFile.footerStartOffset),           // footerStartOffset
-          toLongSafeOption(matchingFile.footerEndOffset),             // footerEndOffset
-          toLongSafeOption(matchingFile.deleteOpstamp),               // deleteOpstamp
-          matchingFile.numMergeOps.getOrElse(0),                      // numMergeOps (Int is OK for this field)
-          "doc-mapping-uid",                                          // docMappingUid (NEW - required)
-          matchingFile.docMappingJson.orNull,                         // docMappingJson (MOVED - for performance)
+          matchingFile.path.split("/").last.replace(".split", ""),      // splitId from filename
+          "tantivy4spark-index",                                        // indexUid (NEW - required)
+          0L,                                                           // partitionId (NEW - required)
+          "tantivy4spark-source",                                       // sourceId (NEW - required)
+          "tantivy4spark-node",                                         // nodeId (NEW - required)
+          toLongSafeOption(matchingFile.numRecords),                    // numDocs
+          toLongSafeOption(matchingFile.uncompressedSizeBytes),         // uncompressedSizeBytes
+          matchingFile.timeRangeStart.map(Instant.parse).orNull,        // timeRangeStart
+          matchingFile.timeRangeEnd.map(Instant.parse).orNull,          // timeRangeEnd
+          System.currentTimeMillis() / 1000,                            // createTimestamp (NEW - required)
+          "Mature",                                                     // maturity (NEW - required)
+          matchingFile.splitTags.getOrElse(Set.empty[String]).asJava,   // tags
+          toLongSafeOption(matchingFile.footerStartOffset),             // footerStartOffset
+          toLongSafeOption(matchingFile.footerEndOffset),               // footerEndOffset
+          toLongSafeOption(matchingFile.deleteOpstamp),                 // deleteOpstamp
+          matchingFile.numMergeOps.getOrElse(0),                        // numMergeOps (Int is OK for this field)
+          "doc-mapping-uid",                                            // docMappingUid (NEW - required)
+          matchingFile.docMappingJson.orNull,                           // docMappingJson (MOVED - for performance)
           java.util.Collections.emptyList[QuickwitSplit.SkippedSplit]() // skippedSplits
         )
         println(s"✅ Retrieved metadata from transaction log with footer offsets: ${metadata.hasFooterOffsets()}")

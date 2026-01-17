@@ -474,7 +474,7 @@ class IndexTables4SparkStandardWrite(
         tablePath = tablePath,
         partitionPredicates = Seq.empty, // No partition filtering for count
         targetSize = targetSizeBytes,
-        maxDestSplits = None, // No limit for counting
+        maxDestSplits = None,           // No limit for counting
         maxSourceSplitsPerMerge = None, // Use config default
         preCommitMerge = false,
         overrideOptions = Some(optionsToPass)
@@ -534,7 +534,7 @@ class IndexTables4SparkStandardWrite(
         tablePath = tablePath,
         partitionPredicates = Seq.empty, // Merge all partitions
         targetSize = targetSizeBytes,
-        maxDestSplits = None, // No limit on groups for auto-merge
+        maxDestSplits = None,           // No limit on groups for auto-merge
         maxSourceSplitsPerMerge = None, // Use config default
         preCommitMerge = false,
         overrideOptions = Some(optionsToPass) // Pass write options directly

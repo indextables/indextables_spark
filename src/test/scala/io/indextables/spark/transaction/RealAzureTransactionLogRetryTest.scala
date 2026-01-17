@@ -17,31 +17,30 @@
 
 package io.indextables.spark.transaction
 
-import java.util.UUID
 import java.util.concurrent.{CountDownLatch, CyclicBarrier, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.RealAzureTestBase
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.compression.{CompressionUtils, GzipCompressionCodec}
+import io.indextables.spark.RealAzureTestBase
 
 /**
  * Real Azure Blob Storage tests for transaction log concurrent write retry logic.
  *
- * These tests validate the retry mechanism on actual Azure infrastructure,
- * including Azure's conditional put semantics (If-None-Match: *).
+ * These tests validate the retry mechanism on actual Azure infrastructure, including Azure's conditional put semantics
+ * (If-None-Match: *).
  *
- * IMPORTANT: These tests require Azure credentials and will create/delete
- * real blobs in Azure Storage. Configure via:
+ * IMPORTANT: These tests require Azure credentials and will create/delete real blobs in Azure Storage. Configure via:
  *   - ~/.azure/credentials file
  *   - Environment variables: AZURE_STORAGE_ACCOUNT, AZURE_STORAGE_KEY
  *   - System properties: test.azure.storageAccount, test.azure.accountKey, test.azure.container
@@ -51,10 +50,12 @@ import io.indextables.spark.transaction.compression.{CompressionUtils, GzipCompr
 class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
 
   private def getTestSchema(): StructType =
-    StructType(Seq(
-      StructField("id", LongType, nullable = false),
-      StructField("value", StringType, nullable = true)
-    ))
+    StructType(
+      Seq(
+        StructField("id", LongType, nullable = false),
+        StructField("value", StringType, nullable = true)
+      )
+    )
 
   private def createAddAction(index: Int): AddAction =
     AddAction(
@@ -67,12 +68,12 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
     )
 
   private def generateTestPath(): String = {
-    val testId = UUID.randomUUID().toString.take(8)
+    val testId  = UUID.randomUUID().toString.take(8)
     val account = getStorageAccount.getOrElse("test")
     s"abfss://$testContainer@$account.dfs.core.windows.net/retry-tests/test-$testId"
   }
 
-  private def cleanupPath(path: String): Unit = {
+  private def cleanupPath(path: String): Unit =
     try {
       val cloudProvider = CloudStorageProviderFactory.createProvider(
         path,
@@ -83,21 +84,20 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         // Delete all files in the path
         val files = cloudProvider.listFiles(path)
         files.foreach { file =>
-          try { cloudProvider.deleteFile(file.path) } catch { case _: Exception => }
+          try cloudProvider.deleteFile(file.path)
+          catch { case _: Exception => }
         }
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     } catch {
       case e: Exception =>
         println(s"Warning: Failed to cleanup test path $path: ${e.getMessage}")
     }
-  }
 
   test("Azure: metrics should be recorded for successful writes without conflicts") {
     assume(hasAzureCredentials(), "Azure credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -107,7 +107,7 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         transactionLog.initialize(getTestSchema())
 
         val addAction = createAddAction(1)
-        val version = transactionLog.addFiles(Seq(addAction))
+        val version   = transactionLog.addFiles(Seq(addAction))
         version shouldBe 1L
 
         // Metrics should be present
@@ -118,18 +118,16 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         metrics.get.finalVersion shouldBe 1L
 
         println(s"Azure write succeeded: attempts=${metrics.get.attemptsMade}, version=${metrics.get.finalVersion}")
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("Azure: concurrent appends from multiple threads should all succeed with retry") {
     assume(hasAzureCredentials(), "Azure credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -139,13 +137,13 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         transactionLog.initialize(getTestSchema())
 
         val numConcurrentWrites = 5
-        val successCount = new AtomicInteger(0)
-        val failureCount = new AtomicInteger(0)
-        val totalConflicts = new AtomicInteger(0)
-        val errors = new ListBuffer[Throwable]()
-        val versions = new ListBuffer[Long]()
-        val allMetrics = new ListBuffer[TxRetryMetrics]()
-        val latch = new CountDownLatch(numConcurrentWrites)
+        val successCount        = new AtomicInteger(0)
+        val failureCount        = new AtomicInteger(0)
+        val totalConflicts      = new AtomicInteger(0)
+        val errors              = new ListBuffer[Throwable]()
+        val versions            = new ListBuffer[Long]()
+        val allMetrics          = new ListBuffer[TxRetryMetrics]()
+        val latch               = new CountDownLatch(numConcurrentWrites)
 
         implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(
           Executors.newFixedThreadPool(numConcurrentWrites)
@@ -158,7 +156,7 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
             startLatch.await()
             try {
               val addAction = createAddAction(i)
-              val version = transactionLog.addFiles(Seq(addAction))
+              val version   = transactionLog.addFiles(Seq(addAction))
               synchronized {
                 versions += version
                 transactionLog.getLastRetryMetrics().foreach { m =>
@@ -170,10 +168,9 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
             } catch {
               case e: Exception =>
                 failureCount.incrementAndGet()
-                synchronized { errors += e }
-            } finally {
+                synchronized(errors += e)
+            } finally
               latch.countDown()
-            }
           }
         }
 
@@ -203,7 +200,9 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         // On Azure, we expect to see conflicts due to actual concurrent writes
         // The retry mechanism should handle them
         if (totalConflicts.get() > 0) {
-          println(s"SUCCESS: Azure conflict detection and retry worked! ${totalConflicts.get()} conflicts were resolved.")
+          println(
+            s"SUCCESS: Azure conflict detection and retry worked! ${totalConflicts.get()} conflicts were resolved."
+          )
         } else {
           println("Note: No conflicts detected - writes may have been serialized by timing")
         }
@@ -212,18 +211,16 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.size shouldBe numConcurrentWrites
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("Azure: commitMergeSplits should record metrics") {
     assume(hasAzureCredentials(), "Azure credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -271,15 +268,11 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.exists(_.path == "merged.split") shouldBe true
-        addActions.foreach { add =>
-          files.exists(_.path == add.path) shouldBe false
-        }
-      } finally {
+        addActions.foreach(add => files.exists(_.path == add.path) shouldBe false)
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("Azure: writeFileIfNotExists should return false when blob already exists") {
@@ -315,18 +308,16 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         actualContent shouldBe "first write"
 
         println("Azure SUCCESS: writeFileIfNotExists correctly returns false when blob exists")
-      } finally {
+      } finally
         cloudProvider.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("Azure: concurrent writes should all eventually succeed via retry") {
     assume(hasAzureCredentials(), "Azure credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
@@ -337,12 +328,12 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
 
         // Use more concurrent writes to increase conflict likelihood on Azure
         val numConcurrentWrites = 10
-        val successCount = new AtomicInteger(0)
-        val failureCount = new AtomicInteger(0)
-        val totalConflicts = new AtomicInteger(0)
-        val versions = new ListBuffer[Long]()
-        val allMetrics = new ListBuffer[TxRetryMetrics]()
-        val latch = new CountDownLatch(numConcurrentWrites)
+        val successCount        = new AtomicInteger(0)
+        val failureCount        = new AtomicInteger(0)
+        val totalConflicts      = new AtomicInteger(0)
+        val versions            = new ListBuffer[Long]()
+        val allMetrics          = new ListBuffer[TxRetryMetrics]()
+        val latch               = new CountDownLatch(numConcurrentWrites)
 
         implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(
           Executors.newFixedThreadPool(numConcurrentWrites)
@@ -354,7 +345,7 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
             startLatch.await()
             try {
               val addAction = createAddAction(i)
-              val version = transactionLog.addFiles(Seq(addAction))
+              val version   = transactionLog.addFiles(Seq(addAction))
               synchronized {
                 versions += version
                 transactionLog.getLastRetryMetrics().foreach { m =>
@@ -366,10 +357,9 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
             } catch {
               case e: Exception =>
                 failureCount.incrementAndGet()
-                synchronized { println(s"Azure Error: ${e.getMessage}") }
-            } finally {
+                synchronized(println(s"Azure Error: ${e.getMessage}"))
+            } finally
               latch.countDown()
-            }
           }
         }
 
@@ -390,7 +380,9 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         if (totalConflicts.get() > 0) {
           println(s"Azure SUCCESS: Conflicts detected and handled via retry!")
           allMetrics.filter(_.conflictsEncountered > 0).foreach { m =>
-            println(s"  Azure Version ${m.finalVersion}: ${m.attemptsMade} attempts, ${m.conflictsEncountered} conflicts")
+            println(
+              s"  Azure Version ${m.finalVersion}: ${m.attemptsMade} attempts, ${m.conflictsEncountered} conflicts"
+            )
           }
         }
 
@@ -398,12 +390,10 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         transactionLog.invalidateCache()
         val files = transactionLog.listFiles()
         files.size shouldBe numConcurrentWrites
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 
   test("Azure FORCED CONFLICT: out-of-band file upload should trigger retry") {
@@ -417,14 +407,15 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
     // which would update the version counter. Azure's conditional put will detect the conflict.
     assume(hasAzureCredentials(), "Azure credentials not available")
 
-    val testPath = generateTestPath()
+    val testPath  = generateTestPath()
     val tablePath = new Path(testPath)
 
     try {
       // Create TransactionLog with protocol checking DISABLED
       val options = new CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.protocol.checkEnabled", "false"
+          "spark.indextables.protocol.checkEnabled",
+          "false"
         )
       )
       val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
@@ -434,7 +425,7 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
 
         // Step 1: Do a real write to initialize versionCounter
         val addAction1 = createAddAction(100)
-        val version1 = transactionLog.addFiles(Seq(addAction1))
+        val version1   = transactionLog.addFiles(Seq(addAction1))
         println(s"Azure Step 1: First write completed at version $version1")
         version1 shouldBe 1L
 
@@ -443,8 +434,8 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
 
         // Step 2: Pre-create the NEXT version file out-of-band directly on Azure
         val transactionLogDir = new Path(testPath, "_transaction_log")
-        val conflictVersion = version1 + 1
-        val conflictFile = new Path(transactionLogDir, f"$conflictVersion%020d.json")
+        val conflictVersion   = version1 + 1
+        val conflictFile      = new Path(transactionLogDir, f"$conflictVersion%020d.json")
 
         val cloudProvider = CloudStorageProviderFactory.createProvider(
           testPath,
@@ -453,7 +444,8 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
         )
 
         try {
-          val dummyContent = s"""{"add":{"path":"AZURE_OUT_OF_BAND_FILE.split","partitionValues":{},"size":888,"modificationTime":1700000000000,"dataChange":true}}"""
+          val dummyContent =
+            s"""{"add":{"path":"AZURE_OUT_OF_BAND_FILE.split","partitionValues":{},"size":888,"modificationTime":1700000000000,"dataChange":true}}"""
           val compressedContent = CompressionUtils.writeTransactionFile(
             dummyContent.getBytes("UTF-8"),
             Some(new GzipCompressionCodec())
@@ -469,7 +461,7 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
           // Azure's writeFileIfNotExists will return FALSE (blob exists via If-None-Match)
           // Retry logic MUST kick in
           val addAction2 = createAddAction(200)
-          val version2 = transactionLog.addFiles(Seq(addAction2))
+          val version2   = transactionLog.addFiles(Seq(addAction2))
 
           println(s"Azure Step 3: Second write completed at version $version2")
 
@@ -497,14 +489,11 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
           files.exists(_.path == "file200.split") shouldBe true
           files.exists(_.path == "AZURE_OUT_OF_BAND_FILE.split") shouldBe true
           println("Azure Verified: All files present in transaction log")
-        } finally {
+        } finally
           cloudProvider.close()
-        }
-      } finally {
+      } finally
         transactionLog.close()
-      }
-    } finally {
+    } finally
       cleanupPath(testPath)
-    }
   }
 }

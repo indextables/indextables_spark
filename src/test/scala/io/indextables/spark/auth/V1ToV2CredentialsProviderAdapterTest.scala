@@ -23,18 +23,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import org.apache.hadoop.conf.Configuration
 
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicAWSCredentials, BasicSessionCredentials}
-import io.indextables.spark.TestBase
 import io.indextables.spark.testutils.TestV1CredentialProvider
+import io.indextables.spark.TestBase
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials
 
 /**
  * Unit tests for V1ToV2CredentialsProviderAdapter.
  *
  * These tests verify that the adapter properly:
- * 1. Wraps v1 credential providers
- * 2. Delegates resolveCredentials() to the v1 provider's getCredentials()
- * 3. Preserves refresh logic by calling getCredentials() on each resolveCredentials() call
- * 4. Handles both session credentials and basic credentials
+ *   1. Wraps v1 credential providers 2. Delegates resolveCredentials() to the v1 provider's getCredentials() 3.
+ *      Preserves refresh logic by calling getCredentials() on each resolveCredentials() call 4. Handles both session
+ *      credentials and basic credentials
  */
 class V1ToV2CredentialsProviderAdapterTest extends TestBase {
 
@@ -52,7 +51,7 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     hadoopConf.set("test.aws.sessionToken", "TEST_SESSION_TOKEN")
 
     val v1Provider = new TestV1CredentialProvider(testUri, hadoopConf)
-    val adapter = new V1ToV2CredentialsProviderAdapter(v1Provider)
+    val adapter    = new V1ToV2CredentialsProviderAdapter(v1Provider)
 
     val creds = adapter.resolveCredentials()
 
@@ -70,7 +69,7 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     // No session token
 
     val v1Provider = new TestV1CredentialProvider(testUri, hadoopConf)
-    val adapter = new V1ToV2CredentialsProviderAdapter(v1Provider)
+    val adapter    = new V1ToV2CredentialsProviderAdapter(v1Provider)
 
     val creds = adapter.resolveCredentials()
 
@@ -115,17 +114,15 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     var credentialVersion = 1
 
     val refreshableProvider = new AWSCredentialsProvider {
-      override def getCredentials(): AWSCredentials = {
+      override def getCredentials(): AWSCredentials =
         // Simulate: check expiration and refresh if needed (real providers do this internally)
         new BasicSessionCredentials(
           s"ACCESS_V$credentialVersion",
           s"SECRET_V$credentialVersion",
           s"TOKEN_V$credentialVersion"
         )
-      }
-      override def refresh(): Unit = {
+      override def refresh(): Unit =
         credentialVersion += 1
-      }
     }
 
     val adapter = new V1ToV2CredentialsProviderAdapter(refreshableProvider)
@@ -149,7 +146,7 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     hadoopConf.set("test.aws.secretKey", "TEST_SECRET")
 
     val v1Provider = new TestV1CredentialProvider(testUri, hadoopConf)
-    val adapter = new V1ToV2CredentialsProviderAdapter(v1Provider)
+    val adapter    = new V1ToV2CredentialsProviderAdapter(v1Provider)
 
     assert(adapter.getWrappedProvider eq v1Provider)
   }
@@ -176,8 +173,8 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     hadoopConf.set("test.aws.secretKey", "SHARED_SECRET")
 
     val v1Provider = new TestV1CredentialProvider(testUri, hadoopConf)
-    val adapter1 = new V1ToV2CredentialsProviderAdapter(v1Provider)
-    val adapter2 = new V1ToV2CredentialsProviderAdapter(v1Provider)
+    val adapter1   = new V1ToV2CredentialsProviderAdapter(v1Provider)
+    val adapter2   = new V1ToV2CredentialsProviderAdapter(v1Provider)
 
     val creds1 = adapter1.resolveCredentials()
     val creds2 = adapter2.resolveCredentials()
@@ -202,13 +199,7 @@ class V1ToV2CredentialsProviderAdapterTest extends TestBase {
     val adapter = new V1ToV2CredentialsProviderAdapter(threadSafeProvider)
 
     // Run 10 concurrent threads, each calling resolveCredentials 10 times
-    val threads = (1 to 10).map { _ =>
-      new Thread(() => {
-        (1 to 10).foreach { _ =>
-          adapter.resolveCredentials()
-        }
-      })
-    }
+    val threads = (1 to 10).map(_ => new Thread(() => (1 to 10).foreach(_ => adapter.resolveCredentials())))
 
     threads.foreach(_.start())
     threads.foreach(_.join())

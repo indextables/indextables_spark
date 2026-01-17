@@ -27,7 +27,6 @@ import scala.util.Try
 import com.azure.identity.{ClientSecretCredential, ClientSecretCredentialBuilder}
 import com.azure.storage.blob.{BlobAsyncClient, BlobServiceAsyncClient, BlobServiceClientBuilder}
 import com.azure.storage.common.StorageSharedKeyCredential
-
 import org.slf4j.LoggerFactory
 
 /**
@@ -236,10 +235,10 @@ object AzureAsyncDownloader {
     def get(key: String): Option[String] =
       configs.get(key).orElse(configs.get(key.toLowerCase)).filter(_.nonEmpty)
 
-    val accountName = get("spark.indextables.azure.accountName")
-    val accountKey  = get("spark.indextables.azure.accountKey")
-    val tenantId    = get("spark.indextables.azure.tenantId")
-    val clientId    = get("spark.indextables.azure.clientId")
+    val accountName  = get("spark.indextables.azure.accountName")
+    val accountKey   = get("spark.indextables.azure.accountKey")
+    val tenantId     = get("spark.indextables.azure.tenantId")
+    val clientId     = get("spark.indextables.azure.clientId")
     val clientSecret = get("spark.indextables.azure.clientSecret")
 
     accountName match {

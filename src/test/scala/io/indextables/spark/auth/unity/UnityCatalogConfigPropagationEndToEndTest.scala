@@ -26,20 +26,19 @@ import io.indextables.spark.TestBase
 import org.slf4j.LoggerFactory
 
 /**
- * End-to-end tests that verify Databricks config propagation by attempting operations
- * with the UnityCatalogAWSCredentialProvider and verifying that errors indicate the
- * provider received the correct configuration.
+ * End-to-end tests that verify Databricks config propagation by attempting operations with the
+ * UnityCatalogAWSCredentialProvider and verifying that errors indicate the provider received the correct configuration.
  *
- * These tests use a fake workspace URL that will fail to connect, but the error message
- * will prove that the config was properly propagated to the credential provider.
+ * These tests use a fake workspace URL that will fail to connect, but the error message will prove that the config was
+ * properly propagated to the credential provider.
  */
 class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
   private val logger = LoggerFactory.getLogger(classOf[UnityCatalogConfigPropagationEndToEndTest])
 
   // Use a unique port that won't be in use - connection will fail but error proves config propagation
-  private val fakeWorkspaceUrl = "http://localhost:19876"
-  private val fakeApiToken = "test-databricks-token-12345"
+  private val fakeWorkspaceUrl  = "http://localhost:19876"
+  private val fakeApiToken      = "test-databricks-token-12345"
   private val testProviderClass = "io.indextables.spark.auth.unity.UnityCatalogAWSCredentialProvider"
 
   // S3 path that would trigger the credential provider
@@ -67,14 +66,12 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   }
 
   /**
-   * Helper to verify that an exception indicates the Unity Catalog provider was invoked
-   * with the correct workspace URL configuration, or that the operation tried to access
-   * the S3 path (which means config propagation occurred).
+   * Helper to verify that an exception indicates the Unity Catalog provider was invoked with the correct workspace URL
+   * configuration, or that the operation tried to access the S3 path (which means config propagation occurred).
    *
-   * Note: When the Unity Catalog provider fails, S3CloudStorageProvider falls back to
-   * explicit credentials (TestBase defaults). So the final exception might be from the
-   * S3 fallback, but we accept that as evidence that config propagation worked - the
-   * provider WAS invoked.
+   * Note: When the Unity Catalog provider fails, S3CloudStorageProvider falls back to explicit credentials (TestBase
+   * defaults). So the final exception might be from the S3 fallback, but we accept that as evidence that config
+   * propagation worked - the provider WAS invoked.
    */
   private def assertUnityProviderInvoked(exception: Throwable): Unit = {
     val fullMessage = getFullExceptionMessage(exception)
@@ -87,22 +84,22 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     // 4. The credential provider class was referenced (proves config propagation)
     val configPropagated =
       fullMessage.contains(fakeWorkspaceUrl) ||
-      fullMessage.contains("localhost:19876") ||
-      fullMessage.contains("Unity Catalog") ||
-      fullMessage.contains("UnityCatalog") ||
-      fullMessage.contains("temporary-path-credentials") ||
-      fullMessage.contains("Databricks") ||
-      fullMessage.contains("Unable to obtain") ||  // From Unity Catalog provider
-      fullMessage.contains("unity-catalog-test-bucket") ||  // S3 bucket in error
-      fullMessage.contains("S3") ||
-      fullMessage.contains("SdkClientException") ||  // AWS SDK error (fallback)
-      fullMessage.contains("NoSuchBucket") ||
-      fullMessage.contains("AccessDenied") ||
-      fullMessage.contains("localhost:10101") ||  // TestBase S3 endpoint (fallback)
-      fullMessage.contains("CredentialProviderFactory") ||  // Provider factory error
-      fullMessage.contains("Failed to create custom credential provider") ||  // S3CloudStorageProvider error
-      fullMessage.contains("Failed to extract credentials from provider") ||  // CredentialProviderFactory error
-      fullMessage.contains("Connection refused")  // Network error from fake workspace URL
+        fullMessage.contains("localhost:19876") ||
+        fullMessage.contains("Unity Catalog") ||
+        fullMessage.contains("UnityCatalog") ||
+        fullMessage.contains("temporary-path-credentials") ||
+        fullMessage.contains("Databricks") ||
+        fullMessage.contains("Unable to obtain") ||          // From Unity Catalog provider
+        fullMessage.contains("unity-catalog-test-bucket") || // S3 bucket in error
+        fullMessage.contains("S3") ||
+        fullMessage.contains("SdkClientException") || // AWS SDK error (fallback)
+        fullMessage.contains("NoSuchBucket") ||
+        fullMessage.contains("AccessDenied") ||
+        fullMessage.contains("localhost:10101") ||                             // TestBase S3 endpoint (fallback)
+        fullMessage.contains("CredentialProviderFactory") ||                   // Provider factory error
+        fullMessage.contains("Failed to create custom credential provider") || // S3CloudStorageProvider error
+        fullMessage.contains("Failed to extract credentials from provider") || // CredentialProviderFactory error
+        fullMessage.contains("Connection refused")                             // Network error from fake workspace URL
 
     withClue(s"Expected error to indicate operation attempted to use configured credentials. Full message: $fullMessage") {
       configPropagated shouldBe true
@@ -110,7 +107,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   }
 
   private def getFullExceptionMessage(t: Throwable): String = {
-    val sb = new StringBuilder
+    val sb   = new StringBuilder
     val seen = scala.collection.mutable.Set[Throwable]()
 
     def appendException(ex: Throwable, depth: Int): Unit = {
@@ -139,7 +136,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   test("READ operation should propagate databricks configs to credential provider") {
     // Create a simple local index first that we can try to read
     val localPath = tempDir + "/read_test"
-    val df = spark.createDataFrame(Seq((1, "test"))).toDF("id", "value")
+    val df        = spark.createDataFrame(Seq((1, "test"))).toDF("id", "value")
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -159,10 +156,14 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   }
 
   test("WRITE operation should propagate databricks configs to credential provider") {
-    val df = spark.createDataFrame(Seq(
-      (1, "test1"),
-      (2, "test2")
-    )).toDF("id", "value")
+    val df = spark
+      .createDataFrame(
+        Seq(
+          (1, "test1"),
+          (2, "test2")
+        )
+      )
+      .toDF("id", "value")
 
     val exception = intercept[Exception] {
       df.write
@@ -190,13 +191,14 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     // Try MERGE on an S3 path - this should invoke the credential provider
     // The command may complete gracefully (no splits to merge) or throw an exception
-    val result = try {
-      spark.sql(s"MERGE SPLITS '$testS3Path' TARGET SIZE 100M").collect()
-      None
-    } catch {
-      case e: Exception =>
-        Some(e)
-    }
+    val result =
+      try {
+        spark.sql(s"MERGE SPLITS '$testS3Path' TARGET SIZE 100M").collect()
+        None
+      } catch {
+        case e: Exception =>
+          Some(e)
+      }
 
     result match {
       case Some(exception) =>
@@ -208,9 +210,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val hadoopConf = new org.apache.hadoop.conf.Configuration()
+          val hadoopConf   = new org.apache.hadoop.conf.Configuration()
           sparkConfigs.foreach { case (key, value) => hadoopConf.set(key, value) }
-          val uri = new java.net.URI(testS3Path)
+          val uri      = new java.net.URI(testS3Path)
           val provider = new UnityCatalogAWSCredentialProvider(uri, hadoopConf)
           provider.getCredentials()
         }
@@ -241,10 +243,14 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   test("DROP PARTITIONS command should propagate databricks configs to credential provider") {
     // First we need a partitioned table - create locally
     val localPath = tempDir + "/drop_partition_test"
-    val df = spark.createDataFrame(Seq(
-      (1, "2024-01-01", "value1"),
-      (2, "2024-01-02", "value2")
-    )).toDF("id", "date", "value")
+    val df = spark
+      .createDataFrame(
+        Seq(
+          (1, "2024-01-01", "value1"),
+          (2, "2024-01-02", "value2")
+        )
+      )
+      .toDF("id", "date", "value")
 
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
@@ -254,13 +260,14 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     // Try DROP PARTITIONS on S3 path - this should invoke the credential provider
     // The command may complete gracefully (no partitions found) or throw an exception
-    val result = try {
-      spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$testS3Path' WHERE date = '2024-01-01'").collect()
-      None
-    } catch {
-      case e: Exception =>
-        Some(e)
-    }
+    val result =
+      try {
+        spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$testS3Path' WHERE date = '2024-01-01'").collect()
+        None
+      } catch {
+        case e: Exception =>
+          Some(e)
+      }
 
     result match {
       case Some(exception) =>
@@ -272,9 +279,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
         val directException = intercept[Exception] {
           import io.indextables.spark.util.ConfigNormalization
           val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-          val hadoopConf = new org.apache.hadoop.conf.Configuration()
+          val hadoopConf   = new org.apache.hadoop.conf.Configuration()
           sparkConfigs.foreach { case (key, value) => hadoopConf.set(key, value) }
-          val uri = new java.net.URI(testS3Path)
+          val uri      = new java.net.URI(testS3Path)
           val provider = new UnityCatalogAWSCredentialProvider(uri, hadoopConf)
           provider.getCredentials()
         }
@@ -296,14 +303,15 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
   test("DESCRIBE TRANSACTION LOG command should propagate databricks configs to credential provider") {
     // DESCRIBE TRANSACTION LOG may not throw an exception if it returns empty results
     // Try to trigger an actual access to the path
-    val result = try {
-      val df = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$testS3Path'")
-      df.collect() // Force evaluation
-      None
-    } catch {
-      case e: Exception =>
-        Some(e)
-    }
+    val result =
+      try {
+        val df = spark.sql(s"DESCRIBE INDEXTABLES TRANSACTION LOG '$testS3Path'")
+        df.collect() // Force evaluation
+        None
+      } catch {
+        case e: Exception =>
+          Some(e)
+      }
 
     result match {
       case Some(exception) =>
@@ -326,8 +334,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     // Create Hadoop config with all extracted configs (simulating enrichHadoopConfWithSparkConf)
     val hadoopConf = new Configuration()
-    sparkConfigs.foreach { case (key, value) =>
-      hadoopConf.set(key, value)
+    sparkConfigs.foreach {
+      case (key, value) =>
+        hadoopConf.set(key, value)
     }
 
     // Instantiate the provider directly
@@ -352,11 +361,12 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
 
     logger.info(s"Spark configs extracted: ${sparkConfigs.size} keys")
-    sparkConfigs.foreach { case (k, v) =>
-      if (k.contains("credentials") || k.contains("Provider") || k.contains("databricks")) {
-        val maskedValue = if (k.contains("Token") || k.contains("secret")) "***" else v
-        logger.info(s"  $k = $maskedValue")
-      }
+    sparkConfigs.foreach {
+      case (k, v) =>
+        if (k.contains("credentials") || k.contains("Provider") || k.contains("databricks")) {
+          val maskedValue = if (k.contains("Token") || k.contains("secret")) "***" else v
+          logger.info(s"  $k = $maskedValue")
+        }
     }
 
     // Verify the credential provider class is in the extracted configs
@@ -365,8 +375,9 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     // Create enriched Hadoop config manually
     val enrichedConf = new Configuration()
-    sparkConfigs.foreach { case (key, value) =>
-      enrichedConf.set(key, value)
+    sparkConfigs.foreach {
+      case (key, value) =>
+        enrichedConf.set(key, value)
     }
 
     // Now extract CloudStorageConfig using the enriched config
@@ -403,7 +414,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     logger.info(s"   databricks.workspaceUrl from Spark: $workspaceUrlFromSpark")
 
     // 2. Check Hadoop config
-    val hadoopConf = spark.sparkContext.hadoopConfiguration
+    val hadoopConf    = spark.sparkContext.hadoopConfiguration
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     logger.info(s"2. Hadoop config has ${hadoopConfigs.size} spark.indextables.* configs")
 
@@ -413,7 +424,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     // 3. Check what TestBase set
     val testAccessKey = spark.conf.get("spark.indextables.aws.accessKey", "not set")
     val testSecretKey = spark.conf.get("spark.indextables.aws.secretKey", "not set")
-    val testEndpoint = spark.conf.get("spark.indextables.s3.endpoint", "not set")
+    val testEndpoint  = spark.conf.get("spark.indextables.s3.endpoint", "not set")
     logger.info(s"3. TestBase defaults:")
     logger.info(s"   accessKey: ${testAccessKey.take(10)}...")
     logger.info(s"   secretKey: ${testSecretKey.take(10)}...")
@@ -429,7 +440,7 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
     import io.indextables.spark.util.ConfigNormalization
 
     // Extract configs like MergeSplitsExecutor does
-    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 

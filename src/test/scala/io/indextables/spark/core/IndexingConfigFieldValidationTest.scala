@@ -23,11 +23,9 @@ import io.indextables.spark.TestBase
  * Tests for validating field names in indexing configuration options.
  *
  * This test validates that:
- *   1. typemap field names that don't exist in schema are rejected
- *   2. fastfields field names that don't exist in schema are rejected
- *   3. indexrecordoption field names that don't exist in schema are rejected
- *   4. Error messages include all invalid fields and available schema fields
- *   5. Valid configurations continue to work
+ *   1. typemap field names that don't exist in schema are rejected 2. fastfields field names that don't exist in schema
+ *      are rejected 3. indexrecordoption field names that don't exist in schema are rejected 4. Error messages include
+ *      all invalid fields and available schema fields 5. Valid configurations continue to work
  */
 class IndexingConfigFieldValidationTest extends TestBase {
 
@@ -61,8 +59,8 @@ class IndexingConfigFieldValidationTest extends TestBase {
     val exception = intercept[IllegalArgumentException] {
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.titl", "text")      // Typo
-        .option("spark.indextables.indexing.typemap.contnt", "text")    // Typo
+        .option("spark.indextables.indexing.typemap.titl", "text")       // Typo
+        .option("spark.indextables.indexing.typemap.contnt", "text")     // Typo
         .option("spark.indextables.indexing.typemap.descriptin", "text") // Typo
         .mode("overwrite")
         .save(tablePath)
@@ -124,8 +122,8 @@ class IndexingConfigFieldValidationTest extends TestBase {
     val exception = intercept[IllegalArgumentException] {
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-        .option("spark.indextables.indexing.typemap.titl", "text")           // Typo in typemap
-        .option("spark.indextables.indexing.fastfields", "scor,ratng")       // Typos in fastfields
+        .option("spark.indextables.indexing.typemap.titl", "text")                 // Typo in typemap
+        .option("spark.indextables.indexing.fastfields", "scor,ratng")             // Typos in fastfields
         .option("spark.indextables.indexing.indexrecordoption.contnt", "position") // Typo in indexrecordoption
         .mode("overwrite")
         .save(tablePath)
@@ -232,8 +230,8 @@ class IndexingConfigFieldValidationTest extends TestBase {
     // Should accept case-insensitive match
     df.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .option("spark.indextables.indexing.typemap.title", "string")   // lowercase matches Title
-      .option("spark.indextables.indexing.typemap.content", "text")   // lowercase matches CONTENT
+      .option("spark.indextables.indexing.typemap.title", "string") // lowercase matches Title
+      .option("spark.indextables.indexing.typemap.content", "text") // lowercase matches CONTENT
       .mode("overwrite")
       .save(tablePath)
 

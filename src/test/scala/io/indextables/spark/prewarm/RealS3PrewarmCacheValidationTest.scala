@@ -28,8 +28,8 @@ import org.apache.spark.sql.functions._
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 
-import io.indextables.spark.RealS3TestBase
 import io.indextables.spark.storage.GlobalSplitCacheManager
+import io.indextables.spark.RealS3TestBase
 import io.indextables.tantivy4java.split.SplitCacheManager
 
 /**
@@ -39,12 +39,9 @@ import io.indextables.tantivy4java.split.SplitCacheManager
  * created, proving that all required data was prewarmed.
  *
  * Key validation approach:
- *   1. Write test data to S3
- *   2. Execute FLUSH to ensure clean cache state
- *   3. Execute PREWARM with ALL segments including DOC_STORE
- *   4. Record cache stats (total_bytes, components_cached)
- *   5. Execute multiple queries that exercise different code paths
- *   6. Verify cache stats haven't increased (no new cache entries)
+ *   1. Write test data to S3 2. Execute FLUSH to ensure clean cache state 3. Execute PREWARM with ALL segments
+ *      including DOC_STORE 4. Record cache stats (total_bytes, components_cached) 5. Execute multiple queries that
+ *      exercise different code paths 6. Verify cache stats haven't increased (no new cache entries)
  *
  * Prerequisites:
  *   - AWS credentials in ~/.aws/credentials file
@@ -132,9 +129,7 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     file.delete()
   }
 
-  /**
-   * List all files in the disk cache directory for debugging.
-   */
+  /** List all files in the disk cache directory for debugging. */
   private def listDiskCacheContents(label: String): Unit = {
     val cacheDir = new File(diskCachePath)
     if (cacheDir.exists() && cacheDir.isDirectory) {
@@ -150,14 +145,13 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
           val uuidPattern = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}".r
           uuidPattern.findFirstIn(name).getOrElse("other")
         }
-        byPrefix.toSeq.sortBy(_._1).foreach { case (prefix, groupFiles) =>
-          println(s"   Split $prefix: ${groupFiles.length} files")
-          groupFiles.sortBy(_.getName).take(10).foreach { f =>
-            println(s"     - ${f.getName} (${f.length()} bytes)")
-          }
-          if (groupFiles.length > 10) {
-            println(s"     ... and ${groupFiles.length - 10} more files")
-          }
+        byPrefix.toSeq.sortBy(_._1).foreach {
+          case (prefix, groupFiles) =>
+            println(s"   Split $prefix: ${groupFiles.length} files")
+            groupFiles.sortBy(_.getName).take(10).foreach(f => println(s"     - ${f.getName} (${f.length()} bytes)"))
+            if (groupFiles.length > 10) {
+              println(s"     ... and ${groupFiles.length - 10} more files")
+            }
         }
       }
     } else {
@@ -165,17 +159,14 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     }
   }
 
-  private def listFilesRecursively(dir: File): Seq[File] = {
+  private def listFilesRecursively(dir: File): Seq[File] =
     if (dir.isDirectory) {
       Option(dir.listFiles()).map(_.toSeq).getOrElse(Seq.empty).flatMap { f =>
         if (f.isDirectory) listFilesRecursively(f) else Seq(f)
       }
     } else Seq.empty
-  }
 
-  /**
-   * Helper to get disk cache stats from DESCRIBE command.
-   */
+  /** Helper to get disk cache stats from DESCRIBE command. */
   private def getDiskCacheStats(): Option[(Long, Long)] =
     try {
       val result = spark.sql("DESCRIBE INDEXTABLES DISK CACHE").collect()
@@ -208,16 +199,18 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
 
     // Step 1: Create test data with multiple field types
     println("Step 1: Creating test data on S3...")
-    val testData = (1 until 501).map { i =>
-      (
-        i.toLong,
-        s"title_$i with some searchable content",
-        s"This is the full text content for record $i with various words",
-        s"category_${i % 10}",
-        i * 1.5,
-        s"2024-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}"
-      )
-    }.toDF("id", "title", "content", "category", "score", "date_str")
+    val testData = (1 until 501)
+      .map { i =>
+        (
+          i.toLong,
+          s"title_$i with some searchable content",
+          s"This is the full text content for record $i with various words",
+          s"category_${i % 10}",
+          i * 1.5,
+          s"2024-${"%02d".format((i % 12) + 1)}-${"%02d".format((i % 28) + 1)}"
+        )
+      }
+      .toDF("id", "title", "content", "category", "score", "date_str")
 
     testData
       .coalesce(2) // Create 2 splits for better test coverage
@@ -327,7 +320,7 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
 
     // Verify no S3 access occurred during queries
     val s3BytesFetchedAfterQueries = SplitCacheManager.getObjectStorageBytesFetched()
-    val s3BytesDelta = s3BytesFetchedAfterQueries - s3BytesFetchedAfterPrewarm
+    val s3BytesDelta               = s3BytesFetchedAfterQueries - s3BytesFetchedAfterPrewarm
     println(s"📊 S3 bytes fetched after queries: $s3BytesFetchedAfterQueries (delta: $s3BytesDelta)")
 
     // Key assertion: after full prewarm, queries should NOT access S3 at all
@@ -367,7 +360,9 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
         } else if (prewarmCoveragePercent >= 80.0) {
           println(s"✅ EXCELLENT: Prewarm cached $prewarmCoveragePercent% of required components")
         } else {
-          println(s"✅ GOOD: Prewarm cached $prewarmCoveragePercent% of required components (some additional loads expected)")
+          println(
+            s"✅ GOOD: Prewarm cached $prewarmCoveragePercent% of required components (some additional loads expected)"
+          )
         }
 
       case (None, _) =>
@@ -394,9 +389,9 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     import ss.implicits._
 
     // Create test data
-    val testData = (1 until 301).map { i =>
-      (i.toLong, s"title_$i", s"category_${i % 5}", i * 2.0)
-    }.toDF("id", "title", "category", "score")
+    val testData = (1 until 301)
+      .map(i => (i.toLong, s"title_$i", s"category_${i % 5}", i * 2.0))
+      .toDF("id", "title", "category", "score")
 
     testData
       .coalesce(1)
@@ -465,9 +460,8 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     import ss.implicits._
 
     // Create test data
-    val testData = (1 until 1001).map { i =>
-      (i.toLong, s"title_$i", s"content_$i", i * 1.5)
-    }.toDF("id", "title", "content", "score")
+    val testData =
+      (1 until 1001).map(i => (i.toLong, s"title_$i", s"content_$i", i * 1.5)).toDF("id", "title", "content", "score")
 
     testData
       .coalesce(2)
@@ -521,9 +515,9 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     import ss.implicits._
 
     // Create test data
-    val testData = (1 until 301).map { i =>
-      (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5)
-    }.toDF("id", "title", "category", "score")
+    val testData = (1 until 301)
+      .map(i => (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5))
+      .toDF("id", "title", "category", "score")
 
     testData
       .coalesce(1)
@@ -570,7 +564,7 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
 
     // Record S3 bytes AFTER queries
     val s3BytesAfterQueries = SplitCacheManager.getObjectStorageBytesFetched()
-    val s3BytesDelta = s3BytesAfterQueries - s3BytesBeforeQueries
+    val s3BytesDelta        = s3BytesAfterQueries - s3BytesBeforeQueries
     println(s"📊 S3 bytes fetched after queries: $s3BytesAfterQueries (delta: $s3BytesDelta)")
 
     // Key assertion: WITHOUT prewarm, queries SHOULD access S3
@@ -597,9 +591,9 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     import ss.implicits._
 
     // Create test data with fast fields for aggregation
-    val testData = (1 until 501).map { i =>
-      (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5, i % 100)
-    }.toDF("id", "title", "category", "score", "value")
+    val testData = (1 until 501)
+      .map(i => (i.toLong, s"title_$i", s"category_${i % 10}", i * 1.5, i % 100))
+      .toDF("id", "title", "category", "score", "value")
 
     testData
       .coalesce(1)
@@ -664,13 +658,16 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     println(s"  Aggregation 1 (count): $count1")
 
     // Aggregation 2: Multiple aggregates on fast fields (pushed down)
-    val multiAgg = df.agg(
-      count("*").as("cnt"),
-      sum("score").as("total_score"),
-      avg("value").as("avg_value"),
-      min("id").as("min_id"),
-      max("id").as("max_id")
-    ).collect().head
+    val multiAgg = df
+      .agg(
+        count("*").as("cnt"),
+        sum("score").as("total_score"),
+        avg("value").as("avg_value"),
+        min("id").as("min_id"),
+        max("id").as("max_id")
+      )
+      .collect()
+      .head
     println(s"  Aggregation 2 (multi): count=${multiAgg.getLong(0)}, sum=${multiAgg.getDouble(1)}")
 
     // Aggregation 3: Filtered count (uses term dict for filter)
@@ -678,14 +675,16 @@ class RealS3PrewarmCacheValidationTest extends RealS3TestBase {
     println(s"  Aggregation 3 (filtered count): $filteredCount")
 
     // Aggregation 4: Filtered aggregation with fast fields
-    val filteredAgg = df.filter(col("category") === "category_5")
+    val filteredAgg = df
+      .filter(col("category") === "category_5")
       .agg(count("*").as("cnt"), sum("score").as("total"))
-      .collect().head
+      .collect()
+      .head
     println(s"  Aggregation 4 (filtered multi-agg): count=${filteredAgg.getLong(0)}")
 
     // Record S3 bytes AFTER aggregations
     val s3BytesAfterAggregations = SplitCacheManager.getObjectStorageBytesFetched()
-    val aggS3BytesDelta = s3BytesAfterAggregations - s3BytesAfterPrewarm
+    val aggS3BytesDelta          = s3BytesAfterAggregations - s3BytesAfterPrewarm
     println(s"📊 S3 bytes fetched after aggregations: $s3BytesAfterAggregations (delta: $aggS3BytesDelta)")
 
     // Key assertion: After prewarming all segments, aggregations should NOT access S3

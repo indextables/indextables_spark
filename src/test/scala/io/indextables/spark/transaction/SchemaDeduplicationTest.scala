@@ -129,9 +129,7 @@ class SchemaDeduplicationTest extends TestBase {
 
   test("estimateSavings should calculate size reduction") {
     // Create 10 actions with the same large schema
-    val actions = (1 to 10).map { i =>
-      createTestAddAction(s"file$i.split").copy(docMappingJson = Some(largeSchema))
-    }
+    val actions = (1 to 10).map(i => createTestAddAction(s"file$i.split").copy(docMappingJson = Some(largeSchema)))
 
     val (originalSize, deduplicatedSize) = SchemaDeduplication.estimateSavings(actions)
 
@@ -144,9 +142,9 @@ class SchemaDeduplicationTest extends TestBase {
   }
 
   test("deduplicateSchemas should handle actions without schemas") {
-    val addWithSchema = createTestAddAction("file1.split").copy(docMappingJson = Some(smallSchema))
+    val addWithSchema    = createTestAddAction("file1.split").copy(docMappingJson = Some(smallSchema))
     val addWithoutSchema = createTestAddAction("file2.split")
-    val protocolAction = createTestProtocolAction()
+    val protocolAction   = createTestProtocolAction()
 
     val actions: Seq[Action] = Seq(protocolAction, addWithSchema, addWithoutSchema)
 
@@ -175,7 +173,7 @@ class SchemaDeduplicationTest extends TestBase {
     val registry = Map.empty[String, String]
 
     // Should return action unchanged if schema not found
-    val restored = SchemaDeduplication.restoreSchemas(Seq(addAction), registry)
+    val restored    = SchemaDeduplication.restoreSchemas(Seq(addAction), registry)
     val restoredAdd = restored.head.asInstanceOf[AddAction]
 
     // docMappingRef should still be present (couldn't restore)
@@ -185,10 +183,10 @@ class SchemaDeduplicationTest extends TestBase {
 
   test("extractSchemaRegistry should extract only schema entries") {
     val configuration = Map(
-      "spark.indextables.some.config" -> "value",
+      "spark.indextables.some.config"                  -> "value",
       s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}hash1" -> smallSchema,
       s"${SchemaDeduplication.SCHEMA_KEY_PREFIX}hash2" -> largeSchema,
-      "other.config" -> "other"
+      "other.config"                                   -> "other"
     )
 
     val extracted = SchemaDeduplication.extractSchemaRegistry(configuration)
@@ -283,8 +281,10 @@ class SchemaDeduplicationTest extends TestBase {
       // Create options that allow direct TransactionLog usage (for testing)
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.transaction.allowDirectUsage", "true",
-          "spark.indextables.checkpoint.enabled", "false" // Disable checkpoints to test transaction log directly
+          "spark.indextables.transaction.allowDirectUsage",
+          "true",
+          "spark.indextables.checkpoint.enabled",
+          "false" // Disable checkpoints to test transaction log directly
         )
       )
 
@@ -307,9 +307,7 @@ class SchemaDeduplicationTest extends TestBase {
         // Verify files can be read back with schemas restored
         val filesAfterWrite = txLog.listFiles()
         filesAfterWrite.length shouldBe 3
-        filesAfterWrite.foreach { file =>
-          file.docMappingJson shouldBe Some(largeSchema)
-        }
+        filesAfterWrite.foreach(file => file.docMappingJson shouldBe Some(largeSchema))
 
         // Simulate a merge operation:
         // 1. Remove old splits
@@ -353,8 +351,10 @@ class SchemaDeduplicationTest extends TestBase {
 
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.transaction.allowDirectUsage", "true",
-          "spark.indextables.checkpoint.enabled", "false"
+          "spark.indextables.transaction.allowDirectUsage",
+          "true",
+          "spark.indextables.checkpoint.enabled",
+          "false"
         )
       )
 
@@ -419,7 +419,8 @@ class SchemaDeduplicationTest extends TestBase {
 
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.checkpoint.enabled", "false"
+          "spark.indextables.checkpoint.enabled",
+          "false"
         )
       )
 
@@ -441,9 +442,7 @@ class SchemaDeduplicationTest extends TestBase {
         // Verify files can be read
         val filesAfterWrite = txLog.listFiles()
         filesAfterWrite.length shouldBe 3
-        filesAfterWrite.foreach { file =>
-          file.docMappingJson shouldBe Some(largeSchema)
-        }
+        filesAfterWrite.foreach(file => file.docMappingJson shouldBe Some(largeSchema))
 
         // Simulate merge operation
         val removeActions = filesAfterWrite.map { add =>
@@ -484,7 +483,7 @@ class SchemaDeduplicationTest extends TestBase {
     // 4. After code upgrade, merge runs and produces deduped AddActions
     // 5. Reading should work correctly
     withTempPath { tempPath =>
-      val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+      val tablePath          = new org.apache.hadoop.fs.Path(tempPath)
       val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
 
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -538,8 +537,10 @@ class SchemaDeduplicationTest extends TestBase {
         // Step 2: Now open the table with the NEW code (schema deduplication enabled)
         val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
           java.util.Map.of(
-            "spark.indextables.transaction.allowDirectUsage", "true",
-            "spark.indextables.checkpoint.enabled", "false"
+            "spark.indextables.transaction.allowDirectUsage",
+            "true",
+            "spark.indextables.checkpoint.enabled",
+            "false"
           )
         )
 
@@ -594,18 +595,20 @@ class SchemaDeduplicationTest extends TestBase {
       import sparkImplicits._
 
       // Create a DataFrame with a medium schema (50 fields)
-      val numFields = 50
+      val numFields  = 50
       val numRecords = 10
 
       def createDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
         val rows = (1 to numRecords).map { i =>
-          val id = (batchNum - 1) * numRecords + i
+          val id     = (batchNum - 1) * numRecords + i
           val values = (1 to numFields).map(f => s"value_${id}_$f")
           org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
         }
         val schema = org.apache.spark.sql.types.StructType(
           org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
-          (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+            (1 to numFields).map(f =>
+              org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType)
+            )
         )
         spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
       }
@@ -613,7 +616,7 @@ class SchemaDeduplicationTest extends TestBase {
       // Write 12 batches to trigger checkpoint at version 10
       (1 to 12).foreach { i =>
         val mode = if (i == 1) "overwrite" else "append"
-        val df = createDF(i)
+        val df   = createDF(i)
         df.write
           .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
           .mode(mode)
@@ -642,9 +645,10 @@ class SchemaDeduplicationTest extends TestBase {
 
         if (cloudProvider.exists(checkpointPath)) {
           val bytes = cloudProvider.readFile(checkpointPath)
-          val decompressedBytes = io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
+          val decompressedBytes =
+            io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
           val content = new String(decompressedBytes, java.nio.charset.StandardCharsets.UTF_8)
-          val lines = content.split("\n").filter(_.trim.nonEmpty)
+          val lines   = content.split("\n").filter(_.trim.nonEmpty)
 
           // Debug: show first few lines of checkpoint
           println(s"DEBUG: Checkpoint has ${lines.length} lines")
@@ -658,9 +662,9 @@ class SchemaDeduplicationTest extends TestBase {
           metadataLines.length shouldBe 1
 
           // Extract schema registry entries from MetadataAction
-          val metadataLine = metadataLines.head
+          val metadataLine     = metadataLines.head
           val schemaKeyPattern = """"docMappingSchema\.[^"]+"""".r
-          val schemaKeys = schemaKeyPattern.findAllIn(metadataLine).toList
+          val schemaKeys       = schemaKeyPattern.findAllIn(metadataLine).toList
 
           println(s"DEBUG: Found ${schemaKeys.length} schema registry entries: ${schemaKeys.mkString(", ")}")
 
@@ -674,10 +678,9 @@ class SchemaDeduplicationTest extends TestBase {
 
           // Count AddActions and verify they all use docMappingRef (not docMappingJson)
           val addActionLines = lines.filter(_.contains("\"add\""))
-          val withRef = addActionLines.count(_.contains("\"docMappingRef\""))
-          val withFullJson = addActionLines.count(line =>
-            line.contains("\"docMappingJson\"") && !line.contains("\"docMappingJson\":null")
-          )
+          val withRef        = addActionLines.count(_.contains("\"docMappingRef\""))
+          val withFullJson =
+            addActionLines.count(line => line.contains("\"docMappingJson\"") && !line.contains("\"docMappingJson\":null"))
 
           println(s"DEBUG: ${addActionLines.length} AddActions total, $withRef with docMappingRef, $withFullJson with full docMappingJson")
 
@@ -696,9 +699,8 @@ class SchemaDeduplicationTest extends TestBase {
         val count = result.count()
         println(s"DEBUG: Read $count rows")
         count shouldBe (12 * numRecords)
-      } finally {
+      } finally
         cloudProvider.close()
-      }
     }
   }
 
@@ -713,18 +715,20 @@ class SchemaDeduplicationTest extends TestBase {
       import sparkImplicits._
 
       // Create a DataFrame with a large schema (100 fields) and 100 records
-      val numFields = 100
+      val numFields  = 100
       val numRecords = 100
 
       def createLargeDF(batchNum: Int): org.apache.spark.sql.DataFrame = {
         val rows = (1 to numRecords).map { i =>
-          val id = (batchNum - 1) * numRecords + i
+          val id     = (batchNum - 1) * numRecords + i
           val values = (1 to numFields).map(f => s"value_${id}_$f")
           org.apache.spark.sql.Row.fromSeq(id.toLong +: values)
         }
         val schema = org.apache.spark.sql.types.StructType(
           org.apache.spark.sql.types.StructField("id", org.apache.spark.sql.types.LongType) +:
-          (1 to numFields).map(f => org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType))
+            (1 to numFields).map(f =>
+              org.apache.spark.sql.types.StructField(s"field_$f", org.apache.spark.sql.types.StringType)
+            )
         )
         spark.createDataFrame(spark.sparkContext.parallelize(rows), schema)
       }
@@ -759,7 +763,7 @@ class SchemaDeduplicationTest extends TestBase {
       )
 
       try {
-        var metadataCount = 0
+        var metadataCount  = 0
         var addActionCount = 0
 
         // Read each version and check for MetadataAction
@@ -768,12 +772,13 @@ class SchemaDeduplicationTest extends TestBase {
           if (cloudProvider.exists(versionFilePath)) {
             // Read and decompress if needed
             val bytes = cloudProvider.readFile(versionFilePath)
-            val decompressedBytes = io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
+            val decompressedBytes =
+              io.indextables.spark.transaction.compression.CompressionUtils.readTransactionFile(bytes)
             val content = new String(decompressedBytes, java.nio.charset.StandardCharsets.UTF_8)
-            val lines = content.split("\n").filter(_.trim.nonEmpty)
+            val lines   = content.split("\n").filter(_.trim.nonEmpty)
 
             // Check for metadata and add actions by looking at JSON keys
-            val hasMetadata = lines.exists(_.contains("\"metadataAction\""))
+            val hasMetadata    = lines.exists(_.contains("\"metadataAction\""))
             val addActionLines = lines.filter(_.contains("\"add\""))
             addActionCount += addActionLines.size
 
@@ -783,10 +788,12 @@ class SchemaDeduplicationTest extends TestBase {
             }
 
             // Check if AddActions use docMappingRef (deduplication) vs docMappingJson
-            val withRef = addActionLines.count(_.contains("\"docMappingRef\""))
+            val withRef  = addActionLines.count(_.contains("\"docMappingRef\""))
             val withJson = addActionLines.count(_.contains("\"docMappingJson\""))
             if (addActionLines.nonEmpty) {
-              println(s"DEBUG: Version $version: ${addActionLines.size} AddActions ($withRef with ref, $withJson with json)")
+              println(
+                s"DEBUG: Version $version: ${addActionLines.size} AddActions ($withRef with ref, $withJson with json)"
+              )
             }
           }
         }
@@ -796,9 +803,8 @@ class SchemaDeduplicationTest extends TestBase {
         // MetadataAction should be in version 0 (initialize) and version 1 (first schema registration)
         // It should NOT be in every version
         metadataCount should be <= 3 // Allow for version 0, 1, and maybe one more
-      } finally {
+      } finally
         cloudProvider.close()
-      }
 
       // Read back - this should fail with "Missing schema hashes" if deduplication isn't working
       println("DEBUG: Reading back data")

@@ -224,7 +224,8 @@ class IndexTables4SparkScanBuilder(
     val effectiveBucketConfig: Option[BucketAggregationConfig] = _bucketConfig.orElse {
       import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
       val relationForBucket = IndexTables4SparkScanBuilder.getCurrentRelation()
-      relationForBucket.collect { case rel: DataSourceV2Relation => rel }
+      relationForBucket
+        .collect { case rel: DataSourceV2Relation => rel }
         .flatMap(rel => V2BucketExpressionRule.getBucketConfig(rel))
     }
 
@@ -541,7 +542,7 @@ class IndexTables4SparkScanBuilder(
     logger.info(s"Pruned columns to: ${requiredSchema.fieldNames.mkString(", ")}")
   }
 
-  override def pushLimit(limit: Int): Boolean = {
+  override def pushLimit(limit: Int): Boolean =
     // Databricks notebooks add LIMIT 10001 by default for display purposes.
     // Ignore this artificial limit to avoid affecting query performance.
     if (limit == 10001) {
@@ -552,7 +553,6 @@ class IndexTables4SparkScanBuilder(
       logger.info(s"Pushed limit: $limit")
       true // We support limit pushdown
     }
-  }
 
   override def supportCompletePushDown(aggregation: Aggregation): Boolean = {
     // Return false to allow Spark to handle final aggregation combining partial results
@@ -871,20 +871,22 @@ class IndexTables4SparkScanBuilder(
   }
 
   /**
-   * Detect bucket aggregation expressions in GROUP BY clauses.
-   * Returns configuration for DateHistogram, Histogram, or Range aggregations.
+   * Detect bucket aggregation expressions in GROUP BY clauses. Returns configuration for DateHistogram, Histogram, or
+   * Range aggregations.
    */
   private def detectBucketExpression(
     groupByExpressions: Array[org.apache.spark.sql.connector.expressions.Expression]
   ): Option[BucketAggregationConfig] = {
     // We only support a single bucket expression in GROUP BY
     if (groupByExpressions.length != 1) {
-      logger.debug(s"BUCKET DETECTION: Multiple GROUP BY expressions (${groupByExpressions.length}), not a bucket aggregation")
+      logger.debug(
+        s"BUCKET DETECTION: Multiple GROUP BY expressions (${groupByExpressions.length}), not a bucket aggregation"
+      )
       return None
     }
 
-    val expr = groupByExpressions(0)
-    val exprStr = expr.toString
+    val expr      = groupByExpressions(0)
+    val exprStr   = expr.toString
     val exprClass = expr.getClass.getName
 
     logger.debug(s"BUCKET DETECTION: Checking expression: $exprStr (class: $exprClass)")
@@ -937,9 +939,7 @@ class IndexTables4SparkScanBuilder(
     None
   }
 
-  /**
-   * Extract the underlying Catalyst expression from a V2 expression.
-   */
+  /** Extract the underlying Catalyst expression from a V2 expression. */
   private def extractCatalystExpression(
     v2Expr: org.apache.spark.sql.connector.expressions.Expression
   ): Option[org.apache.spark.sql.catalyst.expressions.Expression] =
@@ -949,22 +949,23 @@ class IndexTables4SparkScanBuilder(
       val clazz = v2Expr.getClass
 
       // Try 'expr' field (common in V2Aggregation wrappers)
-      val exprField = try {
-        Some(clazz.getDeclaredField("expr"))
-      } catch {
-        case _: NoSuchFieldException =>
-          try {
-            Some(clazz.getDeclaredField("expression"))
-          } catch {
-            case _: NoSuchFieldException => None
-          }
-      }
+      val exprField =
+        try
+          Some(clazz.getDeclaredField("expr"))
+        catch {
+          case _: NoSuchFieldException =>
+            try
+              Some(clazz.getDeclaredField("expression"))
+            catch {
+              case _: NoSuchFieldException => None
+            }
+        }
 
       exprField.flatMap { field =>
         field.setAccessible(true)
         field.get(v2Expr) match {
           case catalyst: org.apache.spark.sql.catalyst.expressions.Expression => Some(catalyst)
-          case _ => None
+          case _                                                              => None
         }
       }
     } catch {
@@ -972,8 +973,8 @@ class IndexTables4SparkScanBuilder(
     }
 
   /**
-   * Extract DateHistogramConfig from expression string representation.
-   * Parses patterns like: DateHistogramExpression(timestamp, 1h, ...)
+   * Extract DateHistogramConfig from expression string representation. Parses patterns like:
+   * DateHistogramExpression(timestamp, 1h, ...)
    */
   private def extractDateHistogramConfig(
     expr: org.apache.spark.sql.connector.expressions.Expression
@@ -990,7 +991,7 @@ class IndexTables4SparkScanBuilder(
 
     matched.map { m =>
       val fieldName = m.group(1).trim
-      val interval = m.group(2).trim.replaceAll("'", "")
+      val interval  = m.group(2).trim.replaceAll("'", "")
 
       logger.debug(s"BUCKET EXTRACTION: Extracted date histogram - field=$fieldName, interval=$interval")
 
@@ -1001,9 +1002,7 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
-  /**
-   * Extract HistogramConfig from expression string representation.
-   */
+  /** Extract HistogramConfig from expression string representation. */
   private def extractHistogramConfig(
     expr: org.apache.spark.sql.connector.expressions.Expression
   ): Option[HistogramConfig] = {
@@ -1018,7 +1017,7 @@ class IndexTables4SparkScanBuilder(
 
     matched.map { m =>
       val fieldName = m.group(1).trim
-      val interval = m.group(2).trim.toDouble
+      val interval  = m.group(2).trim.toDouble
 
       logger.debug(s"BUCKET EXTRACTION: Extracted histogram - field=$fieldName, interval=$interval")
 
@@ -1029,9 +1028,7 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
-  /**
-   * Extract RangeConfig from expression string representation.
-   */
+  /** Extract RangeConfig from expression string representation. */
   private def extractRangeConfig(
     expr: org.apache.spark.sql.connector.expressions.Expression
   ): Option[RangeConfig] = {
@@ -1041,40 +1038,45 @@ class IndexTables4SparkScanBuilder(
     // For now, basic extraction - more complex parsing would require full expression tree access
     // Pattern: RangeExpression(field, [ranges...])
     val fieldPattern = """RangeExpression\(([^,]+),""".r
-    val fieldMatch = fieldPattern.findFirstMatchIn(exprStr)
+    val fieldMatch   = fieldPattern.findFirstMatchIn(exprStr)
 
     fieldMatch.map { m =>
       val fieldName = m.group(1).trim
 
       // Extract ranges from the expression string
       val rangePattern = """(\w+):\[([^,]*),([^\)]*)\)""".r
-      val ranges = rangePattern.findAllMatchIn(exprStr).map { rm =>
-        val key = rm.group(1)
-        val from = rm.group(2).trim match {
-          case "*" | "" => None
-          case v => Some(v.toDouble)
+      val ranges = rangePattern
+        .findAllMatchIn(exprStr)
+        .map { rm =>
+          val key = rm.group(1)
+          val from = rm.group(2).trim match {
+            case "*" | "" => None
+            case v        => Some(v.toDouble)
+          }
+          val to = rm.group(3).trim match {
+            case "*" | "" => None
+            case v        => Some(v.toDouble)
+          }
+          RangeBucket(key, from, to)
         }
-        val to = rm.group(3).trim match {
-          case "*" | "" => None
-          case v => Some(v.toDouble)
-        }
-        RangeBucket(key, from, to)
-      }.toSeq
+        .toSeq
 
       if (ranges.isEmpty) {
         // Fallback: create a simple range config with the field name
         logger.debug(s"BUCKET EXTRACTION: Could not parse ranges, creating placeholder config for field=$fieldName")
         RangeConfig(fieldName = fieldName, ranges = Seq(RangeBucket("default", None, None)))
       } else {
-        logger.debug(s"BUCKET EXTRACTION: Extracted range - field=$fieldName, ranges=${ranges.map(_.toString).mkString(", ")}")
+        logger.debug(
+          s"BUCKET EXTRACTION: Extracted range - field=$fieldName, ranges=${ranges.map(_.toString).mkString(", ")}"
+        )
         RangeConfig(fieldName = fieldName, ranges = ranges)
       }
     }
   }
 
   /**
-   * Check if aggregations are compatible with bucket aggregations.
-   * Supports: COUNT, COUNT(*), SUM, AVG (as SUM+COUNT), MIN, MAX
+   * Check if aggregations are compatible with bucket aggregations. Supports: COUNT, COUNT(*), SUM, AVG (as SUM+COUNT),
+   * MIN, MAX
    */
   private def areAggregationsCompatibleWithBucket(aggregation: Aggregation): Boolean = {
     import org.apache.spark.sql.connector.expressions.aggregate._
