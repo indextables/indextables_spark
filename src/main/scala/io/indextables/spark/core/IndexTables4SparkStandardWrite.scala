@@ -54,6 +54,15 @@ class IndexTables4SparkStandardWrite(
 
   // Validate the write schema
   io.indextables.spark.util.SchemaValidator.validateNoDuplicateColumns(writeSchema)
+
+  // Validate that indexing configuration fields exist in schema
+  {
+    import scala.jdk.CollectionConverters._
+    val tantivyOptions = IndexTables4SparkOptions(
+      new org.apache.spark.sql.util.CaseInsensitiveStringMap(serializedOptions.asJava)
+    )
+    tantivyOptions.validateFieldsExist(writeSchema)
+  }
   private val serializedHadoopConf =
     // Serialize only the tantivy4spark config properties from hadoopConf (includes credentials from enrichedHadoopConf)
     io.indextables.spark.util.ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
