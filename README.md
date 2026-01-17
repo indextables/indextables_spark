@@ -956,11 +956,40 @@ The system supports several configuration options for performance tuning:
 | Configuration | Default | Description |
 |---------------|---------|-------------|
 | `spark.indextables.indexing.typemap.<field_name>` | `string` | Field indexing type: `string`, `text`, or `json` (Struct/Array fields automatically use JSON) |
+| `spark.indextables.indexing.typemap.<type>` | - | **List-based syntax**: Configure multiple fields with the same type (e.g., `typemap.text` = `"title,content,body"`) |
 | `spark.indextables.indexing.json.mode` | `full` | JSON field indexing mode: `full` (all features, fast fields enabled) or `minimal` (stored+indexed only, no fast fields) |
 | `spark.indextables.indexing.fastfields` | - | Comma-separated list of fields for fast access |
 | `spark.indextables.indexing.storeonlyfields` | - | Fields stored but not indexed |
 | `spark.indextables.indexing.indexonlyfields` | - | Fields indexed but not stored |
-| `spark.indextables.indexing.tokenizer.<field_name>` | - | Tokenizer type: `default`, `whitespace`, or `raw` |
+| `spark.indextables.indexing.tokenizer.<tokenizer_name>` | - | **List-based syntax**: Apply tokenizer to multiple fields (e.g., `tokenizer.en_stem` = `"title,content"`) |
+| `spark.indextables.indexing.indexrecordoption.<field_name>` | `position` | Index record option per field: `basic`, `freq`, or `position` |
+| `spark.indextables.indexing.indexrecordoption.<option>` | - | **List-based syntax**: Apply index record option to multiple fields (e.g., `indexrecordoption.basic` = `"metadata,logs"`) |
+
+##### List-Based Configuration Syntax
+
+Configure multiple fields with the same setting in a single option:
+
+```scala
+// Instead of repetitive per-field configuration:
+.option("spark.indextables.indexing.typemap.title", "text")
+.option("spark.indextables.indexing.typemap.content", "text")
+.option("spark.indextables.indexing.typemap.body", "text")
+
+// Use concise list-based syntax:
+.option("spark.indextables.indexing.typemap.text", "title,content,body")
+
+// Tokenizer configuration (list-based only):
+.option("spark.indextables.indexing.tokenizer.en_stem", "title,content,body")
+
+// Index record option configuration:
+.option("spark.indextables.indexing.indexrecordoption.position", "title,content")
+.option("spark.indextables.indexing.indexrecordoption.basic", "metadata,logs")
+```
+
+**Syntax rules:**
+- **typemap**: Supports both old (`typemap.<field>` = `"<type>"`) and new (`typemap.<type>` = `"<fields>"`) syntax
+- **tokenizer**: Uses new syntax only (`tokenizer.<tokenizer_name>` = `"<fields>"`)
+- **indexrecordoption**: Supports both old (`indexrecordoption.<field>` = `"<option>"`) and new (`indexrecordoption.<option>` = `"<fields>"`) syntax
 
 #### JSON Field Support for Nested Data
 
