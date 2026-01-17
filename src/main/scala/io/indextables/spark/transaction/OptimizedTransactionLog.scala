@@ -117,6 +117,10 @@ class OptimizedTransactionLog(
   // Stores metrics from the most recent write operation with retry
   @volatile private var lastRetryMetrics: Option[TxRetryMetrics] = None
 
+  // Cache of known file sizes from S3 listings - used to validate local cache
+  // If cached file size doesn't match, table may have been deleted/recreated
+  private val knownFileSizes = new java.util.concurrent.ConcurrentHashMap[String, Long]()
+
   /**
    * Get metrics from the most recent write operation with retry.
    * Useful for testing and monitoring concurrent write behavior.
@@ -165,6 +169,24 @@ class OptimizedTransactionLog(
     // Extract just the filename (e.g., "00000000000000000001.json" or "00000000000000000010.checkpoint.json")
     val fileName = cloudFilePath.split("/").last
     new File(txlogCacheDir, fileName)
+  }
+
+  /**
+   * Clear all cached transaction log files for this table.
+   * Called when cache validation detects a size mismatch, indicating the table
+   * may have been deleted and recreated with the same path.
+   */
+  private def clearTableCache(): Unit = {
+    val files = txlogCacheDir.listFiles()
+    if (files != null) {
+      var deletedCount = 0
+      files.foreach { file =>
+        if (file.delete()) deletedCount += 1
+      }
+      logger.info(s"Cleared $deletedCount cached files from ${txlogCacheDir.getAbsolutePath}")
+    }
+    // Also clear the in-memory size cache since it's now stale
+    knownFileSizes.clear()
   }
 
   def getTablePath(): Path = tablePath
@@ -1013,6 +1035,12 @@ class OptimizedTransactionLog(
     logger.debug(
       s" getVersions: cloudProvider returned ${files.size} files: ${files.map(_.path.split("/").last).mkString(", ")}"
     )
+
+    // Store file sizes for cache validation (detects table delete/recreate)
+    files.foreach { file =>
+      knownFileSizes.put(file.path, file.size)
+    }
+
     val versions = files.flatMap(file => parseVersionFromPath(file.path)).distinct
     logger.debug(s" getVersions: parsed versions: ${versions.sorted.mkString(", ")}")
     versions
@@ -1099,9 +1127,36 @@ class OptimizedTransactionLog(
     // Use cached file if available, otherwise download to cache
     val cacheFile = getCacheFilePath(filePath)
 
-    // Download to cache if not already cached
+    // Validate cache: if cached file exists, verify size matches cloud storage
+    // This handles table delete/recreate scenarios where path is reused
+    // Uses sizes from prior listFiles call - no additional S3 request needed
+    if (cacheFile.exists()) {
+      val expectedSize = knownFileSizes.get(filePath)
+      if (expectedSize != null) {
+        val cachedSize = cacheFile.length()
+        if (cachedSize != expectedSize) {
+          logger.info(s"Cache invalidation: cached size ($cachedSize) != cloud size ($expectedSize) for $filePath - table may have been recreated, clearing all cached files")
+          clearTableCache()
+        }
+      }
+    }
+
+    // Download to cache if not already cached (or was invalidated above)
+    // Handle concurrent download race: if download fails but file now exists,
+    // another thread won the race and we can use their cached copy
     if (!cacheFile.exists()) {
-      downloadToCache(filePath, cacheFile)
+      try {
+        downloadToCache(filePath, cacheFile)
+      } catch {
+        case _: java.nio.file.FileAlreadyExistsException | _: java.nio.file.NoSuchFileException =>
+          // Race condition: another thread is downloading or just finished
+          // Check if they succeeded - if so, use their cached copy
+          if (!cacheFile.exists()) {
+            // Still doesn't exist - re-throw or retry
+            throw new java.io.IOException(s"Failed to cache file and no cached copy available: $filePath")
+          }
+          logger.debug(s"Using cached txlog file after race: ${cacheFile.getAbsolutePath}")
+      }
     } else {
       logger.debug(s"Using cached txlog file: ${cacheFile.getAbsolutePath}")
     }

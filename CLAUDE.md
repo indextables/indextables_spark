@@ -223,6 +223,18 @@ spark.indextables.indexing.typemap.<field>: "text"
 spark.indextables.indexing.json.mode: "full" (default) or "minimal"
 ```
 
+#### List-Based Typemap Syntax (Recommended)
+Configure multiple fields with the same type in one line:
+```scala
+// New syntax: typemap.<type> = "field1,field2,..."
+spark.indextables.indexing.typemap.text: "title,content,body,description"
+spark.indextables.indexing.typemap.string: "status,category,tags"
+spark.indextables.indexing.typemap.json: "metadata,attributes"
+
+// Old per-field syntax still works for typemap
+spark.indextables.indexing.typemap.title: "text"
+```
+
 ### Index Record Options (for text fields)
 Controls what information is stored in the inverted index for text fields:
 - `basic` - Document IDs only (smallest index)
@@ -233,9 +245,25 @@ Controls what information is stored in the inverted index for text fields:
 // Default for all text fields (default: "position")
 spark.indextables.indexing.text.indexRecordOption: "position"
 
-// Per-field override (e.g., reduce index size for fields not needing phrase queries)
+// List-based syntax (recommended): indexrecordoption.<option> = "field1,field2,..."
+spark.indextables.indexing.indexrecordoption.position: "title,content,body"
+spark.indextables.indexing.indexrecordoption.basic: "logs,metrics"
+
+// Old per-field syntax still works
 spark.indextables.indexing.indexrecordoption.logs: "basic"
-spark.indextables.indexing.indexrecordoption.metrics: "freq"
+```
+
+### Tokenizers (for text fields)
+Configure which tokenizer to use for text fields:
+```scala
+// List-based syntax: tokenizer.<tokenizer_name> = "field1,field2,..."
+spark.indextables.indexing.tokenizer.en_stem: "title,content,body"  // English stemming
+spark.indextables.indexing.tokenizer.default: "exact_match_field"   // No stemming
+
+// Old per-field syntax still works
+spark.indextables.indexing.tokenizer.content: "en_stem"
+
+// Available tokenizers: default, raw, en_stem, whitespace
 ```
 
 ### Fast Fields (for aggregations)

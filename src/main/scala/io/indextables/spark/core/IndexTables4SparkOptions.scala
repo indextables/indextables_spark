@@ -40,25 +40,65 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   def forceStandardStorage: Option[Boolean] =
     Option(options.get("forceStandardStorage")).map(_.toBoolean)
 
+  /** Valid field types for typemap configuration. */
+  private val ValidFieldTypes = Set("string", "text", "json")
+
+  /** Valid index record options. */
+  private val ValidIndexRecordOptions = Set("basic", "freq", "position")
+
+  /** Valid tokenizer names for list-based syntax detection. */
+  private val ValidTokenizers = Set("default", "raw", "whitespace", "en_stem")
+
   /**
-   * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
+   * Parse dual-syntax configuration options into a field-to-value map.
    *
-   * NOTE: Field names are stored in lowercase to handle case-insensitive matching with schema field names.
+   * Supports two syntaxes:
+   *   - Per-field (old): `prefix.fieldName` = "value" → field gets value
+   *   - Per-value (new): `prefix.value` = "field1,field2" → fields get value
+   *
+   * Detection: If the key suffix is in knownValues, use new syntax; otherwise use old syntax.
+   *
+   * @param prefix The option prefix (e.g., "spark.indextables.indexing.typemap.")
+   * @param knownValues Set of known values that trigger new syntax parsing
+   * @return Map[String, String] where key=field name (lowercase), value=configured value (lowercase)
    */
-  def getFieldTypeMapping: Map[String, String] = {
+  private def parseDualSyntaxConfig(prefix: String, knownValues: Set[String]): Map[String, String] = {
     import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.typemap."
+    val result = scala.collection.mutable.Map[String, String]()
+
     options
       .asCaseSensitiveMap()
       .asScala
       .toMap
       .filter { case (key, _) => key.startsWith(prefix) }
-      .map {
+      .foreach {
         case (key, value) =>
-          // Normalize field name to lowercase for case-insensitive matching
-          key.substring(prefix.length).toLowerCase -> value.toLowerCase
+          val suffix = key.substring(prefix.length).toLowerCase
+          val valueLower = value.toLowerCase
+
+          if (knownValues.contains(suffix)) {
+            // New syntax: key is the value type, value is comma-separated field list
+            value.split(",").map(_.trim).filterNot(_.isEmpty).foreach { fieldName =>
+              result += (fieldName.toLowerCase -> suffix)
+            }
+          } else {
+            // Old syntax: key is the field name, value is the value type
+            result += (suffix -> valueLower)
+          }
       }
+
+    result.toMap
   }
+
+  /**
+   * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
+   *
+   * Supports two syntaxes:
+   *   - Per-field (old): `typemap.title` = "text" → title gets type "text"
+   *   - Per-type (new): `typemap.text` = "title,content" → title and content both get type "text"
+   */
+  def getFieldTypeMapping: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.typemap.", ValidFieldTypes)
 
   /** Get fast fields configuration. Returns set of field names that should get "fast" indexing. */
   def getFastFields: Set[String] =
@@ -87,17 +127,15 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .map(_.split(",").map(_.trim).filterNot(_.isEmpty).toSet)
       .getOrElse(Set.empty)
 
-  /** Get tokenizer override configuration. Maps field names to their tokenizer types. */
-  def getTokenizerOverrides: Map[String, String] = {
-    import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.tokenizer."
-    options
-      .asCaseSensitiveMap()
-      .asScala
-      .toMap
-      .filter { case (key, _) => key.startsWith(prefix) }
-      .map { case (key, value) => key.substring(prefix.length) -> value }
-  }
+  /**
+   * Get tokenizer override configuration. Maps field names to their tokenizer types.
+   *
+   * Supports both syntaxes:
+   * - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
+   * - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
+   */
+  def getTokenizerOverrides: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.tokenizer.", ValidTokenizers)
 
   /**
    * Get the default index record option for text fields.
@@ -111,20 +149,15 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
       .getOrElse("position")
 
   /**
-   * Get per-field index record option overrides.
-   * Maps field names to their record options: "basic", "freq", or "position".
-   * Use spark.indextables.indexing.indexrecordoption.<fieldname> = "position" to enable phrase queries on that field.
+   * Get per-field index record option overrides. Maps field names to their record options: "basic", "freq", or
+   * "position".
+   *
+   * Supports two syntaxes:
+   *   - Per-field (old): `indexrecordoption.content` = "position" → content uses option "position"
+   *   - Per-option (new): `indexrecordoption.position` = "content,body" → content and body both use "position"
    */
-  def getIndexRecordOptionOverrides: Map[String, String] = {
-    import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.indexrecordoption."
-    options
-      .asCaseSensitiveMap()
-      .asScala
-      .toMap
-      .filter { case (key, _) => key.startsWith(prefix) }
-      .map { case (key, value) => key.substring(prefix.length).toLowerCase -> value.toLowerCase }
-  }
+  def getIndexRecordOptionOverrides: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.indexrecordoption.", ValidIndexRecordOptions)
 
   // ===== Batch Optimization Configuration =====
 
@@ -228,13 +261,13 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    * Validate that all field-specific indexing configuration options reference fields that exist in the schema.
    *
    * This prevents silent misconfiguration due to typos in field names. The validation checks:
-   *   - typemap.<field> - field type configuration
+   *   - typemap - field type configuration (supports both per-field and per-type syntax)
    *   - fastfields - comma-separated list of fast fields
    *   - nonfastfields - comma-separated list of non-fast fields
    *   - storeonlyfields - comma-separated list of store-only fields
    *   - indexonlyfields - comma-separated list of index-only fields
-   *   - tokenizer.<field> - tokenizer override configuration
-   *   - indexrecordoption.<field> - index record option configuration
+   *   - tokenizer - tokenizer override configuration (per-tokenizer syntax)
+   *   - indexrecordoption - index record option configuration (supports both per-field and per-option syntax)
    *
    * @param schema
    *   The Spark schema to validate against
