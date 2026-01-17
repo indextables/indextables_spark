@@ -292,6 +292,14 @@ class SplitSearchEngine private (
       // Sort by (segmentOrd, docId) for sequential reads within segments
       val docAddresses = hits.map(hit => hit.getDocAddress()).sortBy(addr => (addr.getSegmentOrd, addr.getDoc))
 
+      // Extract field names from sparkSchema for native-side filtering (byte buffer protocol optimization)
+      // This reduces serialization overhead by only retrieving needed fields (8-12x faster per developer guide)
+      val fieldNames: java.util.Set[String] = {
+        import scala.jdk.CollectionConverters._
+        sparkSchema.fields.map(_.name).toSet.asJava
+      }
+      logger.debug(s"Using native-side field filtering for ${fieldNames.size()} fields: ${sparkSchema.fields.map(_.name).mkString(", ")}")
+
       // Use configurable document retrieval strategy
       val documents: Array[io.indextables.tantivy4java.core.Document] =
         if (cacheConfig.enableDocBatch && docAddresses.length > 1) {
@@ -306,7 +314,8 @@ class SplitSearchEngine private (
             try {
               import scala.jdk.CollectionConverters._
               val javaAddresses = batchAddresses.toList.asJava
-              val javaDocuments = splitSearcher.docBatch(javaAddresses)
+              // Use docBatch with field filtering for native-side optimization (byte buffer protocol)
+              val javaDocuments = splitSearcher.docBatch(javaAddresses, fieldNames)
               javaDocuments.asScala
             } catch {
               case e: Exception =>
