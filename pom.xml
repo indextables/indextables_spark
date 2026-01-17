@@ -164,11 +164,11 @@
 
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
-        <!-- Version 0.28.1: Byte buffer protocol with native-side field filtering -->
+        <!-- Version 0.28.2: Byte buffer protocol with native-side field filtering -->
         <dependency>
             <groupId>io.indextables</groupId>
             <artifactId>tantivy4java</artifactId>
-            <version>0.28.1</version>
+            <version>0.28.2</version>
         </dependency>
 
         <!-- Azure Storage SDK for Azure Blob Storage support -->
