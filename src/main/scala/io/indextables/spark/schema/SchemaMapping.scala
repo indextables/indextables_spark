@@ -141,6 +141,27 @@ object SchemaMapping {
   object Read {
 
     /**
+     * Build a cached map of field names to Tantivy field types.
+     * Call this once before processing a batch of documents to avoid per-field JNI calls.
+     *
+     * @param splitSchema Schema from the split file (tantivy4java Schema)
+     * @param sparkSchema Target Spark schema (from transaction log)
+     * @return Map of field name to FieldType
+     */
+    def buildFieldTypeCache(splitSchema: Schema, sparkSchema: StructType): Map[String, FieldType] = {
+      sparkSchema.fields.flatMap { field =>
+        try {
+          val fieldInfo = splitSchema.getFieldInfo(field.name)
+          Some(field.name -> fieldInfo.getType())
+        } catch {
+          case _: Exception =>
+            // Field not found in split schema - will be handled during conversion
+            None
+        }
+      }.toMap
+    }
+
+    /**
      * Convert data from split schema to Spark schema
      * @param splitDocument
      *   Document from tantivy4java split
@@ -159,9 +180,36 @@ object SchemaMapping {
       sparkSchema: StructType,
       options: Option[io.indextables.spark.core.IndexTables4SparkOptions] = None
     ): Array[Any] = {
-      logger.debug(s"SchemaMapping.convertDocument DEBUG:")
+      // Build field type cache (this is the slow path - called per document)
+      val fieldTypeCache = buildFieldTypeCache(splitSchema, sparkSchema)
+      convertDocumentWithCache(splitDocument, sparkSchema, fieldTypeCache, options)
+    }
+
+    /**
+     * Convert data from split schema to Spark schema using a pre-computed field type cache.
+     * This is the fast path - call buildFieldTypeCache once before processing a batch of documents,
+     * then call this method for each document.
+     *
+     * @param splitDocument
+     *   Document from tantivy4java split
+     * @param sparkSchema
+     *   Target Spark schema (from transaction log)
+     * @param fieldTypeCache
+     *   Pre-computed map of field name to FieldType (from buildFieldTypeCache)
+     * @param options
+     *   IndexTables4Spark options (optional, for JSON field support)
+     * @return
+     *   Array of values converted to Spark types
+     */
+    def convertDocumentWithCache(
+      splitDocument: io.indextables.tantivy4java.core.Document,
+      sparkSchema: StructType,
+      fieldTypeCache: Map[String, FieldType],
+      options: Option[io.indextables.spark.core.IndexTables4SparkOptions] = None
+    ): Array[Any] = {
+      logger.debug(s"SchemaMapping.convertDocumentWithCache DEBUG:")
       logger.debug(s"  Spark schema fields: ${sparkSchema.fields.map(f => s"${f.name}:${f.dataType}").mkString(", ")}")
-      logger.debug(s"  Split schema fields: ${splitSchema.getFieldNames().toArray.mkString(", ")}")
+      logger.debug(s"  Field type cache: ${fieldTypeCache.keys.mkString(", ")}")
 
       // Create JSON field mapper and converter if options provided
       val jsonMapper: Option[SparkSchemaToTantivyMapper] = options.map(new SparkSchemaToTantivyMapper(_))
@@ -169,7 +217,7 @@ object SchemaMapping {
         jsonMapper.map(mapper => new TantivyToSparkConverter(sparkSchema, mapper))
 
       val result = sparkSchema.fields.map { sparkField =>
-        val convertedValue = convertField(splitDocument, sparkField, splitSchema, jsonMapper, jsonConverter)
+        val convertedValue = convertFieldWithCache(splitDocument, sparkField, fieldTypeCache, jsonMapper, jsonConverter)
         logger.debug(
           s"  Field '${sparkField.name}' -> $convertedValue (${if (convertedValue != null) convertedValue.getClass.getSimpleName
             else "null"})"
@@ -181,7 +229,49 @@ object SchemaMapping {
       result
     }
 
-    /** Convert a single field from split to Spark format */
+    /** Convert a single field from split to Spark format using cached field types */
+    private def convertFieldWithCache(
+      document: io.indextables.tantivy4java.core.Document,
+      sparkField: StructField,
+      fieldTypeCache: Map[String, FieldType],
+      jsonMapper: Option[SparkSchemaToTantivyMapper],
+      jsonConverter: Option[TantivyToSparkConverter]
+    ): Any =
+      try {
+        // Check if this is a JSON field and we have a converter
+        (jsonMapper, jsonConverter) match {
+          case (Some(mapper), Some(converter)) if mapper.shouldUseJsonField(sparkField) =>
+            // Use JSON converter for JSON fields (Struct, Array, JSON strings)
+            logger.debug(s"Using JSON converter for field '${sparkField.name}' (type: ${sparkField.dataType})")
+            converter.retrieveJsonField(document, sparkField)
+
+          case _ =>
+            // Handle regular fields with standard conversion
+            val rawValue = document.getFirst(sparkField.name)
+
+            if (rawValue == null) {
+              return null
+            }
+
+            // Get the Tantivy field type from cached map (no JNI call!)
+            val tantivyFieldType = fieldTypeCache.getOrElse(sparkField.name, FieldType.TEXT)
+
+            // Convert based on explicit mapping
+            convertValue(rawValue, tantivyFieldType, sparkField.dataType, sparkField.name)
+        }
+
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to convert field '${sparkField.name}': ${e.getMessage}")
+          if (sparkField.nullable) {
+            null
+          } else {
+            getDefaultValue(sparkField.dataType)
+          }
+      }
+
+    /** Convert a single field from split to Spark format (legacy - calls JNI per field) */
+    @deprecated("Use convertFieldWithCache for better performance", "0.28.1")
     private def convertField(
       document: io.indextables.tantivy4java.core.Document,
       sparkField: StructField,

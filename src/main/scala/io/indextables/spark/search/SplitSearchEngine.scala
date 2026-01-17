@@ -353,13 +353,17 @@ class SplitSearchEngine private (
           }
         }
 
+      // Build field type cache once before processing documents (avoids N×M JNI calls)
+      val fieldTypeCache = SchemaMapping.Read.buildFieldTypeCache(splitSchema, sparkSchema)
+      logger.debug(s"Built field type cache for ${fieldTypeCache.size} fields")
+
       // Convert documents to InternalRows
       val rows = documents.zipWithIndex.map {
         case (document, index) =>
           try
             if (document != null) {
-              // Use the new SchemaMapping.Read.convertDocument method with options for JSON field support
-              val values = SchemaMapping.Read.convertDocument(document, splitSchema, sparkSchema, options)
+              // Use cached field types for fast conversion (no JNI calls per field)
+              val values = SchemaMapping.Read.convertDocumentWithCache(document, sparkSchema, fieldTypeCache, options)
               org.apache.spark.sql.catalyst.InternalRow.fromSeq(values)
             } else {
               // Fallback to empty row if document retrieval fails
