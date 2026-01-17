@@ -260,7 +260,10 @@ Configure which tokenizer to use for text fields:
 spark.indextables.indexing.tokenizer.en_stem: "title,content,body"  // English stemming
 spark.indextables.indexing.tokenizer.default: "exact_match_field"   // No stemming
 
-// Available tokenizers: default, raw, en_stem, whitespace, etc.
+// Old per-field syntax still works
+spark.indextables.indexing.tokenizer.content: "en_stem"
+
+// Available tokenizers: default, raw, en_stem, whitespace
 ```
 
 ### Fast Fields (for aggregations)

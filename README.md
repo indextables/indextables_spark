@@ -988,7 +988,7 @@ Configure multiple fields with the same setting in a single option:
 
 **Syntax rules:**
 - **typemap**: Supports both old (`typemap.<field>` = `"<type>"`) and new (`typemap.<type>` = `"<fields>"`) syntax
-- **tokenizer**: Uses new syntax only (`tokenizer.<tokenizer_name>` = `"<fields>"`)
+- **tokenizer**: Supports both old (`tokenizer.<field>` = `"<tokenizer>"`) and new (`tokenizer.<tokenizer>` = `"<fields>"`) syntax
 - **indexrecordoption**: Supports both old (`indexrecordoption.<field>` = `"<option>"`) and new (`indexrecordoption.<option>` = `"<fields>"`) syntax
 
 #### JSON Field Support for Nested Data

@@ -46,18 +46,24 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   /** Valid index record options. */
   private val ValidIndexRecordOptions = Set("basic", "freq", "position")
 
+  /** Valid tokenizer names for list-based syntax detection. */
+  private val ValidTokenizers = Set("default", "raw", "whitespace", "en_stem")
+
   /**
-   * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
+   * Parse dual-syntax configuration options into a field-to-value map.
    *
    * Supports two syntaxes:
-   *   - Per-field (old): `typemap.title` = "text" → title gets type "text"
-   *   - Per-type (new): `typemap.text` = "title,content" → title and content both get type "text"
+   *   - Per-field (old): `prefix.fieldName` = "value" → field gets value
+   *   - Per-value (new): `prefix.value` = "field1,field2" → fields get value
    *
-   * NOTE: Field names are stored in lowercase to handle case-insensitive matching with schema field names.
+   * Detection: If the key suffix is in knownValues, use new syntax; otherwise use old syntax.
+   *
+   * @param prefix The option prefix (e.g., "spark.indextables.indexing.typemap.")
+   * @param knownValues Set of known values that trigger new syntax parsing
+   * @return Map[String, String] where key=field name (lowercase), value=configured value (lowercase)
    */
-  def getFieldTypeMapping: Map[String, String] = {
+  private def parseDualSyntaxConfig(prefix: String, knownValues: Set[String]): Map[String, String] = {
     import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.typemap."
     val result = scala.collection.mutable.Map[String, String]()
 
     options
@@ -70,21 +76,29 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
           val suffix = key.substring(prefix.length).toLowerCase
           val valueLower = value.toLowerCase
 
-          if (ValidFieldTypes.contains(suffix)) {
-            // New syntax: key is the type, value is comma-separated field list
-            // Example: typemap.text = "title,content,description"
+          if (knownValues.contains(suffix)) {
+            // New syntax: key is the value type, value is comma-separated field list
             value.split(",").map(_.trim).filterNot(_.isEmpty).foreach { fieldName =>
               result += (fieldName.toLowerCase -> suffix)
             }
           } else {
-            // Old syntax: key is the field name, value is the type
-            // Example: typemap.title = "text"
+            // Old syntax: key is the field name, value is the value type
             result += (suffix -> valueLower)
           }
       }
 
     result.toMap
   }
+
+  /**
+   * Get field type mapping configuration. Maps field names to their indexing types: "string", "text", or "json".
+   *
+   * Supports two syntaxes:
+   *   - Per-field (old): `typemap.title` = "text" → title gets type "text"
+   *   - Per-type (new): `typemap.text` = "title,content" → title and content both get type "text"
+   */
+  def getFieldTypeMapping: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.typemap.", ValidFieldTypes)
 
   /** Get fast fields configuration. Returns set of field names that should get "fast" indexing. */
   def getFastFields: Set[String] =
@@ -116,31 +130,12 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
   /**
    * Get tokenizer override configuration. Maps field names to their tokenizer types.
    *
-   * Syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." Example: `tokenizer.en_stem` = "content,body" → content
-   * and body both use tokenizer "en_stem"
+   * Supports both syntaxes:
+   * - New syntax: `tokenizer.<tokenizer_name>` = "field1,field2,..." (e.g., tokenizer.en_stem = "content,body")
+   * - Old syntax: `tokenizer.<field_name>` = "<tokenizer>" (e.g., tokenizer.content = "en_stem")
    */
-  def getTokenizerOverrides: Map[String, String] = {
-    import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.tokenizer."
-    val result = scala.collection.mutable.Map[String, String]()
-
-    options
-      .asCaseSensitiveMap()
-      .asScala
-      .toMap
-      .filter { case (key, _) => key.startsWith(prefix) }
-      .foreach {
-        case (key, value) =>
-          val tokenizerName = key.substring(prefix.length)
-          // Key is the tokenizer name, value is comma-separated field list
-          // Example: tokenizer.en_stem = "content,body,description"
-          value.split(",").map(_.trim).filterNot(_.isEmpty).foreach { fieldName =>
-            result += (fieldName -> tokenizerName)
-          }
-      }
-
-    result.toMap
-  }
+  def getTokenizerOverrides: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.tokenizer.", ValidTokenizers)
 
   /**
    * Get the default index record option for text fields.
@@ -161,36 +156,8 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
    *   - Per-field (old): `indexrecordoption.content` = "position" → content uses option "position"
    *   - Per-option (new): `indexrecordoption.position` = "content,body" → content and body both use "position"
    */
-  def getIndexRecordOptionOverrides: Map[String, String] = {
-    import scala.jdk.CollectionConverters._
-    val prefix = "spark.indextables.indexing.indexrecordoption."
-    val result = scala.collection.mutable.Map[String, String]()
-
-    options
-      .asCaseSensitiveMap()
-      .asScala
-      .toMap
-      .filter { case (key, _) => key.startsWith(prefix) }
-      .foreach {
-        case (key, value) =>
-          val suffix = key.substring(prefix.length).toLowerCase
-          val valueLower = value.toLowerCase
-
-          if (ValidIndexRecordOptions.contains(suffix)) {
-            // New syntax: key is the option, value is comma-separated field list
-            // Example: indexrecordoption.position = "content,body,description"
-            value.split(",").map(_.trim).filterNot(_.isEmpty).foreach { fieldName =>
-              result += (fieldName.toLowerCase -> suffix)
-            }
-          } else {
-            // Old syntax: key is the field name, value is the option
-            // Example: indexrecordoption.content = "position"
-            result += (suffix -> valueLower)
-          }
-      }
-
-    result.toMap
-  }
+  def getIndexRecordOptionOverrides: Map[String, String] =
+    parseDualSyntaxConfig("spark.indextables.indexing.indexrecordoption.", ValidIndexRecordOptions)
 
   // ===== Batch Optimization Configuration =====
 
