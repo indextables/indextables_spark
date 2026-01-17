@@ -223,6 +223,82 @@ class IndexTables4SparkOptions(options: CaseInsensitiveStringMap) {
     import scala.jdk.CollectionConverters._
     options.asCaseSensitiveMap().asScala.toMap
   }
+
+  /**
+   * Validate that all field-specific indexing configuration options reference fields that exist in the schema.
+   *
+   * This prevents silent misconfiguration due to typos in field names. The validation checks:
+   *   - typemap.<field> - field type configuration
+   *   - fastfields - comma-separated list of fast fields
+   *   - nonfastfields - comma-separated list of non-fast fields
+   *   - storeonlyfields - comma-separated list of store-only fields
+   *   - indexonlyfields - comma-separated list of index-only fields
+   *   - tokenizer.<field> - tokenizer override configuration
+   *   - indexrecordoption.<field> - index record option configuration
+   *
+   * @param schema
+   *   The Spark schema to validate against
+   * @throws IllegalArgumentException
+   *   if any configured fields don't exist in the schema
+   */
+  def validateFieldsExist(schema: org.apache.spark.sql.types.StructType): Unit = {
+    val schemaFieldNames = schema.fieldNames.map(_.toLowerCase).toSet
+    val errors           = scala.collection.mutable.ListBuffer[String]()
+
+    // Helper to check field existence (case-insensitive)
+    // For nested paths like "user.age", only the root field "user" needs to exist in the schema
+    def checkField(fieldName: String, configType: String): Unit = {
+      if (fieldName.nonEmpty) {
+        // Extract the root field name (before the first dot, if any)
+        val rootFieldName = fieldName.split('.').head.toLowerCase
+        if (!schemaFieldNames.contains(rootFieldName)) {
+          errors += s"$configType field '$fieldName' does not exist in schema"
+        }
+      }
+    }
+
+    // Check typemap fields
+    getFieldTypeMapping.keys.foreach { fieldName =>
+      checkField(fieldName, "typemap")
+    }
+
+    // Check fastfields
+    getFastFields.foreach { fieldName =>
+      checkField(fieldName, "fastfields")
+    }
+
+    // Check nonfastfields
+    getNonFastFields.foreach { fieldName =>
+      checkField(fieldName, "nonfastfields")
+    }
+
+    // Check storeonlyfields
+    getStoreOnlyFields.foreach { fieldName =>
+      checkField(fieldName, "storeonlyfields")
+    }
+
+    // Check indexonlyfields
+    getIndexOnlyFields.foreach { fieldName =>
+      checkField(fieldName, "indexonlyfields")
+    }
+
+    // Check tokenizer overrides
+    getTokenizerOverrides.keys.foreach { fieldName =>
+      checkField(fieldName, "tokenizer")
+    }
+
+    // Check indexrecordoption fields
+    getIndexRecordOptionOverrides.keys.foreach { fieldName =>
+      checkField(fieldName, "indexrecordoption")
+    }
+
+    if (errors.nonEmpty) {
+      val availableFields = schema.fieldNames.sorted.mkString(", ")
+      throw new IllegalArgumentException(
+        s"Invalid indexing configuration:\n${errors.mkString("\n")}\n\nAvailable schema fields: [$availableFields]"
+      )
+    }
+  }
 }
 
 object IndexTables4SparkOptions {
