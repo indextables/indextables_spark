@@ -6,10 +6,10 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.3.4_spark_3.5.3</version>
+    <version>0.4.0_spark_3.5.3</version>
     <packaging>jar</packaging>
 
-    <name>Tantivy4Spark</name>
+    <name>IndexTables4Spark</name>
     <description>Fast search file format for Apache Spark using Tantivy search engine</description>
     <url>https://github.com/indextables/indextables_spark</url>
 
