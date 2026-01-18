@@ -35,6 +35,8 @@ class PartitionedTableTest extends TestBase with BeforeAndAfterEach {
 
   override def beforeEach(): Unit = {
     super.beforeEach()
+    // Invalidate partition filter cache to ensure test isolation
+    PartitionFilterCache.invalidate()
     testTempDir = Files.createTempDirectory("tantivy_partition_test_")
     tablePath = new Path(testTempDir.toUri)
   }

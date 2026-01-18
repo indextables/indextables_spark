@@ -85,12 +85,16 @@ object PartitionFilterCache {
   /**
    * Compute a cache key from filters and partition values.
    * Uses a combined hash of both to create a unique Long key.
+   *
+   * Note: We use toString instead of hashCode for filters because Spark's
+   * Filter classes (And, Or, etc.) may have hash collisions when they contain
+   * the same children but different operators. toString includes the class name
+   * and full structure, ensuring And(a, b) and Or(a, b) produce different hashes.
    */
   private def computeCacheKey(filters: Array[Filter], partitionValues: Map[String, String]): Long = {
-    // Compute hash of filters (order-independent for robustness)
-    val filterHash = filters.map(_.hashCode()).sorted.foldLeft(17) { (acc, h) =>
-      31 * acc + h
-    }
+    // Compute hash of filters using toString to capture full structure including filter type
+    // This ensures And(a, b) and Or(a, b) produce different hashes
+    val filterHash = filters.map(_.toString).sorted.mkString(",").hashCode
 
     // Compute hash of partition values (order-independent)
     val partitionHash = partitionValues.toSeq.sortBy(_._1).hashCode()
