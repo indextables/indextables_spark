@@ -23,12 +23,18 @@ import org.apache.spark.sql.sources._
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
 
 /**
  * Unit tests for date filtering in partition pruning that don't require Spark. Tests the core logic of comparing
  * partition values (stored as strings) with filter values.
  */
-class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers {
+class PartitionPruningDateFilterTest extends AnyFunSuite with Matchers with BeforeAndAfterEach {
+
+  override def beforeEach(): Unit = {
+    // Invalidate partition filter cache before each test to ensure isolation
+    PartitionFilterCache.invalidate()
+  }
 
   test("String date partition values should match string filter values") {
     // Simulate how partition values are stored in transaction log (as strings)

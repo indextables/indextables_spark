@@ -17,6 +17,10 @@
 
 package io.indextables.spark.transaction
 
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
+import scala.util.Try
+
 import org.apache.spark.sql.sources._
 
 import org.slf4j.LoggerFactory
@@ -24,27 +28,68 @@ import org.slf4j.LoggerFactory
 /**
  * Utilities for partition pruning based on transaction log metadata. Enables efficient querying by skipping irrelevant
  * split files based on partition values.
+ *
+ * Optimizations implemented:
+ * 1. Filter evaluation cache - caches results of filter evaluations
+ * 2. Pre-grouped files + per-column index - O(1) equality lookups
+ * 3. Filter selectivity ordering - most selective filters first
+ * 4. Lazy filter evaluation - short-circuit AND/OR
+ * 5. Parallel partition evaluation - for large partition counts
  */
 object PartitionPruning {
 
   private val logger = LoggerFactory.getLogger(PartitionPruning.getClass)
 
+  // Configuration defaults
+  val DEFAULT_FILTER_CACHE_ENABLED = true
+  val DEFAULT_INDEX_ENABLED = true
+  val DEFAULT_PARALLEL_THRESHOLD = 100
+  val DEFAULT_SELECTIVITY_ORDERING = true
+
   /**
    * Filter AddActions based on partition predicates. Returns only the AddActions that could potentially match the given
    * filters.
+   *
+   * This is the main entry point that uses all optimizations.
    */
   def prunePartitions(
     addActions: Seq[AddAction],
     partitionColumns: Seq[String],
     filters: Array[Filter]
+  ): Seq[AddAction] =
+    prunePartitionsOptimized(
+      addActions,
+      partitionColumns,
+      filters,
+      filterCacheEnabled = DEFAULT_FILTER_CACHE_ENABLED,
+      indexEnabled = DEFAULT_INDEX_ENABLED,
+      parallelThreshold = DEFAULT_PARALLEL_THRESHOLD,
+      selectivityOrdering = DEFAULT_SELECTIVITY_ORDERING
+    )
+
+  /**
+   * Filter AddActions with configurable optimization settings.
+   */
+  def prunePartitionsOptimized(
+    addActions: Seq[AddAction],
+    partitionColumns: Seq[String],
+    filters: Array[Filter],
+    filterCacheEnabled: Boolean = DEFAULT_FILTER_CACHE_ENABLED,
+    indexEnabled: Boolean = DEFAULT_INDEX_ENABLED,
+    parallelThreshold: Int = DEFAULT_PARALLEL_THRESHOLD,
+    selectivityOrdering: Boolean = DEFAULT_SELECTIVITY_ORDERING
   ): Seq[AddAction] = {
 
+    // Early return if no partition columns or filters
     if (partitionColumns.isEmpty || filters.isEmpty) {
       return addActions
     }
 
+    if (addActions.isEmpty) {
+      return addActions
+    }
+
     // Extract partition filters from the filter array
-    // Use enhanced extraction to handle mixed partition/non-partition filters
     val partitionFilters = filters.flatMap(extractPartitionFilter(_, partitionColumns))
 
     if (partitionFilters.isEmpty) {
@@ -54,23 +99,223 @@ object PartitionPruning {
 
     logger.info(s"Applying partition pruning with ${partitionFilters.length} filters on columns: ${partitionColumns.mkString(", ")}")
 
-    val prunedActions = addActions.filter { addAction =>
-      evaluatePartitionFilters(addAction.partitionValues, partitionFilters)
+    // Order filters by selectivity (most selective first)
+    val orderedFilters = if (selectivityOrdering) {
+      FilterSelectivityEstimator.orderBySelectivity(partitionFilters)
+    } else {
+      partitionFilters
     }
 
-    val pruned = addActions.length - prunedActions.length
-    if (pruned > 0) {
-      logger.info(s"Partition pruning: filtered out $pruned of ${addActions.length} split files")
+    // Try to use index-based pruning if enabled
+    if (indexEnabled) {
+      val result = pruneWithIndex(addActions, partitionColumns, orderedFilters, filterCacheEnabled, parallelThreshold)
+      if (result.isDefined) {
+        val prunedActions = result.get
+        logPruningResults(addActions.length, prunedActions.length)
+        return prunedActions
+      }
     }
 
+    // Fallback to standard evaluation
+    val prunedActions = if (filterCacheEnabled) {
+      pruneWithCache(addActions, orderedFilters)
+    } else {
+      pruneStandard(addActions, orderedFilters)
+    }
+
+    logPruningResults(addActions.length, prunedActions.length)
     prunedActions
+  }
+
+  /**
+   * Prune using the partition index for O(1) lookups on equality/IN filters.
+   * Returns None if index-based pruning is not applicable.
+   */
+  private def pruneWithIndex(
+    addActions: Seq[AddAction],
+    partitionColumns: Seq[String],
+    filters: Array[Filter],
+    filterCacheEnabled: Boolean,
+    parallelThreshold: Int
+  ): Option[Seq[AddAction]] = {
+
+    // Build the partition index
+    val index = PartitionIndex.build(addActions, partitionColumns)
+
+    if (index.isEmpty) {
+      return None
+    }
+
+    // Separate indexable filters from those requiring evaluation
+    val (indexableFilters, remainingFilters) = FilterSelectivityEstimator.partitionFilters(filters)
+
+    if (indexableFilters.isEmpty) {
+      // No indexable filters, fall back to partition-based evaluation
+      return Some(pruneByPartitions(index, filters, filterCacheEnabled, parallelThreshold))
+    }
+
+    // Use index for initial pruning
+    var candidatePartitions = index.uniquePartitions
+
+    // Apply indexable filters for O(1) pruning
+    indexableFilters.foreach { filter =>
+      candidatePartitions = applyIndexableFilter(index, filter, candidatePartitions)
+      if (candidatePartitions.isEmpty) {
+        logger.debug("Index lookup eliminated all partitions")
+        return Some(Seq.empty)
+      }
+    }
+
+    // If there are remaining filters, evaluate them
+    val matchingPartitions = if (remainingFilters.nonEmpty) {
+      if (candidatePartitions.size >= parallelThreshold) {
+        evaluatePartitionsParallel(candidatePartitions, remainingFilters, filterCacheEnabled)
+      } else {
+        evaluatePartitionsSequential(candidatePartitions, remainingFilters, filterCacheEnabled)
+      }
+    } else {
+      candidatePartitions
+    }
+
+    // Collect files from matching partitions
+    Some(index.getFilesForPartitions(matchingPartitions))
+  }
+
+  /**
+   * Apply an indexable filter using the partition index.
+   */
+  private def applyIndexableFilter(
+    index: PartitionIndex,
+    filter: Filter,
+    currentPartitions: Set[Map[String, String]]
+  ): Set[Map[String, String]] =
+    filter match {
+      case EqualTo(attribute, value) =>
+        val matchingPartitions = index.getPartitionsForEquality(attribute, valueToString(value))
+        currentPartitions.intersect(matchingPartitions)
+
+      case EqualNullSafe(attribute, value) =>
+        val matchingPartitions = index.getPartitionsForEquality(attribute, valueToString(value))
+        currentPartitions.intersect(matchingPartitions)
+
+      case In(attribute, values) =>
+        val stringValues = values.map(valueToString).toSeq
+        val matchingPartitions = index.getPartitionsForIn(attribute, stringValues)
+        currentPartitions.intersect(matchingPartitions)
+
+      case _ =>
+        // Non-indexable filter, keep all partitions
+        currentPartitions
+    }
+
+  /**
+   * Convert a filter value to string for index lookup.
+   */
+  private def valueToString(value: Any): String =
+    if (value == null) null else value.toString
+
+  /**
+   * Prune by evaluating filters on unique partitions instead of individual files.
+   */
+  private def pruneByPartitions(
+    index: PartitionIndex,
+    filters: Array[Filter],
+    filterCacheEnabled: Boolean,
+    parallelThreshold: Int
+  ): Seq[AddAction] = {
+    val partitions = index.uniquePartitions
+
+    val matchingPartitions = if (partitions.size >= parallelThreshold) {
+      evaluatePartitionsParallel(partitions, filters, filterCacheEnabled)
+    } else {
+      evaluatePartitionsSequential(partitions, filters, filterCacheEnabled)
+    }
+
+    index.getFilesForPartitions(matchingPartitions)
+  }
+
+  /**
+   * Evaluate filters on partitions sequentially.
+   */
+  private def evaluatePartitionsSequential(
+    partitions: Set[Map[String, String]],
+    filters: Array[Filter],
+    filterCacheEnabled: Boolean
+  ): Set[Map[String, String]] =
+    partitions.filter { partitionValues =>
+      if (filterCacheEnabled) {
+        PartitionFilterCache.getOrCompute(filters, partitionValues, evaluatePartitionFilters(partitionValues, filters))
+      } else {
+        evaluatePartitionFilters(partitionValues, filters)
+      }
+    }
+
+  /**
+   * Evaluate filters on partitions in parallel.
+   */
+  private def evaluatePartitionsParallel(
+    partitions: Set[Map[String, String]],
+    filters: Array[Filter],
+    filterCacheEnabled: Boolean
+  ): Set[Map[String, String]] = {
+    implicit val ec: ExecutionContext = TransactionLogThreadPools.parallelReadThreadPool.executionContext
+
+    val futures = partitions.toSeq.map { partitionValues =>
+      Future {
+        val matches = if (filterCacheEnabled) {
+          PartitionFilterCache.getOrCompute(filters, partitionValues, evaluatePartitionFilters(partitionValues, filters))
+        } else {
+          evaluatePartitionFilters(partitionValues, filters)
+        }
+        if (matches) Some(partitionValues) else None
+      }
+    }
+
+    Try {
+      Await.result(Future.sequence(futures), 60.seconds)
+        .flatten
+        .toSet
+    }.getOrElse {
+      logger.warn("Parallel partition evaluation timed out, falling back to sequential")
+      evaluatePartitionsSequential(partitions, filters, filterCacheEnabled)
+    }
+  }
+
+  /**
+   * Prune with filter cache but without partition index.
+   */
+  private def pruneWithCache(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] =
+    addActions.filter { addAction =>
+      PartitionFilterCache.getOrCompute(
+        filters,
+        addAction.partitionValues,
+        evaluatePartitionFilters(addAction.partitionValues, filters)
+      )
+    }
+
+  /**
+   * Standard pruning without optimizations.
+   */
+  private def pruneStandard(addActions: Seq[AddAction], filters: Array[Filter]): Seq[AddAction] =
+    addActions.filter { addAction =>
+      evaluatePartitionFilters(addAction.partitionValues, filters)
+    }
+
+  /**
+   * Log pruning results.
+   */
+  private def logPruningResults(totalFiles: Int, remainingFiles: Int): Unit = {
+    val pruned = totalFiles - remainingFiles
+    if (pruned > 0) {
+      logger.info(s"Partition pruning: filtered out $pruned of $totalFiles split files")
+    }
   }
 
   /**
    * Extract the partition-filterable parts of a complex filter. This handles cases where a filter contains both
    * partition and non-partition column references.
    */
-  private def extractPartitionFilter(filter: Filter, partitionColumns: Seq[String]): Option[Filter] =
+  private[transaction] def extractPartitionFilter(filter: Filter, partitionColumns: Seq[String]): Option[Filter] =
     filter match {
       // Simple filters - check if they reference only partition columns
       case f @ EqualTo(attribute, _) if partitionColumns.contains(attribute)            => Some(f)
@@ -135,9 +380,18 @@ object PartitionPruning {
       case _                                => Set.empty
     }
 
-  /** Evaluate whether partition values satisfy the given filters. */
-  private def evaluatePartitionFilters(partitionValues: Map[String, String], filters: Array[Filter]): Boolean =
-    filters.forall(evaluateFilter(partitionValues, _))
+  /** Evaluate whether partition values satisfy the given filters. Uses lazy AND evaluation. */
+  private def evaluatePartitionFilters(partitionValues: Map[String, String], filters: Array[Filter]): Boolean = {
+    // Use lazy evaluation for short-circuit AND
+    var i = 0
+    while (i < filters.length) {
+      if (!evaluateFilter(partitionValues, filters(i))) {
+        return false  // Short-circuit on first false
+      }
+      i += 1
+    }
+    true
+  }
 
   /** Evaluate a single filter against partition values. Package-private for testing. */
   private[transaction] def evaluateFilter(partitionValues: Map[String, String], filter: Filter): Boolean =
@@ -179,9 +433,11 @@ object PartitionPruning {
         }
 
       case And(left, right) =>
+        // Lazy AND evaluation
         evaluateFilter(partitionValues, left) && evaluateFilter(partitionValues, right)
 
       case Or(left, right) =>
+        // Lazy OR evaluation
         evaluateFilter(partitionValues, left) || evaluateFilter(partitionValues, right)
 
       case _ =>
@@ -265,5 +521,26 @@ object PartitionPruning {
       "averageFilesPerPartition" -> (if (partitionCounts.nonEmpty) totalFiles.toDouble / partitionCounts.size else 0.0),
       "partitionDistribution"    -> partitionCounts.toMap
     )
+  }
+
+  /**
+   * Get optimization statistics for monitoring.
+   */
+  def getOptimizationStats(): Map[String, Any] = {
+    val (hits, misses, hitRate) = PartitionFilterCache.getStats()
+    Map(
+      "filterCacheHits" -> hits,
+      "filterCacheMisses" -> misses,
+      "filterCacheHitRate" -> f"${hitRate * 100}%.1f%%",
+      "filterCacheSize" -> PartitionFilterCache.size()
+    )
+  }
+
+  /**
+   * Invalidate all optimization caches.
+   * Should be called when the file list changes.
+   */
+  def invalidateCaches(): Unit = {
+    PartitionFilterCache.invalidate()
   }
 }

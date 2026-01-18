@@ -17,6 +17,7 @@
 
 package io.indextables.spark.core
 
+import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{
   Batch,
   InputPartition,
@@ -30,7 +31,9 @@ import org.apache.spark.sql.types.{DateType, DoubleType, FloatType, IntegerType,
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
+import io.indextables.spark.metrics._
 import io.indextables.spark.prewarm.{IndexComponentMapping, PreWarmManager}
+import io.indextables.spark.stats.{DataSkippingMetrics, ExpressionSimplifier, FilterExpressionCache}
 import io.indextables.spark.storage.DriverSplitLocalityManager
 import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, PartitionPruning, TransactionLog}
 import io.indextables.spark.util.TimestampUtils
@@ -59,6 +62,13 @@ class IndexTables4SparkScan(
   // Optional metrics accumulator for collecting batch optimization statistics
   // Set via enableMetricsCollection() for testing/monitoring
   private var metricsAccumulator: Option[io.indextables.spark.storage.BatchOptimizationMetricsAccumulator] = None
+
+  // Data skipping metrics for Spark UI reporting (captured during applyDataSkipping)
+  @volatile private var lastScanTotalFiles: Long = 0L
+  @volatile private var lastScanPartitionPrunedFiles: Long = 0L
+  @volatile private var lastScanDataSkippedFiles: Long = 0L
+  @volatile private var lastScanResultFiles: Long = 0L
+  @volatile private var lastScanTotalSkipRate: Double = 0.0
 
   logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
   pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
@@ -315,12 +325,59 @@ class IndexTables4SparkScan(
 
     if (filters.isEmpty) {
       logger.debug(s"DATA SKIPPING DEBUG: No filters, returning all ${addActions.length} files")
+      // Record metrics even for no-filter case
+      val tablePath = transactionLog.getTablePath().toString
+      DataSkippingMetrics.recordScan(tablePath, addActions.length, addActions.length, addActions.length)
+      // Update Spark UI metrics
+      lastScanTotalFiles = addActions.length
+      lastScanPartitionPrunedFiles = 0
+      lastScanDataSkippedFiles = 0
+      lastScanResultFiles = addActions.length
+      lastScanTotalSkipRate = 0.0
       return addActions
     }
 
     val partitionColumns = transactionLog.getPartitionColumns()
     logger.debug(s"DATA SKIPPING DEBUG: Partition columns: ${partitionColumns.mkString(", ")}")
     val initialCount = addActions.length
+
+    // Step 0: Apply expression simplification (cached)
+    val simplifiedFilters = FilterExpressionCache.getOrSimplify(filters, fullTableSchema)
+
+    // Check if simplification determined no files can match
+    if (simplifiedFilters.exists(ExpressionSimplifier.isAlwaysFalse)) {
+      logger.info("Expression simplification determined no files can match - returning empty result")
+      val tablePath = transactionLog.getTablePath().toString
+      DataSkippingMetrics.recordScan(tablePath, initialCount, 0, 0, Map("ExpressionSimplification" -> initialCount))
+      // Update Spark UI metrics
+      lastScanTotalFiles = initialCount
+      lastScanPartitionPrunedFiles = initialCount
+      lastScanDataSkippedFiles = 0
+      lastScanResultFiles = 0
+      lastScanTotalSkipRate = 1.0
+      return Seq.empty
+    }
+
+    // Check if simplification determined all files match (no filtering needed)
+    val effectiveFilters = if (simplifiedFilters.isEmpty || simplifiedFilters.forall(ExpressionSimplifier.isAlwaysTrue)) {
+      logger.debug("Expression simplification determined all files match - skipping filter evaluation")
+      Array.empty[Filter]
+    } else {
+      // Filter out AlwaysTrue entries
+      simplifiedFilters.filterNot(ExpressionSimplifier.isAlwaysTrue)
+    }
+
+    if (effectiveFilters.isEmpty) {
+      val tablePath = transactionLog.getTablePath().toString
+      DataSkippingMetrics.recordScan(tablePath, initialCount, initialCount, initialCount)
+      // Update Spark UI metrics
+      lastScanTotalFiles = initialCount
+      lastScanPartitionPrunedFiles = 0
+      lastScanDataSkippedFiles = 0
+      lastScanResultFiles = initialCount
+      lastScanTotalSkipRate = 0.0
+      return addActions
+    }
 
     // Debug: Print AddAction details
     addActions.zipWithIndex.foreach {
@@ -338,9 +395,22 @@ class IndexTables4SparkScan(
         }
     }
 
-    // Step 1: Apply partition pruning
+    // Step 1: Apply partition pruning with configurable optimizations
     val partitionPrunedActions = if (partitionColumns.nonEmpty) {
-      val pruned      = PartitionPruning.prunePartitions(addActions, partitionColumns, filters)
+      val filterCacheEnabled = config.getOrElse("spark.indextables.partitionPruning.filterCacheEnabled", "true").toBoolean
+      val indexEnabled = config.getOrElse("spark.indextables.partitionPruning.indexEnabled", "true").toBoolean
+      val parallelThreshold = config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100").toInt
+      val selectivityOrdering = config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
+
+      val pruned = PartitionPruning.prunePartitionsOptimized(
+        addActions,
+        partitionColumns,
+        effectiveFilters,
+        filterCacheEnabled = filterCacheEnabled,
+        indexEnabled = indexEnabled,
+        parallelThreshold = parallelThreshold,
+        selectivityOrdering = selectivityOrdering
+      )
       val prunedCount = addActions.length - pruned.length
       if (prunedCount > 0) {
         logger.info(s"Partition pruning: filtered out $prunedCount of ${addActions.length} split files")
@@ -351,15 +421,27 @@ class IndexTables4SparkScan(
     }
 
     // Step 2: Apply min/max value skipping on remaining files
-    val nonPartitionFilters = filters.filterNot { filter =>
+    val nonPartitionFilters = effectiveFilters.filterNot { filter =>
       // Only apply min/max skipping to non-partition columns to avoid double filtering
       getFilterReferencedColumns(filter).exists(partitionColumns.contains)
     }
 
+    // Track which filter types skip files for metrics
+    val filterTypeSkips = scala.collection.mutable.Map[String, Long]().withDefaultValue(0L)
+
     val finalActions = if (nonPartitionFilters.nonEmpty) {
       val skipped = partitionPrunedActions.filter { addAction =>
         // Improved data skipping logic that handles OR predicates correctly
-        canFileMatchFilters(addAction, nonPartitionFilters)
+        val canMatch = canFileMatchFilters(addAction, nonPartitionFilters)
+        if (!canMatch) {
+          // Track which filter types contributed to skipping
+          nonPartitionFilters.foreach { filter =>
+            if (!canFilterMatchFile(addAction, filter)) {
+              filterTypeSkips(getFilterTypeName(filter)) += 1
+            }
+          }
+        }
+        canMatch
       }
       val skippedCount = partitionPrunedActions.length - skipped.length
       if (skippedCount > 0) {
@@ -377,7 +459,49 @@ class IndexTables4SparkScan(
       )
     }
 
+    // Record metrics
+    val tablePath = transactionLog.getTablePath().toString
+    DataSkippingMetrics.recordScan(
+      tablePath,
+      initialCount,
+      partitionPrunedActions.length,
+      finalActions.length,
+      filterTypeSkips.toMap
+    )
+
+    // Update Spark UI metrics
+    lastScanTotalFiles = initialCount
+    lastScanPartitionPrunedFiles = initialCount - partitionPrunedActions.length
+    lastScanDataSkippedFiles = partitionPrunedActions.length - finalActions.length
+    lastScanResultFiles = finalActions.length
+    lastScanTotalSkipRate = if (initialCount > 0) (initialCount - finalActions.length).toDouble / initialCount else 0.0
+
     finalActions
+  }
+
+  /**
+   * Get a human-readable name for a filter type (for metrics).
+   */
+  private def getFilterTypeName(filter: Filter): String = {
+    import org.apache.spark.sql.sources._
+    filter match {
+      case _: EqualTo => "EqualTo"
+      case _: EqualNullSafe => "EqualNullSafe"
+      case _: GreaterThan => "GreaterThan"
+      case _: GreaterThanOrEqual => "GreaterThanOrEqual"
+      case _: LessThan => "LessThan"
+      case _: LessThanOrEqual => "LessThanOrEqual"
+      case _: In => "In"
+      case _: IsNull => "IsNull"
+      case _: IsNotNull => "IsNotNull"
+      case _: StringStartsWith => "StringStartsWith"
+      case _: StringEndsWith => "StringEndsWith"
+      case _: StringContains => "StringContains"
+      case _: And => "And"
+      case _: Or => "Or"
+      case _: Not => "Not"
+      case _ => filter.getClass.getSimpleName
+    }
   }
 
   // TODO: Fix options flow from read operations to scan for proper field type detection
@@ -486,6 +610,49 @@ class IndexTables4SparkScan(
                 logger.debug(s"DATA SKIPPING DEBUG: No min/max values found, not skipping")
                 false
             }
+
+          // IN filter optimization: check if file's [min,max] range overlaps with IN list's [min,max]
+          case In(attribute, values) if values.nonEmpty =>
+            val minVal = minVals.get(attribute)
+            val maxVal = maxVals.get(attribute)
+            (minVal, maxVal) match {
+              case (Some(fileMin), Some(fileMax)) if fileMin.nonEmpty && fileMax.nonEmpty =>
+                // Get or compute the IN list's min/max range (cached)
+                FilterExpressionCache.getOrComputeInRange(attribute, values) match {
+                  case Some(inRange) =>
+                    // Convert file stats and IN range values to comparable types
+                    val (_, convertedFileMin, convertedFileMax) =
+                      convertValuesForComparison(attribute, inRange.minValue, fileMin, fileMax)
+
+                    // Also convert IN list min/max to same type for comparison
+                    val inMinStr = inRange.minValue.toString
+                    val inMaxStr = inRange.maxValue.toString
+                    val (convertedInMin, _, _) = convertValuesForComparison(attribute, inMinStr, inMinStr, inMinStr)
+                    val (convertedInMax, _, _) = convertValuesForComparison(attribute, inMaxStr, inMaxStr, inMaxStr)
+
+                    // Skip if file's range doesn't overlap with IN list's range
+                    // No overlap if: fileMax < inMin OR fileMin > inMax
+                    val shouldSkip = convertedFileMax.compareTo(convertedInMin) < 0 ||
+                                     convertedFileMin.compareTo(convertedInMax) > 0
+
+                    logger.debug(s"DATA SKIPPING In: attribute=$attribute, " +
+                      s"fileRange=[$convertedFileMin, $convertedFileMax], " +
+                      s"inRange=[$convertedInMin, $convertedInMax], " +
+                      s"values=${values.take(5).mkString(",")}" +
+                      (if (values.length > 5) s"...(${values.length} total)" else "") +
+                      s", shouldSkip=$shouldSkip")
+                    shouldSkip
+
+                  case None =>
+                    // Could not compute IN range - don't skip
+                    logger.debug(s"DATA SKIPPING In: Could not compute IN range for $attribute, not skipping")
+                    false
+                }
+              case _ =>
+                logger.debug(s"DATA SKIPPING In: No min/max values for $attribute, not skipping")
+                false
+            }
+
           case GreaterThan(attribute, value) =>
             maxVals.get(attribute) match {
               case Some(max) if max.nonEmpty =>
@@ -779,5 +946,37 @@ class IndexTables4SparkScan(
           maxValue.asInstanceOf[Comparable[Any]]
         )
     }
+  }
+
+  // ============================================================================
+  // DataSource V2 Custom Metrics for Spark UI
+  // ============================================================================
+
+  /**
+   * Returns the custom metrics supported by this scan.
+   * These metrics appear in the Spark UI SQL tab under the scan operator.
+   */
+  override def supportedCustomMetrics(): Array[CustomMetric] = {
+    Array(
+      new TotalFilesConsidered(),
+      new PartitionPrunedFiles(),
+      new DataSkippedFiles(),
+      new ResultFiles(),
+      new TotalSkipRate()
+    )
+  }
+
+  /**
+   * Reports driver-side metrics collected during scan planning.
+   * Called by Spark after the scan completes to populate metrics in the UI.
+   */
+  override def reportDriverMetrics(): Array[CustomTaskMetric] = {
+    Array(
+      new TaskTotalFilesConsidered(lastScanTotalFiles),
+      new TaskPartitionPrunedFiles(lastScanPartitionPrunedFiles),
+      new TaskDataSkippedFiles(lastScanDataSkippedFiles),
+      new TaskResultFiles(lastScanResultFiles),
+      new TaskTotalSkipRate(lastScanTotalSkipRate)
+    )
   }
 }

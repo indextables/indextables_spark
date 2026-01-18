@@ -110,6 +110,18 @@ spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
 
+// Partition Pruning Optimization (reduces complexity from O(n*f) to O(p*f) where n=files, p=partitions, f=filters)
+spark.indextables.partitionPruning.filterCacheEnabled: true (default: true, LRU cache for filter evaluations)
+spark.indextables.partitionPruning.indexEnabled: true (default: true, O(1) index lookup for equality/IN filters)
+spark.indextables.partitionPruning.parallelThreshold: 100 (default: 100, parallelize when unique partitions > threshold)
+spark.indextables.partitionPruning.selectivityOrdering: true (default: true, evaluate most selective filters first)
+
+// Data Skipping Optimization (reduces file scans using min/max statistics)
+// Features: IN filter optimization, expression simplification, filter caching, metrics tracking
+// Use DESCRIBE INDEXTABLES DATA SKIPPING STATS to view effectiveness metrics
+// Use FLUSH INDEXTABLES DATA SKIPPING STATS to reset metrics
+// Use INVALIDATE INDEXTABLES DATA SKIPPING CACHE to clear caches
+
 // String Pattern Filter Pushdown (all disabled by default)
 // Enable these to allow aggregate pushdown with pattern filters
 // Note: These match individual tokens, not full strings for text fields
@@ -781,6 +793,59 @@ DESCRIBE TANTIVY4SPARK STORAGE STATS;  -- alternate syntax
 - Each executor maintains its own independent counters
 - Useful for monitoring S3 costs and validating cache effectiveness
 - After a full prewarm, `bytes_fetched` should not increase during subsequent queries
+
+### Describe Data Skipping Stats
+```sql
+-- View data skipping effectiveness statistics
+DESCRIBE INDEXTABLES DATA SKIPPING STATS;
+DESCRIBE TANTIVY4SPARK DATA SKIPPING STATS;  -- alternate syntax
+
+-- Example output:
+-- +----------------------+----------------------+---------------+
+-- |metric_type           |metric_name           |metric_value   |
+-- +----------------------+----------------------+---------------+
+-- |data_skipping         |total_files_considered|1000           |
+-- |data_skipping         |partition_pruned_files|400            |
+-- |data_skipping         |data_skipped_files    |300            |
+-- |data_skipping         |final_files_scanned   |300            |
+-- |data_skipping         |partition_skip_rate   |40.00%         |
+-- |data_skipping         |data_skip_rate        |50.00%         |
+-- |data_skipping         |total_skip_rate       |70.00%         |
+-- |filter_type_skips     |EqualTo               |200            |
+-- |filter_type_skips     |GreaterThan           |100            |
+-- |filter_expr_cache     |simplified_hits       |500            |
+-- |filter_expr_cache     |simplified_hit_rate   |83.33%         |
+-- |partition_filter_cache|hits                  |800            |
+-- |partition_filter_cache|hit_rate              |88.89%         |
+-- +----------------------+----------------------+---------------+
+
+-- Reset statistics (keeps cache entries)
+FLUSH INDEXTABLES DATA SKIPPING STATS;
+FLUSH TANTIVY4SPARK DATA SKIPPING STATS;
+
+-- Clear caches and statistics
+INVALIDATE INDEXTABLES DATA SKIPPING CACHE;
+INVALIDATE TANTIVY4SPARK DATA SKIPPING CACHE;
+```
+
+**Key points:**
+- `data_skipping` metrics track overall file pruning effectiveness
+- `filter_type_skips` shows which filter types contributed most to skipping
+- `filter_expr_cache` tracks expression simplification cache performance
+- `partition_filter_cache` tracks partition filter evaluation cache performance
+- Statistics are cumulative since session start or last reset
+- Use FLUSH to reset stats while keeping cached entries
+- Use INVALIDATE to clear both caches and stats
+
+**Spark UI Integration:**
+Data skipping metrics are also reported to the Spark UI SQL tab. During query execution, the following metrics appear under the scan operator:
+- `total files considered` - All files in the table before filtering
+- `files pruned by partitions` - Files eliminated by partition predicates
+- `files skipped by stats` - Files eliminated by min/max column statistics
+- `files to scan` - Final files that will be read
+- `total skip rate` - Percentage of files skipped (e.g., "70.0%")
+
+These metrics are visible in the Spark UI under the SQL tab for each query, similar to how Iceberg and Delta Lake report data skipping effectiveness.
 
 ### Describe Environment
 ```sql
