@@ -454,6 +454,9 @@ class EnhancedTransactionLogCache(
     invalidateByPredicate(snapshotCache, (key: SnapshotCacheKey) => key.tablePath == tablePath)
     metadataCache.invalidate(MetadataCacheKey(tablePath))
     protocolCache.invalidate(MetadataCacheKey(tablePath))
+
+    // Also invalidate partition filter evaluation cache
+    PartitionFilterCache.invalidate()
   }
 
   /** Invalidate specific versions */
@@ -499,6 +502,8 @@ class EnhancedTransactionLogCache(
     lazyValueCache.clear()
     // Also clear GLOBAL checkpoint caches
     EnhancedTransactionLogCache.clearGlobalCaches()
+    // Also clear partition filter evaluation cache
+    PartitionFilterCache.invalidate()
   }
 
   /** Cleanup expired entries */

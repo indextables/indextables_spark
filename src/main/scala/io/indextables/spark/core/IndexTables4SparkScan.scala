@@ -338,9 +338,22 @@ class IndexTables4SparkScan(
         }
     }
 
-    // Step 1: Apply partition pruning
+    // Step 1: Apply partition pruning with configurable optimizations
     val partitionPrunedActions = if (partitionColumns.nonEmpty) {
-      val pruned      = PartitionPruning.prunePartitions(addActions, partitionColumns, filters)
+      val filterCacheEnabled = config.getOrElse("spark.indextables.partitionPruning.filterCacheEnabled", "true").toBoolean
+      val indexEnabled = config.getOrElse("spark.indextables.partitionPruning.indexEnabled", "true").toBoolean
+      val parallelThreshold = config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100").toInt
+      val selectivityOrdering = config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
+
+      val pruned = PartitionPruning.prunePartitionsOptimized(
+        addActions,
+        partitionColumns,
+        filters,
+        filterCacheEnabled = filterCacheEnabled,
+        indexEnabled = indexEnabled,
+        parallelThreshold = parallelThreshold,
+        selectivityOrdering = selectivityOrdering
+      )
       val prunedCount = addActions.length - pruned.length
       if (prunedCount > 0) {
         logger.info(s"Partition pruning: filtered out $prunedCount of ${addActions.length} split files")

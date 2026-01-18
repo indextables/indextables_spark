@@ -140,6 +140,7 @@ df.filter((col("name").contains("John")) & (col("age") > 25)).show()
 - 🚀 **Embedded Search**: Runs directly within Spark executors with no additional infrastructure required
 - ☁️ **Multi-Cloud Storage**: Stores indexed data in cost-effective object storage (AWS S3 and Azure Blob Storage fully supported)
 - ⚡ **Smart File Skipping**: Delta/Iceberg-style transaction log with min/max statistics for efficient query pruning
+- 🎯 **Optimized Partition Pruning**: O(1) index lookups for equality/IN filters, LRU-cached evaluations, and parallel processing for large partition counts
 - 🔍 **Full-Text Search**: Native `indexquery` operator provides access to complete Tantivy search syntax
 - 📊 **Predicate Pushdown**: WHERE clause filters automatically convert to native search operations for faster execution
 - 🎯 **Aggregate Pushdown**: COUNT, SUM, AVG, MIN, MAX execute directly in the search engine (10-100x faster)
@@ -942,6 +943,10 @@ The system supports several configuration options for performance tuning:
 | `spark.indextables.merge.tempDirectoryPath` | auto-detect `/local_disk0` | Custom temp directory for split merging (auto-detects optimal location) |
 | `spark.indextables.merge.batchSize` | `defaultParallelism` | Number of merge groups per batch (defaults to Spark's defaultParallelism) |
 | `spark.indextables.merge.maxConcurrentBatches` | `2` | Maximum number of batches to process concurrently |
+| `spark.indextables.partitionPruning.filterCacheEnabled` | `true` | Enable LRU cache for partition filter evaluation results |
+| `spark.indextables.partitionPruning.indexEnabled` | `true` | Enable per-column partition index for O(1) equality/IN lookups |
+| `spark.indextables.partitionPruning.parallelThreshold` | `100` | Partition count threshold for parallel filter evaluation |
+| `spark.indextables.partitionPruning.selectivityOrdering` | `true` | Order filters by selectivity (most selective first) |
 | `spark.indextables.aws.accessKey` | - | AWS access key for S3 split access |
 | `spark.indextables.aws.secretKey` | - | AWS secret key for S3 split access |
 | `spark.indextables.aws.sessionToken` | - | AWS session token for temporary credentials (STS) |

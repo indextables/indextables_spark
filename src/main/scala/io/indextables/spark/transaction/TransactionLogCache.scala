@@ -45,6 +45,10 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
   private val protocolCache                           = new AtomicLong(0L) // timestamp when protocol was cached
   private var cachedProtocol: Option[ProtocolAction]  = None
 
+  // Partition index cache for optimized partition pruning
+  private val partitionIndexCache                       = new AtomicLong(0L) // timestamp when partition index was cached
+  private var cachedPartitionIndex: Option[PartitionIndex] = None
+
   // Statistics
   private val hitCount  = new AtomicLong(0)
   private val missCount = new AtomicLong(0)
@@ -183,6 +187,37 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
     logger.debug("Invalidated protocol cache")
   }
 
+  /** Get cached partition index or None if not cached/expired */
+  def getCachedPartitionIndex(): Option[PartitionIndex] = {
+    val currentTime = System.currentTimeMillis()
+    val lastUpdate  = partitionIndexCache.get()
+
+    if (currentTime - lastUpdate > expirationMillis || cachedPartitionIndex.isEmpty) {
+      missCount.incrementAndGet()
+      None
+    } else {
+      hitCount.incrementAndGet()
+      cachedPartitionIndex
+    }
+  }
+
+  /** Cache partition index */
+  def cachePartitionIndex(index: PartitionIndex): Unit =
+    synchronized {
+      cachedPartitionIndex = Some(index)
+      partitionIndexCache.set(System.currentTimeMillis())
+      logger.debug(s"Cached partition index: ${index.partitionCount} partitions, ${index.totalFiles} files")
+    }
+
+  /** Invalidate partition index cache */
+  def invalidatePartitionIndex(): Unit =
+    synchronized {
+      cachedPartitionIndex = None
+      partitionIndexCache.set(0)
+      // Also invalidate the filter evaluation cache
+      PartitionFilterCache.invalidate()
+    }
+
   /** Invalidate all caches (useful after write operations) */
   def invalidateAll(): Unit = {
     versionCache.clear()
@@ -191,11 +226,15 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
       cachedFilesList = None
       cachedMetadata = None
       cachedProtocol = None
+      cachedPartitionIndex = None
       versionsListCache.set(0)
       filesCache.set(0)
       metadataCache.set(0)
       protocolCache.set(0)
+      partitionIndexCache.set(0)
     }
+    // Also invalidate partition filter evaluation cache
+    PartitionFilterCache.invalidate()
     logger.debug("Invalidated all caches")
   }
 
@@ -206,11 +245,15 @@ class TransactionLogCache(expirationSeconds: Long = 5 * 60L) {
       cachedFilesList = None
       cachedMetadata = None
       cachedProtocol = None
+      cachedPartitionIndex = None
       versionsListCache.set(0)
       filesCache.set(0)
       metadataCache.set(0)
       protocolCache.set(0)
+      partitionIndexCache.set(0)
     }
+    // Also invalidate partition filter evaluation cache
+    PartitionFilterCache.invalidate()
     logger.debug("Invalidated version-dependent caches")
   }
 

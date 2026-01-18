@@ -110,6 +110,12 @@ spark.indextables.cache.disk.manifestSyncInterval: 30 (default: 30 seconds)
 // Read Limits (controls default result set size when no explicit LIMIT is specified)
 spark.indextables.read.defaultLimit: 250 (default: 250, maximum documents per partition when no LIMIT pushed down)
 
+// Partition Pruning Optimization (reduces complexity from O(n*f) to O(p*f) where n=files, p=partitions, f=filters)
+spark.indextables.partitionPruning.filterCacheEnabled: true (default: true, LRU cache for filter evaluations)
+spark.indextables.partitionPruning.indexEnabled: true (default: true, O(1) index lookup for equality/IN filters)
+spark.indextables.partitionPruning.parallelThreshold: 100 (default: 100, parallelize when unique partitions > threshold)
+spark.indextables.partitionPruning.selectivityOrdering: true (default: true, evaluate most selective filters first)
+
 // String Pattern Filter Pushdown (all disabled by default)
 // Enable these to allow aggregate pushdown with pattern filters
 // Note: These match individual tokens, not full strings for text fields
