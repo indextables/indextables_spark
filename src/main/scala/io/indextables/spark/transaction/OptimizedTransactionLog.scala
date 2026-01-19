@@ -68,6 +68,13 @@ class OptimizedTransactionLog(
       else legacyExpirationSeconds / 60
     } else -1L
 
+    // Configure global checkpoint cache TTL (shared across all TransactionLog instances)
+    val checkpointCacheTTL =
+      if (legacyExpirationMinutes > 0) legacyExpirationMinutes
+      else options.getLong("spark.indextables.cache.checkpoint.ttl", 5)
+    val checkpointCacheSize = options.getLong("spark.indextables.cache.checkpoint.size", 200)
+    EnhancedTransactionLogCache.configureGlobalCacheTTL(checkpointCacheTTL, checkpointCacheSize)
+
     new EnhancedTransactionLogCache(
       logCacheSize = options.getLong("spark.indextables.cache.log.size", 1000),
       logCacheTTLMinutes =
@@ -605,8 +612,8 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing metadata from transaction log")
 
-        // Get checkpoint version and metadata (if available)
-        val checkpointVersion                    = checkpoint.flatMap(_.getLastCheckpointVersion())
+        // Get checkpoint version and metadata (if available) - uses cached checkpoint info
+        val checkpointVersion                    = getLastCheckpointInfoCached().map(_.version)
         var baseMetadata: Option[MetadataAction] = None
 
         // Try checkpoint first if available - uses cached checkpoint actions
@@ -894,8 +901,8 @@ class OptimizedTransactionLog(
 
   /** Get total row count using optimized operations */
   def getTotalRowCount(): Long =
-    // First try to get from checkpoint info
-    checkpoint.flatMap(_.getLastCheckpointInfo()) match {
+    // First try to get from checkpoint info (uses cached checkpoint info)
+    getLastCheckpointInfoCached() match {
       case Some(info) if info.numFiles > 0 =>
         // Estimate from checkpoint
         val files = listFilesOptimized()
@@ -914,13 +921,24 @@ class OptimizedTransactionLog(
   def isPartitioned(): Boolean =
     getPartitionColumns().nonEmpty
 
-  /** Get last checkpoint version */
+  /** Get last checkpoint version (cached) */
   def getLastCheckpointVersion(): Option[Long] =
-    checkpoint.flatMap(_.getLastCheckpointVersion())
+    getLastCheckpointInfoCached().map(_.version)
 
-  /** Get the full checkpoint info (including multi-part checkpoint details). */
+  /** Get the full checkpoint info (including multi-part checkpoint details). Uses global cache. */
   def getLastCheckpointInfo(): Option[LastCheckpointInfo] =
-    checkpoint.flatMap(_.getLastCheckpointInfo())
+    getLastCheckpointInfoCached()
+
+  /**
+   * Get last checkpoint info using global cache. This avoids repeated S3 calls for _last_checkpoint file.
+   * The cache is shared across all TransactionLog instances with configurable TTL (default 5 minutes).
+   * Configure via spark.indextables.cache.checkpoint.ttl
+   */
+  private def getLastCheckpointInfoCached(): Option[LastCheckpointInfo] =
+    enhancedCache.getOrComputeLastCheckpointInfo(
+      tablePath.toString,
+      checkpoint.flatMap(_.getLastCheckpointInfo())
+    )
 
   /** Get all actions from the latest checkpoint (consolidated state). */
   override def getCheckpointActions(): Option[Seq[Action]] =
@@ -1071,11 +1089,8 @@ class OptimizedTransactionLog(
    * checkpoint actions to avoid repeated reads of _last_checkpoint and checkpoint files.
    */
   private def getCheckpointActionsCached(): Option[Seq[Action]] = {
-    // First, get the last checkpoint info (cached)
-    val lastCheckpointInfo = enhancedCache.getOrComputeLastCheckpointInfo(
-      tablePath.toString,
-      checkpoint.flatMap(_.getLastCheckpointInfo())
-    )
+    // First, get the last checkpoint info (uses shared cached method)
+    val lastCheckpointInfo = getLastCheckpointInfoCached()
 
     // If no checkpoint info, return None
     lastCheckpointInfo match {
@@ -1637,7 +1652,7 @@ class OptimizedTransactionLog(
 
     // Load initial state from checkpoint if available - this allows reading even when early versions are deleted
     val initialFiles = scala.collection.mutable.HashMap[String, AddAction]()
-    val versionsToProcess = checkpoint.flatMap(_.getLastCheckpointVersion()) match {
+    val versionsToProcess = getLastCheckpointInfoCached().map(_.version) match {
       case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
         logger.info(s"Loading initial state from checkpoint at version $checkpointVersion for getAllCurrentActions")
 
@@ -1784,7 +1799,7 @@ class OptimizedTransactionLog(
     logger.info(s"Reconstructing state from versions: ${versions.sorted}")
 
     // Try to start from checkpoint if available - this allows reading even when early versions are deleted
-    val (startVersion, versionsToProcess) = checkpoint.flatMap(_.getLastCheckpointVersion()) match {
+    val (startVersion, versionsToProcess) = getLastCheckpointInfoCached().map(_.version) match {
       case Some(checkpointVersion) if versions.contains(checkpointVersion) =>
         logger.info(s"Starting reconstruction from checkpoint at version $checkpointVersion")
 
@@ -1855,8 +1870,8 @@ class OptimizedTransactionLog(
   def getSkippedFiles(): Seq[SkipAction] = {
     val skips = scala.collection.mutable.ListBuffer[SkipAction]()
 
-    // Get checkpoint version for determining which versions to read
-    val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+    // Get checkpoint version for determining which versions to read (uses cached checkpoint info)
+    val checkpointVersion = getLastCheckpointInfoCached().map(_.version).getOrElse(-1L)
 
     // Use cached checkpoint actions (shared with other operations)
     getCheckpointActionsCached() match {

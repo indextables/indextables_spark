@@ -114,6 +114,9 @@ case class DropPartitionsCommand(
     val transactionLog =
       TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(resolvedConfigs.asJava))
 
+    // Invalidate cache to ensure fresh read of transaction log state
+    transactionLog.invalidateCache()
+
     try {
       // Check if transaction log is initialized
       val metadata =

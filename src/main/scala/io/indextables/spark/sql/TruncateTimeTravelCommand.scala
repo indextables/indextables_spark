@@ -96,6 +96,9 @@ case class TruncateTimeTravelCommand(
       // Create transaction log instance with resolved credentials
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
 
+      // Invalidate cache to ensure fresh read of transaction log state
+      transactionLog.invalidateCache()
+
       try {
         // Get current versions
         val versions = transactionLog.getVersions()

@@ -289,6 +289,7 @@ class S3CloudStorageProvider(
   }
 
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
+    CloudStorageProvider.incrementListFiles()
     val (bucket, originalPrefix) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
@@ -373,6 +374,7 @@ class S3CloudStorageProvider(
   }
 
   override def exists(path: String): Boolean = {
+    CloudStorageProvider.incrementExists()
     val (bucket, originalKey) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
@@ -396,6 +398,7 @@ class S3CloudStorageProvider(
   }
 
   override def getFileInfo(path: String): Option[CloudFileInfo] = {
+    CloudStorageProvider.incrementGetFileInfo()
     val (bucket, key) = parseS3Path(path)
 
     try {
@@ -424,6 +427,7 @@ class S3CloudStorageProvider(
   }
 
   override def readFile(path: String): Array[Byte] = {
+    CloudStorageProvider.incrementReadFile()
     val (bucket, originalKey) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
@@ -497,6 +501,7 @@ class S3CloudStorageProvider(
     new S3OutputStream(path)
 
   override def writeFile(path: String, content: Array[Byte]): Unit = {
+    CloudStorageProvider.incrementWriteFile()
     val (bucket, originalKey) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
@@ -543,6 +548,7 @@ class S3CloudStorageProvider(
   }
 
   override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean = {
+    CloudStorageProvider.incrementWriteFile()
     val (bucket, originalKey) = parseS3Path(path)
 
     // Apply uniform path flattening for S3Mock compatibility
@@ -642,6 +648,7 @@ class S3CloudStorageProvider(
   }
 
   override def deleteFile(path: String): Boolean = {
+    CloudStorageProvider.incrementDeleteFile()
     val (bucket, key) = parseS3Path(path)
 
     try {

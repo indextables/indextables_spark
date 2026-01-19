@@ -75,6 +75,9 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       // Create transaction log instance to read current state
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
 
+      // Invalidate cache to ensure fresh read of transaction log state
+      transactionLog.invalidateCache()
+
       try {
         // Get current version and all actions
         val versions = transactionLog.getVersions()

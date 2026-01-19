@@ -81,6 +81,9 @@ class PurgeOrphanedSplitsExecutor(
     val txLog =
       TransactionLogFactory.create(new Path(tablePath), spark, new CaseInsensitiveStringMap(cloudConfigs.asJava))
 
+    // Invalidate cache to ensure fresh read of transaction log state for purge planning
+    txLog.invalidateCache()
+
     // Step 2: Determine which transaction log files will be deleted
     // Get the list of versions that will remain after cleanup (for time travel support)
     val versionsBeforeCleanup = txLog.getVersions()

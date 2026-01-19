@@ -159,6 +159,9 @@ case class MergeSplitsCommand(
     val transactionLog =
       TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(txLogResolvedConfigs.asJava))
 
+    // Invalidate cache to ensure fresh read of transaction log state for merge planning
+    transactionLog.invalidateCache()
+
     try {
       // Check if transaction log is initialized
       val hasMetadata =
