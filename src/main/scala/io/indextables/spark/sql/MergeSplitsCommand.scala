@@ -432,6 +432,18 @@ class MergeSplitsExecutor(
   )
 
   /**
+   * Maximum number of merge passes to execute in a single call. Each pass finds merge groups based on the current
+   * transaction log state and executes them. The loop continues until no more merge groups are found or maxPasses is
+   * reached. Default: 10.
+   */
+  private val maxPasses: Int = sparkSession.conf
+    .getOption("spark.indextables.merge.maxPasses")
+    .map(_.toInt)
+    .getOrElse(10)
+
+  logger.info(s"Max merge passes: $maxPasses")
+
+  /**
    * Extract AWS configuration from SparkSession for merge operations. Merges configs from: overrideOptions >
    * sparkSession > hadoopConfiguration Credentials are resolved on executor using CredentialProviderFactory (same as
    * S3CloudStorageProvider).
@@ -565,42 +577,9 @@ class MergeSplitsExecutor(
       )
     }
 
-    // Get current files from transaction log (in order they were added)
-    val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
-    logger.info(s"Found ${allFiles.length} split files in transaction log")
-
-    // Filter out files that are currently in cooldown period
-    val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
-    val currentFiles = if (trackingEnabled) {
-      val filtered      = transactionLog.filterFilesInCooldown(allFiles)
-      val filteredCount = allFiles.length - filtered.length
-      if (filteredCount > 0) {
-        logger.info(s"Filtered out $filteredCount files in cooldown period")
-      }
-      filtered
-    } else {
-      allFiles
-    }
-
-    logger.info(s"Processing ${currentFiles.length} files for merge (after cooldown filtering)")
-    currentFiles.foreach { file =>
-      logger.info(s"  File: ${file.path} (${file.size} bytes, partition: ${file.partitionValues})")
-    }
-
-    // Group files by partition (merge only within partitions - Delta Lake pattern)
-    val partitionsToMerge = currentFiles.groupBy(_.partitionValues).toSeq
-    logger.info(s"Found ${partitionsToMerge.length} partitions to potentially merge")
-    partitionsToMerge.foreach {
-      case (partitionValues, files) =>
-        logger.info(s"  Partition $partitionValues: ${files.length} files")
-    }
-
-    // Apply partition predicates if specified
-    val filteredPartitions = if (partitionPredicates.nonEmpty) {
-      applyPartitionPredicates(partitionsToMerge, partitionSchema)
-    } else {
-      partitionsToMerge
-    }
+    // Extract AWS and Azure configuration early for use across all passes
+    val awsConfig   = extractAwsConfig()
+    val azureConfig = extractAzureConfig()
 
     // Get effective maxSourceSplitsPerMerge (from parameter or config default)
     val effectiveMaxSourceSplitsPerMerge = maxSourceSplitsPerMerge
@@ -617,161 +596,201 @@ class MergeSplitsExecutor(
 
     logger.info(s"Using MAX SOURCE SPLITS PER MERGE: $effectiveMaxSourceSplitsPerMerge")
 
-    // Find mergeable splits within each partition
-    val mergeGroups = filteredPartitions.flatMap {
-      case (partitionValues, files) =>
-        logger.info(s"Processing partition $partitionValues with ${files.length} files:")
-        files.foreach(file => logger.info(s"  File: ${file.path} (${file.size} bytes)"))
+    // Multi-pass merge loop - accumulate results across passes
+    val allPassResults      = ArrayBuffer[MergeResult]()
+    var passNumber          = 0
+    var continueLooping     = true
+    var totalBatches        = 0
+    var totalSuccessful     = 0
+    var totalFailed         = 0
 
-        val groups = findMergeableGroups(partitionValues, files, effectiveMaxSourceSplitsPerMerge)
-        logger.info(s"Found ${groups.length} potential merge groups in partition $partitionValues")
+    while (continueLooping && passNumber < maxPasses) {
+      passNumber += 1
+      logger.info(s"=== Starting merge pass $passNumber of max $maxPasses ===")
 
-        // Double-check: filter out any single-file groups that might have slipped through
-        logger.debug(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
-        groups.foreach { group =>
-          logger.debug(
-            s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}"
-          )
+      // Get current files from transaction log (in order they were added)
+      val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
+      logger.info(s"Found ${allFiles.length} split files in transaction log")
+
+      // Filter out files that are currently in cooldown period
+      val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean
+      val currentFiles = if (trackingEnabled) {
+        val filtered      = transactionLog.filterFilesInCooldown(allFiles)
+        val filteredCount = allFiles.length - filtered.length
+        if (filteredCount > 0) {
+          logger.info(s"Filtered out $filteredCount files in cooldown period")
         }
-        val validGroups = groups.filter(_.files.length >= 2)
-        logger.debug(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
-        if (groups.length != validGroups.length) {
-          logger.warn(
-            s"Filtered out ${groups.length - validGroups.length} single-file groups from partition $partitionValues"
-          )
-        }
-
-        validGroups.foreach { group =>
-          logger.info(s"  Valid merge group: ${group.files.length} files (${group.files.map(_.size).sum} bytes total)")
-          group.files.foreach(file => logger.info(s"    - ${file.path} (${file.size} bytes)"))
-        }
-
-        validGroups
-    }
-
-    logger.info(s"Found ${mergeGroups.length} merge groups containing ${mergeGroups.map(_.files.length).sum} files")
-
-    // Sort ALL merge groups by:
-    // 1. Primary: source split count (descending) - prioritize high-impact merges
-    // 2. Secondary: oldest modification time (ascending) - tie-break with oldest first
-    val prioritizedMergeGroups = mergeGroups.sortBy { g =>
-      val sourceCount = -g.files.length                     // Negative for descending order
-      val oldestTime  = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
-      (sourceCount, oldestTime)
-    }
-    logger.info(s"Prioritized merge groups by source split count (ties broken by oldest): ${prioritizedMergeGroups
-        .map(_.files.length)
-        .take(10)
-        .mkString(", ")}${if (prioritizedMergeGroups.length > 10) "..." else ""}")
-
-    // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
-    // Now takes the top N groups by source split count (highest impact merges first)
-    val limitedMergeGroups = maxDestSplits match {
-      case Some(maxLimit) if prioritizedMergeGroups.length > maxLimit =>
-        logger.info(s"Limiting merge operation to $maxLimit highest-impact dest splits (out of ${prioritizedMergeGroups.length} total)")
-
-        // Take the top N groups (already sorted by source split count descending, oldest first for ties)
-        val limitedGroups = prioritizedMergeGroups.take(maxLimit)
-
-        val limitedFilesCount = limitedGroups.map(_.files.length).sum
-        val totalFilesCount   = prioritizedMergeGroups.map(_.files.length).sum
-        val skippedGroups     = prioritizedMergeGroups.drop(maxLimit)
-        logger.info(
-          s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit highest-impact groups " +
-            s"(source splits range: ${limitedGroups.map(_.files.length).min}-${limitedGroups.map(_.files.length).max})"
-        )
-        if (skippedGroups.nonEmpty) {
-          logger.info(
-            s"Skipping ${skippedGroups.length} lower-impact groups with ${skippedGroups.map(_.files.length).sum} files " +
-              s"(source splits range: ${skippedGroups.map(_.files.length).min}-${skippedGroups.map(_.files.length).max})"
-          )
-        }
-
-        limitedGroups
-      case Some(maxLimit) =>
-        logger.info(s"MAX DEST SPLITS limit of $maxLimit not reached (found ${prioritizedMergeGroups.length} groups)")
-        prioritizedMergeGroups
-      case None =>
-        logger.debug("No MAX DEST SPLITS limit specified")
-        prioritizedMergeGroups
-    }
-
-    // Final safety check: ensure no single-file groups exist
-    val singleFileGroups = limitedMergeGroups.filter(_.files.length < 2)
-    if (singleFileGroups.nonEmpty) {
-      logger.error(s"CRITICAL: Found ${singleFileGroups.length} single-file groups that should have been filtered out!")
-      singleFileGroups.foreach { group =>
-        logger.error(s"  Single-file group: ${group.files.head.path} in partition ${group.partitionValues}")
+        filtered
+      } else {
+        allFiles
       }
-      throw new IllegalStateException(s"Internal error: Found ${singleFileGroups.length} single-file merge groups")
-    }
 
-    // Extract AWS and Azure configuration early so it's available for all code paths
-    val awsConfig   = extractAwsConfig()
-    val azureConfig = extractAzureConfig()
+      logger.info(s"Processing ${currentFiles.length} files for merge (after cooldown filtering)")
+      currentFiles.foreach { file =>
+        logger.info(s"  File: ${file.path} (${file.size} bytes, partition: ${file.partitionValues})")
+      }
 
-    if (limitedMergeGroups.isEmpty) {
-      logger.info("No splits require merging")
-      return Seq(
-        Row(
-          tablePath.toString,
-          Row("no_action", null, null, null, null, "All splits are already optimal size"),
-          awsConfig.tempDirectoryPath.getOrElse(null),
-          if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
-        )
-      )
-    }
+      // Group files by partition (merge only within partitions - Delta Lake pattern)
+      val partitionsToMerge = currentFiles.groupBy(_.partitionValues).toSeq
+      logger.info(s"Found ${partitionsToMerge.length} partitions to potentially merge")
+      partitionsToMerge.foreach {
+        case (partitionValues, files) =>
+          logger.info(s"  Partition $partitionValues: ${files.length} files")
+      }
 
-    // Get batch configuration - Delta Lake-inspired batching strategy
-    val defaultParallelism = sparkSession.sparkContext.defaultParallelism
-    val batchSize = sparkSession.conf
-      .getOption("spark.indextables.merge.batchSize")
-      .map(_.toInt)
-      .getOrElse(defaultParallelism)
+      // Apply partition predicates if specified
+      val filteredPartitions = if (partitionPredicates.nonEmpty) {
+        applyPartitionPredicates(partitionsToMerge, partitionSchema)
+      } else {
+        partitionsToMerge
+      }
 
-    val maxConcurrentBatches = sparkSession.conf
-      .getOption("spark.indextables.merge.maxConcurrentBatches")
-      .map(_.toInt)
-      .getOrElse(2)
+      // Find mergeable splits within each partition
+      val mergeGroups = filteredPartitions.flatMap {
+        case (partitionValues, files) =>
+          logger.info(s"Processing partition $partitionValues with ${files.length} files:")
+          files.foreach(file => logger.info(s"  File: ${file.path} (${file.size} bytes)"))
 
-    logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
+          val groups = findMergeableGroups(partitionValues, files, effectiveMaxSourceSplitsPerMerge)
+          logger.info(s"Found ${groups.length} potential merge groups in partition $partitionValues")
 
-    // limitedMergeGroups is already sorted by source split count (descending), oldest first for ties
-    // Split merge groups into batches based on batch size
-    val batches = limitedMergeGroups.grouped(batchSize).toSeq
-    logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
+          // Double-check: filter out any single-file groups that might have slipped through
+          logger.debug(s"MERGE DEBUG: Before filtering: ${groups.length} groups")
+          groups.foreach { group =>
+            logger.debug(
+              s"MERGE DEBUG:   Group has ${group.files.length} files: ${group.files.map(_.path).mkString(", ")}"
+            )
+          }
+          val validGroups = groups.filter(_.files.length >= 2)
+          logger.debug(s"MERGE DEBUG: After filtering: ${validGroups.length} valid groups")
+          if (groups.length != validGroups.length) {
+            logger.warn(
+              s"Filtered out ${groups.length - validGroups.length} single-file groups from partition $partitionValues"
+            )
+          }
 
-    batches.zipWithIndex.foreach {
-      case (batch, idx) =>
-        logger.info(s"Batch ${idx + 1}/${batches.length}: ${batch.length} merge groups")
-    }
+          validGroups.foreach { group =>
+            logger.info(s"  Valid merge group: ${group.files.length} files (${group.files.map(_.size).sum} bytes total)")
+            group.files.foreach(file => logger.info(s"    - ${file.path} (${file.size} bytes)"))
+          }
 
-    // Execute batches concurrently with controlled parallelism
-    logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
+          validGroups
+      }
 
-    // Broadcast Azure configuration and table path (these don't expire)
-    // AWS config is refreshed per-batch to get fresh credentials from provider
-    val broadcastAzureConfig = sparkSession.sparkContext.broadcast(azureConfig)
-    val broadcastTablePath   = sparkSession.sparkContext.broadcast(tablePath.toString)
+      logger.info(s"Found ${mergeGroups.length} merge groups containing ${mergeGroups.map(_.files.length).sum} files")
 
-    // Process batches with controlled concurrency using Scala parallel collections
-    import scala.collection.parallel.ForkJoinTaskSupport
-    import java.util.concurrent.ForkJoinPool
-    import scala.util.{Try, Success, Failure}
+      // Sort ALL merge groups by:
+      // 1. Primary: source split count (descending) - prioritize high-impact merges
+      // 2. Secondary: oldest modification time (ascending) - tie-break with oldest first
+      val prioritizedMergeGroups = mergeGroups.sortBy { g =>
+        val sourceCount = -g.files.length                     // Negative for descending order
+        val oldestTime  = g.files.map(_.modificationTime).min // Ascending (oldest first for ties)
+        (sourceCount, oldestTime)
+      }
+      logger.info(s"Prioritized merge groups by source split count (ties broken by oldest): ${prioritizedMergeGroups
+          .map(_.files.length)
+          .take(10)
+          .mkString(", ")}${if (prioritizedMergeGroups.length > 10) "..." else ""}")
 
-    val batchResults      = batches.zipWithIndex.par
-    val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
-    batchResults.tasksupport = customTaskSupport
+      // Apply MAX DEST SPLITS limit if specified (formerly MAX GROUPS)
+      // Now takes the top N groups by source split count (highest impact merges first)
+      val limitedMergeGroups = maxDestSplits match {
+        case Some(maxLimit) if prioritizedMergeGroups.length > maxLimit =>
+          logger.info(s"Limiting merge operation to $maxLimit highest-impact dest splits (out of ${prioritizedMergeGroups.length} total)")
 
-    // Track batch failures
-    var failedBatchCount     = 0
-    var successfulBatchCount = 0
+          // Take the top N groups (already sorted by source split count descending, oldest first for ties)
+          val limitedGroups = prioritizedMergeGroups.take(maxLimit)
 
-    val allResults =
-      try {
-        batchResults.flatMap {
-          case (batch, batchIdx) =>
-            Try {
+          val limitedFilesCount = limitedGroups.map(_.files.length).sum
+          val totalFilesCount   = prioritizedMergeGroups.map(_.files.length).sum
+          val skippedGroups     = prioritizedMergeGroups.drop(maxLimit)
+          logger.info(
+            s"MAX DEST SPLITS limit applied: processing $limitedFilesCount files from $maxLimit highest-impact groups " +
+              s"(source splits range: ${limitedGroups.map(_.files.length).min}-${limitedGroups.map(_.files.length).max})"
+          )
+          if (skippedGroups.nonEmpty) {
+            logger.info(
+              s"Skipping ${skippedGroups.length} lower-impact groups with ${skippedGroups.map(_.files.length).sum} files " +
+                s"(source splits range: ${skippedGroups.map(_.files.length).min}-${skippedGroups.map(_.files.length).max})"
+            )
+          }
+
+          limitedGroups
+        case Some(maxLimit) =>
+          logger.info(s"MAX DEST SPLITS limit of $maxLimit not reached (found ${prioritizedMergeGroups.length} groups)")
+          prioritizedMergeGroups
+        case None =>
+          logger.debug("No MAX DEST SPLITS limit specified")
+          prioritizedMergeGroups
+      }
+
+      // Final safety check: ensure no single-file groups exist
+      val singleFileGroups = limitedMergeGroups.filter(_.files.length < 2)
+      if (singleFileGroups.nonEmpty) {
+        logger.error(s"CRITICAL: Found ${singleFileGroups.length} single-file groups that should have been filtered out!")
+        singleFileGroups.foreach { group =>
+          logger.error(s"  Single-file group: ${group.files.head.path} in partition ${group.partitionValues}")
+        }
+        throw new IllegalStateException(s"Internal error: Found ${singleFileGroups.length} single-file merge groups")
+      }
+
+      // Check if no merge groups found - exit loop
+      if (limitedMergeGroups.isEmpty) {
+        logger.info(s"Pass $passNumber: No merge groups found")
+        continueLooping = false
+      } else {
+        // Continue with batch execution for this pass
+
+        // Get batch configuration - Delta Lake-inspired batching strategy
+        val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+        val batchSize = sparkSession.conf
+          .getOption("spark.indextables.merge.batchSize")
+          .map(_.toInt)
+          .getOrElse(defaultParallelism)
+
+        val maxConcurrentBatches = sparkSession.conf
+          .getOption("spark.indextables.merge.maxConcurrentBatches")
+          .map(_.toInt)
+          .getOrElse(2)
+
+        logger.info(s"Batch configuration: batchSize=$batchSize (defaultParallelism=$defaultParallelism), maxConcurrentBatches=$maxConcurrentBatches")
+
+        // limitedMergeGroups is already sorted by source split count (descending), oldest first for ties
+        // Split merge groups into batches based on batch size
+        val batches = limitedMergeGroups.grouped(batchSize).toSeq
+        logger.info(s"Split ${limitedMergeGroups.length} merge groups into ${batches.length} batches")
+
+        batches.zipWithIndex.foreach {
+          case (batch, idx) =>
+            logger.info(s"Batch ${idx + 1}/${batches.length}: ${batch.length} merge groups")
+        }
+
+        // Execute batches concurrently with controlled parallelism
+        logger.info(s"Processing ${batches.length} batches with up to $maxConcurrentBatches concurrent batches")
+
+        // Broadcast Azure configuration and table path (these don't expire)
+        // AWS config is refreshed per-batch to get fresh credentials from provider
+        val broadcastAzureConfig = sparkSession.sparkContext.broadcast(azureConfig)
+        val broadcastTablePath   = sparkSession.sparkContext.broadcast(tablePath.toString)
+
+        // Process batches with controlled concurrency using Scala parallel collections
+        import scala.collection.parallel.ForkJoinTaskSupport
+        import java.util.concurrent.ForkJoinPool
+        import scala.util.{Try, Success, Failure}
+
+        val batchResults      = batches.zipWithIndex.par
+        val customTaskSupport = new ForkJoinTaskSupport(new ForkJoinPool(maxConcurrentBatches))
+        batchResults.tasksupport = customTaskSupport
+
+        // Track batch failures
+        var failedBatchCount     = 0
+        var successfulBatchCount = 0
+
+        val allResults =
+          try {
+            batchResults.flatMap {
+              case (batch, batchIdx) =>
+                Try {
               val batchNum    = batchIdx + 1
               val totalSplits = batch.map(_.files.length).sum
               val totalSizeGB = batch.map(_.files.map(_.size).sum).sum / (1024.0 * 1024.0 * 1024.0)
@@ -1097,35 +1116,67 @@ class MergeSplitsExecutor(
                 Seq.empty // Return empty sequence for failed batches
             }
         }.toList
-      } finally
-        customTaskSupport.environment.shutdown()
+        } finally
+          customTaskSupport.environment.shutdown()
 
-    val totalMergedFiles  = allResults.map(_.mergedFiles).sum
-    val totalMergeGroups  = allResults.length
-    val totalOriginalSize = allResults.map(_.originalSize).sum
-    val totalMergedSize   = allResults.map(_.mergedSize).sum
+        // Accumulate results from this pass
+        allPassResults ++= allResults
+        totalBatches += batches.length
+        totalSuccessful += successfulBatchCount
+        totalFailed += failedBatchCount
 
-    val status = if (failedBatchCount == 0) "success" else "partial_success"
+        val passMergedFiles = allResults.map(_.mergedFiles).sum
+        val passMergeGroups = allResults.length
+        logger.info(s"Pass $passNumber completed: merged $passMergedFiles files into $passMergeGroups splits across ${batches.length} batches")
+      } // End of else block (merge groups found)
+    } // End of while loop
 
-    logger.info(s"MERGE SPLITS completed: merged $totalMergedFiles files into $totalMergeGroups new splits across ${batches.length} batches")
-    logger.info(s"Batch summary: $successfulBatchCount successful, $failedBatchCount failed")
+    // Check if we hit the max passes limit
+    if (passNumber >= maxPasses && continueLooping) {
+      logger.warn(s"Reached maximum passes limit ($maxPasses). More merges may be possible.")
+    }
+
+    // Aggregate results from all passes
+    val totalMergedFiles  = allPassResults.map(_.mergedFiles).sum
+    val totalMergeGroups  = allPassResults.length
+    val totalOriginalSize = allPassResults.map(_.originalSize).sum
+    val totalMergedSize   = allPassResults.map(_.mergedSize).sum
+
+    val completedPasses = if (continueLooping) passNumber else passNumber - 1
+    val status = if (totalFailed == 0 && totalMergedFiles > 0) "success"
+                 else if (totalMergedFiles == 0) "no_action"
+                 else "partial_success"
+
+    logger.info(s"MERGE SPLITS completed: $completedPasses passes, merged $totalMergedFiles files into $totalMergeGroups new splits")
+    logger.info(s"Total batches: $totalBatches, successful: $totalSuccessful, failed: $totalFailed")
     logger.info(s"Size change: $totalOriginalSize bytes -> $totalMergedSize bytes")
 
-    Seq(
-      Row(
-        tablePath.toString,
+    if (totalMergedFiles == 0) {
+      Seq(
         Row(
-          status,
-          totalMergedFiles.asInstanceOf[Long],
-          totalMergeGroups.asInstanceOf[Long],
-          totalOriginalSize,
-          totalMergedSize,
-          s"batches: ${batches.length}, successful: $successfulBatchCount, failed: $failedBatchCount"
-        ),
-        awsConfig.tempDirectoryPath.getOrElse(null),
-        if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
+          tablePath.toString,
+          Row("no_action", null, null, null, null, "All splits are already optimal size"),
+          awsConfig.tempDirectoryPath.getOrElse(null),
+          if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
+        )
       )
-    )
+    } else {
+      Seq(
+        Row(
+          tablePath.toString,
+          Row(
+            status,
+            totalMergedFiles.asInstanceOf[Long],
+            totalMergeGroups.asInstanceOf[Long],
+            totalOriginalSize,
+            totalMergedSize,
+            s"passes: $completedPasses, batches: $totalBatches, successful: $totalSuccessful, failed: $totalFailed"
+          ),
+          awsConfig.tempDirectoryPath.getOrElse(null),
+          if (awsConfig.heapSize == null) null else awsConfig.heapSize.asInstanceOf[Long]
+        )
+      )
+    }
   }
 
   /**
