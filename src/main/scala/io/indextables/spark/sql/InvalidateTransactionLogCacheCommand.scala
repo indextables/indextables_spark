@@ -75,16 +75,27 @@ case class InvalidateTransactionLogCacheCommand(
         // Invalidate cache for specific table
         invalidateTableCache(path, sparkSession)
       case None =>
-        // Global invalidation - this would require a global registry of TransactionLog instances
-        // For now, return a message indicating this is not fully implemented
-        logger.info("Global transaction log cache invalidation requested - limited implementation")
+        // Global invalidation - clear all global caches
+        logger.info("Global transaction log cache invalidation requested - clearing all global caches")
+
+        // Get stats before clearing
+        val (actionsStats, checkpointStats) = io.indextables.spark.transaction.EnhancedTransactionLogCache.getGlobalCacheStats()
+        val hitsBefore = actionsStats.hitCount() + checkpointStats.hitCount()
+        val missesBefore = actionsStats.missCount() + checkpointStats.missCount()
+        val totalRequests = hitsBefore + missesBefore
+        val hitRateBefore = if (totalRequests > 0) f"${(hitsBefore.toDouble / totalRequests) * 100}%.1f%%" else "N/A"
+
+        // Clear all global caches
+        io.indextables.spark.transaction.EnhancedTransactionLogCache.clearGlobalCaches()
+
+        logger.info("Global transaction log caches cleared successfully")
         Seq(
           Row(
             "GLOBAL",
-            "Global cache invalidation not fully implemented - use table-specific invalidation",
-            0L,
-            0L,
-            "N/A"
+            "All global transaction log caches cleared successfully",
+            hitsBefore,
+            missesBefore,
+            hitRateBefore
           )
         )
     }

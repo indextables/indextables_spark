@@ -18,6 +18,7 @@
 package io.indextables.spark.io
 
 import java.io.{Closeable, InputStream, OutputStream}
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -142,6 +143,94 @@ trait CloudStorageProvider extends Closeable {
    * Other providers can return the path unchanged.
    */
   def normalizePathForTantivy(path: String): String = path // Default implementation returns unchanged
+}
+
+/**
+ * Companion object providing global request counters for monitoring and testing.
+ * These counters track all CloudStorageProvider operations across the JVM and are
+ * useful for validating caching effectiveness and diagnosing performance issues.
+ */
+object CloudStorageProvider {
+  // Global atomic counters for all CloudStorageProvider operations
+  private val existsCount = new AtomicLong(0)
+  private val readFileCount = new AtomicLong(0)
+  private val listFilesCount = new AtomicLong(0)
+  private val writeFileCount = new AtomicLong(0)
+  private val deleteFileCount = new AtomicLong(0)
+  private val getFileInfoCount = new AtomicLong(0)
+
+  /** Increment exists (headObject) call counter */
+  def incrementExists(): Unit = existsCount.incrementAndGet()
+
+  /** Increment readFile call counter */
+  def incrementReadFile(): Unit = readFileCount.incrementAndGet()
+
+  /** Increment listFiles call counter */
+  def incrementListFiles(): Unit = listFilesCount.incrementAndGet()
+
+  /** Increment writeFile call counter */
+  def incrementWriteFile(): Unit = writeFileCount.incrementAndGet()
+
+  /** Increment deleteFile call counter */
+  def incrementDeleteFile(): Unit = deleteFileCount.incrementAndGet()
+
+  /** Increment getFileInfo call counter */
+  def incrementGetFileInfo(): Unit = getFileInfoCount.incrementAndGet()
+
+  /** Get current exists call count */
+  def getExistsCount: Long = existsCount.get()
+
+  /** Get current readFile call count */
+  def getReadFileCount: Long = readFileCount.get()
+
+  /** Get current listFiles call count */
+  def getListFilesCount: Long = listFilesCount.get()
+
+  /** Get current writeFile call count */
+  def getWriteFileCount: Long = writeFileCount.get()
+
+  /** Get current deleteFile call count */
+  def getDeleteFileCount: Long = deleteFileCount.get()
+
+  /** Get current getFileInfo call count */
+  def getGetFileInfoCount: Long = getFileInfoCount.get()
+
+  /** Get total request count (all operations) */
+  def getTotalRequestCount: Long =
+    existsCount.get() + readFileCount.get() + listFilesCount.get() +
+      writeFileCount.get() + deleteFileCount.get() + getFileInfoCount.get()
+
+  /** Reset all counters (for testing) */
+  def resetCounters(): Unit = {
+    existsCount.set(0)
+    readFileCount.set(0)
+    listFilesCount.set(0)
+    writeFileCount.set(0)
+    deleteFileCount.set(0)
+    getFileInfoCount.set(0)
+  }
+
+  /** Get a snapshot of all counters */
+  def getCountersSnapshot: CloudStorageCounters =
+    CloudStorageCounters(
+      exists = existsCount.get(),
+      readFile = readFileCount.get(),
+      listFiles = listFilesCount.get(),
+      writeFile = writeFileCount.get(),
+      deleteFile = deleteFileCount.get(),
+      getFileInfo = getFileInfoCount.get()
+    )
+}
+
+/** Snapshot of CloudStorageProvider global counters */
+case class CloudStorageCounters(
+  exists: Long,
+  readFile: Long,
+  listFiles: Long,
+  writeFile: Long,
+  deleteFile: Long,
+  getFileInfo: Long) {
+  def total: Long = exists + readFile + listFiles + writeFile + deleteFile + getFileInfo
 }
 
 /** File metadata information */

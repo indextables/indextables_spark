@@ -352,6 +352,7 @@ class AzureCloudStorageProvider(
   }
 
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
+    CloudStorageProvider.incrementListFiles()
     val (container, prefix) = parseAzureUri(path)
     val containerClient     = getContainerClient(container)
 
@@ -383,7 +384,8 @@ class AzureCloudStorageProvider(
     }
   }
 
-  override def exists(path: String): Boolean =
+  override def exists(path: String): Boolean = {
+    CloudStorageProvider.incrementExists()
     try {
       val blobClient = getBlobClient(path)
       blobClient.exists()
@@ -392,8 +394,10 @@ class AzureCloudStorageProvider(
         logger.error(s"Failed to check existence of $path", ex)
         false
     }
+  }
 
-  override def getFileInfo(path: String): Option[CloudFileInfo] =
+  override def getFileInfo(path: String): Option[CloudFileInfo] = {
+    CloudStorageProvider.incrementGetFileInfo()
     try {
       val blobClient = getBlobClient(path)
       if (blobClient.exists()) {
@@ -414,8 +418,10 @@ class AzureCloudStorageProvider(
         logger.error(s"Failed to get file info for $path", ex)
         None
     }
+  }
 
   override def readFile(path: String): Array[Byte] = {
+    CloudStorageProvider.incrementReadFile()
     val blobClient   = getBlobClient(path)
     val outputStream = new ByteArrayOutputStream()
     blobClient.download(outputStream)
@@ -454,12 +460,14 @@ class AzureCloudStorageProvider(
     }
 
   override def writeFile(path: String, content: Array[Byte]): Unit = {
+    CloudStorageProvider.incrementWriteFile()
     val blobClient  = getBlobClient(path)
     val inputStream = new ByteArrayInputStream(content)
     blobClient.upload(inputStream, content.length, true) // overwrite = true
   }
 
-  override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean =
+  override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean = {
+    CloudStorageProvider.incrementWriteFile()
     try {
       val blobClient = getBlobClient(path)
 
@@ -488,6 +496,7 @@ class AzureCloudStorageProvider(
         logger.error(s"Failed to write file conditionally: $path", ex)
         throw new RuntimeException(s"Failed to write file conditionally: $path", ex)
     }
+  }
 
   /**
    * Write file from input stream with parallel block uploads using ASYNC Azure client.
@@ -686,7 +695,8 @@ class AzureCloudStorageProvider(
     }
   }
 
-  override def deleteFile(path: String): Boolean =
+  override def deleteFile(path: String): Boolean = {
+    CloudStorageProvider.incrementDeleteFile()
     try {
       val blobClient = getBlobClient(path)
       blobClient.delete()
@@ -699,6 +709,7 @@ class AzureCloudStorageProvider(
         logger.error(s"Failed to delete blob: $path", ex)
         false
     }
+  }
 
   override def createDirectory(path: String): Boolean =
     // Azure Blob Storage doesn't have directories - they are virtual

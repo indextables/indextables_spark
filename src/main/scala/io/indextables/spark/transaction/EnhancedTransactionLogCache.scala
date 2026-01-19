@@ -36,25 +36,58 @@ object EnhancedTransactionLogCache {
   case class CheckpointActionsKey(tablePath: String, checkpointVersion: Long)
   case class LastCheckpointInfoCached(info: Option[LastCheckpointInfo], cachedAt: Long)
 
-  // GLOBAL checkpoint actions cache - shared across all TransactionLog instances
-  private[transaction] val globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = CacheBuilder
-    .newBuilder()
-    .expireAfterAccess(30, TimeUnit.MINUTES)
-    .maximumSize(200)
-    .recordStats()
-    .removalListener(new RemovalListener[CheckpointActionsKey, Seq[Action]] {
-      override def onRemoval(notification: RemovalNotification[CheckpointActionsKey, Seq[Action]]): Unit =
-        logger.debug(s"Evicted global checkpoint actions: ${notification.getKey}, reason: ${notification.getCause}")
-    })
-    .build[CheckpointActionsKey, Seq[Action]]()
+  // Configurable TTL for global checkpoint caches (default 5 minutes)
+  @volatile private var globalCheckpointCacheTTLMinutes: Long = 5
+  @volatile private var globalCheckpointCacheMaxSize: Long = 200
+  @volatile private var cachesInitialized: Boolean = false
 
-  // GLOBAL last checkpoint info cache - shared across all TransactionLog instances
-  private[transaction] val globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = CacheBuilder
-    .newBuilder()
-    .expireAfterAccess(30, TimeUnit.MINUTES)
-    .maximumSize(200)
-    .recordStats()
-    .build[String, LastCheckpointInfoCached]()
+  /**
+   * Configure the global checkpoint cache TTL. Must be called before first cache access.
+   * Thread-safe but will log a warning if called after caches are already initialized.
+   */
+  def configureGlobalCacheTTL(ttlMinutes: Long, maxSize: Long = 200): Unit = synchronized {
+    if (cachesInitialized) {
+      logger.warn(s"Global checkpoint caches already initialized with TTL=${globalCheckpointCacheTTLMinutes}min. " +
+        s"New TTL=$ttlMinutes will take effect after cache rebuild (clearGlobalCaches + re-access).")
+    }
+    globalCheckpointCacheTTLMinutes = ttlMinutes
+    globalCheckpointCacheMaxSize = maxSize
+    logger.info(s"Configured global checkpoint cache: TTL=${ttlMinutes}min, maxSize=$maxSize")
+  }
+
+  /** Get the current global checkpoint cache TTL in minutes */
+  def getGlobalCacheTTLMinutes: Long = globalCheckpointCacheTTLMinutes
+
+  // Lazy initialization of global caches to allow configuration before first use
+  private lazy val _globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global checkpoint actions cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .removalListener(new RemovalListener[CheckpointActionsKey, Seq[Action]] {
+        override def onRemoval(notification: RemovalNotification[CheckpointActionsKey, Seq[Action]]): Unit =
+          logger.debug(s"Evicted global checkpoint actions: ${notification.getKey}, reason: ${notification.getCause}")
+      })
+      .build[CheckpointActionsKey, Seq[Action]]()
+  }
+
+  private lazy val _globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global last checkpoint info cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .build[String, LastCheckpointInfoCached]()
+  }
+
+  // Accessors for the lazy caches
+  private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
+  private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {

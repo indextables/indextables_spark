@@ -33,6 +33,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   private val logger = LoggerFactory.getLogger(classOf[HadoopCloudStorageProvider])
 
   override def listFiles(path: String, recursive: Boolean = false): Seq[CloudFileInfo] = {
+    CloudStorageProvider.incrementListFiles()
     val hadoopPath = new Path(path)
 
     try {
@@ -60,6 +61,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def exists(path: String): Boolean = {
+    CloudStorageProvider.incrementExists()
     val hadoopPath = new Path(path)
 
     try {
@@ -73,6 +75,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def getFileInfo(path: String): Option[CloudFileInfo] = {
+    CloudStorageProvider.incrementGetFileInfo()
     val hadoopPath = new Path(path)
 
     try {
@@ -91,6 +94,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def readFile(path: String): Array[Byte] = {
+    CloudStorageProvider.incrementReadFile()
     val hadoopPath = new Path(path)
 
     try {
@@ -163,6 +167,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def writeFile(path: String, content: Array[Byte]): Unit = {
+    CloudStorageProvider.incrementWriteFile()
     val output = createOutputStream(path)
 
     try
@@ -172,6 +177,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def writeFileIfNotExists(path: String, content: Array[Byte]): Boolean = {
+    CloudStorageProvider.incrementWriteFile()
     val hadoopPath = new Path(path)
 
     try {
@@ -237,6 +243,7 @@ class HadoopCloudStorageProvider(hadoopConf: Configuration) extends CloudStorage
   }
 
   override def deleteFile(path: String): Boolean = {
+    CloudStorageProvider.incrementDeleteFile()
     val hadoopPath = new Path(path)
 
     try {
