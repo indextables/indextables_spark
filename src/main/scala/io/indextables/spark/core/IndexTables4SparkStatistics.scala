@@ -96,8 +96,15 @@ object IndexTables4SparkStatistics {
   /**
    * Creates statistics from a collection of AddAction entries from the transaction log. This aggregates information
    * from all splits to provide table-level statistics.
+   *
+   * @param addActions the split files to aggregate statistics from
+   * @param referencedColumns optional set of column names to compute statistics for (from WHERE clause filters).
+   *                          If empty, column statistics are skipped entirely (fast path for queries without filters).
    */
-  def fromAddActions(addActions: Seq[AddAction]): IndexTables4SparkStatistics = {
+  def fromAddActions(
+      addActions: Seq[AddAction],
+      referencedColumns: Set[String] = Set.empty
+  ): IndexTables4SparkStatistics = {
     if (addActions.isEmpty) {
       return new IndexTables4SparkStatistics(Some(0L), Some(0L))
     }
@@ -109,7 +116,8 @@ object IndexTables4SparkStatistics {
     val totalRows = addActions.flatMap(_.numRecords).map(convertToLong).foldLeft(0L)(_ + _)
 
     // Aggregate column-level statistics from min/max values in AddActions
-    val columnStats = aggregateColumnStatistics(addActions, totalRows)
+    // Only compute for referenced columns (optimization: O(addActions × referencedColumns) instead of O(addActions × allColumns))
+    val columnStats = aggregateColumnStatistics(addActions, totalRows, referencedColumns)
 
     new IndexTables4SparkStatistics(
       totalSizeInBytes = if (totalSize > 0) Some(totalSize) else None,
@@ -128,44 +136,74 @@ object IndexTables4SparkStatistics {
       case other                => other.toString.toLong
     }
 
-  /** Aggregates column statistics from AddAction min/max values. */
-  private def aggregateColumnStatistics(addActions: Seq[AddAction], totalRows: Long): Map[String, ColumnStatistics] = {
-    val columnStatsBuilder = scala.collection.mutable.Map[String, ColumnStatistics]()
+  /**
+   * Aggregates column statistics from AddAction min/max values using single-pass algorithm.
+   *
+   * Performance optimization: Only computes statistics for columns referenced in WHERE clause filters.
+   * Uses mutable accumulators for O(addActions × referencedColumns) complexity instead of
+   * O(addActions × allColumns) in the original two-pass algorithm.
+   *
+   * @param addActions the split files to aggregate statistics from
+   * @param totalRows total row count (unused but kept for API compatibility)
+   * @param referencedColumns columns to compute statistics for. If empty, returns empty Map (fast path).
+   */
+  private def aggregateColumnStatistics(
+      addActions: Seq[AddAction],
+      totalRows: Long,
+      referencedColumns: Set[String]
+  ): Map[String, ColumnStatistics] = {
+    // Fast path: no filters = no column stats needed
+    if (referencedColumns.isEmpty) {
+      return Map.empty
+    }
 
-    // Collect all column names that have min/max values
-    val allColumnNames = addActions.flatMap { action =>
-      action.minValues.getOrElse(Map.empty).keys ++ action.maxValues.getOrElse(Map.empty).keys
-    }.toSet
+    // Use Java HashMap for performance (avoids Scala collection boxing overhead)
+    val minAccum = new JavaHashMap[String, String]()
+    val maxAccum = new JavaHashMap[String, String]()
 
-    allColumnNames.foreach { columnName =>
-      try {
-        // Extract min/max values for this column across all files
-        val minValues = addActions.flatMap(_.minValues.getOrElse(Map.empty).get(columnName)).filter(_.nonEmpty)
-        val maxValues = addActions.flatMap(_.maxValues.getOrElse(Map.empty).get(columnName)).filter(_.nonEmpty)
-
-        if (minValues.nonEmpty && maxValues.nonEmpty) {
-          // For strings, use lexicographic ordering; for numbers, parse and compare
-          val globalMin = minValues.min
-          val globalMax = maxValues.max
-
-          // We don't have null count or distinct count information in AddActions,
-          // so we'll provide basic min/max statistics only
-          val colStats = new SimpleColumnStatistics(
-            nullCount = None,     // Not available from transaction log
-            distinctCount = None, // Not available from transaction log
-            minValue = Some(globalMin),
-            maxValue = Some(globalMax)
-          )
-
-          columnStatsBuilder(columnName) = colStats
+    // Single pass through addActions - only process referenced columns
+    addActions.foreach { action =>
+      action.minValues.foreach { minMap =>
+        referencedColumns.foreach { col =>
+          minMap.get(col).foreach { value =>
+            if (value.nonEmpty) {
+              val current = minAccum.get(col)
+              if (current == null || value < current) {
+                minAccum.put(col, value)
+              }
+            }
+          }
         }
-      } catch {
-        case _: Exception =>
-        // Skip columns that can't be processed (e.g., incomparable types)
+      }
+      action.maxValues.foreach { maxMap =>
+        referencedColumns.foreach { col =>
+          maxMap.get(col).foreach { value =>
+            if (value.nonEmpty) {
+              val current = maxAccum.get(col)
+              if (current == null || value > current) {
+                maxAccum.put(col, value)
+              }
+            }
+          }
+        }
       }
     }
 
-    columnStatsBuilder.toMap
+    // Build result only for columns with both min and max
+    referencedColumns.flatMap { col =>
+      val min = Option(minAccum.get(col))
+      val max = Option(maxAccum.get(col))
+      if (min.isDefined && max.isDefined) {
+        Some(col -> new SimpleColumnStatistics(
+          nullCount = None,     // Not available from transaction log
+          distinctCount = None, // Not available from transaction log
+          minValue = min,
+          maxValue = max
+        ))
+      } else {
+        None
+      }
+    }.toMap
   }
 
   /** Creates statistics for an empty table. */

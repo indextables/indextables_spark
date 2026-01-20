@@ -297,10 +297,15 @@ class IndexTables4SparkScan(
       // for the filtered dataset that will actually be read
       val filteredActions = applyDataSkipping(addActions, pushedFilters)
 
-      val statistics = IndexTables4SparkStatistics.fromAddActions(filteredActions)
+      // Extract columns referenced in WHERE clause filters for optimized column statistics computation
+      // This reduces complexity from O(addActions × allColumns) to O(addActions × referencedColumns)
+      val referencedColumns = pushedFilters.flatMap(getFilterReferencedColumns).toSet
+
+      val statistics = IndexTables4SparkStatistics.fromAddActions(filteredActions, referencedColumns)
 
       logger.info(
-        s"Table statistics: ${statistics.sizeInBytes().orElse(0L)} bytes, ${statistics.numRows().orElse(0L)} rows"
+        s"Table statistics: ${statistics.sizeInBytes().orElse(0L)} bytes, ${statistics.numRows().orElse(0L)} rows" +
+          (if (referencedColumns.nonEmpty) s", column stats for ${referencedColumns.size} columns" else ", no column stats (no filters)")
       )
 
       statistics
