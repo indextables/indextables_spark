@@ -70,6 +70,38 @@ class IndexTables4SparkScan(
   @volatile private var lastScanResultFiles: Long = 0L
   @volatile private var lastScanTotalSkipRate: Double = 0.0
 
+  // Cache for filtered actions (computed once, reused between planInputPartitions and estimateStatistics)
+  // This avoids duplicate calls to transactionLog.listFiles() and applyDataSkipping()
+  @volatile private var cachedFilteredActions: Option[Seq[AddAction]] = None
+
+  // Pre-computed filter hash for cache lookups (computed once in constructor)
+  // This avoids recomputing O(filters) hash on every cache lookup in applyDataSkipping
+  private val precomputedFilterHash: Long = computeFilterHash(pushedFilters)
+
+  /**
+   * Compute a hash for the filter array (computed once in constructor).
+   * Uses toString to capture full filter structure, matching PartitionFilterCache pattern.
+   */
+  private def computeFilterHash(filters: Array[Filter]): Long = {
+    if (filters.isEmpty) return 0L
+    val filterString = filters.map(_.toString).sorted.mkString("|")
+    filterString.hashCode.toLong & 0xFFFFFFFFL
+  }
+
+  /**
+   * Get filtered actions, computing and caching on first call.
+   * This optimization reduces redundant listFiles() and applyDataSkipping() calls
+   * that would otherwise occur in both planInputPartitions() and estimateStatistics().
+   */
+  private def getFilteredActions(): Seq[AddAction] = {
+    cachedFilteredActions.getOrElse {
+      val addActions = transactionLog.listFiles()
+      val filtered = applyDataSkipping(addActions, pushedFilters)
+      cachedFilteredActions = Some(filtered)
+      filtered
+    }
+  }
+
   if (logger.isDebugEnabled) {
     logger.debug(s"SCAN CONSTRUCTION: IndexTables4SparkScan created with ${pushedFilters.length} pushed filters")
     pushedFilters.foreach(f => logger.debug(s"SCAN CONSTRUCTION:   - Filter: $f"))
@@ -90,8 +122,6 @@ class IndexTables4SparkScan(
         logger.warn(s"Failed to capture baseline batch optimization metrics: ${ex.getMessage}")
     }
 
-    val addActions = transactionLog.listFiles()
-
     // Get available hosts from SparkContext for driver-based locality assignment
     val sparkContext   = sparkSession.sparkContext
     val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sparkContext)
@@ -109,8 +139,8 @@ class IndexTables4SparkScan(
       }
     }
 
-    // Apply comprehensive data skipping (includes both partition pruning and min/max filtering)
-    val filteredActions = applyDataSkipping(addActions, pushedFilters)
+    // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
+    val filteredActions = getFilteredActions()
 
     // Check if pre-warm is enabled (supports both old and new config paths)
     val isPreWarmEnabled = config
@@ -219,7 +249,7 @@ class IndexTables4SparkScan(
       }
     }
 
-    logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions from ${addActions.length} total files")
+    logger.debug(s"SCAN DEBUG: Planning ${filteredActions.length} partitions")
 
     // Batch-assign all splits for this query using per-query load balancing
     val splitPaths  = filteredActions.map(_.path)
@@ -291,11 +321,10 @@ class IndexTables4SparkScan(
   override def estimateStatistics(): Statistics =
     try {
       logger.info("Estimating statistics for IndexTables4Spark table")
-      val addActions = transactionLog.listFiles()
 
-      // Apply the same data skipping logic used in planInputPartitions to get accurate statistics
-      // for the filtered dataset that will actually be read
-      val filteredActions = applyDataSkipping(addActions, pushedFilters)
+      // Use cached filtered actions (avoids duplicate listFiles + applyDataSkipping calls)
+      // This is the same filtered dataset that will be read, reused from planInputPartitions
+      val filteredActions = getFilteredActions()
 
       // Extract columns referenced in WHERE clause filters for optimized column statistics computation
       // This reduces complexity from O(addActions × allColumns) to O(addActions × referencedColumns)
@@ -333,8 +362,8 @@ class IndexTables4SparkScan(
     val partitionColumns = transactionLog.getPartitionColumns()
     val initialCount = addActions.length
 
-    // Step 0: Apply expression simplification (cached)
-    val simplifiedFilters = FilterExpressionCache.getOrSimplify(filters, fullTableSchema)
+    // Step 0: Apply expression simplification (cached, using pre-computed filter hash)
+    val simplifiedFilters = FilterExpressionCache.getOrSimplifyWithHash(filters, fullTableSchema, precomputedFilterHash)
 
     // Check if simplification determined no files can match
     if (simplifiedFilters.exists(ExpressionSimplifier.isAlwaysFalse)) {
@@ -377,6 +406,11 @@ class IndexTables4SparkScan(
       val parallelThreshold = config.getOrElse("spark.indextables.partitionPruning.parallelThreshold", "100").toInt
       val selectivityOrdering = config.getOrElse("spark.indextables.partitionPruning.selectivityOrdering", "true").toBoolean
 
+      // Get table path and version for PartitionIndex caching
+      // This enables O(1) cache hits on repeated queries to the same table version
+      val tablePath = transactionLog.getTablePath().toString
+      val tableVersion = transactionLog.getVersions().lastOption.getOrElse(-1L)
+
       val pruned = PartitionPruning.prunePartitionsOptimized(
         addActions,
         partitionColumns,
@@ -384,7 +418,9 @@ class IndexTables4SparkScan(
         filterCacheEnabled = filterCacheEnabled,
         indexEnabled = indexEnabled,
         parallelThreshold = parallelThreshold,
-        selectivityOrdering = selectivityOrdering
+        selectivityOrdering = selectivityOrdering,
+        tablePath = Some(tablePath),
+        tableVersion = Some(tableVersion)
       )
       val prunedCount = addActions.length - pruned.length
       if (prunedCount > 0) {
