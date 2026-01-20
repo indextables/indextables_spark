@@ -165,9 +165,6 @@ class IndexTables4SparkPartitionReader(
 
   private val logger = LoggerFactory.getLogger(classOf[IndexTables4SparkPartitionReader])
 
-  logger.debug(s"PARTITION READER: Created for split ${addAction.path} with ${filters.length} filters")
-  filters.foreach(f => logger.debug(s"PARTITION READER:   - Filter: $f"))
-
   // Calculate effective limit: use pushed limit, then configurable default, then hardcoded fallback
   // Configuration key: spark.indextables.read.defaultLimit (default: 250)
   private val configuredDefaultLimit: Int = config
@@ -212,9 +209,6 @@ class IndexTables4SparkPartitionReader(
   private def initialize(): Unit = {
     if (!initialized) {
       try {
-        logger.debug(s"ENTERING initialize() for split: ${addAction.path}")
-        logger.debug(s"V2 PartitionReader initializing for split: ${addAction.path}")
-
         // Note: Split locality is now tracked by DriverSplitLocalityManager on the driver
         // No executor-side recording needed - assignments are managed during partition planning
 
@@ -232,11 +226,7 @@ class IndexTables4SparkPartitionReader(
         }
 
         // Create cache configuration from Spark options
-        logger.debug(s"ABOUT TO CALL createCacheConfig()...")
-        logger.debug(s"Creating cache configuration for split read...")
         val cacheConfig = createCacheConfig()
-        logger.debug(s"createCacheConfig() COMPLETED SUCCESSFULLY")
-        logger.debug(s"Cache config created with: awsRegion=${cacheConfig.awsRegion.getOrElse("None")}, awsEndpoint=${cacheConfig.awsEndpoint.getOrElse("None")}")
 
         // Create split search engine using footer offset optimization when available
         // Normalize URLs for tantivy4java compatibility (S3, Azure, etc.)
@@ -252,12 +242,6 @@ class IndexTables4SparkPartitionReader(
             cachedHadoopConf
           )
         }
-
-        logger.debug(s"SPLIT PATH DEBUG:")
-        logger.debug(s"  - addAction.path: ${addAction.path}")
-        logger.debug(s"  - tablePath: ${tablePath.toString}")
-        logger.debug(s"  - filePath (resolved): $filePath")
-        logger.debug(s"actualPath (normalized) passed to tantivy4java: $actualPath")
 
         // Footer offset metadata is required for all split reading operations
         if (!addAction.hasFooterOffsets || addAction.footerStartOffset.isEmpty) {
@@ -281,16 +265,6 @@ class IndexTables4SparkPartitionReader(
               case _                    => value.toString.toLong
             }
           case None => 0L
-        }
-
-        logger.debug(
-          s"RECONSTRUCTING SplitMetadata from AddAction - docMappingJson: ${if (addAction.docMappingJson.isDefined)
-              s"PRESENT (${addAction.docMappingJson.get.length} chars)"
-            else "MISSING/NULL"}"
-        )
-        if (addAction.docMappingJson.isDefined) {
-          logger.debug(s"AddAction docMappingJson content preview: ${addAction.docMappingJson.get
-              .take(200)}${if (addAction.docMappingJson.get.length > 200) "..." else ""}")
         }
 
         val splitMetadata = new io.indextables.tantivy4java.split.merge.QuickwitSplit.SplitMetadata(
@@ -339,8 +313,7 @@ class IndexTables4SparkPartitionReader(
             splitSchema.close() // Prevent native memory leak
         }
 
-        // Log the filters and limit for debugging
-        logger.debug(s"PARTITION DEBUG: Pushdown configuration for ${addAction.path}:")
+        // Log the filters and limit
         logger.info(s"  - Filters: ${filters.length} filter(s) - ${filters.mkString(", ")}")
         logger.info(
           s"  - IndexQuery Filters: ${indexQueryFilters.length} filter(s) - ${indexQueryFilters.mkString(", ")}"
@@ -378,11 +351,6 @@ class IndexTables4SparkPartitionReader(
         }
 
         val allFilters: Array[Any] = optimizedFilters.asInstanceOf[Array[Any]] ++ indexQueryFilters
-        logger.debug(s"Combined filters: ${allFilters.length} total (${nonPartitionFilters.length} regular + ${indexQueryFilters.length} IndexQuery)")
-        if (logger.isDebugEnabled) {
-          filters.foreach(f => logger.debug(s"  - Regular filter: $f"))
-          indexQueryFilters.foreach(f => logger.debug(s"  - IndexQuery filter: $f"))
-        }
 
         // Convert filters to SplitQuery object with schema validation
         val splitQuery = if (allFilters.nonEmpty) {

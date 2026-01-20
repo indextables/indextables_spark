@@ -120,8 +120,6 @@ object DriverSplitLocalityManager {
 
         // Update per-query count
         perQueryHostCounts(leastLoadedHost) += 1
-
-        logger.debug(s"Assigned split $splitPath to $leastLoadedHost (now has ${perQueryHostCounts(leastLoadedHost)} splits in query)")
       }
 
       // Log distribution

@@ -78,14 +78,11 @@ object SplitConversionThrottle {
       throw new IllegalStateException("SplitConversionThrottle not initialized. Call initialize() first.")
     }
 
-    logger.debug(s"Acquiring split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
     sem.acquire()
     try {
-      logger.debug(s"Acquired split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
       block
     } finally {
       sem.release()
-      logger.debug(s"Released split conversion permit (available: ${sem.availablePermits()}/$currentMaxParallelism)")
     }
   }
 
@@ -193,16 +190,6 @@ object SplitManager {
         }
         logger.info(s"Split created locally: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
 
-        // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
-        val docMappingJson = metadata.getDocMappingJson()
-        logger.debug(s"SPLIT CREATED: docMappingJson from tantivy4java:")
-        logger.debug(s"SPLIT CREATED: $docMappingJson")
-        if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.debug(s"SPLIT CREATED WITH fast=false in schema")
-        } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.debug(s"SPLIT CREATED WITH fast=true in schema")
-        }
-
         // Upload to S3 using cloud storage provider with streaming for memory efficiency
         val cloudProvider = CloudStorageProviderFactory.createProvider(outputPath, options, hadoopConf)
         try {
@@ -249,16 +236,6 @@ object SplitManager {
           QuickwitSplit.convertIndexFromPath(indexPath, outputPath, config)
         }
         logger.info(s"Split created successfully: ${metadata.getSplitId()}, ${metadata.getNumDocs()} documents")
-
-        // LOG DOCMAPPINGJSON TO INVESTIGATE FAST FIELDS
-        val docMappingJson = metadata.getDocMappingJson()
-        logger.debug(s"SPLIT CREATED (non-S3): docMappingJson from tantivy4java:")
-        logger.debug(s"SPLIT CREATED (non-S3): $docMappingJson")
-        if (docMappingJson != null && docMappingJson.contains("\"fast\":false")) {
-          logger.debug(s"SPLIT CREATED WITH fast=false in schema")
-        } else if (docMappingJson != null && docMappingJson.contains("\"fast\":true")) {
-          logger.debug(s"SPLIT CREATED WITH fast=true in schema")
-        }
 
         metadata
       } catch {
