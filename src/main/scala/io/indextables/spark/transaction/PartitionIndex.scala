@@ -17,7 +17,12 @@
 
 package io.indextables.spark.transaction
 
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+
 import scala.collection.mutable
+
+import com.google.common.cache.{Cache, CacheBuilder}
 
 import org.slf4j.LoggerFactory
 
@@ -111,6 +116,97 @@ case class PartitionIndex(
 object PartitionIndex {
 
   private val logger = LoggerFactory.getLogger(PartitionIndex.getClass)
+
+  // Global cache: (tablePath, version, partitionColumnsHash) -> PartitionIndex
+  // This avoids rebuilding the index on every query for the same table/version
+  private case class CacheKey(tablePath: String, version: Long, partitionColumnsHash: Int)
+
+  private val indexCache: Cache[CacheKey, PartitionIndex] = CacheBuilder.newBuilder()
+    .maximumSize(100)
+    .expireAfterAccess(10, TimeUnit.MINUTES)
+    .recordStats()
+    .build[CacheKey, PartitionIndex]()
+
+  // Statistics
+  private val cacheHits = new AtomicLong(0)
+  private val cacheMisses = new AtomicLong(0)
+
+  /**
+   * Build or retrieve cached PartitionIndex.
+   * This is the preferred method when table path and version are available,
+   * as it avoids rebuilding the index on repeated queries to the same table.
+   *
+   * @param tablePath The table path (used as part of cache key)
+   * @param version The transaction log version (ensures cache invalidation on updates)
+   * @param addActions All files to index
+   * @param partitionColumns List of partition column names
+   * @return A PartitionIndex (cached or newly built)
+   */
+  def buildCached(
+    tablePath: String,
+    version: Long,
+    addActions: Seq[AddAction],
+    partitionColumns: Seq[String]
+  ): PartitionIndex = {
+    if (partitionColumns.isEmpty || addActions.isEmpty) {
+      return empty
+    }
+
+    val key = CacheKey(tablePath, version, partitionColumns.hashCode())
+
+    Option(indexCache.getIfPresent(key)) match {
+      case Some(cached) =>
+        cacheHits.incrementAndGet()
+        logger.debug(s"PartitionIndex cache hit for $tablePath@$version")
+        cached
+      case None =>
+        cacheMisses.incrementAndGet()
+        val index = build(addActions, partitionColumns)
+        indexCache.put(key, index)
+        logger.debug(s"PartitionIndex cache miss for $tablePath@$version, built new index with ${index.partitionCount} partitions")
+        index
+    }
+  }
+
+  /**
+   * Get cache statistics.
+   * @return (hits, misses, hitRate)
+   */
+  def getCacheStats(): (Long, Long, Double) = {
+    val hits = cacheHits.get()
+    val misses = cacheMisses.get()
+    val total = hits + misses
+    (hits, misses, if (total > 0) hits.toDouble / total else 0.0)
+  }
+
+  /**
+   * Get current cache size.
+   */
+  def getCacheSize(): Long = indexCache.size()
+
+  /**
+   * Invalidate all cached partition indexes.
+   * Should be called when tables are modified or for testing.
+   */
+  def invalidateCache(): Unit = {
+    indexCache.invalidateAll()
+    cacheHits.set(0)
+    cacheMisses.set(0)
+    logger.debug("PartitionIndex cache invalidated")
+  }
+
+  /**
+   * Invalidate cache for a specific table path.
+   */
+  def invalidateCacheForTable(tablePath: String): Unit = {
+    // Invalidate all entries for this table path (any version)
+    import scala.jdk.CollectionConverters._
+    val keysToInvalidate = indexCache.asMap().keySet().asScala
+      .filter(_.tablePath == tablePath)
+      .toSeq
+    keysToInvalidate.foreach(indexCache.invalidate)
+    logger.debug(s"PartitionIndex cache invalidated for $tablePath (${keysToInvalidate.size} entries)")
+  }
 
   /**
    * Build a PartitionIndex from a sequence of AddActions.

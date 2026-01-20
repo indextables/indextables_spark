@@ -69,6 +69,16 @@ object PartitionPruning {
 
   /**
    * Filter AddActions with configurable optimization settings.
+   *
+   * @param addActions Files to filter
+   * @param partitionColumns Partition column names
+   * @param filters Filters to apply
+   * @param filterCacheEnabled Whether to use filter evaluation cache
+   * @param indexEnabled Whether to use partition index
+   * @param parallelThreshold Threshold for parallel evaluation
+   * @param selectivityOrdering Whether to order filters by selectivity
+   * @param tablePath Optional table path for PartitionIndex caching
+   * @param tableVersion Optional table version for PartitionIndex caching
    */
   def prunePartitionsOptimized(
     addActions: Seq[AddAction],
@@ -77,7 +87,9 @@ object PartitionPruning {
     filterCacheEnabled: Boolean = DEFAULT_FILTER_CACHE_ENABLED,
     indexEnabled: Boolean = DEFAULT_INDEX_ENABLED,
     parallelThreshold: Int = DEFAULT_PARALLEL_THRESHOLD,
-    selectivityOrdering: Boolean = DEFAULT_SELECTIVITY_ORDERING
+    selectivityOrdering: Boolean = DEFAULT_SELECTIVITY_ORDERING,
+    tablePath: Option[String] = None,
+    tableVersion: Option[Long] = None
   ): Seq[AddAction] = {
 
     // Early return if no partition columns or filters
@@ -108,7 +120,10 @@ object PartitionPruning {
 
     // Try to use index-based pruning if enabled
     if (indexEnabled) {
-      val result = pruneWithIndex(addActions, partitionColumns, orderedFilters, filterCacheEnabled, parallelThreshold)
+      val result = pruneWithIndex(
+        addActions, partitionColumns, orderedFilters, filterCacheEnabled, parallelThreshold,
+        tablePath, tableVersion
+      )
       if (result.isDefined) {
         val prunedActions = result.get
         logPruningResults(addActions.length, prunedActions.length)
@@ -130,17 +145,28 @@ object PartitionPruning {
   /**
    * Prune using the partition index for O(1) lookups on equality/IN filters.
    * Returns None if index-based pruning is not applicable.
+   *
+   * @param tablePath Optional table path for PartitionIndex caching
+   * @param tableVersion Optional table version for PartitionIndex caching
    */
   private def pruneWithIndex(
     addActions: Seq[AddAction],
     partitionColumns: Seq[String],
     filters: Array[Filter],
     filterCacheEnabled: Boolean,
-    parallelThreshold: Int
+    parallelThreshold: Int,
+    tablePath: Option[String] = None,
+    tableVersion: Option[Long] = None
   ): Option[Seq[AddAction]] = {
 
-    // Build the partition index
-    val index = PartitionIndex.build(addActions, partitionColumns)
+    // Build or retrieve cached partition index
+    // When table path and version are provided, use the global cache for O(1) repeated lookups
+    val index = (tablePath, tableVersion) match {
+      case (Some(path), Some(version)) =>
+        PartitionIndex.buildCached(path, version, addActions, partitionColumns)
+      case _ =>
+        PartitionIndex.build(addActions, partitionColumns)
+    }
 
     if (index.isEmpty) {
       return None

@@ -95,6 +95,36 @@ object FilterExpressionCache {
   }
 
   /**
+   * Get or compute simplified filters using pre-computed filter hash.
+   * More efficient when filter hash is already computed (e.g., in Scan constructor).
+   * This avoids recomputing O(filters) hash on every cache lookup.
+   *
+   * @param filters Original filters
+   * @param schema Schema for simplification
+   * @param precomputedFilterHash Pre-computed hash of the filter array
+   * @return Simplified filters
+   */
+  def getOrSimplifyWithHash(
+    filters: Array[Filter],
+    schema: StructType,
+    precomputedFilterHash: Long
+  ): Array[Filter] = {
+    val schemaHash = schema.hashCode()
+    val cacheKey: java.lang.Long = (precomputedFilterHash << 32) | (schemaHash.toLong & 0xFFFFFFFFL)
+
+    val cached = simplifiedFiltersCache.getIfPresent(cacheKey)
+    if (cached != null) {
+      simplifiedHits.incrementAndGet()
+      cached
+    } else {
+      simplifiedMisses.incrementAndGet()
+      val simplified = ExpressionSimplifier.simplify(filters, schema)
+      simplifiedFiltersCache.put(cacheKey, simplified)
+      simplified
+    }
+  }
+
+  /**
    * Get or compute IN filter range (min/max of values in the IN list).
    *
    * @param attribute Column name
