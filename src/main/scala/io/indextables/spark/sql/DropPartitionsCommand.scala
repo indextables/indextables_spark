@@ -105,14 +105,11 @@ case class DropPartitionsCommand(
     val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Resolve credentials from custom provider on driver if configured
-    // This fetches actual AWS credentials so transaction log operations work
-    val resolvedConfigs = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
-
-    // Create transaction log with resolved credentials
+    // Create transaction log - CloudStorageProvider will handle credential resolution
+    // with proper refresh logic via V1ToV2CredentialsProviderAdapter
     import scala.jdk.CollectionConverters._
     val transactionLog =
-      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(resolvedConfigs.asJava))
+      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(mergedConfigs.asJava))
 
     // Invalidate cache to ensure fresh read of transaction log state
     transactionLog.invalidateCache()

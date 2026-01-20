@@ -86,14 +86,9 @@ case class TruncateTimeTravelCommand(
       val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
       val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-      // Resolve credentials from custom provider on driver if configured
-      // This fetches actual AWS/Azure credentials so transaction log operations work
-      val resolvedConfigs = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, resolvedPath.toString)
-
-      // Create options map with resolved credentials
-      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(resolvedConfigs.asJava)
-
-      // Create transaction log instance with resolved credentials
+      // Create transaction log - CloudStorageProvider will handle credential resolution
+      // with proper refresh logic via V1ToV2CredentialsProviderAdapter
+      val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(mergedConfigs.asJava)
       val transactionLog = TransactionLogFactory.create(resolvedPath, sparkSession, options)
 
       // Invalidate cache to ensure fresh read of transaction log state

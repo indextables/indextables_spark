@@ -974,13 +974,13 @@ class PurgeOrphanedSplitsExecutor(
    *   1. overrideOptions (from write options) 2. Spark session configuration
    */
   private def extractCloudStorageConfigs(): Map[String, String] = {
-    import io.indextables.spark.util.ConfigUtils
-
     // Get configs from Spark session
     val sparkConfigs = spark.conf.getAll.filter { case (key, _) => key.startsWith("spark.indextables.") }.toMap
 
     // Merge with override options (override takes precedence)
-    val mergedConfigs = overrideOptions match {
+    // CloudStorageProvider will handle credential resolution with proper refresh logic
+    // via V1ToV2CredentialsProviderAdapter
+    overrideOptions match {
       case Some(overrides) =>
         val merged = sparkConfigs ++ overrides.filter { case (key, _) => key.startsWith("spark.indextables.") }
         logger.info(s"Extracted ${merged.size} spark.indextables.* configuration keys (${sparkConfigs.size} from Spark session, ${overrides.size} from override options)")
@@ -989,10 +989,6 @@ class PurgeOrphanedSplitsExecutor(
         logger.info(s"Extracted ${sparkConfigs.size} spark.indextables.* configuration keys from Spark session")
         sparkConfigs
     }
-
-    // Resolve credentials from custom provider on driver if configured
-    // This fetches actual AWS credentials so workers don't need to run the provider
-    ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfigs, tablePath.toString)
   }
 
   /**

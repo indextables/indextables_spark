@@ -165,52 +165,6 @@ class MergeWithWriteOptionsCredentialTest extends TestBase {
     results should not be empty
   }
 
-  /**
-   * Test credential resolution directly using ConfigUtils. This verifies that resolveCredentialsFromProviderOnDriver
-   * gets the right configs.
-   *
-   * Note: With centralized credential resolution, provider failures return None (graceful fallback) instead of throwing
-   * exceptions.
-   */
-  test("ConfigUtils.resolveCredentialsFromProviderOnDriver should receive all session configs") {
-    import io.indextables.spark.util.ConfigUtils
-    import io.indextables.spark.utils.CredentialProviderFactory
-
-    // Clear credential provider cache to force fresh instantiation
-    CredentialProviderFactory.clearCache()
-
-    // Extract configs like MergeSplitsExecutor does
-    val hadoopConf    = spark.sparkContext.hadoopConfiguration
-    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
-    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
-    val mergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
-
-    // Verify all required configs are present
-    mergedConfigs should contain key "spark.indextables.aws.credentialsProviderClass"
-    mergedConfigs should contain key "spark.indextables.databricks.workspaceUrl"
-    mergedConfigs should contain key "spark.indextables.databricks.apiToken"
-
-    // Remove any explicit credentials to force provider invocation
-    val configsNoExplicitCreds = mergedConfigs.filterNot {
-      case (k, _) =>
-        k.toLowerCase.contains("accesskey") ||
-        k.toLowerCase.contains("secretkey") ||
-        k.toLowerCase.contains("sessiontoken")
-    }
-
-    // With centralized resolution, provider failures return the original config unchanged
-    // (graceful fallback to default provider chain) instead of throwing exceptions
-    val result = ConfigUtils.resolveCredentialsFromProviderOnDriver(configsNoExplicitCreds, "s3://test-bucket/path")
-
-    // Since the provider failed (fake URL), the result should be the original config
-    // (no credentials were added because resolution failed gracefully)
-    result.get("spark.indextables.aws.accessKey") shouldBe None
-
-    // The logger.warn output shows the provider was invoked and failed gracefully
-
-    logger.info("SUCCESS: Credential resolution attempted using Unity Catalog provider (failed gracefully as expected)")
-  }
-
   private def getFullErrorMessage(t: Throwable): String = {
     val sb                 = new StringBuilder
     var current: Throwable = t

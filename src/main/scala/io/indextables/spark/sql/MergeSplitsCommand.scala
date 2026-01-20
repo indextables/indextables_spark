@@ -150,14 +150,11 @@ case class MergeSplitsCommand(
     val hadoopConfigs      = ConfigNormalization.extractTantivyConfigsFromHadoop(hadoopConf)
     val txLogMergedConfigs = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Resolve credentials from custom provider on driver if configured
-    // This is needed for transaction log operations (reading metadata, listing files)
-    val txLogResolvedConfigs = ConfigUtils.resolveCredentialsFromProviderOnDriver(txLogMergedConfigs, tablePath.toString)
-
-    // Create transaction log with resolved credentials
+    // Create transaction log - CloudStorageProvider will handle credential resolution
+    // with proper refresh logic via V1ToV2CredentialsProviderAdapter
     import scala.jdk.CollectionConverters._
     val transactionLog =
-      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(txLogResolvedConfigs.asJava))
+      TransactionLogFactory.create(tablePath, sparkSession, new CaseInsensitiveStringMap(txLogMergedConfigs.asJava))
 
     // Invalidate cache to ensure fresh read of transaction log state for merge planning
     transactionLog.invalidateCache()

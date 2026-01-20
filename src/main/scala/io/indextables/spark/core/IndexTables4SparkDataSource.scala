@@ -92,12 +92,9 @@ class IndexTables4SparkTable(
       readTantivyConfigs
     )
 
-    // Resolve credentials from custom provider on driver if configured
-    // This fetches actual AWS credentials so workers don't need to run the provider
-    val tantivyConfigs = io.indextables.spark.util.ConfigUtils.resolveCredentialsFromProviderOnDriver(
-      mergedConfigs,
-      path
-    )
+    // Pass config with provider class intact - CloudStorageProvider will handle credential
+    // resolution with proper refresh logic via V1ToV2CredentialsProviderAdapter
+    val tantivyConfigs = mergedConfigs
 
     // Validate numeric configuration values early to provide better error messages
     def validateNumericConfig(
