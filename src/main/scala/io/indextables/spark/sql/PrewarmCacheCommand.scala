@@ -123,16 +123,13 @@ case class PrewarmCacheCommand(
       ConfigNormalization.extractTantivyConfigsFromHadoop(sparkSession.sparkContext.hadoopConfiguration)
     val mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
 
-    // Resolve credentials from custom provider on driver if configured
-    // This fetches actual AWS credentials so workers don't need to run the provider
-    val sessionConfig = ConfigUtils.resolveCredentialsFromProviderOnDriver(mergedConfig, tablePath)
-
-    // Create transaction log to read splits - use resolved credentials
+    // Create transaction log - CloudStorageProvider will handle credential resolution
+    // with proper refresh logic via V1ToV2CredentialsProviderAdapter
     import scala.jdk.CollectionConverters._
     val transactionLog = TransactionLogFactory.create(
       new Path(tablePath),
       sparkSession,
-      new CaseInsensitiveStringMap(sessionConfig.asJava)
+      new CaseInsensitiveStringMap(mergedConfig.asJava)
     )
 
     try {
@@ -187,7 +184,7 @@ case class PrewarmCacheCommand(
       logger.info(s"Distributing prewarm across ${splitsByHost.size} hosts")
 
       // Read failOnMissingField config from session (can be overridden by command parameter)
-      val effectiveFailOnMissingField = sessionConfig
+      val effectiveFailOnMissingField = mergedConfig
         .get("spark.indextables.prewarm.failOnMissingField")
         .map(_.toBoolean)
         .getOrElse(failOnMissingField)
@@ -212,7 +209,7 @@ case class PrewarmCacheCommand(
       logger.info(s"Created ${prewarmTasks.length} prewarm tasks ($splitsPerTask splits per task)")
 
       // Broadcast config for executor access
-      val broadcastConfig = sc.broadcast(sessionConfig)
+      val broadcastConfig = sc.broadcast(mergedConfig)
 
       // Build lookup: splitPath -> assigned hostname (for retry task creation)
       val splitToHost: Map[String, String] = splitsByHost.flatMap {
@@ -220,7 +217,7 @@ case class PrewarmCacheCommand(
       }.toMap
 
       // Get max retries from config
-      val maxRetries = sessionConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
+      val maxRetries = mergedConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
 
       // Helper function to dispatch tasks and collect results
       def dispatchTasks(tasks: Seq[PrewarmTask], retryNum: Int): Seq[PrewarmTaskResult] = {
