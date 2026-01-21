@@ -192,6 +192,75 @@ object SchemaDeduplication {
   }
 
   /**
+   * Filter out object fields with empty field_mappings from a docMappingJson string.
+   *
+   * When a StructType/ArrayType field is always null during writes, the docMappingJson
+   * ends up with an empty field_mappings array for that field. Quickwit's DocMapperBuilder
+   * rejects such schemas with "object must have at least one field mapping".
+   *
+   * This filter removes those problematic fields so aggregation queries can succeed.
+   * The removed fields have no indexed data anyway (all values were null).
+   *
+   * @param docMappingJson
+   *   The original docMappingJson string (array of field mappings)
+   * @return
+   *   Filtered docMappingJson with empty object fields removed
+   */
+  def filterEmptyObjectMappings(docMappingJson: String): String =
+    try {
+      val rootNode = mapper.readTree(docMappingJson)
+
+      rootNode match {
+        case arrayNode: ArrayNode =>
+          val filteredArray = mapper.createArrayNode()
+          var removedCount  = 0
+
+          arrayNode.elements().asScala.foreach { element =>
+            if (isEmptyObjectField(element)) {
+              removedCount += 1
+              val fieldName = Option(element.get("name")).map(_.asText()).getOrElse("<unknown>")
+              logger.debug(s"Filtering out empty object field '$fieldName' from docMappingJson")
+            } else {
+              filteredArray.add(element)
+            }
+          }
+
+          if (removedCount > 0) {
+            logger.info(s"Filtered $removedCount empty object field(s) from docMappingJson")
+          }
+
+          mapper.writeValueAsString(filteredArray)
+
+        case _ =>
+          // Not an array, return as-is
+          logger.warn(s"docMappingJson is not an array, skipping filter")
+          docMappingJson
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to filter docMappingJson, returning original: ${e.getMessage}")
+        docMappingJson
+    }
+
+  /**
+   * Check if a field mapping is an object type with empty field_mappings.
+   */
+  private def isEmptyObjectField(node: JsonNode): Boolean = {
+    val fieldType = Option(node.get("type")).map(_.asText()).getOrElse("")
+
+    if (fieldType == "object") {
+      val fieldMappings = node.get("field_mappings")
+      fieldMappings match {
+        case arr: ArrayNode => arr.size() == 0
+        case null           => true // No field_mappings at all
+        case _              => false
+      }
+    } else {
+      false
+    }
+  }
+
+  /**
    * Restore schemas in a sequence of actions using a registry.
    *
    * This replaces docMappingRef with docMappingJson for AddActions.
@@ -200,18 +269,22 @@ object SchemaDeduplication {
    *   The actions to process
    * @param registry
    *   The schema registry (from MetadataAction.configuration)
+   * @param filterEmptyObjects
+   *   If true, filter out object fields with empty field_mappings (default: true)
    * @return
    *   Actions with docMappingJson restored
    */
   def restoreSchemas(
     actions: Seq[Action],
-    registry: Map[String, String]
+    registry: Map[String, String],
+    filterEmptyObjects: Boolean = true
   ): Seq[Action] = {
 
-    // Build hash -> schema map from registry
+    // Build hash -> schema map from registry, applying filter if enabled
     val schemaMap = registry.collect {
       case (key, value) if key.startsWith(SCHEMA_KEY_PREFIX) =>
-        key.stripPrefix(SCHEMA_KEY_PREFIX) -> value
+        val schema = if (filterEmptyObjects) filterEmptyObjectMappings(value) else value
+        key.stripPrefix(SCHEMA_KEY_PREFIX) -> schema
     }
 
     actions.map {
@@ -226,6 +299,15 @@ object SchemaDeduplication {
           case None =>
             logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
             add // Return unchanged if schema not found
+        }
+
+      // Also filter inline docMappingJson (legacy format without deduplication)
+      case add: AddAction if add.docMappingJson.isDefined && filterEmptyObjects =>
+        val filteredSchema = filterEmptyObjectMappings(add.docMappingJson.get)
+        if (filteredSchema != add.docMappingJson.get) {
+          add.copy(docMappingJson = Some(filteredSchema))
+        } else {
+          add
         }
 
       case other => other

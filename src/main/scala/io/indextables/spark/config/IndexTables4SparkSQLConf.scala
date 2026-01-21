@@ -110,6 +110,18 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_MERGE_DOWNLOAD_RETRY_MAX_DELAY_MS_DEFAULT = 30000L
 
   /////////////////////
+  // Schema Deduplication Configuration
+  /////////////////////
+
+  /**
+   * Filter out object fields with empty field_mappings from docMappingJson during schema restoration.
+   * This fixes aggregation failures on tables with always-null struct/array fields.
+   * Default: true (enabled)
+   */
+  val TANTIVY4SPARK_SCHEMA_FILTER_EMPTY_OBJECTS         = "spark.indextables.schema.filterEmptyObjects"
+  val TANTIVY4SPARK_SCHEMA_FILTER_EMPTY_OBJECTS_DEFAULT = true
+
+  /////////////////////
   // L2 Disk Cache Configuration (persistent NVMe caching)
   /////////////////////
 

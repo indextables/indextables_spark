@@ -326,10 +326,24 @@ class IndexTables4SparkScanBuilder(
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
     // Bucket aggregations use the GROUP BY scan with bucketConfig
-    // The groupByColumns contains the bucket field name
-    val groupByColumns = Array(bucketConfig.fieldName)
+    // The groupByColumns must include the bucket field PLUS any additional GROUP BY columns
+    // Example: GROUP BY indextables_date_histogram(ts, '15m'), hostname
+    //   -> groupByColumns = Array("ts", "hostname")
+    //   -> bucketConfig applies to position 0 (ts)
+    //
+    // Multi-key bucket aggregations are supported using nested TermsAggregation:
+    // - The bucket aggregation (DateHistogram/Histogram/Range) is the outer aggregation
+    // - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
+    // - Results are flattened: [bucket_key, term_key_1, term_key_2, ..., aggregation_values]
+    val additionalGroupByColumns = _pushedGroupBy.getOrElse(Array.empty[String])
+      .filterNot(_ == bucketConfig.fieldName) // Remove bucket field if already present
+    val groupByColumns = Array(bucketConfig.fieldName) ++ additionalGroupByColumns
 
     logger.debug(s"BUCKET SCAN: Creating bucket aggregate scan for field '${bucketConfig.fieldName}' with config: ${bucketConfig.description}")
+    logger.debug(s"BUCKET SCAN: All GROUP BY columns: ${groupByColumns.mkString(", ")}")
+    if (additionalGroupByColumns.nonEmpty) {
+      logger.debug(s"BUCKET SCAN: Additional GROUP BY columns will use nested TermsAggregation: ${additionalGroupByColumns.mkString(", ")}")
+    }
 
     // Pass partition columns for optimization (bucket aggregations typically don't use partition columns in GROUP BY)
     val partitionCols = getPartitionColumns()
@@ -1198,6 +1212,37 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
+  /** Check if a field is marked as fast in the schema (without numeric type requirement).
+   *  Used for MIN/MAX which can operate on both numeric and string fast fields.
+   */
+  private def isFastField(fieldName: String): Boolean = {
+    val fastFields = getActualFastFieldsFromSchema()
+
+    // For nested JSON fields (containing dots), check if the field itself OR its parent struct is marked as fast
+    if (fieldName.contains(".")) {
+      val parentField  = fieldName.substring(0, fieldName.lastIndexOf('.'))
+      val isFieldFast  = fastFields.contains(fieldName)
+      val isParentFast = fastFields.contains(parentField)
+
+      if (isFieldFast || isParentFast) {
+        logger.debug(s"FAST FIELD VALIDATION: ✓ Nested field '$fieldName' is fast (field_fast=$isFieldFast, parent_fast=$isParentFast)")
+        return true
+      } else {
+        logger.debug(s"FAST FIELD VALIDATION: ✗ Neither '$fieldName' nor parent '$parentField' marked as fast")
+        return false
+      }
+    }
+
+    // For top-level fields, check directly
+    if (fastFields.contains(fieldName)) {
+      logger.debug(s"FAST FIELD VALIDATION: ✓ Field '$fieldName' is marked as fast")
+      true
+    } else {
+      logger.debug(s"FAST FIELD VALIDATION: ✗ Field '$fieldName' is not marked as fast (available: ${fastFields.mkString(", ")})")
+      false
+    }
+  }
+
   /** Check if a DataType is numeric. */
   private def isNumericType(dataType: org.apache.spark.sql.types.DataType): Boolean = {
     import org.apache.spark.sql.types._
@@ -1511,16 +1556,9 @@ class IndexTables4SparkScanBuilder(
     import org.apache.spark.sql.connector.expressions.aggregate._
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
-    // Use broadcast config instead of options for merged configuration
-    val fastFieldsStr = config
-      .get("spark.indextables.indexing.fastfields")
-      .getOrElse("")
-
-    val fastFields = if (fastFieldsStr.nonEmpty) {
-      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-    } else {
-      Set.empty[String]
-    }
+    // Read actual fast fields from transaction log (docMappingJson), not from configuration
+    // This matches the approach used in validateGroupByColumnsOrThrow for consistency
+    val fastFields = getActualFastFieldsFromSchema()
 
     aggregation.aggregateExpressions.foreach { expr =>
       expr match {
@@ -1537,13 +1575,15 @@ class IndexTables4SparkScanBuilder(
             missingFastFields += fieldName
           }
         case min: Min =>
+          // MIN can operate on both numeric and string fast fields
           val fieldName = getFieldName(min.column)
-          if (!isNumericFastField(fieldName)) {
+          if (!isFastField(fieldName)) {
             missingFastFields += fieldName
           }
         case max: Max =>
+          // MAX can operate on both numeric and string fast fields
           val fieldName = getFieldName(max.column)
-          if (!isNumericFastField(fieldName)) {
+          if (!isFastField(fieldName)) {
             missingFastFields += fieldName
           }
         case other =>
