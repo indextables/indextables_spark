@@ -18,7 +18,7 @@
 package io.indextables.spark.catalyst
 
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, SubqueryAlias, View}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
@@ -86,9 +86,15 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
         }
       case filter @ Filter(condition, child: SubqueryAlias) =>
         // Handle SubqueryAlias wrapping a DataSourceV2Relation (temp views)
-        child.child match {
-          case v2Relation: DataSourceV2Relation =>
-            logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias wrapping DataSourceV2Relation")
+        // Use collectFirst to find the DataSourceV2Relation anywhere in the subtree,
+        // not just as a direct child. This handles cases where the user applies
+        // DataFrame filters before creating the temp view, resulting in:
+        // Filter(indexquery) -> SubqueryAlias -> Filter(other) -> DataSourceV2Relation
+        val v2RelationOpt = child.collectFirst { case r: DataSourceV2Relation => r }
+
+        v2RelationOpt match {
+          case Some(v2Relation) =>
+            logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias containing DataSourceV2Relation")
             logger.debug(s"V2IndexQueryExpressionRule: Condition: $condition")
             logger.debug(s"V2IndexQueryExpressionRule: Child table: ${v2Relation.table.name()}")
 
@@ -117,47 +123,8 @@ object V2IndexQueryExpressionRule extends Rule[LogicalPlan] {
               }
               filter
             }
-          case view: View =>
-            // Handle View wrapping a DataSourceV2Relation (temp views)
-            view.child match {
-              case v2Relation: DataSourceV2Relation =>
-                logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias wrapping View wrapping DataSourceV2Relation")
-                logger.debug(s"V2IndexQueryExpressionRule: Condition: $condition")
-                logger.debug(s"V2IndexQueryExpressionRule: Child table: ${v2Relation.table.name()}")
-
-                // Only apply to V2 DataSource relations
-                if (isCompatibleV2DataSource(v2Relation)) {
-                  logger.debug(
-                    s"V2IndexQueryExpressionRule: Compatible V2 DataSource detected (via SubqueryAlias->View)"
-                  )
-                  val convertedCondition = convertIndexQueryExpressions(condition, v2Relation)
-
-                  if (convertedCondition != condition) {
-                    logger.debug(
-                      s"V2IndexQueryExpressionRule: Condition was converted from $condition to $convertedCondition"
-                    )
-                    Filter(convertedCondition, child)
-                  } else {
-                    logger.debug(s"V2IndexQueryExpressionRule: No conversion needed")
-                    filter
-                  }
-                } else {
-                  logger.debug(s"V2IndexQueryExpressionRule: Not compatible V2 DataSource - REJECTING IndexQuery")
-                  // Check if condition contains IndexQuery to warn user
-                  if (containsIndexQueryExpression(condition)) {
-                    logger.warn(s"⚠️  WARNING: IndexQuery expression detected but rejected because table is not compatible V2 DataSource")
-                    logger.warn(
-                      s"⚠️  Table class: ${v2Relation.table.getClass.getName}, Table name: ${v2Relation.table.name()}"
-                    )
-                  }
-                  filter
-                }
-              case _ =>
-                logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias wrapping View wrapping non-V2 relation: ${view.child.getClass.getSimpleName}")
-                filter
-            }
-          case _ =>
-            logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias wrapping non-V2 relation: ${child.child.getClass.getSimpleName}")
+          case None =>
+            logger.debug(s"V2IndexQueryExpressionRule: Found Filter with SubqueryAlias but no DataSourceV2Relation in subtree")
             filter
         }
       case filter @ Filter(condition, child) =>
