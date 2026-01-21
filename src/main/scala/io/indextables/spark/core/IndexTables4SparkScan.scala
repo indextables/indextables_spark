@@ -92,10 +92,32 @@ class IndexTables4SparkScan(
    * Get filtered actions, computing and caching on first call.
    * This optimization reduces redundant listFiles() and applyDataSkipping() calls
    * that would otherwise occur in both planInputPartitions() and estimateStatistics().
+   *
+   * For Avro state format, partition-only filters are passed through to enable manifest
+   * pruning at the checkpoint read level, avoiding I/O for manifests that don't contain
+   * matching partitions.
    */
   private def getFilteredActions(): Seq[AddAction] = {
     cachedFilteredActions.getOrElse {
-      val addActions = transactionLog.listFiles()
+      // Extract partition-only filters for Avro manifest pruning optimization
+      val partitionColumns = transactionLog.getPartitionColumns()
+      val partitionFilters = if (partitionColumns.nonEmpty && pushedFilters.nonEmpty) {
+        pushedFilters.filter { filter =>
+          val referencedCols = getFilterReferencedColumns(filter)
+          referencedCols.nonEmpty && referencedCols.forall(partitionColumns.contains)
+        }.toSeq
+      } else {
+        Seq.empty
+      }
+
+      // Use partition filter pass-through for Avro state format optimization
+      val addActions = if (partitionFilters.nonEmpty) {
+        logger.debug(s"Passing ${partitionFilters.length} partition filters for Avro manifest pruning")
+        transactionLog.listFilesWithPartitionFilters(partitionFilters)
+      } else {
+        transactionLog.listFiles()
+      }
+
       val filtered = applyDataSkipping(addActions, pushedFilters)
       cachedFilteredActions = Some(filtered)
       filtered

@@ -17,6 +17,7 @@ mvn test-compile scalatest:test -DwildcardSuites='io.indextables.spark.core.Date
 
 - **Split-based architecture**: Write-only indexes with QuickwitSplit format
 - **Transaction log**: Delta Lake-style with atomic operations, checkpoints, and GZIP compression
+- **Avro state format**: 10x faster checkpoint reads (70K files: 14s → <500ms), incremental writes, partition pruning (default since v4)
 - **Aggregate pushdown**: COUNT(), SUM(), AVG(), MIN(), MAX() with transaction log optimization
 - **Bucket aggregations**: DateHistogram, Histogram, and Range bucketing via SQL functions for time-series and distribution analysis
 - **Partitioned datasets**: Full support with partition pruning
@@ -50,6 +51,23 @@ spark.indextables.splitConversion.maxParallelism: <auto> (default: max(1, availa
 spark.indextables.checkpoint.enabled: true
 spark.indextables.checkpoint.interval: 10
 spark.indextables.transaction.compression.enabled: true (default)
+
+// Avro State Format (10x faster checkpoint reads, default since Protocol V4)
+// Replaces JSON checkpoints with binary Avro manifests for faster reads and partition pruning
+spark.indextables.state.format: "avro" (default: "avro", options: "avro", "json")
+spark.indextables.state.compression: "zstd" (default: "zstd", options: "zstd", "snappy", "none")
+spark.indextables.state.compressionLevel: 3 (default: 3, range 1-22 for zstd)
+spark.indextables.state.entriesPerManifest: 50000 (default: 50000, max entries per manifest file)
+spark.indextables.state.read.parallelism: 8 (default: 8, parallel manifest reads)
+
+// Avro State Compaction (automatic rewrite to remove tombstones and optimize layout)
+spark.indextables.state.compaction.tombstoneThreshold: 0.10 (default: 10%, trigger compaction when exceeded)
+spark.indextables.state.compaction.maxManifests: 20 (default: 20, trigger compaction when exceeded)
+spark.indextables.state.compaction.afterMerge: true (default: true, compact after MERGE SPLITS)
+
+// Avro State Retention (garbage collection of old state directories)
+spark.indextables.state.retention.versions: 2 (default: 2, keep N old state versions)
+spark.indextables.state.retention.hours: 168 (default: 168 = 7 days)
 
 // Transaction Log Concurrent Write Retry (automatic retry on version conflicts)
 spark.indextables.transaction.retry.maxAttempts: 10 (default: 10, max retry attempts on conflict)
@@ -758,6 +776,58 @@ TRUNCATE TANTIVY4SPARK TIME TRAVEL my_table;  -- Alternate syntax
 - After truncation, time travel to earlier versions is no longer possible
 - Always use DRY RUN first to preview what will be deleted
 - This operation is irreversible - deleted transaction log files cannot be recovered
+
+### Describe State
+```sql
+-- View checkpoint/state format information for a table
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+DESCRIBE INDEXTABLES STATE my_table;
+DESCRIBE TANTIVY4SPARK STATE 's3://bucket/path';  -- alternate syntax
+
+-- Example output (Avro state format):
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+-- |format      |version    |num_files    |num_manifests|num_tombstones|tombstone_ratio|needs_compaction|
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+-- |avro-state  |        42 |       15000 |         3|          150|         0.01 |          false|
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+
+-- Example output (legacy JSON format):
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+-- |format      |version    |num_files    |num_manifests|num_tombstones|tombstone_ratio|needs_compaction|
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+-- |json        |        42 |       15000 |         0|            0|          0.0 |          false|
+-- +------------+-----------+-------------+----------+-------------+--------------+---------------+
+```
+
+**Output schema:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `format` | String | State format: "avro-state", "json", "json-multipart", or "none" |
+| `version` | Long | Transaction version at checkpoint |
+| `num_files` | Long | Number of split files in the table |
+| `num_manifests` | Long | Number of Avro manifest files (0 for JSON) |
+| `num_tombstones` | Long | Number of removed file entries (tombstones) |
+| `tombstone_ratio` | Double | Ratio of tombstones to total entries |
+| `needs_compaction` | Boolean | True if tombstone ratio exceeds threshold |
+
+**Key points:**
+- Use to check if a table uses the new Avro state format or legacy JSON
+- `needs_compaction=true` indicates running CHECKPOINT will improve read performance
+- Tables with `format=json` should be upgraded by running `CHECKPOINT INDEXTABLES <path>`
+- `num_manifests` shows how state is distributed (Avro format only)
+
+**Migration from JSON to Avro:**
+```sql
+-- Check current format
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+
+-- Upgrade to Avro format (if format shows "json" or "json-multipart")
+CHECKPOINT INDEXTABLES 's3://bucket/path';
+
+-- Verify upgrade
+DESCRIBE INDEXTABLES STATE 's3://bucket/path';
+-- format should now show "avro-state"
+```
 
 ### Describe Disk Cache
 ```sql

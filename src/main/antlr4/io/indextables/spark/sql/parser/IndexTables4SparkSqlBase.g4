@@ -65,6 +65,7 @@ statement
     | DESCRIBE indexTablesKeyword DISK CACHE                    #describeDiskCache
     | DESCRIBE indexTablesKeyword STORAGE STATS                 #describeStorageStats
     | DESCRIBE indexTablesKeyword ENVIRONMENT                   #describeEnvironment
+    | DESCRIBE indexTablesKeyword STATE (path=STRING | table=qualifiedName)   #describeState
     | PREWARM indexTablesKeyword CACHE (path=STRING | table=qualifiedName)
         (FOR SEGMENTS '(' segmentList=identifierList ')')?
         (ON FIELDS '(' fieldList=identifierList ')')?
@@ -119,7 +120,7 @@ nonReserved
     | REPAIR | INDEXFILES | AT | LOCATION | PURGE | OLDER | THAN | DAYS | HOURS | DRY | RUN
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
-    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | TRUNCATE | TIME | TRAVEL
+    | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | TRUNCATE | TIME | TRAVEL | STATE
     | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT
     ;
 
@@ -179,6 +180,7 @@ CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
 TRUNCATE: [Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee];
 TIME: [Tt][Ii][Mm][Ee];
 TRAVEL: [Tt][Rr][Aa][Vv][Ee][Ll];
+STATE: [Ss][Tt][Aa][Tt][Ee];
 ASYNC: [Aa][Ss][Yy][Nn][Cc];
 MODE: [Mm][Oo][Dd][Ee];
 JOBS: [Jj][Oo][Bb][Ss];

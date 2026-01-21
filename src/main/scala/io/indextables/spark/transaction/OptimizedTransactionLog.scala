@@ -30,6 +30,7 @@ import scala.util.Try
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
@@ -489,6 +490,66 @@ class OptimizedTransactionLog(
     // Check protocol before reading
     assertTableReadable()
     listFilesOptimized()
+  }
+
+  /**
+   * List files with partition filter pruning for Avro state format.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
+   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
+   * for large tables with many partitions.
+   *
+   * Note: This method bypasses the file cache since filtered results shouldn't be cached
+   * (different filters would produce different results).
+   */
+  override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = {
+    // Check protocol before reading
+    assertTableReadable()
+
+    // If no filters provided, use the regular cached path
+    if (partitionFilters.isEmpty) {
+      return listFilesOptimized()
+    }
+
+    logger.debug(s"listFilesWithPartitionFilters: ${partitionFilters.length} filters for Avro manifest pruning")
+
+    // Get checkpoint actions with partition filter optimization (bypasses cache)
+    val checkpointActions = checkpoint.flatMap(_.getActionsFromCheckpointWithFilters(partitionFilters))
+
+    checkpointActions match {
+      case Some(actions) =>
+        // Apply checkpoint actions
+        val files = scala.collection.mutable.ListBuffer[AddAction]()
+        actions.foreach {
+          case add: AddAction       => files += add
+          case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+          case _                    => // Ignore other actions
+        }
+
+        // Apply incremental changes since checkpoint
+        val checkpointVersion = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+        val allVersions = getVersions()
+        val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
+
+        if (versionsAfterCheckpoint.nonEmpty) {
+          logger.debug(s"Reading ${versionsAfterCheckpoint.length} versions after checkpoint $checkpointVersion")
+          for (version <- versionsAfterCheckpoint.sorted) {
+            val versionActions = readVersionOptimized(version)
+            versionActions.foreach {
+              case add: AddAction       => files += add
+              case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+              case _                    => // Ignore other actions
+            }
+          }
+        }
+
+        // Restore schemas
+        restoreSchemasInAddActions(files.toSeq)
+
+      case None =>
+        // No checkpoint available - fallback to regular listFiles
+        listFilesOptimized()
+    }
   }
 
   private def listFilesOptimized(): Seq[AddAction] = {

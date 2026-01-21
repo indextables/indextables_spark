@@ -162,6 +162,13 @@
             <version>2.15.2</version>
         </dependency>
 
+        <!-- Apache Avro for state file format -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.11.3</version>
+        </dependency>
+
 
         <!-- Tantivy4Java - Java bindings for Tantivy search engine -->
         <!-- Version 0.28.2: Byte buffer protocol with native-side field filtering -->

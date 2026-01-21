@@ -25,7 +25,9 @@ import org.apache.spark.sql.types.{BooleanType, LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateWriter}
+import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
 /**
@@ -118,32 +120,49 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         )
 
         try {
-          val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
-          checkpoint.createCheckpoint(currentVersion, allActions)
+          // Check if Avro state format is enabled
+          val stateFormat = Option(options.get(StateConfig.FORMAT_KEY))
+            .getOrElse(StateConfig.FORMAT_DEFAULT)
 
-          // Get updated checkpoint info
-          val checkpointInfo = checkpoint.getLastCheckpointInfo()
-          val isMultiPart    = checkpointInfo.exists(_.parts.isDefined)
-          val numActions     = checkpointInfo.map(_.size).getOrElse(allActions.length.toLong)
-
-          // Re-read protocol from the newly created checkpoint to get the upgraded version
-          val newProtocolVersion = checkpointInfo
-            .map(_ => 3L) // V3 upgrade happens in createCheckpoint
-            .getOrElse(protocol.minReaderVersion.toLong)
-
-          logger.info(s"Checkpoint created successfully at version $currentVersion with protocol V$newProtocolVersion")
-
-          Seq(
-            Row(
-              resolvedPath.toString,
-              "SUCCESS",
+          if (stateFormat.equalsIgnoreCase("avro")) {
+            // Write checkpoint in Avro state format
+            createAvroStateCheckpoint(
+              transactionLogPath,
+              cloudProvider,
               currentVersion,
-              numActions,
-              allFiles.length.toLong,
-              newProtocolVersion,
-              isMultiPart
+              allFiles,
+              options,
+              resolvedPath.toString
             )
-          )
+          } else {
+            // Use existing JSON checkpoint format
+            val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
+            checkpoint.createCheckpoint(currentVersion, allActions)
+
+            // Get updated checkpoint info
+            val checkpointInfo = checkpoint.getLastCheckpointInfo()
+            val isMultiPart    = checkpointInfo.exists(_.parts.isDefined)
+            val numActions     = checkpointInfo.map(_.size).getOrElse(allActions.length.toLong)
+
+            // Re-read protocol from the newly created checkpoint to get the upgraded version
+            val newProtocolVersion = checkpointInfo
+              .map(_ => 3L) // V3 upgrade happens in createCheckpoint
+              .getOrElse(protocol.minReaderVersion.toLong)
+
+            logger.info(s"Checkpoint created successfully at version $currentVersion with protocol V$newProtocolVersion")
+
+            Seq(
+              Row(
+                resolvedPath.toString,
+                "SUCCESS",
+                currentVersion,
+                numActions,
+                allFiles.length.toLong,
+                newProtocolVersion,
+                isMultiPart
+              )
+            )
+          }
         } finally
           cloudProvider.close()
       } finally
@@ -164,6 +183,107 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
           )
         )
     }
+
+  /**
+   * Create checkpoint in Avro state format.
+   *
+   * This writes a compacted state with all live files sorted by partition values for optimal pruning.
+   */
+  private def createAvroStateCheckpoint(
+      transactionLogPath: Path,
+      cloudProvider: io.indextables.spark.io.CloudStorageProvider,
+      currentVersion: Long,
+      allFiles: Seq[AddAction],
+      options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
+      resolvedPathStr: String): Seq[Row] = {
+
+    val compression = Option(options.get(StateConfig.COMPRESSION_KEY))
+      .getOrElse(StateConfig.COMPRESSION_DEFAULT)
+    val compressionLevel = Option(options.get(StateConfig.COMPRESSION_LEVEL_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.COMPRESSION_LEVEL_DEFAULT)
+    val entriesPerManifest = Option(options.get(StateConfig.ENTRIES_PER_MANIFEST_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.ENTRIES_PER_MANIFEST_DEFAULT)
+
+    val stateWriter = StateWriter(
+      cloudProvider,
+      transactionLogPath.toString,
+      compression,
+      compressionLevel,
+      entriesPerManifest
+    )
+
+    val manifestIO = StateManifestIO(cloudProvider)
+
+    // Build schema registry from AddActions with docMappingJson
+    // This deduplicates schema storage and allows restoration when reading
+    import java.security.MessageDigest
+    val schemaRegistry = scala.collection.mutable.Map[String, String]()
+
+    def hashSchema(json: String): String = {
+      val md = MessageDigest.getInstance("SHA-256")
+      val digest = md.digest(json.getBytes("UTF-8"))
+      digest.take(8).map("%02x".format(_)).mkString
+    }
+
+    // Convert AddActions to FileEntries with current version and timestamp
+    // Also build schema registry and set docMappingRef
+    val timestamp = System.currentTimeMillis()
+    val fileEntries = allFiles.map { add =>
+      val refAndJson = add.docMappingJson.map { json =>
+        val ref = add.docMappingRef.getOrElse(hashSchema(json))
+        schemaRegistry.put(ref, json)
+        ref
+      }
+      FileEntry.fromAddAction(add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)), currentVersion, timestamp)
+    }
+
+    // Create state directory name
+    val stateDir = manifestIO.formatStateDir(currentVersion)
+    val stateDirPath = s"${transactionLogPath.toString}/$stateDir"
+
+    logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
+
+    // Write compacted state (sorted by partition for optimal pruning)
+    stateWriter.writeCompactedStateFromFiles(
+      stateDirPath,
+      fileEntries,
+      currentVersion,
+      schemaRegistry.toMap
+    )
+
+    // Update _last_checkpoint to point to new Avro state
+    val lastCheckpointInfo = LastCheckpointInfo(
+      version = currentVersion,
+      size = fileEntries.size,
+      sizeInBytes = fileEntries.map(_.size).sum,
+      numFiles = fileEntries.size,
+      createdTime = timestamp,
+      parts = None,
+      checkpointId = None,
+      format = Some(StateConfig.Format.AVRO_STATE),
+      stateDir = Some(stateDir)
+    )
+
+    val lastCheckpointPath = new Path(transactionLogPath, "_last_checkpoint")
+    val lastCheckpointJson = JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
+    cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
+
+    logger.info(s"Avro state checkpoint created successfully at version $currentVersion (format=avro-state)")
+
+    Seq(
+      Row(
+        resolvedPathStr,
+        "SUCCESS",
+        currentVersion,
+        fileEntries.size.toLong,
+        fileEntries.size.toLong,
+        4L, // Protocol version 4 for Avro state
+        false // Not multi-part in the JSON sense
+      )
+    )
+  }
 
   /** Resolve table path from string path or table identifier. */
   private def resolveTablePath(pathOrTable: String, sparkSession: SparkSession): Path =

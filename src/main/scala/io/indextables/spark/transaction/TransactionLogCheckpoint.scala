@@ -28,7 +28,10 @@ import scala.util.{Failure, Success, Try}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.avro.{AvroManifestReader, PartitionPruner, StateConfig, StateManifestIO}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
+
+import org.apache.spark.sql.sources.Filter
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -49,7 +52,9 @@ case class LastCheckpointInfo(
   numFiles: Long,
   createdTime: Long,
   parts: Option[Int] = None,          // Number of parts for multi-part checkpoint (None = single file)
-  checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
+  checkpointId: Option[String] = None, // Unique ID for multi-part checkpoint
+  format: Option[String] = None,      // Checkpoint format: "json", "json-multipart", "avro-state"
+  stateDir: Option[String] = None     // State directory name for avro-state format (e.g., "state-v00000000000000000100")
 )
 
 /**
@@ -359,15 +364,40 @@ class TransactionLogCheckpoint(
   }
 
   def getActionsFromCheckpoint(): Option[Seq[Action]] =
+    getActionsFromCheckpointWithFilters(Seq.empty)
+
+  /**
+   * Get actions from checkpoint with optional partition filters for Avro state format.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
+   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
+   * for large tables with many partitions.
+   *
+   * @param partitionFilters
+   *   Partition filters to apply for manifest pruning (only used with Avro state format)
+   * @return
+   *   Actions from the checkpoint, or None if no checkpoint exists
+   */
+  def getActionsFromCheckpointWithFilters(partitionFilters: Seq[Filter]): Option[Seq[Action]] =
     getLastCheckpointInfo().flatMap { info =>
       Try {
-        val actions = info.checkpointId match {
-          case Some(_) =>
-            // New format: manifest-based multi-part checkpoint
-            readMultiPartCheckpointFromManifest(info.version)
-          case None =>
-            // Legacy format: single-file checkpoint (actions directly in file)
-            readLegacySingleFileCheckpoint(info.version)
+        val actions = info.format match {
+          case Some(StateConfig.Format.AVRO_STATE) =>
+            // Avro state format: read from state directory with partition pruning
+            readAvroStateCheckpoint(info, partitionFilters)
+          case _ =>
+            // JSON formats (legacy and multi-part) - emit deprecation warning
+            if (StateConfig.Format.isJsonFormat(info.format)) {
+              logger.warn(StateConfig.JSON_FORMAT_DEPRECATION_WARNING)
+            }
+            info.checkpointId match {
+              case Some(_) =>
+                // New format: manifest-based multi-part checkpoint
+                readMultiPartCheckpointFromManifest(info.version)
+              case None =>
+                // Legacy format: single-file checkpoint (actions directly in file)
+                readLegacySingleFileCheckpoint(info.version)
+            }
         }
 
         // Validate protocol version before proceeding
@@ -385,6 +415,89 @@ class TransactionLogCheckpoint(
           None
       }
     }
+
+  /**
+   * Read checkpoint data from Avro state format.
+   *
+   * The Avro state format stores file entries in binary Avro manifests, providing 10x faster reads than JSON and enabling
+   * partition pruning for gigantic tables.
+   */
+  private def readAvroStateCheckpoint(info: LastCheckpointInfo): Seq[Action] = {
+    readAvroStateCheckpoint(info, partitionFilters = Seq.empty)
+  }
+
+  /**
+   * Read checkpoint data from Avro state format with partition filtering.
+   *
+   * When partition filters are provided, the pruner can skip entire manifests that are known
+   * not to contain matching files based on partition bounds, providing significant speedup
+   * for partition-filtered queries on large tables.
+   *
+   * @param info
+   *   Checkpoint info with stateDir
+   * @param partitionFilters
+   *   Optional partition filters for manifest pruning
+   * @return
+   *   Actions from the checkpoint
+   */
+  private def readAvroStateCheckpoint(info: LastCheckpointInfo, partitionFilters: Seq[Filter]): Seq[Action] = {
+    val stateDir = info.stateDir.getOrElse(
+      throw new IllegalStateException(s"Avro state checkpoint is missing stateDir: version=${info.version}")
+    )
+
+    val stateDirPath = new Path(transactionLogPath, stateDir).toString
+    logger.debug(s"Reading Avro state checkpoint: version=${info.version}, stateDir=$stateDir")
+
+    val manifestIO = StateManifestIO(cloudProvider)
+    val manifestReader = AvroManifestReader(cloudProvider)
+
+    // Read the state manifest (_manifest.json)
+    val stateManifest = manifestIO.readStateManifest(stateDirPath)
+
+    // Apply partition pruning if filters are provided
+    val manifestsToRead = if (partitionFilters.nonEmpty) {
+      val prunedManifests = PartitionPruner.pruneManifests(stateManifest.manifests, partitionFilters)
+      logger.info(
+        s"Partition pruning: reading ${prunedManifests.size} of ${stateManifest.manifests.size} manifests")
+      prunedManifests
+    } else {
+      stateManifest.manifests
+    }
+
+    // Read selected Avro manifests in parallel
+    val manifestPaths = manifestsToRead.map(m => s"$stateDirPath/${m.path}")
+    val fileEntries = manifestReader.readManifestsParallel(manifestPaths)
+
+    // Apply tombstones to filter out removed files
+    val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
+
+    // Convert FileEntries to AddActions with schema registry for docMappingJson restoration
+    val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+
+    // Build the full action list (Protocol + Metadata + AddActions)
+    val actions = scala.collection.mutable.ListBuffer[Action]()
+
+    // Add Protocol action for compatibility
+    actions += ProtocolAction(
+      minReaderVersion = stateManifest.protocolVersion,
+      minWriterVersion = stateManifest.protocolVersion,
+      readerFeatures = Some(Set("avroState")),
+      writerFeatures = Some(Set("avroState"))
+    )
+
+    // Log schema registry usage
+    if (stateManifest.schemaRegistry.nonEmpty) {
+      logger.debug(s"Restored docMappingJson from ${stateManifest.schemaRegistry.size} schema registry entries")
+    }
+
+    actions ++= addActions
+
+    logger.info(
+      s"Read Avro state checkpoint: version=${info.version}, " +
+        s"files=${liveEntries.size}, tombstones=${stateManifest.tombstones.size}")
+
+    actions.toSeq
+  }
 
   /**
    * Read a legacy single-file checkpoint (actions directly in file).

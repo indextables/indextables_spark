@@ -67,6 +67,9 @@ abstract class RealS3TestBase extends AnyFunSuite with Matchers with BeforeAndAf
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
       // Ensure we don't inherit any mock configurations from system properties
       .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "true") // Use SSL for real S3
+      // Configure driver binding for local testing
+      .config("spark.driver.host", "127.0.0.1")
+      .config("spark.driver.bindAddress", "127.0.0.1")
       .getOrCreate()
 
     // Set log level to reduce noise

@@ -26,6 +26,7 @@ import scala.util.{Failure, Success, Try}
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
@@ -462,6 +463,74 @@ class TransactionLog(
         logger.debug(s"Computed and cached files list: ${restoredResult.length} files")
         restoredResult
     }
+  }
+
+  /**
+   * List files with partition filter pruning for Avro state format.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
+   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
+   * for large tables with many partitions.
+   *
+   * Note: This method bypasses the file cache since filtered results shouldn't be cached
+   * (different filters would produce different results).
+   *
+   * @param partitionFilters
+   *   Partition filters for manifest pruning (only used with Avro state format)
+   * @return
+   *   List of AddActions representing files in the table
+   */
+  override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = {
+    // Check protocol before reading
+    assertTableReadable()
+
+    // If no filters provided, use the regular cached path
+    if (partitionFilters.isEmpty) {
+      return listFiles()
+    }
+
+    // Use optimized checkpoint + parallel retrieval approach with partition filters
+    val files = ListBuffer[AddAction]()
+
+    // Try to get base state from checkpoint first with partition filter pruning
+    checkpoint.flatMap(_.getActionsFromCheckpointWithFilters(partitionFilters)) match {
+      case Some(checkpointActions) =>
+        // Apply checkpoint actions first
+        checkpointActions.foreach {
+          case add: AddAction       => files += add
+          case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+          case _                    => // Ignore other actions for file listing
+        }
+
+        // Then apply incremental changes since checkpoint
+        val checkpointVersion       = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+        val allVersions             = getVersions()
+        val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
+
+        if (versionsAfterCheckpoint.nonEmpty) {
+          logger.debug(
+            s"Reading ${versionsAfterCheckpoint.length} versions after checkpoint $checkpointVersion in parallel"
+          )
+          val parallelResults = checkpoint.get.readVersionsInParallel(versionsAfterCheckpoint)
+
+          // Apply changes in version order
+          for (version <- versionsAfterCheckpoint.sorted)
+            parallelResults.get(version).foreach { actions =>
+              actions.foreach {
+                case add: AddAction       => files += add
+                case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                case _                    => // Ignore other actions for file listing
+              }
+            }
+        }
+      case None =>
+        // No checkpoint available - fallback to regular listFiles (no filter optimization)
+        return listFiles()
+    }
+
+    val result = files.toSeq
+    // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
+    restoreSchemasInAddActions(result)
   }
 
   /**

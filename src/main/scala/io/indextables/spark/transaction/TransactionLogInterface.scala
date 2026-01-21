@@ -18,6 +18,7 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
@@ -125,6 +126,20 @@ trait TransactionLogInterface extends AutoCloseable {
    *   Sequence of add actions for all visible files
    */
   def listFiles(): Seq[AddAction]
+
+  /**
+   * Lists all visible files in the table with partition filter optimization.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format,
+   * the reader can prune entire manifest files that don't contain matching partitions,
+   * significantly reducing I/O for large tables with many partitions.
+   *
+   * @param partitionFilters
+   *   Partition filters for manifest pruning (only used with Avro state format)
+   * @return
+   *   Sequence of add actions for all visible files
+   */
+  def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = listFiles()
 
   /**
    * Gets the total row count across all visible files.

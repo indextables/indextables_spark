@@ -1,0 +1,127 @@
+{
+  "type": "record",
+  "name": "FileEntry",
+  "namespace": "io.indextables.state",
+  "doc": "A file entry representing a split in the table state",
+  "fields": [
+    {
+      "name": "path",
+      "type": "string",
+      "field-id": 100,
+      "doc": "Relative path to the split file"
+    },
+    {
+      "name": "partitionValues",
+      "type": {"type": "map", "values": "string"},
+      "field-id": 101,
+      "doc": "Partition column values as string map"
+    },
+    {
+      "name": "size",
+      "type": "long",
+      "field-id": 102,
+      "doc": "File size in bytes"
+    },
+    {
+      "name": "modificationTime",
+      "type": "long",
+      "field-id": 103,
+      "doc": "File modification time (epoch milliseconds)"
+    },
+    {
+      "name": "dataChange",
+      "type": "boolean",
+      "field-id": 104,
+      "doc": "Whether this file represents a data change"
+    },
+    {
+      "name": "stats",
+      "type": ["null", "string"],
+      "default": null,
+      "field-id": 110,
+      "doc": "JSON-encoded statistics"
+    },
+    {
+      "name": "minValues",
+      "type": ["null", {"type": "map", "values": "string"}],
+      "default": null,
+      "field-id": 111,
+      "doc": "Minimum values per column for data skipping"
+    },
+    {
+      "name": "maxValues",
+      "type": ["null", {"type": "map", "values": "string"}],
+      "default": null,
+      "field-id": 112,
+      "doc": "Maximum values per column for data skipping"
+    },
+    {
+      "name": "numRecords",
+      "type": ["null", "long"],
+      "default": null,
+      "field-id": 113,
+      "doc": "Number of records in the file"
+    },
+    {
+      "name": "footerStartOffset",
+      "type": ["null", "long"],
+      "default": null,
+      "field-id": 120,
+      "doc": "Byte offset where footer/metadata begins"
+    },
+    {
+      "name": "footerEndOffset",
+      "type": ["null", "long"],
+      "default": null,
+      "field-id": 121,
+      "doc": "Byte offset where footer/metadata ends"
+    },
+    {
+      "name": "hasFooterOffsets",
+      "type": "boolean",
+      "default": false,
+      "field-id": 124,
+      "doc": "Whether footer offsets are populated"
+    },
+    {
+      "name": "splitTags",
+      "type": ["null", {"type": "array", "items": "string"}],
+      "default": null,
+      "field-id": 132,
+      "doc": "Tags associated with this split"
+    },
+    {
+      "name": "numMergeOps",
+      "type": ["null", "int"],
+      "default": null,
+      "field-id": 134,
+      "doc": "Number of merge operations this split has been through"
+    },
+    {
+      "name": "docMappingRef",
+      "type": ["null", "string"],
+      "default": null,
+      "field-id": 135,
+      "doc": "Reference to doc mapping in schema registry"
+    },
+    {
+      "name": "uncompressedSizeBytes",
+      "type": ["null", "long"],
+      "default": null,
+      "field-id": 136,
+      "doc": "Uncompressed size of the split data"
+    },
+    {
+      "name": "addedAtVersion",
+      "type": "long",
+      "field-id": 140,
+      "doc": "Transaction version when this file was added"
+    },
+    {
+      "name": "addedAtTimestamp",
+      "type": "long",
+      "field-id": 141,
+      "doc": "Timestamp when this file was added (epoch milliseconds)"
+    }
+  ]
+}

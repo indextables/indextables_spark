@@ -72,18 +72,26 @@ case class AddAction(
   @JsonProperty("footerEndOffset") @JsonDeserialize(using = classOf[OptionalLongDeserializer]) footerEndOffset: Option[
     Long
   ] = None,
-  @JsonProperty("hotcacheStartOffset") hotcacheStartOffset: Option[Long] = None,
-  @JsonProperty("hotcacheLength") hotcacheLength: Option[Long] = None,
+  @JsonProperty("hotcacheStartOffset") @JsonDeserialize(using =
+    classOf[OptionalLongDeserializer]
+  ) hotcacheStartOffset: Option[Long] = None,
+  @JsonProperty("hotcacheLength") @JsonDeserialize(using =
+    classOf[OptionalLongDeserializer]
+  ) hotcacheLength: Option[Long] = None,
   @JsonProperty("hasFooterOffsets") hasFooterOffsets: Boolean = false,
   // Complete tantivy4java SplitMetadata fields
   @JsonProperty("timeRangeStart") timeRangeStart: Option[String] = None, // Instant as ISO string
   @JsonProperty("timeRangeEnd") timeRangeEnd: Option[String] = None,     // Instant as ISO string
   @JsonProperty("splitTags") splitTags: Option[Set[String]] = None,      // tantivy4java tags (distinct from Delta tags)
-  @JsonProperty("deleteOpstamp") deleteOpstamp: Option[Long] = None,
+  @JsonProperty("deleteOpstamp") @JsonDeserialize(using =
+    classOf[OptionalLongDeserializer]
+  ) deleteOpstamp: Option[Long] = None,
   @JsonProperty("numMergeOps") numMergeOps: Option[Int] = None,
   @JsonProperty("docMappingJson") docMappingJson: Option[String] = None,
   @JsonProperty("docMappingRef") docMappingRef: Option[String] = None, // Schema hash reference for deduplication
-  @JsonProperty("uncompressedSizeBytes") uncompressedSizeBytes: Option[Long] = None // SplitMetadata uncompressed size
+  @JsonProperty("uncompressedSizeBytes") @JsonDeserialize(using =
+    classOf[OptionalLongDeserializer]
+  ) uncompressedSizeBytes: Option[Long] = None // SplitMetadata uncompressed size
 ) extends Action
 
 case class RemoveAction(
