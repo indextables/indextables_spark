@@ -284,6 +284,135 @@ class BucketAggregationMultiKeyTest extends AnyFunSuite {
       spark.stop()
   }
 
+  test("DateHistogram with THREE GROUP BY columns should work with nested TermsAggregation") {
+    val spark = SparkSession
+      .builder()
+      .appName("BucketAggregationMultiKeyTest-ThreeKeys")
+      .master("local[*]")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      // Test data with timestamps, hostnames, and regions
+      val testData = Seq(
+        (Timestamp.valueOf("2024-01-01 10:00:00"), "host1", "us-east", 100),
+        (Timestamp.valueOf("2024-01-01 10:05:00"), "host1", "us-east", 200),
+        (Timestamp.valueOf("2024-01-01 10:10:00"), "host2", "us-west", 300),
+        (Timestamp.valueOf("2024-01-01 10:20:00"), "host1", "us-west", 400),
+        (Timestamp.valueOf("2024-01-01 10:25:00"), "host2", "us-east", 500),
+        (Timestamp.valueOf("2024-01-01 10:35:00"), "host2", "us-west", 600)
+      ).toDF("timestamp", "hostname", "region", "value")
+
+      val tempDir   = java.nio.file.Files.createTempDirectory("bucket-threekey-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      println("=" * 80)
+      println("Test: DateHistogram with THREE GROUP BY keys (nested TermsAggregation x2)")
+      println("=" * 80)
+
+      // Write data with all fields as fast fields
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "timestamp,hostname,region,value")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      df.createOrReplaceTempView("test_table")
+
+      // Test: DateHistogram with TWO additional GROUP BY columns
+      println("\nTesting DateHistogram with TWO additional GROUP BY columns...")
+      val threeKeyQuery = spark.sql("""
+        SELECT indextables_date_histogram(timestamp, '15m') as slice, hostname, region, count(*) as cnt
+        FROM test_table
+        GROUP BY indextables_date_histogram(timestamp, '15m'), hostname, region
+      """)
+
+      val threeKeyResult = threeKeyQuery.collect()
+      println(s"   Three-key query succeeded with ${threeKeyResult.length} rows")
+      threeKeyQuery.show()
+
+      // Verify results - should have at least 5 distinct combinations
+      assert(threeKeyResult.length >= 5, s"Expected at least 5 rows, got ${threeKeyResult.length}")
+
+      println("\n" + "=" * 80)
+      println("SUCCESS: DateHistogram with THREE GROUP BY keys works!")
+      println("=" * 80)
+
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
+  test("Histogram with THREE GROUP BY columns should work with nested TermsAggregation") {
+    val spark = SparkSession
+      .builder()
+      .appName("BucketAggregationMultiKeyTest-Histogram-ThreeKeys")
+      .master("local[*]")
+      .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+
+      val testData = Seq(
+        ("category_a", "host1", "us-east", 10.0),
+        ("category_a", "host1", "us-west", 25.0),
+        ("category_a", "host2", "us-east", 55.0),
+        ("category_b", "host1", "us-east", 75.0),
+        ("category_b", "host2", "us-west", 120.0)
+      ).toDF("category", "hostname", "region", "price")
+
+      val tempDir   = java.nio.file.Files.createTempDirectory("histogram-threekey-test").toFile
+      val tablePath = tempDir.getAbsolutePath
+
+      println("=" * 80)
+      println("Test: Histogram with THREE GROUP BY keys (nested TermsAggregation x2)")
+      println("=" * 80)
+
+      testData.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.indexing.fastfields", "category,hostname,region,price")
+        .mode("overwrite")
+        .save(tablePath)
+
+      val df = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tablePath)
+
+      df.createOrReplaceTempView("price_table")
+
+      // Test: Histogram with TWO additional GROUP BY columns
+      println("\nTesting Histogram with TWO additional GROUP BY columns...")
+      val query = spark.sql("""
+        SELECT indextables_histogram(price, 50.0) as price_bucket, hostname, region, count(*) as cnt
+        FROM price_table
+        GROUP BY indextables_histogram(price, 50.0), hostname, region
+      """)
+
+      val result = query.collect()
+      println(s"   Query succeeded with ${result.length} rows")
+      query.show()
+
+      // Expected results - should have at least 4 distinct combinations
+      assert(result.length >= 4, s"Expected at least 4 rows, got ${result.length}")
+
+      println("\n" + "=" * 80)
+      println("SUCCESS: Histogram with THREE GROUP BY keys works!")
+      println("=" * 80)
+
+      deleteRecursively(tempDir)
+
+    } finally
+      spark.stop()
+  }
+
   /** Recursively delete a directory and all its contents. */
   private def deleteRecursively(file: File): Unit = {
     if (file.isDirectory) {

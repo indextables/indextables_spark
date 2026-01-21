@@ -945,19 +945,11 @@ class IndexTables4SparkGroupByAggregateReader(
     dhc.extendedBoundsMin.foreach(min => dhc.extendedBoundsMax.foreach(max => agg.setExtendedBounds(min, max)))
 
     // Add nested TermsAggregation for additional GROUP BY columns (multi-key bucket aggregation)
-    // Currently supports one additional GROUP BY column
-    if (additionalGroupByColumns.length == 1) {
-      val nestedTermsAgg = new TermsAggregation("nested_terms", additionalGroupByColumns.head, 1000, 0)
-      // Add sub-aggregations to the nested terms (COUNT, SUM, MIN, MAX)
-      addSubAggregationsToTerms(nestedTermsAgg)
+    // Supports multiple additional columns via recursively nested TermsAggregations
+    if (additionalGroupByColumns.nonEmpty) {
+      val nestedTermsAgg = buildNestedTermsAggregation(additionalGroupByColumns.toList, 0)
       agg.addSubAggregation(nestedTermsAgg)
-      logger.debug(s"Added nested TermsAggregation for '${additionalGroupByColumns.head}' with sub-aggregations")
-    } else if (additionalGroupByColumns.length > 1) {
-      throw new UnsupportedOperationException(
-        s"DateHistogram with more than one additional GROUP BY column is not yet supported. " +
-        s"Additional columns: [${additionalGroupByColumns.mkString(", ")}]. " +
-        s"Please use regular GROUP BY for multi-key aggregations."
-      )
+      logger.debug(s"Added nested TermsAggregation chain for columns: [${additionalGroupByColumns.mkString(", ")}]")
     } else {
       // No additional GROUP BY columns - add sub-aggregations directly to date histogram
       addSubAggregationsToDateHistogram(agg)
@@ -979,10 +971,10 @@ class IndexTables4SparkGroupByAggregateReader(
     }
 
     // Process results differently based on whether there are additional GROUP BY columns
-    if (additionalGroupByColumns.length == 1) {
+    if (additionalGroupByColumns.nonEmpty) {
       processDateHistogramWithNestedTermsResult(
         aggregationResult.asInstanceOf[DateHistogramResult],
-        additionalGroupByColumns.head
+        additionalGroupByColumns.toList
       )
     } else {
       processDateHistogramResult(aggregationResult.asInstanceOf[DateHistogramResult])
@@ -1012,17 +1004,11 @@ class IndexTables4SparkGroupByAggregateReader(
     hc.extendedBoundsMin.foreach(min => hc.extendedBoundsMax.foreach(max => agg.setExtendedBounds(min, max)))
 
     // Add nested TermsAggregation for additional GROUP BY columns (multi-key bucket aggregation)
-    if (additionalGroupByColumns.length == 1) {
-      val nestedTermsAgg = new TermsAggregation("nested_terms", additionalGroupByColumns.head, 1000, 0)
-      addSubAggregationsToTerms(nestedTermsAgg)
+    // Supports multiple additional columns via recursively nested TermsAggregations
+    if (additionalGroupByColumns.nonEmpty) {
+      val nestedTermsAgg = buildNestedTermsAggregation(additionalGroupByColumns.toList, 0)
       agg.addSubAggregation(nestedTermsAgg)
-      logger.debug(s"Added nested TermsAggregation for '${additionalGroupByColumns.head}' with sub-aggregations")
-    } else if (additionalGroupByColumns.length > 1) {
-      throw new UnsupportedOperationException(
-        s"Histogram with more than one additional GROUP BY column is not yet supported. " +
-        s"Additional columns: [${additionalGroupByColumns.mkString(", ")}]. " +
-        s"Please use regular GROUP BY for multi-key aggregations."
-      )
+      logger.debug(s"Added nested TermsAggregation chain for columns: [${additionalGroupByColumns.mkString(", ")}]")
     } else {
       // No additional GROUP BY columns - add sub-aggregations directly to histogram
       addSubAggregationsToHistogram(agg)
@@ -1043,10 +1029,10 @@ class IndexTables4SparkGroupByAggregateReader(
     if (aggregationResult == null) return Array.empty[InternalRow]
 
     // Process results differently based on whether there are additional GROUP BY columns
-    if (additionalGroupByColumns.length == 1) {
+    if (additionalGroupByColumns.nonEmpty) {
       processHistogramWithNestedTermsResult(
         aggregationResult.asInstanceOf[HistogramResult],
-        additionalGroupByColumns.head
+        additionalGroupByColumns.toList
       )
     } else {
       processHistogramResult(aggregationResult.asInstanceOf[HistogramResult])
@@ -1161,6 +1147,34 @@ class IndexTables4SparkGroupByAggregateReader(
   }
 
   /** Add sub-aggregations to a nested TermsAggregation (for multi-key bucket aggregations). */
+  /**
+   * Build recursively nested TermsAggregations for multiple additional GROUP BY columns.
+   * The structure is: Terms(col1) -> Terms(col2) -> ... -> Terms(colN) -> metric sub-aggregations
+   *
+   * @param columns The additional GROUP BY column names
+   * @param depth The current nesting depth (used for naming)
+   * @return The root TermsAggregation with nested children
+   */
+  private def buildNestedTermsAggregation(columns: List[String], depth: Int): TermsAggregation = {
+    val columnName = columns.head
+    val aggName = if (depth == 0) "nested_terms" else s"nested_terms_$depth"
+    val termsAgg = new TermsAggregation(aggName, columnName, 1000, 0)
+
+    if (columns.tail.isEmpty) {
+      // Last column - add the metric sub-aggregations here
+      addSubAggregationsToTerms(termsAgg)
+      logger.debug(s"BUCKET EXECUTION: Created leaf TermsAggregation '$aggName' for column '$columnName' with metric sub-aggregations")
+    } else {
+      // More columns - add nested TermsAggregation
+      val nestedAgg = buildNestedTermsAggregation(columns.tail, depth + 1)
+      val nestedAggName = if (depth + 1 == 1) "nested_terms_1" else s"nested_terms_${depth + 1}"
+      termsAgg.addSubAggregation(nestedAggName, nestedAgg)
+      logger.debug(s"BUCKET EXECUTION: Created TermsAggregation '$aggName' for column '$columnName' with nested terms")
+    }
+
+    termsAgg
+  }
+
   private def addSubAggregationsToTerms(agg: TermsAggregation): Unit = {
     import org.apache.spark.sql.connector.expressions.aggregate._
     partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
@@ -1251,18 +1265,24 @@ class IndexTables4SparkGroupByAggregateReader(
       .toArray
   }
 
-  /** Process DateHistogram with nested TermsAggregation result into flattened InternalRows (multi-key bucket aggregation). */
+  /**
+   * Process DateHistogram with nested TermsAggregation result into flattened InternalRows.
+   * Supports multiple levels of nested TermsAggregation for multi-key bucket aggregation.
+   *
+   * @param result The DateHistogram aggregation result
+   * @param nestedColumnNames The list of additional GROUP BY column names (corresponds to nested terms levels)
+   */
   private def processDateHistogramWithNestedTermsResult(
     result: DateHistogramResult,
-    nestedTermsFieldName: String
+    nestedColumnNames: List[String]
   ): Array[InternalRow] = {
     import scala.jdk.CollectionConverters._
     val histBuckets = result.getBuckets
     if (histBuckets == null) return Array.empty[InternalRow]
 
-    logger.debug(s"BUCKET EXECUTION: Processing DateHistogram with nested terms for field '$nestedTermsFieldName'")
+    logger.debug(s"BUCKET EXECUTION: Processing DateHistogram with ${nestedColumnNames.length} nested terms columns: [${nestedColumnNames.mkString(", ")}]")
 
-    // Flatten: for each histogram bucket, iterate over nested terms buckets
+    // Flatten: for each histogram bucket, recursively iterate over nested terms buckets
     histBuckets.asScala
       .filter(_ != null)
       .flatMap { histBucket =>
@@ -1270,26 +1290,64 @@ class IndexTables4SparkGroupByAggregateReader(
         val keyMillis = histBucket.getKey.toLong
         val keyMicros = keyMillis * 1000L
 
-        // Get nested terms aggregation
+        // Get first nested terms aggregation
         val nestedTermsResult = histBucket.getSubAggregation("nested_terms", classOf[TermsResult])
         if (nestedTermsResult == null || nestedTermsResult.getBuckets == null) {
           logger.debug(s"BUCKET EXECUTION: No nested terms results for histogram bucket at $keyMillis")
           Seq.empty[InternalRow]
         } else {
-          // Iterate over nested terms buckets
-          nestedTermsResult.getBuckets.asScala
-            .filter(_ != null)
-            .map { termBucket =>
-              val termKey = UTF8String.fromString(termBucket.getKey.toString)
-              // Get aggregation values from the terms bucket
-              val aggregationValues = calculateNestedTermsBucketAggregationValues(termBucket)
-              logger.debug(s"BUCKET EXECUTION: DateHistogram[$keyMicros] + Terms[$termKey] -> ${aggregationValues.mkString(", ")}")
-              InternalRow.fromSeq(Seq(keyMicros, termKey) ++ aggregationValues)
+          // Recursively flatten all nested terms levels
+          flattenNestedTermsBuckets(nestedTermsResult, nestedColumnNames.tail, 0)
+            .map { case (termKeys, aggregationValues) =>
+              val allKeys = Seq(keyMicros) ++ termKeys
+              logger.debug(s"BUCKET EXECUTION: DateHistogram[$keyMicros] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
+              InternalRow.fromSeq(allKeys ++ aggregationValues)
             }
-            .toSeq
         }
       }
       .toArray
+  }
+
+  /**
+   * Recursively flatten nested TermsAggregation buckets into (keys, aggregationValues) tuples.
+   * Returns a sequence of (termKeys, aggregationValues) where termKeys has one value per nesting level.
+   */
+  private def flattenNestedTermsBuckets(
+    termsResult: TermsResult,
+    remainingColumnNames: List[String],
+    depth: Int
+  ): Seq[(Seq[Any], Array[Any])] = {
+    import scala.jdk.CollectionConverters._
+
+    if (termsResult == null || termsResult.getBuckets == null) {
+      return Seq.empty
+    }
+
+    termsResult.getBuckets.asScala
+      .filter(_ != null)
+      .flatMap { termBucket =>
+        val termKey = UTF8String.fromString(termBucket.getKey.toString)
+
+        if (remainingColumnNames.isEmpty) {
+          // This is the deepest level - extract aggregation values
+          val aggregationValues = calculateNestedTermsBucketAggregationValues(termBucket)
+          Seq((Seq(termKey), aggregationValues))
+        } else {
+          // More nesting levels - recurse into nested terms
+          val nestedAggName = s"nested_terms_${depth + 1}"
+          val nestedTermsResult = termBucket.getSubAggregation(nestedAggName)
+          if (nestedTermsResult == null) {
+            logger.debug(s"BUCKET EXECUTION: No nested aggregation '$nestedAggName' found at depth $depth")
+            Seq.empty[(Seq[Any], Array[Any])]
+          } else {
+            flattenNestedTermsBuckets(nestedTermsResult.asInstanceOf[TermsResult], remainingColumnNames.tail, depth + 1)
+              .map { case (nestedKeys, aggregationValues) =>
+                (Seq(termKey) ++ nestedKeys, aggregationValues)
+              }
+          }
+        }
+      }
+      .toSeq
   }
 
   /** Calculate aggregation values from a nested TermsBucket (within a bucket aggregation). */
@@ -1348,41 +1406,43 @@ class IndexTables4SparkGroupByAggregateReader(
       .toArray
   }
 
-  /** Process Histogram with nested TermsAggregation result into flattened InternalRows (multi-key bucket aggregation). */
+  /**
+   * Process Histogram with nested TermsAggregation result into flattened InternalRows.
+   * Supports multiple levels of nested TermsAggregation for multi-key bucket aggregation.
+   *
+   * @param result The Histogram aggregation result
+   * @param nestedColumnNames The list of additional GROUP BY column names (corresponds to nested terms levels)
+   */
   private def processHistogramWithNestedTermsResult(
     result: HistogramResult,
-    nestedTermsFieldName: String
+    nestedColumnNames: List[String]
   ): Array[InternalRow] = {
     import scala.jdk.CollectionConverters._
     val histBuckets = result.getBuckets
     if (histBuckets == null) return Array.empty[InternalRow]
 
-    logger.debug(s"BUCKET EXECUTION: Processing Histogram with nested terms for field '$nestedTermsFieldName'")
+    logger.debug(s"BUCKET EXECUTION: Processing Histogram with ${nestedColumnNames.length} nested terms columns: [${nestedColumnNames.mkString(", ")}]")
 
-    // Flatten: for each histogram bucket, iterate over nested terms buckets
+    // Flatten: for each histogram bucket, recursively iterate over nested terms buckets
     histBuckets.asScala
       .filter(_ != null)
       .flatMap { histBucket =>
         // Histogram returns double for bucket key
         val histKey = histBucket.getKey
 
-        // Get nested terms aggregation
+        // Get first nested terms aggregation
         val nestedTermsResult = histBucket.getSubAggregation("nested_terms", classOf[TermsResult])
         if (nestedTermsResult == null || nestedTermsResult.getBuckets == null) {
           logger.debug(s"BUCKET EXECUTION: No nested terms results for histogram bucket at $histKey")
           Seq.empty[InternalRow]
         } else {
-          // Iterate over nested terms buckets
-          nestedTermsResult.getBuckets.asScala
-            .filter(_ != null)
-            .map { termBucket =>
-              val termKey = UTF8String.fromString(termBucket.getKey.toString)
-              // Get aggregation values from the terms bucket
-              val aggregationValues = calculateNestedTermsBucketAggregationValues(termBucket)
-              logger.debug(s"BUCKET EXECUTION: Histogram[$histKey] + Terms[$termKey] -> ${aggregationValues.mkString(", ")}")
-              InternalRow.fromSeq(Seq(histKey, termKey) ++ aggregationValues)
+          // Recursively flatten all nested terms levels
+          flattenNestedTermsBuckets(nestedTermsResult, nestedColumnNames.tail, 0)
+            .map { case (termKeys, aggregationValues) =>
+              val allKeys = Seq(histKey) ++ termKeys
+              logger.debug(s"BUCKET EXECUTION: Histogram[$histKey] + Terms[${termKeys.mkString(", ")}] -> ${aggregationValues.mkString(", ")}")
+              InternalRow.fromSeq(allKeys ++ aggregationValues)
             }
-            .toSeq
         }
       }
       .toArray
