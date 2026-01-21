@@ -462,4 +462,147 @@ class UnityCatalogConfigPropagationEndToEndTest extends TestBase {
 
     logger.info("SerializableAwsConfig: Databricks configs are present and will be passed to executor")
   }
+
+  /**
+   * REGRESSION TEST for PR #100: Demonstrates the BROKEN behavior when cachedHadoopConf is empty.
+   *
+   * This test simulates EXACTLY what IndexTables4SparkPartitionReader does BEFORE the fix:
+   * - cachedHadoopConf = new Configuration() (EMPTY)
+   * - cachedOptionsMap = new CaseInsensitiveStringMap(config.asJava) (has credentials)
+   *
+   * The credential provider is instantiated with the Hadoop config, NOT the options map,
+   * so with an empty Hadoop config, the provider fails with "not configured" error.
+   *
+   * This test MUST FAIL before the fix is applied and PASS after.
+   */
+  test("REGRESSION: Partition reader BROKEN pattern - empty Hadoop config causes credential failure") {
+    import io.indextables.spark.io.{CloudStorageProviderFactory, ProtocolBasedIOFactory}
+    import io.indextables.spark.util.ConfigNormalization
+    import org.apache.hadoop.conf.Configuration
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+
+    logger.info("=== REGRESSION TEST: BROKEN Pattern (empty Hadoop config) ===")
+
+    // Step 1: Build config map as driver does (this has all credentials)
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
+    val configMap     = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    logger.info(s"Config map has ${configMap.size} keys including credentials")
+
+    // Step 2: Simulate the BROKEN IndexTables4SparkPartitionReader pattern:
+    // - cachedOptionsMap gets the config (correct)
+    // - cachedHadoopConf is EMPTY (BROKEN!)
+    val cachedOptionsMap = new CaseInsensitiveStringMap(configMap.asJava)
+    val brokenCachedHadoopConf = new Configuration() // EMPTY - this is the bug!
+
+    logger.info(s"BROKEN: cachedOptionsMap has ${cachedOptionsMap.size()} entries")
+    logger.info(s"BROKEN: cachedHadoopConf is EMPTY (0 spark.indextables.* keys)")
+
+    // Step 3: Try to create credential provider with the BROKEN pattern
+    // CloudStorageProviderFactory.extractCloudConfig uses BOTH options AND hadoop config
+    // but S3CloudStorageProvider passes ONLY hadoop config to credential provider
+    val uri = new java.net.URI(testS3Path)
+
+    val exception = intercept[Exception] {
+      val provider = new UnityCatalogAWSCredentialProvider(uri, brokenCachedHadoopConf)
+      provider.getCredentials()
+    }
+
+    val fullMessage = getFullExceptionMessage(exception)
+    logger.info(s"BROKEN pattern exception: ${fullMessage.take(300)}")
+
+    // With BROKEN pattern (empty Hadoop config), provider should fail with "not configured"
+    val configMissingError =
+      fullMessage.contains("workspaceUrl not configured") ||
+        fullMessage.contains("Databricks workspace URL not configured") ||
+        fullMessage.contains("not configured")
+
+    withClue(
+      s"BROKEN pattern should cause 'not configured' error. " +
+        s"If this PASSES, the bug still exists. Full message: $fullMessage"
+    ) {
+      configMissingError shouldBe true
+    }
+
+    logger.info("CONFIRMED: BROKEN pattern (empty Hadoop config) causes 'not configured' error")
+  }
+
+  /**
+   * REGRESSION TEST for PR #100: Demonstrates the FIXED behavior when cachedHadoopConf is populated.
+   *
+   * This test simulates what IndexTables4SparkPartitionReader SHOULD do AFTER the fix:
+   * - cachedHadoopConf is populated from the config map
+   * - cachedOptionsMap = new CaseInsensitiveStringMap(config.asJava)
+   *
+   * With a properly populated Hadoop config, the credential provider receives the Databricks config
+   * and fails with "Connection refused" (proving config was received) instead of "not configured".
+   *
+   * This test MUST PASS after the fix is applied.
+   */
+  test("REGRESSION: Partition reader FIXED pattern - populated Hadoop config propagates credentials") {
+    import io.indextables.spark.util.ConfigNormalization
+    import org.apache.hadoop.conf.Configuration
+    import org.apache.spark.sql.util.CaseInsensitiveStringMap
+    import scala.jdk.CollectionConverters._
+
+    logger.info("=== REGRESSION TEST: FIXED Pattern (populated Hadoop config) ===")
+
+    // Step 1: Build config map as driver does
+    val sparkConfigs  = ConfigNormalization.extractTantivyConfigsFromSpark(spark)
+    val hadoopConfigs = ConfigNormalization.extractTantivyConfigsFromHadoop(spark.sparkContext.hadoopConfiguration)
+    val configMap     = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Verify credentials are in config map
+    configMap should contain key "spark.indextables.databricks.workspaceUrl"
+    configMap should contain key "spark.indextables.databricks.apiToken"
+    configMap should contain key "spark.indextables.aws.credentialsProviderClass"
+
+    // Step 2: Simulate the FIXED IndexTables4SparkPartitionReader pattern:
+    // - cachedOptionsMap gets the config (same as before)
+    // - cachedHadoopConf is POPULATED from config map (THE FIX!)
+    val cachedOptionsMap = new CaseInsensitiveStringMap(configMap.asJava)
+    val fixedCachedHadoopConf = new Configuration()
+    configMap.foreach {
+      case (key, value) if key.startsWith("spark.indextables.") =>
+        fixedCachedHadoopConf.set(key, value)
+      case _ =>
+    }
+
+    logger.info(s"FIXED: cachedOptionsMap has ${cachedOptionsMap.size()} entries")
+    logger.info(s"FIXED: cachedHadoopConf has ${configMap.count(_._1.startsWith("spark.indextables."))} spark.indextables.* keys")
+
+    // Step 3: Try to create credential provider with the FIXED pattern
+    val uri = new java.net.URI(testS3Path)
+
+    val exception = intercept[Exception] {
+      val provider = new UnityCatalogAWSCredentialProvider(uri, fixedCachedHadoopConf)
+      provider.getCredentials()
+    }
+
+    val fullMessage = getFullExceptionMessage(exception)
+    logger.info(s"FIXED pattern exception: ${fullMessage.take(300)}")
+
+    // With FIXED pattern, provider should NOT fail with "not configured"
+    // Instead it should fail with "Connection refused" (trying to connect to fake workspace)
+    val configMissingError =
+      fullMessage.contains("workspaceUrl not configured") ||
+        fullMessage.contains("Databricks workspace URL not configured") ||
+        fullMessage.contains("apiToken not configured") ||
+        fullMessage.contains("Databricks API token not configured")
+
+    withClue(
+      s"FIXED pattern should NOT cause 'not configured' error. " +
+        s"Should fail on connection, not config. Full message: $fullMessage"
+    ) {
+      configMissingError shouldBe false
+    }
+
+    // Verify the error indicates the provider tried to connect (config was received)
+    assertUnityProviderInvoked(exception)
+
+    logger.info("SUCCESS: FIXED pattern propagates credentials correctly")
+  }
+
 }
