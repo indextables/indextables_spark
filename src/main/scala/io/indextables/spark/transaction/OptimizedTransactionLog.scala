@@ -552,7 +552,8 @@ class OptimizedTransactionLog(
 
     if (!hasSchemaRefs) {
       // No schema refs to restore (legacy format or no schemas)
-      return addActions
+      // But still apply empty object filtering for inline docMappingJson
+      return filterInlineDocMappings(addActions)
     }
 
     // Use cached schema registry instead of reloading metadata each time
@@ -569,6 +570,7 @@ class OptimizedTransactionLog(
     }
 
     // Restore schemas directly using the hash -> schema map (no prefix manipulation needed)
+    // Also apply empty object filtering to the restored schemas
     logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions using cached registry (${schemaRegistry.size} schemas)")
     val restored = addActions
       .map {
@@ -576,10 +578,20 @@ class OptimizedTransactionLog(
           val hash = add.docMappingRef.get
           schemaRegistry.get(hash) match {
             case Some(schema) =>
-              add.copy(docMappingJson = Some(schema), docMappingRef = None)
+              // Apply empty object filtering to the restored schema
+              val filteredSchema = SchemaDeduplication.filterEmptyObjectMappings(schema)
+              add.copy(docMappingJson = Some(filteredSchema), docMappingRef = None)
             case None =>
               logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
               add
+          }
+        // Also filter inline docMappingJson (legacy format)
+        case add: AddAction if add.docMappingJson.isDefined =>
+          val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
+          if (filtered != add.docMappingJson.get) {
+            add.copy(docMappingJson = Some(filtered))
+          } else {
+            add
           }
         case other => other
       }
@@ -597,6 +609,24 @@ class OptimizedTransactionLog(
 
     restored
   }
+
+  /**
+   * Filter inline docMappingJson to remove empty object fields.
+   * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
+   */
+  private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
+    addActions.map { add =>
+      if (add.docMappingJson.isDefined) {
+        val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
+        if (filtered != add.docMappingJson.get) {
+          add.copy(docMappingJson = Some(filtered))
+        } else {
+          add
+        }
+      } else {
+        add
+      }
+    }
 
   /** Get schema from metadata (for interface compatibility) */
   def getSchema(): Option[StructType] =

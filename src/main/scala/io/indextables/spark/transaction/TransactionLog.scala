@@ -479,7 +479,8 @@ class TransactionLog(
 
     if (!hasSchemaRefs) {
       // No schema refs to restore (legacy format or no schemas)
-      return addActions
+      // But still apply empty object filtering for inline docMappingJson
+      return filterInlineDocMappings(addActions)
     }
 
     // Get MetadataAction which contains the schema registry
@@ -494,7 +495,7 @@ class TransactionLog(
       )
     }
 
-    // Restore schemas
+    // Restore schemas (this also applies empty object filtering)
     logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions")
     val restored = SchemaDeduplication.restoreSchemas(addActions, schemaRegistry).collect { case a: AddAction => a }
 
@@ -510,6 +511,24 @@ class TransactionLog(
 
     restored
   }
+
+  /**
+   * Filter inline docMappingJson to remove empty object fields.
+   * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
+   */
+  private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
+    addActions.map { add =>
+      if (add.docMappingJson.isDefined) {
+        val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
+        if (filtered != add.docMappingJson.get) {
+          add.copy(docMappingJson = Some(filtered))
+        } else {
+          add
+        }
+      } else {
+        add
+      }
+    }
 
   /** Get the total row count across all active files. */
   def getTotalRowCount(): Long =
