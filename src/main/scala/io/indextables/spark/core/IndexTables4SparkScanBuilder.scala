@@ -1198,6 +1198,37 @@ class IndexTables4SparkScanBuilder(
     }
   }
 
+  /** Check if a field is marked as fast in the schema (without numeric type requirement).
+   *  Used for MIN/MAX which can operate on both numeric and string fast fields.
+   */
+  private def isFastField(fieldName: String): Boolean = {
+    val fastFields = getActualFastFieldsFromSchema()
+
+    // For nested JSON fields (containing dots), check if the field itself OR its parent struct is marked as fast
+    if (fieldName.contains(".")) {
+      val parentField  = fieldName.substring(0, fieldName.lastIndexOf('.'))
+      val isFieldFast  = fastFields.contains(fieldName)
+      val isParentFast = fastFields.contains(parentField)
+
+      if (isFieldFast || isParentFast) {
+        logger.debug(s"FAST FIELD VALIDATION: ✓ Nested field '$fieldName' is fast (field_fast=$isFieldFast, parent_fast=$isParentFast)")
+        return true
+      } else {
+        logger.debug(s"FAST FIELD VALIDATION: ✗ Neither '$fieldName' nor parent '$parentField' marked as fast")
+        return false
+      }
+    }
+
+    // For top-level fields, check directly
+    if (fastFields.contains(fieldName)) {
+      logger.debug(s"FAST FIELD VALIDATION: ✓ Field '$fieldName' is marked as fast")
+      true
+    } else {
+      logger.debug(s"FAST FIELD VALIDATION: ✗ Field '$fieldName' is not marked as fast (available: ${fastFields.mkString(", ")})")
+      false
+    }
+  }
+
   /** Check if a DataType is numeric. */
   private def isNumericType(dataType: org.apache.spark.sql.types.DataType): Boolean = {
     import org.apache.spark.sql.types._
@@ -1530,13 +1561,15 @@ class IndexTables4SparkScanBuilder(
             missingFastFields += fieldName
           }
         case min: Min =>
+          // MIN can operate on both numeric and string fast fields
           val fieldName = getFieldName(min.column)
-          if (!isNumericFastField(fieldName)) {
+          if (!isFastField(fieldName)) {
             missingFastFields += fieldName
           }
         case max: Max =>
+          // MAX can operate on both numeric and string fast fields
           val fieldName = getFieldName(max.column)
-          if (!isNumericFastField(fieldName)) {
+          if (!isFastField(fieldName)) {
             missingFastFields += fieldName
           }
         case other =>

@@ -147,12 +147,17 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
                 s"V2BucketExpressionRule: Transformed aggregates: ${transformedAggExprs.map(_.toString).mkString(", ")}"
               )
 
-              // Create the transformed Aggregate using copy() for Spark version compatibility
-              // This avoids constructor signature differences between Spark 3.x and 4.x
-              val transformedAgg = agg.copy(
-                groupingExpressions = transformedGrouping,
-                aggregateExpressions = transformedAggExprs
-              )
+              // Create the transformed Aggregate using makeCopy for Spark version compatibility
+              // Spark 4.x added a 4th parameter (hint: Option[AggregateHint]) to the Aggregate case class,
+              // so direct constructor calls and copy() with named params fail with NoSuchMethodError.
+              // makeCopy takes all constructor args and handles version differences.
+              val originalArgs = agg.productIterator.toArray.map(_.asInstanceOf[AnyRef])
+              val newArgs = Array[AnyRef](
+                transformedGrouping,   // Replace groupingExpressions (position 0)
+                transformedAggExprs,   // Replace aggregateExpressions (position 1)
+                child                  // Keep child (position 2)
+              ) ++ originalArgs.drop(3) // Preserve any additional args (e.g., hint in Spark 4.x)
+              val transformedAgg = agg.makeCopy(newArgs).asInstanceOf[Aggregate]
 
               // Only store bucket config AFTER successful transformation
               // This prevents stale configs from polluting subsequent queries if transformation fails
