@@ -326,10 +326,24 @@ class IndexTables4SparkScanBuilder(
     val extractedIndexQueryFilters = extractIndexQueriesFromCurrentPlan()
 
     // Bucket aggregations use the GROUP BY scan with bucketConfig
-    // The groupByColumns contains the bucket field name
-    val groupByColumns = Array(bucketConfig.fieldName)
+    // The groupByColumns must include the bucket field PLUS any additional GROUP BY columns
+    // Example: GROUP BY indextables_date_histogram(ts, '15m'), hostname
+    //   -> groupByColumns = Array("ts", "hostname")
+    //   -> bucketConfig applies to position 0 (ts)
+    //
+    // Multi-key bucket aggregations are supported using nested TermsAggregation:
+    // - The bucket aggregation (DateHistogram/Histogram/Range) is the outer aggregation
+    // - Additional GROUP BY columns use nested TermsAggregation as sub-aggregations
+    // - Results are flattened: [bucket_key, term_key_1, term_key_2, ..., aggregation_values]
+    val additionalGroupByColumns = _pushedGroupBy.getOrElse(Array.empty[String])
+      .filterNot(_ == bucketConfig.fieldName) // Remove bucket field if already present
+    val groupByColumns = Array(bucketConfig.fieldName) ++ additionalGroupByColumns
 
     logger.debug(s"BUCKET SCAN: Creating bucket aggregate scan for field '${bucketConfig.fieldName}' with config: ${bucketConfig.description}")
+    logger.debug(s"BUCKET SCAN: All GROUP BY columns: ${groupByColumns.mkString(", ")}")
+    if (additionalGroupByColumns.nonEmpty) {
+      logger.debug(s"BUCKET SCAN: Additional GROUP BY columns will use nested TermsAggregation: ${additionalGroupByColumns.mkString(", ")}")
+    }
 
     // Pass partition columns for optimization (bucket aggregations typically don't use partition columns in GROUP BY)
     val partitionCols = getPartitionColumns()

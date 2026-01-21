@@ -141,18 +141,58 @@ class IndexTables4SparkGroupByAggregateScan(
     val groupByFields = bucketConfig match {
       case Some(dhc: DateHistogramConfig) =>
         // DateHistogram returns TimestampType for bucket keys (epoch microseconds)
+        // Position 0 is the bucket field, additional GROUP BY columns follow
         logger.debug(s"GROUP BY SCHEMA: DateHistogram bucket key type is TimestampType")
-        Array(StructField("group_col_0", TimestampType, nullable = true))
+        val bucketField = StructField("group_col_0", TimestampType, nullable = true)
+        val additionalFields = groupByColumns.drop(1).zipWithIndex.map {
+          case (columnName, idx) =>
+            val index = idx + 1 // Start at 1 since bucket is at 0
+            schema.fields.find(_.name == columnName) match {
+              case Some(field) =>
+                logger.debug(s"GROUP BY SCHEMA: Additional field '$columnName' with type ${field.dataType}, naming as group_col_$index")
+                StructField(s"group_col_$index", field.dataType, field.nullable)
+              case None =>
+                logger.warn(s"GROUP BY SCHEMA: Additional field '$columnName' not found, falling back to StringType")
+                StructField(s"group_col_$index", StringType, nullable = true)
+            }
+        }
+        Array(bucketField) ++ additionalFields
 
       case Some(hc: HistogramConfig) =>
         // Histogram returns DoubleType for bucket keys
         logger.debug(s"GROUP BY SCHEMA: Histogram bucket key type is DoubleType")
-        Array(StructField("group_col_0", DoubleType, nullable = true))
+        val bucketField = StructField("group_col_0", DoubleType, nullable = true)
+        val additionalFields = groupByColumns.drop(1).zipWithIndex.map {
+          case (columnName, idx) =>
+            val index = idx + 1
+            schema.fields.find(_.name == columnName) match {
+              case Some(field) =>
+                logger.debug(s"GROUP BY SCHEMA: Additional field '$columnName' with type ${field.dataType}, naming as group_col_$index")
+                StructField(s"group_col_$index", field.dataType, field.nullable)
+              case None =>
+                logger.warn(s"GROUP BY SCHEMA: Additional field '$columnName' not found, falling back to StringType")
+                StructField(s"group_col_$index", StringType, nullable = true)
+            }
+        }
+        Array(bucketField) ++ additionalFields
 
       case Some(rc: RangeConfig) =>
         // Range returns StringType for bucket keys (range names)
         logger.debug(s"GROUP BY SCHEMA: Range bucket key type is StringType")
-        Array(StructField("group_col_0", StringType, nullable = true))
+        val bucketField = StructField("group_col_0", StringType, nullable = true)
+        val additionalFields = groupByColumns.drop(1).zipWithIndex.map {
+          case (columnName, idx) =>
+            val index = idx + 1
+            schema.fields.find(_.name == columnName) match {
+              case Some(field) =>
+                logger.debug(s"GROUP BY SCHEMA: Additional field '$columnName' with type ${field.dataType}, naming as group_col_$index")
+                StructField(s"group_col_$index", field.dataType, field.nullable)
+              case None =>
+                logger.warn(s"GROUP BY SCHEMA: Additional field '$columnName' not found, falling back to StringType")
+                StructField(s"group_col_$index", StringType, nullable = true)
+            }
+        }
+        Array(bucketField) ++ additionalFields
 
       case None =>
         // Standard GROUP BY - use field types from schema
@@ -890,7 +930,12 @@ class IndexTables4SparkGroupByAggregateReader(
     dhc: DateHistogramConfig
   ): Array[org.apache.spark.sql.catalyst.InternalRow] = {
 
+    // Get additional GROUP BY columns (beyond the bucket field)
+    val additionalGroupByColumns = partition.groupByColumns.drop(1)
     logger.debug(s"Executing DateHistogramAggregation for field '${dhc.fieldName}' with interval '${dhc.interval}'")
+    if (additionalGroupByColumns.nonEmpty) {
+      logger.debug(s"Additional GROUP BY columns (nested TermsAggregation): ${additionalGroupByColumns.mkString(", ")}")
+    }
 
     val agg = new DateHistogramAggregation("bucket_agg", dhc.fieldName)
     agg.setFixedInterval(dhc.interval)
@@ -899,8 +944,24 @@ class IndexTables4SparkGroupByAggregateReader(
     dhc.hardBoundsMin.foreach(min => dhc.hardBoundsMax.foreach(max => agg.setHardBounds(min, max)))
     dhc.extendedBoundsMin.foreach(min => dhc.extendedBoundsMax.foreach(max => agg.setExtendedBounds(min, max)))
 
-    // Add sub-aggregations
-    addSubAggregationsToDateHistogram(agg)
+    // Add nested TermsAggregation for additional GROUP BY columns (multi-key bucket aggregation)
+    // Currently supports one additional GROUP BY column
+    if (additionalGroupByColumns.length == 1) {
+      val nestedTermsAgg = new TermsAggregation("nested_terms", additionalGroupByColumns.head, 1000, 0)
+      // Add sub-aggregations to the nested terms (COUNT, SUM, MIN, MAX)
+      addSubAggregationsToTerms(nestedTermsAgg)
+      agg.addSubAggregation(nestedTermsAgg)
+      logger.debug(s"Added nested TermsAggregation for '${additionalGroupByColumns.head}' with sub-aggregations")
+    } else if (additionalGroupByColumns.length > 1) {
+      throw new UnsupportedOperationException(
+        s"DateHistogram with more than one additional GROUP BY column is not yet supported. " +
+        s"Additional columns: [${additionalGroupByColumns.mkString(", ")}]. " +
+        s"Please use regular GROUP BY for multi-key aggregations."
+      )
+    } else {
+      // No additional GROUP BY columns - add sub-aggregations directly to date histogram
+      addSubAggregationsToDateHistogram(agg)
+    }
 
     // Build and execute query
     val query  = buildFilterQuery(splitSearchEngine)
@@ -917,7 +978,15 @@ class IndexTables4SparkGroupByAggregateReader(
       return Array.empty[InternalRow]
     }
 
-    processDateHistogramResult(aggregationResult.asInstanceOf[DateHistogramResult])
+    // Process results differently based on whether there are additional GROUP BY columns
+    if (additionalGroupByColumns.length == 1) {
+      processDateHistogramWithNestedTermsResult(
+        aggregationResult.asInstanceOf[DateHistogramResult],
+        additionalGroupByColumns.head
+      )
+    } else {
+      processDateHistogramResult(aggregationResult.asInstanceOf[DateHistogramResult])
+    }
   }
 
   /** Execute Histogram bucket aggregation. */
@@ -927,9 +996,14 @@ class IndexTables4SparkGroupByAggregateReader(
     hc: HistogramConfig
   ): Array[org.apache.spark.sql.catalyst.InternalRow] = {
 
+    // Get additional GROUP BY columns (beyond the bucket field)
+    val additionalGroupByColumns = partition.groupByColumns.drop(1)
     logger.debug(
       s"BUCKET EXECUTION: Creating HistogramAggregation for field '${hc.fieldName}' with interval ${hc.interval}"
     )
+    if (additionalGroupByColumns.nonEmpty) {
+      logger.debug(s"Additional GROUP BY columns (nested TermsAggregation): ${additionalGroupByColumns.mkString(", ")}")
+    }
 
     val agg = new HistogramAggregation("bucket_agg", hc.fieldName, hc.interval)
     if (hc.offset != 0.0) agg.setOffset(hc.offset)
@@ -937,8 +1011,22 @@ class IndexTables4SparkGroupByAggregateReader(
     hc.hardBoundsMin.foreach(min => hc.hardBoundsMax.foreach(max => agg.setHardBounds(min, max)))
     hc.extendedBoundsMin.foreach(min => hc.extendedBoundsMax.foreach(max => agg.setExtendedBounds(min, max)))
 
-    // Add sub-aggregations
-    addSubAggregationsToHistogram(agg)
+    // Add nested TermsAggregation for additional GROUP BY columns (multi-key bucket aggregation)
+    if (additionalGroupByColumns.length == 1) {
+      val nestedTermsAgg = new TermsAggregation("nested_terms", additionalGroupByColumns.head, 1000, 0)
+      addSubAggregationsToTerms(nestedTermsAgg)
+      agg.addSubAggregation(nestedTermsAgg)
+      logger.debug(s"Added nested TermsAggregation for '${additionalGroupByColumns.head}' with sub-aggregations")
+    } else if (additionalGroupByColumns.length > 1) {
+      throw new UnsupportedOperationException(
+        s"Histogram with more than one additional GROUP BY column is not yet supported. " +
+        s"Additional columns: [${additionalGroupByColumns.mkString(", ")}]. " +
+        s"Please use regular GROUP BY for multi-key aggregations."
+      )
+    } else {
+      // No additional GROUP BY columns - add sub-aggregations directly to histogram
+      addSubAggregationsToHistogram(agg)
+    }
 
     // Build and execute query
     val query = buildFilterQuery(splitSearchEngine)
@@ -954,7 +1042,15 @@ class IndexTables4SparkGroupByAggregateReader(
     if (aggregationResult == null) aggregationResult = result.getAggregation("bucket_agg")
     if (aggregationResult == null) return Array.empty[InternalRow]
 
-    processHistogramResult(aggregationResult.asInstanceOf[HistogramResult])
+    // Process results differently based on whether there are additional GROUP BY columns
+    if (additionalGroupByColumns.length == 1) {
+      processHistogramWithNestedTermsResult(
+        aggregationResult.asInstanceOf[HistogramResult],
+        additionalGroupByColumns.head
+      )
+    } else {
+      processHistogramResult(aggregationResult.asInstanceOf[HistogramResult])
+    }
   }
 
   /** Execute Range bucket aggregation. */
@@ -1064,6 +1160,42 @@ class IndexTables4SparkGroupByAggregateReader(
     }
   }
 
+  /** Add sub-aggregations to a nested TermsAggregation (for multi-key bucket aggregations). */
+  private def addSubAggregationsToTerms(agg: TermsAggregation): Unit = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+    partition.aggregation.aggregateExpressions.zipWithIndex.foreach {
+      case (aggExpr, index) =>
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            logger.debug(s"BUCKET EXECUTION: COUNT aggregation at index $index will use bucket doc count")
+
+          case sum: Sum =>
+            val fieldName = getFieldName(sum.column)
+            logger.debug(s"BUCKET EXECUTION: Adding SUM sub-aggregation for field '$fieldName' at index $index")
+            agg.addSubAggregation(s"sum_$index", new SumAggregation(s"sum_$index", fieldName))
+
+          case avg: Avg =>
+            val fieldName = getFieldName(avg.column)
+            throw new IllegalStateException(
+              s"AVG aggregation for field '$fieldName' should have been transformed by Spark into SUM + COUNT."
+            )
+
+          case min: Min =>
+            val fieldName = getFieldName(min.column)
+            logger.debug(s"BUCKET EXECUTION: Adding MIN sub-aggregation for field '$fieldName' at index $index")
+            agg.addSubAggregation(s"min_$index", new MinAggregation(s"min_$index", fieldName))
+
+          case max: Max =>
+            val fieldName = getFieldName(max.column)
+            logger.debug(s"BUCKET EXECUTION: Adding MAX sub-aggregation for field '$fieldName' at index $index")
+            agg.addSubAggregation(s"max_$index", new MaxAggregation(s"max_$index", fieldName))
+
+          case other =>
+            logger.debug(s"BUCKET EXECUTION: Unsupported aggregation type: ${other.getClass.getSimpleName}")
+        }
+    }
+  }
+
   /** Build filter query for bucket aggregation. */
   private def buildFilterQuery(splitSearchEngine: io.indextables.spark.search.SplitSearchEngine)
     : io.indextables.tantivy4java.split.SplitQuery = {
@@ -1101,7 +1233,7 @@ class IndexTables4SparkGroupByAggregateReader(
       if (schema != null) schema.close()
   }
 
-  /** Process DateHistogram aggregation result into InternalRows. */
+  /** Process DateHistogram aggregation result into InternalRows (single-key bucket aggregation). */
   private def processDateHistogramResult(result: DateHistogramResult): Array[InternalRow] = {
     import scala.jdk.CollectionConverters._
     val buckets = result.getBuckets
@@ -1119,7 +1251,84 @@ class IndexTables4SparkGroupByAggregateReader(
       .toArray
   }
 
-  /** Process Histogram aggregation result into InternalRows. */
+  /** Process DateHistogram with nested TermsAggregation result into flattened InternalRows (multi-key bucket aggregation). */
+  private def processDateHistogramWithNestedTermsResult(
+    result: DateHistogramResult,
+    nestedTermsFieldName: String
+  ): Array[InternalRow] = {
+    import scala.jdk.CollectionConverters._
+    val histBuckets = result.getBuckets
+    if (histBuckets == null) return Array.empty[InternalRow]
+
+    logger.debug(s"BUCKET EXECUTION: Processing DateHistogram with nested terms for field '$nestedTermsFieldName'")
+
+    // Flatten: for each histogram bucket, iterate over nested terms buckets
+    histBuckets.asScala
+      .filter(_ != null)
+      .flatMap { histBucket =>
+        // DateHistogram returns epoch milliseconds, Spark TimestampType expects microseconds
+        val keyMillis = histBucket.getKey.toLong
+        val keyMicros = keyMillis * 1000L
+
+        // Get nested terms aggregation
+        val nestedTermsResult = histBucket.getSubAggregation("nested_terms", classOf[TermsResult])
+        if (nestedTermsResult == null || nestedTermsResult.getBuckets == null) {
+          logger.debug(s"BUCKET EXECUTION: No nested terms results for histogram bucket at $keyMillis")
+          Seq.empty[InternalRow]
+        } else {
+          // Iterate over nested terms buckets
+          nestedTermsResult.getBuckets.asScala
+            .filter(_ != null)
+            .map { termBucket =>
+              val termKey = UTF8String.fromString(termBucket.getKey.toString)
+              // Get aggregation values from the terms bucket
+              val aggregationValues = calculateNestedTermsBucketAggregationValues(termBucket)
+              logger.debug(s"BUCKET EXECUTION: DateHistogram[$keyMicros] + Terms[$termKey] -> ${aggregationValues.mkString(", ")}")
+              InternalRow.fromSeq(Seq(keyMicros, termKey) ++ aggregationValues)
+            }
+            .toSeq
+        }
+      }
+      .toArray
+  }
+
+  /** Calculate aggregation values from a nested TermsBucket (within a bucket aggregation). */
+  private def calculateNestedTermsBucketAggregationValues(
+    bucket: io.indextables.tantivy4java.aggregation.TermsResult.TermsBucket
+  ): Array[Any] = {
+    import org.apache.spark.sql.connector.expressions.aggregate._
+
+    partition.aggregation.aggregateExpressions.zipWithIndex.map {
+      case (aggExpr, index) =>
+        aggExpr match {
+          case _: Count | _: CountStar =>
+            bucket.getDocCount.toLong
+
+          case sum: Sum =>
+            try {
+              // TermsBucket.getSubAggregation returns AggregationResult, need to cast
+              val sumResult = bucket.getSubAggregation(s"sum_$index").asInstanceOf[SumResult]
+              if (sumResult != null) convertSumValue(sumResult.getSum, sum) else 0L
+            } catch { case _: Exception => 0L }
+
+          case min: Min =>
+            try {
+              val minResult = bucket.getSubAggregation(s"min_$index").asInstanceOf[MinResult]
+              if (minResult != null) convertMinMaxValue(minResult.getMin, min) else 0.0
+            } catch { case _: Exception => 0.0 }
+
+          case max: Max =>
+            try {
+              val maxResult = bucket.getSubAggregation(s"max_$index").asInstanceOf[MaxResult]
+              if (maxResult != null) convertMinMaxValue(maxResult.getMax, max) else 0.0
+            } catch { case _: Exception => 0.0 }
+
+          case _ => 0L
+        }
+    }
+  }
+
+  /** Process Histogram aggregation result into InternalRows (single-key bucket aggregation). */
   private def processHistogramResult(result: HistogramResult): Array[InternalRow] = {
     import scala.jdk.CollectionConverters._
     val buckets = result.getBuckets
@@ -1135,6 +1344,46 @@ class IndexTables4SparkGroupByAggregateReader(
         val aggregationValues = calculateBucketAggregationValues(bucket)
         logger.debug(s"BUCKET EXECUTION: Histogram bucket key=$key, docCount=${bucket.getDocCount}")
         InternalRow.fromSeq(Seq(key) ++ aggregationValues)
+      }
+      .toArray
+  }
+
+  /** Process Histogram with nested TermsAggregation result into flattened InternalRows (multi-key bucket aggregation). */
+  private def processHistogramWithNestedTermsResult(
+    result: HistogramResult,
+    nestedTermsFieldName: String
+  ): Array[InternalRow] = {
+    import scala.jdk.CollectionConverters._
+    val histBuckets = result.getBuckets
+    if (histBuckets == null) return Array.empty[InternalRow]
+
+    logger.debug(s"BUCKET EXECUTION: Processing Histogram with nested terms for field '$nestedTermsFieldName'")
+
+    // Flatten: for each histogram bucket, iterate over nested terms buckets
+    histBuckets.asScala
+      .filter(_ != null)
+      .flatMap { histBucket =>
+        // Histogram returns double for bucket key
+        val histKey = histBucket.getKey
+
+        // Get nested terms aggregation
+        val nestedTermsResult = histBucket.getSubAggregation("nested_terms", classOf[TermsResult])
+        if (nestedTermsResult == null || nestedTermsResult.getBuckets == null) {
+          logger.debug(s"BUCKET EXECUTION: No nested terms results for histogram bucket at $histKey")
+          Seq.empty[InternalRow]
+        } else {
+          // Iterate over nested terms buckets
+          nestedTermsResult.getBuckets.asScala
+            .filter(_ != null)
+            .map { termBucket =>
+              val termKey = UTF8String.fromString(termBucket.getKey.toString)
+              // Get aggregation values from the terms bucket
+              val aggregationValues = calculateNestedTermsBucketAggregationValues(termBucket)
+              logger.debug(s"BUCKET EXECUTION: Histogram[$histKey] + Terms[$termKey] -> ${aggregationValues.mkString(", ")}")
+              InternalRow.fromSeq(Seq(histKey, termKey) ++ aggregationValues)
+            }
+            .toSeq
+        }
       }
       .toArray
   }
