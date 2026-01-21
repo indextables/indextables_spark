@@ -479,8 +479,28 @@ class IndexTables4SparkGroupByAggregateReader(
         partition.tablePath.toString
       )
 
-      // Normalize s3a:// to s3:// for tantivy4java compatibility
-      val splitPath = resolvedPath.replace("s3a://", "s3://")
+      // Normalize path for tantivy4java compatibility (handles S3, Azure, etc.)
+      // IMPORTANT: Populate Hadoop config from partition.config so credential providers
+      // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
+      // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
+      val optionsMap = {
+        import scala.jdk.CollectionConverters._
+        new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
+      }
+      val hadoopConf = {
+        val conf = new org.apache.hadoop.conf.Configuration()
+        partition.config.foreach {
+          case (key, value) if key.startsWith("spark.indextables.") =>
+            conf.set(key, value)
+          case _ =>
+        }
+        conf
+      }
+      val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
+        resolvedPath,
+        optionsMap,
+        hadoopConf
+      )
 
       logger.debug(s"GROUP BY EXECUTION: Resolved split path: $splitPath")
 
