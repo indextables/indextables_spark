@@ -394,7 +394,10 @@ class IndexTables4SparkSimpleAggregateReader(
         import scala.jdk.CollectionConverters._
         new org.apache.spark.sql.util.CaseInsensitiveStringMap(partition.config.asJava)
       }
-      val hadoopConf = new org.apache.hadoop.conf.Configuration()
+      // IMPORTANT: Populate Hadoop config from partition.config so credential providers
+      // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
+      // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
+      val hadoopConf = io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(partition.config)
       val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
         resolvedPath,
         optionsMap,

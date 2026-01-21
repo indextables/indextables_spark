@@ -1179,13 +1179,27 @@ class PurgeOrphanedSplitsExecutor(
         val configOptions                  = new CaseInsensitiveStringMap(optionsMap)
         var provider: CloudStorageProvider = null
 
+        // IMPORTANT: Populate Hadoop config from broadcast configs so credential providers
+        // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
+        // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
+        val enrichedHadoopConf = io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(configs)
+        // Also copy any existing Hadoop config settings (e.g., fs.s3a.* from cluster config)
+        val baseConf = conf
+        val iter = baseConf.iterator()
+        while (iter.hasNext) {
+          val entry = iter.next()
+          if (enrichedHadoopConf.get(entry.getKey) == null) {
+            enrichedHadoopConf.set(entry.getKey, entry.getValue)
+          }
+        }
+
         try
           fileIter.foreach { fileInfo =>
             // Lazy initialize provider on first file (to get base path)
             if (provider == null) {
               // Extract base path from file path (everything before the filename)
               val basePath = fileInfo.path.substring(0, fileInfo.path.lastIndexOf('/'))
-              provider = CloudStorageProviderFactory.createProvider(basePath, configOptions, conf)
+              provider = CloudStorageProviderFactory.createProvider(basePath, configOptions, enrichedHadoopConf)
             }
 
             // Inline retry logic to avoid serialization issues

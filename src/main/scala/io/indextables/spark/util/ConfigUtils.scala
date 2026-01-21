@@ -74,6 +74,19 @@ object ConfigUtils {
       // Try both the original key and lowercase version (CaseInsensitiveStringMap lowercases keys)
       configMap.get(configKey).orElse(configMap.get(configKey.toLowerCase))
 
+    // Resolve AWS credentials through credential provider if configured.
+    // This is essential for Unity Catalog and other custom credential providers
+    // that don't store credentials directly in config but resolve them dynamically.
+    val resolvedAwsCreds = tablePathOpt.flatMap { tablePath =>
+      try {
+        io.indextables.spark.utils.CredentialProviderFactory.resolveAWSCredentialsFromConfig(configMap, tablePath)
+      } catch {
+        case ex: Exception =>
+          logger.warn(s"Failed to resolve AWS credentials from provider: ${ex.getMessage}")
+          None
+      }
+    }
+
     SplitCacheConfig(
       cacheName = {
         val configName = getConfig("spark.indextables.cache.name", "")
@@ -114,10 +127,11 @@ object ConfigUtils {
       docBatchMaxSize = getConfig("spark.indextables.docBatch.maxSize", "1000").toInt,
       splitCachePath = getConfigOption("spark.indextables.cache.directoryPath")
         .orElse(SplitCacheConfig.getDefaultCachePath()),
-      // AWS configuration from broadcast
-      awsAccessKey = getConfigOption("spark.indextables.aws.accessKey"),
-      awsSecretKey = getConfigOption("spark.indextables.aws.secretKey"),
-      awsSessionToken = getConfigOption("spark.indextables.aws.sessionToken"),
+      // AWS credentials - resolved through credential provider if configured (e.g., UnityCatalog)
+      // Falls back to direct config lookup if no provider or explicit credentials are present
+      awsAccessKey = resolvedAwsCreds.map(_.accessKey).orElse(getConfigOption("spark.indextables.aws.accessKey")),
+      awsSecretKey = resolvedAwsCreds.map(_.secretKey).orElse(getConfigOption("spark.indextables.aws.secretKey")),
+      awsSessionToken = resolvedAwsCreds.flatMap(_.sessionToken).orElse(getConfigOption("spark.indextables.aws.sessionToken")),
       awsRegion = getConfigOption("spark.indextables.aws.region"),
       awsEndpoint = getConfigOption("spark.indextables.s3.endpoint"),
       awsPathStyleAccess = getConfigOption("spark.indextables.s3.pathStyleAccess").map(_.toBoolean),
@@ -266,5 +280,31 @@ object ConfigUtils {
       .orElse(config.get(DATA_SKIPPING_NUM_INDEXED_COLS.toLowerCase))
       .map(_.toInt)
       .getOrElse(DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS)
+
+  /**
+   * Creates a Hadoop Configuration populated with spark.indextables.* keys from the config map.
+   *
+   * This is essential for executor-side credential resolution where credential providers
+   * (e.g., UnityCatalogAWSCredentialProvider) need access to configuration properties
+   * like workspace URLs and API tokens.
+   *
+   * IMPORTANT: This was introduced to fix a regression from PR #100 which removed driver-side
+   * credential resolution. Without populating the Hadoop config, credential providers would
+   * fail with "not configured" errors on executors.
+   *
+   * @param config
+   *   Configuration map containing spark.indextables.* keys
+   * @return
+   *   Hadoop Configuration populated with indextables configuration
+   */
+  def createHadoopConfiguration(config: Map[String, String]): org.apache.hadoop.conf.Configuration = {
+    val conf = new org.apache.hadoop.conf.Configuration()
+    config.foreach {
+      case (key, value) if key.startsWith("spark.indextables.") =>
+        conf.set(key, value)
+      case _ => // Ignore non-indextables keys
+    }
+    conf
+  }
 
 }
