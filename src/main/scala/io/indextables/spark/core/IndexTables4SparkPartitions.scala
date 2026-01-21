@@ -198,16 +198,8 @@ class IndexTables4SparkPartitionReader(
   // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
   // This was fixed in response to PR #100 which removed driver-side credential resolution.
   // See regression tests in UnityCatalogConfigPropagationEndToEndTest for documentation.
-  private lazy val cachedHadoopConf = {
-    val conf = new org.apache.hadoop.conf.Configuration()
-    // Populate Hadoop config with all spark.indextables.* keys from the config map
-    config.foreach {
-      case (key, value) if key.startsWith("spark.indextables.") =>
-        conf.set(key, value)
-      case _ => // Ignore non-indextables keys
-    }
-    conf
-  }
+  private lazy val cachedHadoopConf =
+    io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(config)
   private lazy val cachedOptionsMap = {
     import scala.jdk.CollectionConverters._
     new org.apache.spark.sql.util.CaseInsensitiveStringMap(config.asJava)

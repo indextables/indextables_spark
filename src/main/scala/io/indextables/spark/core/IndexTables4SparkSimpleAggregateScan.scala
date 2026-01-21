@@ -397,15 +397,7 @@ class IndexTables4SparkSimpleAggregateReader(
       // IMPORTANT: Populate Hadoop config from partition.config so credential providers
       // (e.g., UnityCatalogAWSCredentialProvider) receive necessary configuration on executors.
       // This matches the fix in IndexTables4SparkPartitionReader (PR #100 follow-up).
-      val hadoopConf = {
-        val conf = new org.apache.hadoop.conf.Configuration()
-        partition.config.foreach {
-          case (key, value) if key.startsWith("spark.indextables.") =>
-            conf.set(key, value)
-          case _ =>
-        }
-        conf
-      }
+      val hadoopConf = io.indextables.spark.util.ConfigUtils.createHadoopConfiguration(partition.config)
       val splitPath = io.indextables.spark.io.CloudStorageProviderFactory.normalizePathForTantivy(
         resolvedPath,
         optionsMap,

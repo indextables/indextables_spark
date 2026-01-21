@@ -267,4 +267,30 @@ object ConfigUtils {
       .map(_.toInt)
       .getOrElse(DEFAULT_DATA_SKIPPING_NUM_INDEXED_COLS)
 
+  /**
+   * Creates a Hadoop Configuration populated with spark.indextables.* keys from the config map.
+   *
+   * This is essential for executor-side credential resolution where credential providers
+   * (e.g., UnityCatalogAWSCredentialProvider) need access to configuration properties
+   * like workspace URLs and API tokens.
+   *
+   * IMPORTANT: This was introduced to fix a regression from PR #100 which removed driver-side
+   * credential resolution. Without populating the Hadoop config, credential providers would
+   * fail with "not configured" errors on executors.
+   *
+   * @param config
+   *   Configuration map containing spark.indextables.* keys
+   * @return
+   *   Hadoop Configuration populated with indextables configuration
+   */
+  def createHadoopConfiguration(config: Map[String, String]): org.apache.hadoop.conf.Configuration = {
+    val conf = new org.apache.hadoop.conf.Configuration()
+    config.foreach {
+      case (key, value) if key.startsWith("spark.indextables.") =>
+        conf.set(key, value)
+      case _ => // Ignore non-indextables keys
+    }
+    conf
+  }
+
 }
