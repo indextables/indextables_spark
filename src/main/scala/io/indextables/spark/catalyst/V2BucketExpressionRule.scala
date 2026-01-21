@@ -17,7 +17,7 @@
 
 package io.indextables.spark.catalyst
 
-import java.util.concurrent.ConcurrentHashMap
+import java.util.WeakHashMap
 
 import scala.collection.mutable
 
@@ -58,35 +58,42 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
 
   private val logger = LoggerFactory.getLogger(V2BucketExpressionRule.getClass)
 
-  // Storage for bucket configurations keyed by relation identity hash code
-  // Using ConcurrentHashMap for thread safety
-  private val bucketConfigStorage = new ConcurrentHashMap[Int, BucketAggregationConfig]()
+  // Storage for bucket configurations keyed by relation object
+  // Using WeakHashMap so configs are automatically GC'd when relations are no longer referenced
+  // This prevents stale configs from affecting subsequent queries (fixes "unexpected column count" errors)
+  private val bucketConfigStorage = new WeakHashMap[DataSourceV2Relation, BucketAggregationConfig]()
 
   // Special marker prefix for bucket group columns
   val BUCKET_GROUP_MARKER = "__bucket_group__"
 
   /** Retrieve stored bucket configuration for a relation. */
-  def getBucketConfig(relation: DataSourceV2Relation): Option[BucketAggregationConfig] = {
-    val key = System.identityHashCode(relation)
-    Option(bucketConfigStorage.get(key))
-  }
+  def getBucketConfig(relation: DataSourceV2Relation): Option[BucketAggregationConfig] =
+    bucketConfigStorage.synchronized {
+      Option(bucketConfigStorage.get(relation))
+    }
 
-  /** Retrieve stored bucket configuration by relation hash code. */
+  /** Retrieve stored bucket configuration by relation hash code (deprecated, kept for compatibility). */
   def getBucketConfigByHash(relationHashCode: Int): Option[BucketAggregationConfig] =
-    Option(bucketConfigStorage.get(relationHashCode))
+    bucketConfigStorage.synchronized {
+      // Search for matching relation by hash code (slower but maintains compatibility)
+      import scala.jdk.CollectionConverters._
+      bucketConfigStorage.asScala.collectFirst {
+        case (rel, config) if System.identityHashCode(rel) == relationHashCode => config
+      }
+    }
 
   /** Store bucket configuration for a relation. */
-  def storeBucketConfig(relation: DataSourceV2Relation, config: BucketAggregationConfig): Unit = {
-    val key = System.identityHashCode(relation)
-    logger.debug(s"V2BucketExpressionRule: Storing bucket config for relation $key: ${config.description}")
-    bucketConfigStorage.put(key, config)
-  }
+  def storeBucketConfig(relation: DataSourceV2Relation, config: BucketAggregationConfig): Unit =
+    bucketConfigStorage.synchronized {
+      logger.debug(s"V2BucketExpressionRule: Storing bucket config for relation ${System.identityHashCode(relation)}: ${config.description}")
+      bucketConfigStorage.put(relation, config)
+    }
 
   /** Clear bucket configuration for a relation. */
-  def clearBucketConfig(relation: DataSourceV2Relation): Unit = {
-    val key = System.identityHashCode(relation)
-    bucketConfigStorage.remove(key)
-  }
+  def clearBucketConfig(relation: DataSourceV2Relation): Unit =
+    bucketConfigStorage.synchronized {
+      bucketConfigStorage.remove(relation)
+    }
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     logger.debug(s"V2BucketExpressionRule: Processing plan: ${plan.getClass.getSimpleName}")
@@ -125,15 +132,6 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
               // Extract bucket config and field reference
               val (bucketConfig, fieldRef) = extractBucketConfig(bucketExpr)
 
-              // Store bucket config for ScanBuilder to retrieve
-              storeBucketConfig(relation, bucketConfig)
-
-              // CRITICAL: Also set the current relation in ThreadLocal for ScanBuilder to retrieve
-              // This is the same pattern used by V2IndexQueryExpressionRule
-              import io.indextables.spark.core.IndexTables4SparkScanBuilder
-              IndexTables4SparkScanBuilder.setCurrentRelation(relation)
-              logger.info(s"V2BucketExpressionRule: Stored bucket config and set current relation: ${System.identityHashCode(relation)}")
-
               // Transform the aggregate to use the field reference instead of bucket expression
               val transformedGrouping = groupingExpressions.map(expr => transformBucketExpression(expr, fieldRef))
 
@@ -149,7 +147,24 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
                 s"V2BucketExpressionRule: Transformed aggregates: ${transformedAggExprs.map(_.toString).mkString(", ")}"
               )
 
-              Aggregate(transformedGrouping, transformedAggExprs, child)
+              // Create the transformed Aggregate using copy() for Spark version compatibility
+              // This avoids constructor signature differences between Spark 3.x and 4.x
+              val transformedAgg = agg.copy(
+                groupingExpressions = transformedGrouping,
+                aggregateExpressions = transformedAggExprs
+              )
+
+              // Only store bucket config AFTER successful transformation
+              // This prevents stale configs from polluting subsequent queries if transformation fails
+              storeBucketConfig(relation, bucketConfig)
+
+              // CRITICAL: Also set the current relation in ThreadLocal for ScanBuilder to retrieve
+              // This is the same pattern used by V2IndexQueryExpressionRule
+              import io.indextables.spark.core.IndexTables4SparkScanBuilder
+              IndexTables4SparkScanBuilder.setCurrentRelation(relation)
+              logger.info(s"V2BucketExpressionRule: Stored bucket config and set current relation: ${System.identityHashCode(relation)}")
+
+              transformedAgg
 
             case _ =>
               logger.debug(s"V2BucketExpressionRule: No compatible V2 DataSource found, skipping transformation")

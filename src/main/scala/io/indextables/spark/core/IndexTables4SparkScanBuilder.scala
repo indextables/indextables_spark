@@ -1511,16 +1511,9 @@ class IndexTables4SparkScanBuilder(
     import org.apache.spark.sql.connector.expressions.aggregate._
     val missingFastFields = scala.collection.mutable.ArrayBuffer[String]()
 
-    // Use broadcast config instead of options for merged configuration
-    val fastFieldsStr = config
-      .get("spark.indextables.indexing.fastfields")
-      .getOrElse("")
-
-    val fastFields = if (fastFieldsStr.nonEmpty) {
-      fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-    } else {
-      Set.empty[String]
-    }
+    // Read actual fast fields from transaction log (docMappingJson), not from configuration
+    // This matches the approach used in validateGroupByColumnsOrThrow for consistency
+    val fastFields = getActualFastFieldsFromSchema()
 
     aggregation.aggregateExpressions.foreach { expr =>
       expr match {
