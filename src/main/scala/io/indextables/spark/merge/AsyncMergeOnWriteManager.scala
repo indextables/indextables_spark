@@ -172,21 +172,22 @@ object AsyncMergeOnWriteManager {
     activeJobs.put(jobId, job)
     logger.info(s"Starting async merge job $jobId for $tablePath: $totalMergeGroups groups in $totalBatches batches (batch size: $batchSize)")
 
-    // Capture scheduler pool from caller's thread for FAIR scheduling
-    // This allows merge to share resources fairly with the write that triggered it
-    val callerSchedulerPool = Option(sparkSession.sparkContext.getLocalProperty("spark.scheduler.pool"))
-    if (callerSchedulerPool.isDefined) {
-      logger.info(s"Job $jobId inheriting scheduler pool '${callerSchedulerPool.get}' from caller")
-    }
+    // Use a separate scheduler pool for merges to enable fair resource sharing
+    // With spark.scheduler.mode=FAIR, the root pool uses FAIR scheduling between pools:
+    // - Writes use "indextables-write" pool (user should set this before writing)
+    // - Merges use "indextables-merge" pool (automatic)
+    // This gives each operation type a fair share of cluster resources without XML config.
+    val mergeSchedulerPool = sparkSession.conf
+      .getOption("spark.indextables.merge.schedulerPool")
+      .getOrElse("indextables-merge")
+    logger.info(s"Job $jobId will use scheduler pool '$mergeSchedulerPool'")
 
     // Submit work to executor
     executorService.submit(new Runnable {
       override def run(): Unit = {
         try {
-          // Restore scheduler pool in background thread
-          callerSchedulerPool.foreach { pool =>
-            sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", pool)
-          }
+          // Set the merge scheduler pool
+          sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", mergeSchedulerPool)
           executeMergeJob(job, transactionLog, writeOptions, serializedHadoopConf, sparkSession)
         } catch {
           case e: InterruptedException =>
