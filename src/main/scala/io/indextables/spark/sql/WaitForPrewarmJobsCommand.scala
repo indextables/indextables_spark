@@ -62,7 +62,7 @@ case class WaitForPrewarmJobsCommand(
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[WaitForPrewarmJobsCommand])
-  private val pollIntervalMs = 2000L // Poll every 2 seconds
+  private val pollIntervalMs = 5000L // Poll every 5 seconds
 
   override val output: Seq[Attribute] = Seq(
     AttributeReference("executor_id", StringType, nullable = false)(),
