@@ -82,6 +82,38 @@ object IndexTables4SparkSQLConf {
   val TANTIVY4SPARK_MERGE_MAX_SOURCE_SPLITS_PER_MERGE_DEFAULT = 1000
 
   /////////////////////
+  // Async Merge-On-Write Configuration
+  /////////////////////
+
+  /** Enable merge-on-write feature (default: false) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_ENABLED         = "spark.indextables.mergeOnWrite.enabled"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_ENABLED_DEFAULT = false
+
+  /** Enable asynchronous merge execution in background thread (default: true) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_ASYNC_ENABLED         = "spark.indextables.mergeOnWrite.async.enabled"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_ASYNC_ENABLED_DEFAULT = true
+
+  /** Fraction of cluster CPUs to use per merge batch (default: 0.167 = 1/6) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_BATCH_CPU_FRACTION         = "spark.indextables.mergeOnWrite.batchCpuFraction"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_BATCH_CPU_FRACTION_DEFAULT = 0.167
+
+  /** Maximum number of merge batches running simultaneously (default: 3) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_MAX_CONCURRENT_BATCHES         = "spark.indextables.mergeOnWrite.maxConcurrentBatches"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_MAX_CONCURRENT_BATCHES_DEFAULT = 3
+
+  /** Minimum batches worth of merge groups required to trigger merge (default: 1) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_MIN_BATCHES_TO_TRIGGER         = "spark.indextables.mergeOnWrite.minBatchesToTrigger"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_MIN_BATCHES_TO_TRIGGER_DEFAULT = 1
+
+  /** Target size for merged splits (default: 4G) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_TARGET_SIZE         = "spark.indextables.mergeOnWrite.targetSize"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_TARGET_SIZE_DEFAULT = "4G"
+
+  /** Graceful shutdown timeout in milliseconds (default: 300000 = 5 minutes) */
+  val TANTIVY4SPARK_MERGE_ON_WRITE_SHUTDOWN_TIMEOUT_MS         = "spark.indextables.mergeOnWrite.shutdownTimeoutMs"
+  val TANTIVY4SPARK_MERGE_ON_WRITE_SHUTDOWN_TIMEOUT_MS_DEFAULT = 300000L
+
+  /////////////////////
   // Merge Download Configuration (cloud storage I/O for merge operations)
   /////////////////////
 

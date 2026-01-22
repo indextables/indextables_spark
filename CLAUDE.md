@@ -64,10 +64,23 @@ spark.indextables.stats.truncation.maxLength: 32
 spark.indextables.dataSkippingStatsColumns: <column_list> (comma-separated, takes precedence over numIndexedCols)
 spark.indextables.dataSkippingNumIndexedCols: 32 (default: 32, -1 for all eligible columns, 0 to disable)
 
-// Merge-On-Write (automatic split consolidation during writes via Spark shuffle)
+// Merge-On-Write (automatic split consolidation during writes)
 spark.indextables.mergeOnWrite.enabled: false (default: false)
 spark.indextables.mergeOnWrite.targetSize: "4G" (default: 4G, target merged split size)
-spark.indextables.mergeOnWrite.mergeGroupMultiplier: 2.0 (default: 2.0, threshold = parallelism × multiplier)
+
+// Async Merge-On-Write (runs merges in background thread, allows indexing to continue)
+spark.indextables.mergeOnWrite.async.enabled: true (default: true, run merges in background thread)
+spark.indextables.mergeOnWrite.batchCpuFraction: 0.167 (default: 1/6, fraction of cluster CPUs per batch)
+spark.indextables.mergeOnWrite.maxConcurrentBatches: 3 (default: 3, max batches running simultaneously)
+spark.indextables.mergeOnWrite.minBatchesToTrigger: 1 (default: 1, min batches worth of groups to trigger)
+spark.indextables.mergeOnWrite.shutdownTimeoutMs: 300000 (default: 5 minutes, graceful shutdown wait)
+
+// Threshold formula: threshold = batchSize × minBatchesToTrigger
+// Batch size formula: batchSize = max(1, totalClusterCpus × batchCpuFraction)
+// Example: 24 CPUs with defaults = batchSize 4, threshold 4 groups to trigger merge
+
+// Legacy merge-on-write settings (deprecated, kept for backwards compatibility)
+spark.indextables.mergeOnWrite.mergeGroupMultiplier: 2.0 (deprecated, use batchCpuFraction + minBatchesToTrigger)
 spark.indextables.mergeOnWrite.minDiskSpaceGB: 20 (default: 20GB, use 1GB for tests)
 spark.indextables.mergeOnWrite.maxConcurrentMergesPerWorker: <auto> (default: auto-calculated based on heap size)
 spark.indextables.mergeOnWrite.memoryOverheadFactor: 3.0 (default: 3.0, memory overhead multiplier for merge size)
@@ -894,6 +907,57 @@ spark.sql("SELECT * FROM env_props WHERE property_name LIKE 'spark.indextables%'
 spark.sql("SELECT property_name, role, property_value FROM env_props WHERE property_type = 'spark' ORDER BY property_name, role").show()
 ```
 
+### Describe Merge Jobs
+```sql
+-- View async merge-on-write job status on the driver
+DESCRIBE INDEXTABLES MERGE JOBS;
+DESCRIBE TANTIVY4SPARK MERGE JOBS;  -- alternate syntax
+
+-- Example output:
+-- +--------+-------------------+-------+------------+-----------------+-------------+------------------+------------+------------+-------------+
+-- |job_id  |table_path         |status |total_groups|completed_groups |total_batches|completed_batches |progress_pct|duration_ms |error_message|
+-- +--------+-------------------+-------+------------+-----------------+-------------+------------------+------------+------------+-------------+
+-- |abc12345|s3://bucket/table  |RUNNING|         100|               45|           25|                12|        45.0|       12500|         null|
+-- |def67890|s3://bucket/table2 |COMPLETED|       50|               50|           10|                10|       100.0|        8000|         null|
+-- +--------+-------------------+-------+------------+-----------------+-------------+------------------+------------+------------+-------------+
+```
+
+**Output schema:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `job_id` | String | Unique job identifier |
+| `table_path` | String | Path of the table being merged |
+| `status` | String | Job status (RUNNING, COMPLETED, FAILED, CANCELLED) |
+| `total_groups` | Integer | Total number of merge groups to process |
+| `completed_groups` | Integer | Number of groups merged so far |
+| `total_batches` | Integer | Total number of batches |
+| `completed_batches` | Integer | Number of batches completed |
+| `progress_pct` | Double | Percentage progress (completed_groups/total_groups * 100) |
+| `duration_ms` | Long | Duration in milliseconds |
+| `error_message` | String | Error message if failed (null otherwise) |
+
+**Key points:**
+- Merge jobs run on the driver in a background thread (if async enabled)
+- Useful for monitoring long-running merge operations
+- Results can be filtered using SQL after registering as a temp view
+- Use with async merge-on-write: `spark.indextables.mergeOnWrite.async.enabled=true`
+
+**Example usage:**
+```scala
+// Check for running merge jobs
+spark.sql("DESCRIBE INDEXTABLES MERGE JOBS").show()
+
+// Filter to specific tables
+spark.sql("DESCRIBE INDEXTABLES MERGE JOBS").createOrReplaceTempView("merge_jobs")
+spark.sql("SELECT * FROM merge_jobs WHERE table_path LIKE 's3://my-bucket%'").show()
+
+// Wait for merges to complete before proceeding
+// (merges run in background and don't block writes)
+while (spark.sql("SELECT COUNT(*) FROM merge_jobs WHERE status = 'RUNNING'").head().getLong(0) > 0) {
+  Thread.sleep(5000)
+}
+```
+
 ### Flush Disk Cache
 ```sql
 -- Flush disk cache across all executors (clears cached data and locality state)
@@ -1055,8 +1119,11 @@ spark.conf.set("spark.indextables.checkpoint.parallelism", "8")
 - **Working directories**: Automatic /local_disk0 detection on Databricks/EMR
 - **JSON fields**: Automatic detection for Struct/Array/Map types with complete filter pushdown
 - **JSON configuration**: Use `spark.indextables.indexing.json.mode` to control indexing behavior ("full" or "minimal")
-- **Merge-on-write**: Post-commit evaluation architecture - writes complete normally, then evaluates if merge is worthwhile based on merge group count vs parallelism threshold
-- **Merge-on-write threshold**: Merge runs if merge groups ≥ (defaultParallelism × mergeGroupMultiplier), default multiplier is 2.0
+- **Merge-on-write**: Post-commit evaluation architecture - writes complete normally, then evaluates if merge is worthwhile based on merge group count vs threshold
+- **Async merge-on-write**: Enabled by default (`spark.indextables.mergeOnWrite.async.enabled=true`), runs merges in background thread so indexing can continue in parallel
+- **Merge-on-write threshold**: New formula: `threshold = batchSize × minBatchesToTrigger` where `batchSize = max(1, totalClusterCpus × batchCpuFraction)`. Default: 1/6 of cluster CPUs per batch, 1 batch to trigger
+- **Merge-on-write concurrency**: Max 3 concurrent batches (`maxConcurrentBatches=3`), controllable via semaphore across all tables
+- **Merge job monitoring**: Use `DESCRIBE INDEXTABLES MERGE JOBS` to view async merge job status
 - **Merge-on-write delegation**: Invokes existing MERGE SPLITS command programmatically after transaction commit
 - **Purge-on-write**: Automatic cleanup of orphaned splits and old transaction logs during write operations
 - **Purge-on-write triggers**: Can run after merge-on-write or after N writes per table (per-session counters)
