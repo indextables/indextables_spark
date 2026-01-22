@@ -543,7 +543,7 @@ class MultiPartCheckpointTest extends TestBase {
     }
   }
 
-  test("protocol is upgraded to V3 when using multi-part checkpoint") {
+  test("protocol is upgraded to V4 when using multi-part checkpoint") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -580,20 +580,20 @@ class MultiPartCheckpointTest extends TestBase {
         lastCheckpointInfo.get.parts shouldBe defined
         lastCheckpointInfo.get.parts.get should be > 1
 
-        // Read checkpoint and verify protocol was upgraded to V3
+        // Read checkpoint and verify protocol was upgraded to V4 (includes V3 features + Avro state)
         val restored = checkpoint.getActionsFromCheckpoint()
         restored shouldBe defined
 
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         restoredProtocol shouldBe defined
-        restoredProtocol.get.minReaderVersion shouldBe 3 // Upgraded from V2 to V3
-        restoredProtocol.get.minWriterVersion shouldBe 3
+        restoredProtocol.get.minReaderVersion shouldBe 4 // Upgraded from V2 to V4
+        restoredProtocol.get.minWriterVersion shouldBe 4
       } finally
         cloudProvider.close()
     }
   }
 
-  test("protocol is upgraded to V3 when using schema deduplication") {
+  test("protocol is upgraded to V4 when using schema deduplication") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -633,14 +633,14 @@ class MultiPartCheckpointTest extends TestBase {
         lastCheckpointInfo shouldBe defined
         lastCheckpointInfo.get.parts shouldBe None // Single-part
 
-        // Read checkpoint and verify protocol was upgraded to V3 due to schema dedup
+        // Read checkpoint and verify protocol was upgraded to V4 due to schema dedup
         val restored = checkpoint.getActionsFromCheckpoint()
         restored shouldBe defined
 
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         restoredProtocol shouldBe defined
-        restoredProtocol.get.minReaderVersion shouldBe 3 // Upgraded from V2 to V3
-        restoredProtocol.get.minWriterVersion shouldBe 3
+        restoredProtocol.get.minReaderVersion shouldBe 4 // Upgraded from V2 to V4
+        restoredProtocol.get.minWriterVersion shouldBe 4
       } finally
         cloudProvider.close()
     }
