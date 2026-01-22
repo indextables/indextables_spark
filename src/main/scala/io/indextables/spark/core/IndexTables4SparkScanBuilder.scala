@@ -227,6 +227,16 @@ class IndexTables4SparkScanBuilder(
       relationForBucket
         .collect { case rel: DataSourceV2Relation => rel }
         .flatMap(rel => V2BucketExpressionRule.getBucketConfig(rel))
+    }.filter { bucketCfg =>
+      // CRITICAL: Only use the bucket config if the bucket field is in the current query's GROUP BY
+      // This prevents stale bucket configs from previous queries (stored in WeakHashMap) from
+      // affecting non-bucket queries on the same view/relation (e.g., partition GROUP BY count(*))
+      val groupByColumns = _pushedGroupBy.getOrElse(Array.empty[String])
+      val bucketFieldInGroupBy = groupByColumns.contains(bucketCfg.fieldName)
+      if (!bucketFieldInGroupBy) {
+        logger.debug(s"AGGREGATE SCAN: Ignoring stale bucket config for field '${bucketCfg.fieldName}' - not in GROUP BY columns: ${groupByColumns.mkString(", ")}")
+      }
+      bucketFieldInGroupBy
     }
 
     effectiveBucketConfig match {
