@@ -69,7 +69,13 @@ statement
         (FOR SEGMENTS '(' segmentList=identifierList ')')?
         (ON FIELDS '(' fieldList=identifierList ')')?
         (WITH PERWORKER PARALLELISM OF parallelism=INTEGER_VALUE)?
-        (WHERE whereClause=predicateToken)?                     #prewarmCache
+        (WHERE whereClause=predicateToken)?
+        (ASYNC MODE)?                                           #prewarmCache
+    | DESCRIBE indexTablesKeyword PREWARM JOBS                  #describePrewarmJobs
+    | WAIT FOR indexTablesKeyword PREWARM JOBS
+        (path=STRING | table=qualifiedName)?
+        (JOB jobId=STRING)?
+        (TIMEOUT timeoutSeconds=INTEGER_VALUE)?                 #waitForPrewarmJobs
     | CHECKPOINT indexTablesKeyword (path=STRING | table=qualifiedName)   #checkpointIndexTable
     | TRUNCATE indexTablesKeyword TIME TRAVEL
         (path=STRING | table=qualifiedName)
@@ -113,6 +119,7 @@ nonReserved
     | RETENTION | DESCRIBE | INCLUDE | ALL | DROP | PARTITIONS | FROM | DISK | WITH
     | PREWARM | SEGMENTS | FIELDS | PERWORKER | PARALLELISM | OF | ON | STORAGE | STATS
     | DEST | SOURCE | PER | ENVIRONMENT | CHECKPOINT | TRUNCATE | TIME | TRAVEL
+    | ASYNC | MODE | JOBS | JOB | WAIT | TIMEOUT
     ;
 
 // Keywords (case-insensitive)
@@ -171,6 +178,12 @@ CHECKPOINT: [Cc][Hh][Ee][Cc][Kk][Pp][Oo][Ii][Nn][Tt];
 TRUNCATE: [Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee];
 TIME: [Tt][Ii][Mm][Ee];
 TRAVEL: [Tt][Rr][Aa][Vv][Ee][Ll];
+ASYNC: [Aa][Ss][Yy][Nn][Cc];
+MODE: [Mm][Oo][Dd][Ee];
+JOBS: [Jj][Oo][Bb][Ss];
+JOB: [Jj][Oo][Bb];
+WAIT: [Ww][Aa][Ii][Tt];
+TIMEOUT: [Tt][Ii][Mm][Ee][Oo][Uu][Tt];
 
 // Literals
 STRING

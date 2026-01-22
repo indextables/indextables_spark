@@ -27,7 +27,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.prewarm.IndexComponentMapping
+import io.indextables.spark.prewarm.{AsyncPrewarmJobManager, AsyncPrewarmJobResult, IndexComponentMapping}
 import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
 import io.indextables.spark.transaction.{PartitionPredicateUtils, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, ProtocolNormalizer, SplitMetadataFactory}
@@ -74,7 +74,8 @@ case class PrewarmCacheCommand(
   fields: Option[Seq[String]],
   splitsPerTask: Int,
   wherePredicates: Seq[String],
-  failOnMissingField: Boolean = true)
+  failOnMissingField: Boolean = true,
+  asyncMode: Boolean = false)
     extends LeafRunnableCommand {
 
   private val logger = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
@@ -91,11 +92,22 @@ case class PrewarmCacheCommand(
     AttributeReference("status", StringType, nullable = false)(),
     AttributeReference("skipped_fields", StringType, nullable = true)(),
     AttributeReference("retries", IntegerType, nullable = false)(),
-    AttributeReference("failed_splits_by_host", StringType, nullable = true)()
+    AttributeReference("failed_splits_by_host", StringType, nullable = true)(),
+    AttributeReference("job_id", StringType, nullable = true)(),
+    AttributeReference("async_mode", BooleanType, nullable = false)()
   )
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    logger.info(s"Starting prewarm cache for table: $tablePath")
+    if (asyncMode) {
+      runAsync(sparkSession)
+    } else {
+      runSync(sparkSession)
+    }
+  }
+
+  /** Execute synchronous prewarm (original behavior). */
+  private def runSync(sparkSession: SparkSession): Seq[Row] = {
+    logger.info(s"Starting synchronous prewarm cache for table: $tablePath")
     val startTime = System.currentTimeMillis()
 
     val sc = sparkSession.sparkContext
@@ -143,6 +155,9 @@ case class PrewarmCacheCommand(
       var addActions = transactionLog.listFiles()
       logger.info(s"Found ${addActions.length} splits in transaction log")
 
+      // Sort by modificationTime descending (newest first) so newest data gets hot first
+      addActions = addActions.sortBy(_.modificationTime)(Ordering[Long].reverse)
+
       // Apply partition predicates if specified
       if (wherePredicates.nonEmpty) {
         val parsedPredicates =
@@ -166,7 +181,9 @@ case class PrewarmCacheCommand(
             "no_splits", // status
             null,        // skipped_fields
             0,           // retries
-            null         // failed_splits_by_host
+            null,        // failed_splits_by_host
+            null,        // job_id (sync mode has no job ID)
+            false        // async_mode
           )
         )
       }
@@ -347,7 +364,9 @@ case class PrewarmCacheCommand(
               overallStatus,
               skippedStr,
               retryCount,
-              failedByHostStr
+              failedByHostStr,
+              null,  // job_id (sync mode has no job ID)
+              false  // async_mode
             )
         }
         .toSeq
@@ -359,6 +378,406 @@ case class PrewarmCacheCommand(
 
     } finally
       transactionLog.close()
+  }
+
+  /** Execute asynchronous prewarm - starts jobs in background and returns immediately. */
+  private def runAsync(sparkSession: SparkSession): Seq[Row] = {
+    logger.info(s"Starting asynchronous prewarm cache for table: $tablePath")
+    val jobId = java.util.UUID.randomUUID().toString
+
+    val sc = sparkSession.sparkContext
+
+    // Resolve segment aliases to IndexComponent set
+    val resolvedSegments: Set[IndexComponent] = if (segments.isEmpty) {
+      logger.info("Using default segments: TERM, POSTINGS")
+      IndexComponentMapping.defaultComponents
+    } else {
+      val resolved = segments.map { seg =>
+        IndexComponentMapping.aliasToComponent.getOrElse(
+          seg,
+          throw new IllegalArgumentException(
+            s"Unknown segment type: $seg. Valid types: ${IndexComponentMapping.aliasToComponent.keys.mkString(", ")}"
+          )
+        )
+      }.toSet
+      logger.info(s"Using specified segments: ${resolved.map(_.name()).mkString(", ")}")
+      resolved
+    }
+
+    // Get session config for credentials and cache settings
+    val sparkConfigs = ConfigNormalization.extractTantivyConfigsFromSpark(sparkSession)
+    val hadoopConfigs =
+      ConfigNormalization.extractTantivyConfigsFromHadoop(sparkSession.sparkContext.hadoopConfiguration)
+    val mergedConfig = ConfigNormalization.mergeWithPrecedence(hadoopConfigs, sparkConfigs)
+
+    // Create transaction log
+    import scala.jdk.CollectionConverters._
+    val transactionLog = TransactionLogFactory.create(
+      new Path(tablePath),
+      sparkSession,
+      new CaseInsensitiveStringMap(mergedConfig.asJava)
+    )
+
+    try {
+      // Get partition schema for predicate validation
+      val metadata = transactionLog.getMetadata()
+      val partitionSchema = StructType(
+        metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
+      )
+
+      // Get all active splits
+      var addActions = transactionLog.listFiles()
+      logger.info(s"Found ${addActions.length} splits in transaction log")
+
+      // Sort by modificationTime descending (newest first) so newest data gets hot first
+      addActions = addActions.sortBy(_.modificationTime)(Ordering[Long].reverse)
+
+      // Apply partition predicates if specified
+      if (wherePredicates.nonEmpty) {
+        val parsedPredicates =
+          PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+        addActions = PartitionPredicateUtils.filterAddActionsByPredicates(addActions, partitionSchema, parsedPredicates)
+        logger.info(s"After partition filtering: ${addActions.length} splits")
+      }
+
+      if (addActions.isEmpty) {
+        logger.info("No splits to prewarm")
+        return Seq(
+          Row(
+            "none", // host
+            "none", // assigned_host
+            0,      // locality_hits
+            0,      // locality_misses
+            0,      // splits_prewarmed
+            resolvedSegments.map(_.name()).toSeq.sorted.mkString(","),
+            fields.map(_.mkString(",")).getOrElse("all"),
+            0L,          // duration_ms
+            "no_splits", // status
+            null,        // skipped_fields
+            0,           // retries
+            null,        // failed_splits_by_host
+            jobId,       // job_id
+            true         // async_mode
+          )
+        )
+      }
+
+      // Get available hosts and assign splits
+      val availableHosts = DriverSplitLocalityManager.getAvailableHosts(sc)
+      val splitPaths     = addActions.map(_.path)
+      val assignments    = DriverSplitLocalityManager.assignSplitsForQuery(splitPaths, availableHosts)
+
+      // Group ALL splits by assigned host (one task per host for async mode)
+      val splitsByHost = addActions
+        .groupBy(action => assignments.getOrElse(action.path, "any"))
+        .filter(_._1 != "any")
+
+      logger.info(s"Distributing async prewarm across ${splitsByHost.size} hosts")
+
+      // Read config values
+      val effectiveFailOnMissingField = mergedConfig
+        .get("spark.indextables.prewarm.failOnMissingField")
+        .map(_.toBoolean)
+        .getOrElse(failOnMissingField)
+      val maxRetries = mergedConfig.getOrElse("spark.indextables.prewarm.maxRetries", "10").toInt
+      val maxConcurrent = mergedConfig.getOrElse("spark.indextables.prewarm.async.maxConcurrent", "1").toInt
+      val completedRetentionMs = mergedConfig.getOrElse("spark.indextables.prewarm.async.completedJobRetentionMs", "3600000").toLong
+
+      // Create one async task per host with ALL splits for that host
+      val asyncTasks = splitsByHost.map {
+        case (hostname, hostSplits) =>
+          AsyncPrewarmTask(
+            jobId = jobId,
+            hostname = hostname,
+            addActions = hostSplits,
+            tablePath = tablePath,
+            segments = resolvedSegments,
+            fields = fields,
+            failOnMissingField = effectiveFailOnMissingField,
+            maxConcurrent = maxConcurrent,
+            completedRetentionMs = completedRetentionMs
+          )
+      }.toSeq
+
+      logger.info(s"Created ${asyncTasks.length} async prewarm tasks (one per host)")
+
+      // Broadcast config for executor access
+      val broadcastConfig = sc.broadcast(mergedConfig)
+
+      // Build lookup: splitPath -> assigned hostname (for retry task creation)
+      val splitToHost: Map[String, String] = splitsByHost.flatMap {
+        case (host, actions) => actions.map(_.path -> host)
+      }.toMap
+
+      // Helper function to dispatch async tasks
+      def dispatchAsyncTasks(tasks: Seq[AsyncPrewarmTask], retryNum: Int): Seq[AsyncPrewarmStartResult] = {
+        val jobGroup = s"tantivy4spark-async-prewarm-${System.currentTimeMillis()}"
+        val jobDescription = if (retryNum == 0) {
+          s"Starting async prewarm for ${addActions.length} splits across ${splitsByHost.size} hosts"
+        } else {
+          s"Async prewarm retry $retryNum: ${tasks.flatMap(_.addActions).size} splits"
+        }
+
+        sc.setJobGroup(jobGroup, jobDescription, interruptOnCancel = false)
+
+        val tasksWithLocations = tasks.map(t => (t, Seq(t.hostname)))
+
+        try
+          sc.makeRDD(tasksWithLocations)
+            .setName(if (retryNum == 0) s"Async Prewarm: ${addActions.length} splits" else s"Async Prewarm Retry $retryNum")
+            .map(task => executeAsyncPrewarmTask(task, broadcastConfig.value))
+            .collect()
+            .toSeq
+        finally
+          sc.clearJobGroup()
+      }
+
+      // Retry loop - dispatch, collect wrong_host, rebuild tasks, repeat
+      var retryCount              = 0
+      var pendingTasks            = asyncTasks
+      var allSuccessfulResults    = Seq.empty[AsyncPrewarmStartResult]
+      var finalWrongHostResults   = Seq.empty[AsyncPrewarmStartResult]
+
+      while (pendingTasks.nonEmpty) {
+        val taskResults = dispatchAsyncTasks(pendingTasks, retryCount)
+
+        val (succeeded, wrongHost) = taskResults.partition(_.status != "wrong_host")
+        allSuccessfulResults ++= succeeded
+
+        if (wrongHost.isEmpty) {
+          pendingTasks = Seq.empty
+        } else if (retryCount >= maxRetries) {
+          finalWrongHostResults = wrongHost
+          logger.warn(s"Async prewarm exhausted max retries ($maxRetries), ${wrongHost.size} tasks still on wrong host")
+          pendingTasks = Seq.empty
+        } else {
+          retryCount += 1
+
+          // Get misrouted split paths and rebuild tasks
+          val misroutedPaths   = wrongHost.flatMap(_.splitPaths).toSet
+          val misroutedActions = addActions.filter(a => misroutedPaths.contains(a.path))
+
+          // Create individual tasks per split for better locality on retry
+          pendingTasks = misroutedActions.map { addAction =>
+            AsyncPrewarmTask(
+              jobId = jobId,
+              hostname = splitToHost.getOrElse(addAction.path, "unknown"),
+              addActions = Seq(addAction),
+              tablePath = tablePath,
+              segments = resolvedSegments,
+              fields = fields,
+              failOnMissingField = effectiveFailOnMissingField,
+              maxConcurrent = maxConcurrent,
+              completedRetentionMs = completedRetentionMs
+            )
+          }
+          logger.warn(s"Async prewarm retry $retryCount/$maxRetries: ${pendingTasks.size} splits misrouted")
+        }
+      }
+
+      // Build result rows
+      val resultRows = allSuccessfulResults.map { result =>
+        Row(
+          result.hostname,      // host
+          result.assignedHost,  // assigned_host
+          0,                    // locality_hits (not tracked at start)
+          0,                    // locality_misses
+          0,                    // splits_prewarmed (job just started)
+          result.segments,      // segments
+          result.fields,        // fields
+          0L,                   // duration_ms (job just started)
+          result.status,        // status
+          null,                 // skipped_fields
+          retryCount,           // retries
+          null,                 // failed_splits_by_host
+          result.jobId,         // job_id
+          true                  // async_mode
+        )
+      }
+
+      // Add rows for final wrong_host failures
+      val wrongHostRows = finalWrongHostResults.map { result =>
+        Row(
+          result.hostname,
+          result.assignedHost,
+          0,
+          0,
+          0,
+          result.segments,
+          result.fields,
+          0L,
+          "wrong_host",
+          null,
+          retryCount,
+          null,
+          result.jobId,
+          true
+        )
+      }
+
+      logger.info(s"Async prewarm started: jobId=$jobId, ${resultRows.size} hosts, retries=$retryCount")
+      resultRows ++ wrongHostRows
+
+    } finally
+      transactionLog.close()
+  }
+
+  /** Execute async prewarm task - starts background job and returns immediately. */
+  private def executeAsyncPrewarmTask(
+    task: AsyncPrewarmTask,
+    config: Map[String, String]
+  ): AsyncPrewarmStartResult = {
+    val taskLogger = LoggerFactory.getLogger(classOf[PrewarmCacheCommand])
+
+    // Get actual hostname
+    val actualHostname = org.apache.spark.SparkEnv.get.blockManager.blockManagerId.host
+
+    // Verify locality
+    if (task.hostname != actualHostname) {
+      taskLogger.warn(s"LOCALITY MISMATCH: Async task assigned to '${task.hostname}' but running on '$actualHostname'")
+      return AsyncPrewarmStartResult(
+        hostname = actualHostname,
+        assignedHost = task.hostname,
+        jobId = task.jobId,
+        status = "wrong_host",
+        segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
+        fields = task.fields.map(_.mkString(",")).getOrElse("all"),
+        totalSplits = task.addActions.size,
+        message = s"Wrong host: expected ${task.hostname}, got $actualHostname",
+        splitPaths = task.addActions.map(_.path)
+      )
+    }
+
+    // Configure AsyncPrewarmJobManager
+    AsyncPrewarmJobManager.configure(task.maxConcurrent, task.completedRetentionMs)
+
+    // Define the prewarm work (closure that does actual prewarming)
+    val prewarmWork: () => AsyncPrewarmJobResult = () => {
+      val startTime = System.currentTimeMillis()
+      var splitsPrewarmed = 0
+      var errorMessage: Option[String] = None
+
+      try {
+        // Create cache config
+        val cacheConfig  = ConfigUtils.createSplitCacheConfig(config, Some(task.tablePath))
+        val cacheManager = GlobalSplitCacheManager.getInstance(cacheConfig)
+
+        task.addActions.foreach { addAction =>
+          // Check for cancellation
+          if (AsyncPrewarmJobManager.isJobCancelled(task.jobId)) {
+            taskLogger.info(s"Async prewarm job ${task.jobId} cancelled")
+            throw new InterruptedException("Job cancelled")
+          }
+
+          try {
+            // Normalize path
+            val fullPath =
+              if (ProtocolNormalizer.isS3Path(addAction.path) || ProtocolNormalizer.isAzurePath(addAction.path)) {
+                addAction.path
+              } else {
+                s"${task.tablePath}/${addAction.path}"
+              }
+            val actualPath = ProtocolNormalizer.normalizeAllProtocols(fullPath)
+
+            // Create split metadata and searcher
+            val splitMetadata = SplitMetadataFactory.fromAddAction(addAction, task.tablePath)
+            val splitSearcher = cacheManager.createSplitSearcher(actualPath, splitMetadata)
+
+            try {
+              // Prewarm based on field selection
+              task.fields match {
+                case Some(requestedFields) =>
+                  // Field-specific preloading
+                  val futures = task.segments.toSeq.map { component =>
+                    splitSearcher.preloadFields(component, requestedFields: _*)
+                  }
+                  futures.foreach(_.join())
+
+                case None =>
+                  // Full component preloading
+                  val fut = splitSearcher.preloadComponents(task.segments.toArray: _*)
+                  fut.join()
+              }
+
+              splitsPrewarmed += 1
+              AsyncPrewarmJobManager.incrementProgress(task.jobId)
+
+              // Record prewarm completion
+              DriverSplitLocalityManager.recordPrewarmCompletion(
+                addAction.path,
+                actualHostname,
+                task.segments,
+                task.fields.map(_.toSet)
+              )
+
+            } finally {
+              try { splitSearcher.close() } catch { case _: Exception => }
+            }
+          } catch {
+            case e: InterruptedException => throw e
+            case e: Exception =>
+              taskLogger.warn(s"Failed to prewarm split ${addAction.path}: ${e.getMessage}")
+          }
+        }
+      } catch {
+        case e: InterruptedException =>
+          errorMessage = Some("Job cancelled")
+        case e: Exception =>
+          taskLogger.error(s"Async prewarm job ${task.jobId} failed: ${e.getMessage}", e)
+          errorMessage = Some(e.getMessage)
+      }
+
+      val durationMs = System.currentTimeMillis() - startTime
+      taskLogger.info(s"Async prewarm job ${task.jobId} completed: $splitsPrewarmed/${task.addActions.size} splits in ${durationMs}ms")
+
+      AsyncPrewarmJobResult(
+        jobId = task.jobId,
+        tablePath = task.tablePath,
+        hostname = actualHostname,
+        totalSplits = task.addActions.size,
+        splitsPrewarmed = splitsPrewarmed,
+        durationMs = durationMs,
+        success = errorMessage.isEmpty && splitsPrewarmed > 0,
+        errorMessage = errorMessage
+      )
+    }
+
+    // Try to start the job
+    AsyncPrewarmJobManager.tryStartJob(
+      task.jobId,
+      task.tablePath,
+      actualHostname,
+      task.addActions.size,
+      prewarmWork
+    ) match {
+      case Right(job) =>
+        taskLogger.info(s"Started async prewarm job ${task.jobId} on $actualHostname (${task.addActions.size} splits)")
+        AsyncPrewarmStartResult(
+          hostname = actualHostname,
+          assignedHost = task.hostname,
+          jobId = task.jobId,
+          status = "job_started",
+          segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
+          fields = task.fields.map(_.mkString(",")).getOrElse("all"),
+          totalSplits = task.addActions.size,
+          message = s"Job started with ${task.addActions.size} splits",
+          splitPaths = task.addActions.map(_.path)
+        )
+
+      case Left(reason) =>
+        taskLogger.warn(s"Async prewarm job ${task.jobId} rejected on $actualHostname: $reason")
+        AsyncPrewarmStartResult(
+          hostname = actualHostname,
+          assignedHost = task.hostname,
+          jobId = task.jobId,
+          status = "rejected",
+          segments = task.segments.map(_.name()).toSeq.sorted.mkString(","),
+          fields = task.fields.map(_.mkString(",")).getOrElse("all"),
+          totalSplits = task.addActions.size,
+          message = reason,
+          splitPaths = task.addActions.map(_.path)
+        )
+    }
   }
 
   /** Execute prewarm for a task (batch of splits) on an executor. */
@@ -615,4 +1034,30 @@ private[sql] case class PrewarmTaskResult(
   status: String,
   skippedFields: Option[String],
   splitPaths: Seq[String] = Seq.empty) // Split paths for retry tracking
+    extends Serializable
+
+/** Internal task representation for async prewarm distribution. */
+private[sql] case class AsyncPrewarmTask(
+  jobId: String,
+  hostname: String,
+  addActions: Seq[io.indextables.spark.transaction.AddAction],
+  tablePath: String,
+  segments: Set[IndexComponent],
+  fields: Option[Seq[String]],
+  failOnMissingField: Boolean,
+  maxConcurrent: Int,
+  completedRetentionMs: Long)
+    extends Serializable
+
+/** Result from starting an async prewarm task (returned immediately). */
+private[sql] case class AsyncPrewarmStartResult(
+  hostname: String,
+  assignedHost: String,
+  jobId: String,
+  status: String,         // "job_started", "rejected", or "wrong_host"
+  segments: String,
+  fields: String,
+  totalSplits: Int,
+  message: String,
+  splitPaths: Seq[String] = Seq.empty)
     extends Serializable

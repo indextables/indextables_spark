@@ -299,4 +299,194 @@ class PrewarmCacheParsingTest extends AnyFunSuite with BeforeAndAfterEach {
     }
     assert(ex.getMessage.contains("Unknown segment type"))
   }
+
+  // === ASYNC MODE Tests ===
+
+  test("PREWARM should parse with ASYNC MODE flag") {
+    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test' ASYNC MODE"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.tablePath == "/tmp/test")
+    assert(cmd.asyncMode == true)
+  }
+
+  test("PREWARM without ASYNC MODE should default to false") {
+    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test'"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.asyncMode == false)
+  }
+
+  test("PREWARM should parse with all clauses and ASYNC MODE") {
+    val sql = """
+      PREWARM INDEXTABLES CACHE 's3://bucket/table'
+        FOR SEGMENTS (TERM_DICT, POSTINGS)
+        ON FIELDS (title, content)
+        WITH PERWORKER PARALLELISM OF 4
+        WHERE date >= '2024-01-01'
+        ASYNC MODE
+    """.stripMargin.replaceAll("\n", " ")
+
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.tablePath == "s3://bucket/table")
+    assert(cmd.segments.size == 2)
+    assert(cmd.fields.isDefined)
+    assert(cmd.fields.get.size == 2)
+    assert(cmd.splitsPerTask == 4)
+    assert(cmd.wherePredicates.nonEmpty)
+    assert(cmd.asyncMode == true)
+  }
+
+  test("PREWARM ASYNC MODE should be case-insensitive") {
+    val sql  = "prewarm indextables cache '/tmp/test' async mode"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.asyncMode == true)
+  }
+
+  test("PREWARM with only segments and ASYNC MODE") {
+    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test' FOR SEGMENTS (TERM_DICT) ASYNC MODE"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.segments.size == 1)
+    assert(cmd.asyncMode == true)
+  }
+
+  test("PREWARM with only WHERE clause and ASYNC MODE") {
+    val sql  = "PREWARM INDEXTABLES CACHE '/tmp/test' WHERE year = '2024' ASYNC MODE"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[PrewarmCacheCommand])
+
+    val cmd = plan.asInstanceOf[PrewarmCacheCommand]
+    assert(cmd.wherePredicates.nonEmpty)
+    assert(cmd.asyncMode == true)
+  }
+
+  // === DESCRIBE PREWARM JOBS Tests ===
+
+  test("DESCRIBE INDEXTABLES PREWARM JOBS should parse") {
+    val sql  = "DESCRIBE INDEXTABLES PREWARM JOBS"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[DescribePrewarmJobsCommand])
+  }
+
+  test("DESCRIBE TANTIVY4SPARK PREWARM JOBS should parse") {
+    val sql  = "DESCRIBE TANTIVY4SPARK PREWARM JOBS"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[DescribePrewarmJobsCommand])
+  }
+
+  test("DESCRIBE PREWARM JOBS should be case-insensitive") {
+    val sql  = "describe indextables prewarm jobs"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[DescribePrewarmJobsCommand])
+  }
+
+  // === WAIT FOR PREWARM JOBS Tests ===
+
+  test("WAIT FOR INDEXTABLES PREWARM JOBS should parse without arguments") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.isEmpty)
+    assert(cmd.jobId.isEmpty)
+    assert(cmd.timeoutSeconds == 3600) // Default
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with table path") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS 's3://bucket/table'"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.contains("s3://bucket/table"))
+    assert(cmd.jobId.isEmpty)
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with table identifier") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS my_table"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.contains("my_table"))
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with job ID") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS JOB 'abc-123-def-456'"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.isEmpty)
+    assert(cmd.jobId.contains("abc-123-def-456"))
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with timeout") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS TIMEOUT 300"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.timeoutSeconds == 300)
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with table path and timeout") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS 's3://bucket/table' TIMEOUT 600"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.contains("s3://bucket/table"))
+    assert(cmd.timeoutSeconds == 600)
+  }
+
+  test("WAIT FOR PREWARM JOBS should parse with job ID and timeout") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS JOB 'job-uuid' TIMEOUT 60"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.jobId.contains("job-uuid"))
+    assert(cmd.timeoutSeconds == 60)
+  }
+
+  test("WAIT FOR TANTIVY4SPARK PREWARM JOBS should parse") {
+    val sql  = "WAIT FOR TANTIVY4SPARK PREWARM JOBS"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+  }
+
+  test("WAIT FOR PREWARM JOBS should be case-insensitive") {
+    val sql  = "wait for indextables prewarm jobs timeout 100"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.timeoutSeconds == 100)
+  }
+
+  test("WAIT FOR PREWARM JOBS with all options") {
+    val sql  = "WAIT FOR INDEXTABLES PREWARM JOBS 's3://bucket/path' JOB 'job-123' TIMEOUT 1800"
+    val plan = spark.sessionState.sqlParser.parsePlan(sql)
+    assert(plan.isInstanceOf[WaitForPrewarmJobsCommand])
+
+    val cmd = plan.asInstanceOf[WaitForPrewarmJobsCommand]
+    assert(cmd.tablePath.contains("s3://bucket/path"))
+    assert(cmd.jobId.contains("job-123"))
+    assert(cmd.timeoutSeconds == 1800)
+  }
 }

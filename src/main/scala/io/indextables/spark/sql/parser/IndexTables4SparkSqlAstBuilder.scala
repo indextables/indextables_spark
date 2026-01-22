@@ -27,6 +27,7 @@ import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
+  DescribePrewarmJobsCommand,
   DescribeStorageStatsCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
@@ -37,7 +38,8 @@ import io.indextables.spark.sql.{
   PrewarmCacheCommand,
   PurgeOrphanedSplitsCommand,
   RepairIndexFilesTransactionLogCommand,
-  TruncateTimeTravelCommand
+  TruncateTimeTravelCommand,
+  WaitForPrewarmJobsCommand
 }
 import io.indextables.spark.sql.parser.IndexTables4SparkSqlBaseParser._
 import org.antlr.v4.runtime.ParserRuleContext
@@ -497,6 +499,71 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     result
   }
 
+  override def visitDescribePrewarmJobs(ctx: DescribePrewarmJobsContext): LogicalPlan = {
+    logger.debug("visitDescribePrewarmJobs called")
+    val result = DescribePrewarmJobsCommand()
+    logger.debug(s"Created DescribePrewarmJobsCommand: $result")
+    result
+  }
+
+  override def visitWaitForPrewarmJobs(ctx: WaitForPrewarmJobsContext): LogicalPlan = {
+    logger.debug(s"visitWaitForPrewarmJobs called with context: $ctx")
+    logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}, ctx.jobId = ${ctx.jobId}")
+
+    try {
+      // Extract table path or identifier (optional)
+      val tablePath: Option[String] = if (ctx.path != null) {
+        logger.debug(s"Processing path: ${ctx.path.getText}")
+        val pathStr = ParserUtils.string(ctx.path)
+        logger.debug(s"Parsed path: $pathStr")
+        Some(pathStr)
+      } else if (ctx.table != null) {
+        logger.debug(s"Processing table: ${ctx.table.getText}")
+        val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+        logger.debug(s"Parsed table ID: $tableId")
+        Some(tableId.mkString("."))
+      } else {
+        logger.debug("No path or table specified - will wait for all jobs")
+        None
+      }
+
+      // Extract job ID (optional)
+      val jobId: Option[String] = if (ctx.jobId != null) {
+        val jobIdStr = ParserUtils.string(ctx.jobId)
+        logger.debug(s"Found job ID: $jobIdStr")
+        Some(jobIdStr)
+      } else {
+        logger.debug("No job ID specified")
+        None
+      }
+
+      // Extract timeout (optional, default 3600 seconds = 1 hour)
+      val timeoutSeconds: Int = if (ctx.timeoutSeconds != null) {
+        val timeout = ctx.timeoutSeconds.getText.toInt
+        logger.debug(s"Found timeout: $timeout seconds")
+        if (timeout <= 0) {
+          throw new IllegalArgumentException(s"TIMEOUT must be positive, got: $timeout")
+        }
+        timeout
+      } else {
+        logger.debug("No timeout specified, will use default (3600 seconds)")
+        3600
+      }
+
+      // Create command
+      logger.debug(
+        s"Creating WaitForPrewarmJobsCommand with tablePath=$tablePath, jobId=$jobId, timeoutSeconds=$timeoutSeconds"
+      )
+      val result = WaitForPrewarmJobsCommand(tablePath, jobId, timeoutSeconds)
+      logger.debug(s"Created WaitForPrewarmJobsCommand: $result")
+      result
+    } catch {
+      case e: Exception =>
+        logger.error(s"Exception in visitWaitForPrewarmJobs: ${e.getMessage}", e)
+        throw e
+    }
+  }
+
   override def visitPrewarmCache(ctx: PrewarmCacheContext): LogicalPlan = {
     logger.debug(s"visitPrewarmCache called with context: $ctx")
     logger.debug(s"ctx.path = ${ctx.path}, ctx.table = ${ctx.table}")
@@ -560,17 +627,22 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         Seq.empty
       }
 
+      // Extract ASYNC MODE flag
+      val asyncMode: Boolean = ctx.ASYNC() != null && ctx.MODE() != null
+      logger.debug(s"ASYNC MODE flag: $asyncMode")
+
       // Create command
       logger.debug(
         s"Creating PrewarmCacheCommand with tablePath=$tablePath, segments=$segments, " +
-          s"fields=$fields, splitsPerTask=$splitsPerTask, wherePredicates=$wherePredicates"
+          s"fields=$fields, splitsPerTask=$splitsPerTask, wherePredicates=$wherePredicates, asyncMode=$asyncMode"
       )
       val result = PrewarmCacheCommand(
         tablePath = tablePath,
         segments = segments,
         fields = fields,
         splitsPerTask = splitsPerTask,
-        wherePredicates = wherePredicates
+        wherePredicates = wherePredicates,
+        asyncMode = asyncMode
       )
       logger.debug(s"Created PrewarmCacheCommand: $result")
       result
