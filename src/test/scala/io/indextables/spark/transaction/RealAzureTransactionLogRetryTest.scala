@@ -131,7 +131,13 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
     val tablePath = new Path(testPath)
 
     try {
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      // Disable checkpointing to avoid race conditions during concurrent writes
+      val options = new CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.checkpoint.enabled", "false"
+        )
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         transactionLog.initialize(getTestSchema())
@@ -321,7 +327,13 @@ class RealAzureTransactionLogRetryTest extends RealAzureTestBase {
     val tablePath = new Path(testPath)
 
     try {
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      // Disable checkpointing to avoid race conditions during concurrent writes
+      val options = new CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.checkpoint.enabled", "false"
+        )
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         transactionLog.initialize(getTestSchema())
