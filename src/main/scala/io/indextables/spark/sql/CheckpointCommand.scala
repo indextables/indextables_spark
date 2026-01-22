@@ -26,7 +26,7 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, TransactionLogCheckpoint, TransactionLogFactory}
-import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateWriter}
+import io.indextables.spark.transaction.avro.{ConcurrentStateWriteException, FileEntry, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -185,9 +185,10 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
     }
 
   /**
-   * Create checkpoint in Avro state format.
+   * Create checkpoint in Avro state format with retry support for concurrent write conflicts.
    *
    * This writes a compacted state with all live files sorted by partition values for optimal pruning.
+   * Uses conditional writes and retry logic to handle concurrent checkpoint creation.
    */
   private def createAvroStateCheckpoint(
       transactionLogPath: Path,
@@ -206,12 +207,26 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       .map(_.toInt)
       .getOrElse(StateConfig.ENTRIES_PER_MANIFEST_DEFAULT)
 
+    // Build retry configuration from options
+    val retryConfig = StateRetryConfig(
+      maxAttempts = Option(options.get(StateConfig.RETRY_MAX_ATTEMPTS_KEY))
+        .map(_.toInt)
+        .getOrElse(StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT),
+      baseDelayMs = Option(options.get(StateConfig.RETRY_BASE_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_BASE_DELAY_MS_DEFAULT),
+      maxDelayMs = Option(options.get(StateConfig.RETRY_MAX_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+    )
+
     val stateWriter = StateWriter(
       cloudProvider,
       transactionLogPath.toString,
       compression,
       compressionLevel,
-      entriesPerManifest
+      entriesPerManifest,
+      retryConfig
     )
 
     val manifestIO = StateManifestIO(cloudProvider)
@@ -239,23 +254,29 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       FileEntry.fromAddAction(add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)), currentVersion, timestamp)
     }
 
-    // Create state directory name
-    val stateDir = manifestIO.formatStateDir(currentVersion)
-    val stateDirPath = s"${transactionLogPath.toString}/$stateDir"
-
     logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
 
-    // Write compacted state (sorted by partition for optimal pruning)
-    stateWriter.writeCompactedStateFromFiles(
-      stateDirPath,
-      fileEntries,
+    // Write compacted state with retry support for concurrent conflicts
+    // This uses conditional writes for _manifest.json and automatic version increment on conflict
+    val writeResult = stateWriter.writeStateWithRetry(
       currentVersion,
+      fileEntries,
       schemaRegistry.toMap
     )
 
+    // Extract the actual version and state directory from the write result
+    val actualVersion = writeResult.version
+    val stateDir = manifestIO.formatStateDir(actualVersion)
+
+    if (writeResult.conflictDetected) {
+      logger.info(s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
+        s"(original version $currentVersion had concurrent conflict)")
+    }
+
     // Update _last_checkpoint to point to new Avro state
+    // Use version-checked write to avoid regressing to an older checkpoint
     val lastCheckpointInfo = LastCheckpointInfo(
-      version = currentVersion,
+      version = actualVersion,
       size = fileEntries.size,
       sizeInBytes = fileEntries.map(_.size).sum,
       numFiles = fileEntries.size,
@@ -266,17 +287,25 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       stateDir = Some(stateDir)
     )
 
-    val lastCheckpointPath = new Path(transactionLogPath, "_last_checkpoint")
     val lastCheckpointJson = JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
-    cloudProvider.writeFile(lastCheckpointPath.toString, lastCheckpointJson.getBytes("UTF-8"))
+    val checkpointUpdated = manifestIO.writeLastCheckpointIfNewer(
+      transactionLogPath.toString,
+      actualVersion,
+      lastCheckpointJson
+    )
 
-    logger.info(s"Avro state checkpoint created successfully at version $currentVersion (format=avro-state)")
+    if (checkpointUpdated) {
+      logger.info(s"Avro state checkpoint created successfully at version $actualVersion (format=avro-state)")
+    } else {
+      logger.info(s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
+        s"(a newer checkpoint already exists)")
+    }
 
     Seq(
       Row(
         resolvedPathStr,
         "SUCCESS",
-        currentVersion,
+        actualVersion,
         fileEntries.size.toLong,
         fileEntries.size.toLong,
         4L, // Protocol version 4 for Avro state

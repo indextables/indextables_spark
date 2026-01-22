@@ -312,6 +312,90 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       case _                => None
     }
   }
+
+  /**
+   * Read current _last_checkpoint info from JSON file.
+   *
+   * @param transactionLogPath
+   *   Path to the transaction log directory
+   * @return
+   *   Current LastCheckpointInfo if file exists and is valid, None otherwise
+   */
+  def readLastCheckpointJson(transactionLogPath: String): Option[JsonNode] = {
+    val lastCheckpointPath = s"$transactionLogPath/_last_checkpoint"
+
+    if (!cloudProvider.exists(lastCheckpointPath)) {
+      return None
+    }
+
+    Try {
+      val content = new String(cloudProvider.readFile(lastCheckpointPath), "UTF-8")
+      mapper.readTree(content)
+    } match {
+      case Success(json) => Some(json)
+      case Failure(e) =>
+        log.warn(s"Failed to read _last_checkpoint: ${e.getMessage}")
+        None
+    }
+  }
+
+  /**
+   * Get the current checkpoint version from _last_checkpoint file.
+   *
+   * @param transactionLogPath
+   *   Path to the transaction log directory
+   * @return
+   *   Current version if file exists and is valid, None otherwise
+   */
+  def getCurrentCheckpointVersion(transactionLogPath: String): Option[Long] = {
+    readLastCheckpointJson(transactionLogPath).flatMap { json =>
+      val versionNode = json.get("version")
+      if (versionNode != null && !versionNode.isNull) {
+        Some(versionNode.asLong())
+      } else {
+        None
+      }
+    }
+  }
+
+  /**
+   * Write _last_checkpoint only if the new version is greater than the existing version.
+   *
+   * This provides a form of version-based conflict resolution for _last_checkpoint updates.
+   * If a concurrent writer has already advanced the checkpoint to a higher version, this
+   * write will be skipped (which is the correct behavior - we don't want to regress).
+   *
+   * @param transactionLogPath
+   *   Path to the transaction log directory
+   * @param newVersion
+   *   Version of the new checkpoint
+   * @param lastCheckpointJson
+   *   JSON content to write
+   * @return
+   *   true if written (new version was greater), false if skipped (existing version was >= new)
+   */
+  def writeLastCheckpointIfNewer(
+      transactionLogPath: String,
+      newVersion: Long,
+      lastCheckpointJson: String): Boolean = {
+
+    val lastCheckpointPath = s"$transactionLogPath/_last_checkpoint"
+
+    // Check current version (if exists)
+    val currentVersion = getCurrentCheckpointVersion(transactionLogPath)
+
+    currentVersion match {
+      case Some(existingVersion) if existingVersion >= newVersion =>
+        log.info(s"Skipping _last_checkpoint update: existing version $existingVersion >= new version $newVersion")
+        false
+
+      case _ =>
+        // Either no existing file, or existing version is lower - write the new checkpoint
+        cloudProvider.writeFile(lastCheckpointPath, lastCheckpointJson.getBytes("UTF-8"))
+        log.debug(s"Updated _last_checkpoint to version $newVersion")
+        true
+    }
+  }
 }
 
 object StateManifestIO {

@@ -332,4 +332,60 @@ object StateConfig {
     val SNAPPY = "snappy"
     val NONE = "none"
   }
+
+  // Retry configuration for concurrent write conflicts
+  val RETRY_MAX_ATTEMPTS_KEY = s"$PREFIX.retry.maxAttempts"
+  val RETRY_MAX_ATTEMPTS_DEFAULT = 10
+
+  val RETRY_BASE_DELAY_MS_KEY = s"$PREFIX.retry.baseDelayMs"
+  val RETRY_BASE_DELAY_MS_DEFAULT = 100L
+
+  val RETRY_MAX_DELAY_MS_KEY = s"$PREFIX.retry.maxDelayMs"
+  val RETRY_MAX_DELAY_MS_DEFAULT = 5000L
 }
+
+/**
+ * Configuration for state write retry behavior on concurrent conflicts.
+ *
+ * @param maxAttempts
+ *   Maximum number of retry attempts (default: 10)
+ * @param baseDelayMs
+ *   Base delay in milliseconds for exponential backoff (default: 100)
+ * @param maxDelayMs
+ *   Maximum delay in milliseconds (default: 5000)
+ */
+case class StateRetryConfig(
+    maxAttempts: Int = StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT,
+    baseDelayMs: Long = StateConfig.RETRY_BASE_DELAY_MS_DEFAULT,
+    maxDelayMs: Long = StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+
+/**
+ * Result of a state write operation.
+ *
+ * @param stateDir
+ *   Path to the state directory that was written
+ * @param version
+ *   Transaction version of the written state
+ * @param attempts
+ *   Number of attempts taken (1 = no retry needed)
+ * @param conflictDetected
+ *   Whether a concurrent write conflict was detected
+ */
+case class StateWriteResult(
+    stateDir: String,
+    version: Long,
+    attempts: Int,
+    conflictDetected: Boolean)
+
+/**
+ * Exception thrown when state write fails after all retry attempts due to concurrent conflicts.
+ *
+ * @param message
+ *   Error message describing the failure
+ * @param lastAttemptedVersion
+ *   The last version that was attempted
+ * @param attempts
+ *   Total number of attempts made
+ */
+class ConcurrentStateWriteException(message: String, val lastAttemptedVersion: Long, val attempts: Int)
+    extends RuntimeException(message)

@@ -23,6 +23,7 @@ import io.indextables.spark.transaction.AddAction
 import org.slf4j.LoggerFactory
 
 import scala.util.{Failure, Success, Try}
+import scala.util.Random
 
 /**
  * Writer for Avro state files with support for incremental and compacted writes.
@@ -38,13 +39,15 @@ class StateWriter(
     transactionLogPath: String,
     compression: String = StateConfig.COMPRESSION_DEFAULT,
     compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
-    entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT) {
+    entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
+    retryConfig: StateRetryConfig = StateRetryConfig()) {
 
   private val log = LoggerFactory.getLogger(getClass)
 
   private val manifestIO = StateManifestIO(cloudProvider)
   private val manifestWriter = AvroManifestWriter(cloudProvider)
   private val manifestReader = AvroManifestReader(cloudProvider)
+  private val random = new Random()
 
   /**
    * Write a new state, either incrementally or compacted.
@@ -94,6 +97,190 @@ class StateWriter(
     }
 
     newStateDir
+  }
+
+  /**
+   * Write a new state with automatic retry on concurrent write conflict.
+   *
+   * This method handles version assignment and retry logic internally. If a concurrent writer
+   * creates the same state version, this method will increment the version and retry.
+   *
+   * @param currentVersion
+   *   Initial transaction version to attempt
+   * @param liveFiles
+   *   All live file entries (for compacted state)
+   * @param schemaRegistry
+   *   Schema registry for doc mapping deduplication
+   * @return
+   *   StateWriteResult containing the written state directory, actual version, and retry info
+   * @throws ConcurrentStateWriteException
+   *   if all retry attempts fail due to concurrent conflicts
+   */
+  def writeStateWithRetry(
+      currentVersion: Long,
+      liveFiles: Seq[FileEntry],
+      schemaRegistry: Map[String, String]): StateWriteResult = {
+
+    var attempt = 1
+    var version = currentVersion
+    var lastConflictVersion = 0L
+
+    while (attempt <= retryConfig.maxAttempts) {
+      val stateDir = s"$transactionLogPath/${manifestIO.formatStateDir(version)}"
+
+      log.debug(s"Attempting to write state at version $version (attempt $attempt/${retryConfig.maxAttempts})")
+
+      // Check if state directory already exists (quick check before doing work)
+      if (manifestIO.stateExists(stateDir)) {
+        log.debug(s"State directory already exists: $stateDir")
+        lastConflictVersion = version
+        version = findNextAvailableVersion(version)
+        attempt += 1
+
+        if (attempt <= retryConfig.maxAttempts) {
+          val delay = calculateRetryDelay(attempt)
+          log.info(s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+            s"Retrying with version $version after ${delay}ms")
+          Thread.sleep(delay)
+        }
+      } else {
+        // Try to write the state with conditional manifest write
+        val success = tryWriteCompactedState(stateDir, liveFiles, version, schemaRegistry)
+
+        if (success) {
+          log.info(s"Successfully wrote state at version $version (attempt $attempt)")
+          return StateWriteResult(
+            stateDir = stateDir,
+            version = version,
+            attempts = attempt,
+            conflictDetected = attempt > 1
+          )
+        } else {
+          // Conditional write failed - another writer created the state
+          log.debug(s"Conditional write failed for state version $version - concurrent writer detected")
+          lastConflictVersion = version
+          version = findNextAvailableVersion(version)
+          attempt += 1
+
+          if (attempt <= retryConfig.maxAttempts) {
+            val delay = calculateRetryDelay(attempt)
+            log.info(s"Concurrent state conflict at version $lastConflictVersion (attempt ${attempt - 1}/${retryConfig.maxAttempts}). " +
+              s"Retrying with version $version after ${delay}ms")
+            Thread.sleep(delay)
+          }
+        }
+      }
+    }
+
+    throw new ConcurrentStateWriteException(
+      s"Failed to write state after ${retryConfig.maxAttempts} attempts. " +
+        s"Last conflicted version: $lastConflictVersion. " +
+        s"Consider increasing spark.indextables.state.retry.maxAttempts or reducing concurrent writers.",
+      lastConflictVersion,
+      retryConfig.maxAttempts
+    )
+  }
+
+  /**
+   * Try to write a compacted state with conditional _manifest.json write.
+   *
+   * @return true if write succeeded, false if concurrent conflict detected
+   */
+  private def tryWriteCompactedState(
+      stateDir: String,
+      liveFiles: Seq[FileEntry],
+      version: Long,
+      schemaRegistry: Map[String, String]): Boolean = {
+
+    // Create directory (safe - directory names are versioned)
+    if (!cloudProvider.exists(stateDir)) {
+      cloudProvider.createDirectory(stateDir)
+    }
+
+    // Sort files by partition values for locality
+    val sortedFiles = liveFiles.sortBy { entry =>
+      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
+    }
+
+    // Partition into manifest chunks
+    val manifestChunks = if (sortedFiles.isEmpty) {
+      Seq(Seq.empty[FileEntry])
+    } else {
+      sortedFiles.grouped(entriesPerManifest).toSeq
+    }
+
+    // Write new manifests (safe - UUID naming ensures uniqueness)
+    val newManifests = manifestChunks.map { chunk =>
+      val manifestId = manifestWriter.generateManifestId()
+      val manifestPath = s"manifest-$manifestId.avro"
+      val fullManifestPath = s"$stateDir/$manifestPath"
+
+      if (chunk.nonEmpty) {
+        manifestWriter.writeManifest(fullManifestPath, chunk, compression, compressionLevel)
+      } else {
+        manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
+      }
+
+      manifestWriter.createManifestInfo(manifestPath, chunk)
+    }
+
+    // Create state manifest
+    val stateManifest = StateManifest(
+      formatVersion = 1,
+      stateVersion = version,
+      createdAt = System.currentTimeMillis(),
+      numFiles = liveFiles.size,
+      totalBytes = liveFiles.map(_.size).sum,
+      manifests = newManifests,
+      tombstones = Seq.empty,
+      schemaRegistry = schemaRegistry,
+      protocolVersion = 4
+    )
+
+    // Use conditional write for _manifest.json - this is the commit point
+    val written = manifestIO.writeStateManifestIfNotExists(stateDir, stateManifest)
+
+    if (written) {
+      log.info(s"Wrote compacted state: version=$version, files=${liveFiles.size}, manifests=${newManifests.size}")
+    }
+
+    written
+  }
+
+  /**
+   * Find the next available state version by scanning existing state directories.
+   */
+  private def findNextAvailableVersion(afterVersion: Long): Long = {
+    Try {
+      val files = cloudProvider.listFiles(transactionLogPath, recursive = true)
+      val manifestFiles = files
+        .filter(f => f.path.endsWith("/_manifest.json"))
+        .filter(f => f.path.contains("/state-v"))
+
+      if (manifestFiles.isEmpty) {
+        afterVersion + 1
+      } else {
+        val versions = manifestFiles.flatMap { f =>
+          manifestIO.parseStateDirVersion(f.path.stripSuffix("/_manifest.json"))
+        }
+        val maxVersion = if (versions.isEmpty) afterVersion else versions.max
+        math.max(afterVersion, maxVersion) + 1
+      }
+    } match {
+      case Success(v) => v
+      case Failure(_) => afterVersion + 1
+    }
+  }
+
+  /**
+   * Calculate exponential backoff delay with jitter for retry attempts.
+   */
+  private def calculateRetryDelay(attempt: Int): Long = {
+    val exponentialDelay = retryConfig.baseDelayMs * math.pow(2, attempt - 1).toLong
+    val cappedDelay = math.min(exponentialDelay, retryConfig.maxDelayMs)
+    // Add jitter: 75% to 125% of the calculated delay
+    val jitter = 0.75 + random.nextDouble() * 0.5
+    (cappedDelay * jitter).toLong
   }
 
   /**
@@ -385,6 +572,8 @@ object StateWriter {
    *   Compression level (default: 3)
    * @param entriesPerManifest
    *   Maximum entries per manifest file (default: 50000)
+   * @param retryConfig
+   *   Retry configuration for concurrent write conflicts (default: StateRetryConfig())
    * @return
    *   StateWriter instance
    */
@@ -393,7 +582,8 @@ object StateWriter {
       transactionLogPath: String,
       compression: String = StateConfig.COMPRESSION_DEFAULT,
       compressionLevel: Int = StateConfig.COMPRESSION_LEVEL_DEFAULT,
-      entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT): StateWriter = {
-    new StateWriter(cloudProvider, transactionLogPath, compression, compressionLevel, entriesPerManifest)
+      entriesPerManifest: Int = StateConfig.ENTRIES_PER_MANIFEST_DEFAULT,
+      retryConfig: StateRetryConfig = StateRetryConfig()): StateWriter = {
+    new StateWriter(cloudProvider, transactionLogPath, compression, compressionLevel, entriesPerManifest, retryConfig)
   }
 }
