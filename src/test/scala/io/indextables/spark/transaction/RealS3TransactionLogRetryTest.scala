@@ -323,7 +323,13 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
     val tablePath = new Path(testPath)
 
     try {
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      // Disable automatic checkpointing to avoid race conditions with concurrent writes
+      val options = new CaseInsensitiveStringMap(
+        java.util.Map.of(
+          "spark.indextables.checkpoint.enabled", "false"
+        )
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, options)
 
       try {
         transactionLog.initialize(getTestSchema())
