@@ -172,10 +172,21 @@ object AsyncMergeOnWriteManager {
     activeJobs.put(jobId, job)
     logger.info(s"Starting async merge job $jobId for $tablePath: $totalMergeGroups groups in $totalBatches batches (batch size: $batchSize)")
 
+    // Capture scheduler pool from caller's thread for FAIR scheduling
+    // This allows merge to share resources fairly with the write that triggered it
+    val callerSchedulerPool = Option(sparkSession.sparkContext.getLocalProperty("spark.scheduler.pool"))
+    if (callerSchedulerPool.isDefined) {
+      logger.info(s"Job $jobId inheriting scheduler pool '${callerSchedulerPool.get}' from caller")
+    }
+
     // Submit work to executor
     executorService.submit(new Runnable {
       override def run(): Unit = {
         try {
+          // Restore scheduler pool in background thread
+          callerSchedulerPool.foreach { pool =>
+            sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", pool)
+          }
           executeMergeJob(job, transactionLog, writeOptions, serializedHadoopConf, sparkSession)
         } catch {
           case e: InterruptedException =>
@@ -184,6 +195,9 @@ object AsyncMergeOnWriteManager {
           case e: Exception =>
             logger.error(s"Async merge job ${job.jobId} failed: ${e.getMessage}", e)
             failJob(job, e.getMessage)
+        } finally {
+          // Clear local property
+          sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
         }
       }
     })
@@ -386,34 +400,41 @@ object AsyncMergeOnWriteManager {
   }
 
   /**
-   * Execute merge with batching using our semaphore for concurrency control.
+   * Execute merge with batching using configured concurrency.
    *
    * This method:
-   * 1. Acquires semaphore permits for each batch (limits concurrent batches across all tables)
-   * 2. Executes batches using the MergeSplitsExecutor
-   * 3. Reports progress to the job
+   * 1. Configures batchSize (1/6 of cluster CPUs) for the executor
+   * 2. Configures maxConcurrentBatches (default 3) for parallel batch execution
+   * 3. Lets the MergeSplitsExecutor handle parallelism via its internal ForkJoinPool
+   * 4. Reports progress to the job
+   *
+   * With defaults on a 24-CPU cluster:
+   * - batchSize = 4 (24 × 0.167)
+   * - maxConcurrentBatches = 3
+   * - Total concurrent work = 4 × 3 = 12 merge groups (50% of cluster)
    */
   private def executeMergeWithBatching(
     job: AsyncMergeJob,
     executor: MergeSplitsExecutor,
     sparkSession: SparkSession
   ): Seq[org.apache.spark.sql.Row] = {
-    // Use the executor's merge method which handles batching internally
-    // The executor already uses Scala parallel collections with ForkJoinPool
-    // We wrap this with our semaphore control per-batch
+    // The executor uses Scala parallel collections with ForkJoinPool
+    // to process multiple batches concurrently
 
-    // Set our batch size in spark config for the executor to pick up
+    // Set our batch size and concurrency in spark config for the executor to pick up
     val originalBatchSize = sparkSession.conf.getOption("spark.indextables.merge.batchSize")
     val originalMaxConcurrent = sparkSession.conf.getOption("spark.indextables.merge.maxConcurrentBatches")
 
     try {
-      // Configure the executor to use our batch size
+      // Configure the executor to use our batch size (1/6 of cluster CPUs)
       sparkSession.conf.set("spark.indextables.merge.batchSize", job.batchSize.toString)
-      // We control concurrency via our semaphore, so set executor to process one batch at a time
-      // The actual parallelism comes from our semaphore across all tables
-      sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", "1")
+      // Configure max concurrent batches (default 3, so up to 50% of cluster used)
+      sparkSession.conf.set("spark.indextables.merge.maxConcurrentBatches", maxConcurrentBatches.toString)
 
-      // Execute merge with progress tracking
+      logger.info(s"Job ${job.jobId}: batchSize=${job.batchSize}, maxConcurrentBatches=$maxConcurrentBatches " +
+        s"(max concurrent groups: ${job.batchSize * maxConcurrentBatches})")
+
+      // Execute merge - the executor handles parallel batch execution internally
       executeMergeWithSemaphore(job, executor)
 
     } finally {
@@ -430,20 +451,22 @@ object AsyncMergeOnWriteManager {
   }
 
   /**
-   * Execute merge with semaphore control.
+   * Execute merge with job-level semaphore control.
    *
-   * Acquires a permit from the semaphore for the entire job execution,
-   * ensuring we respect the maxConcurrentBatches limit across all tables.
-   * The executor handles internal batching.
+   * The semaphore limits concurrent merge JOBS (not batches).
+   * Within each job, the executor handles batch-level parallelism via ForkJoinPool
+   * using maxConcurrentBatches (default 3).
+   *
+   * This prevents resource exhaustion when multiple tables trigger merges simultaneously.
    */
   private def executeMergeWithSemaphore(
     job: AsyncMergeJob,
     executor: MergeSplitsExecutor
   ): Seq[org.apache.spark.sql.Row] = {
-    // Acquire permit for this job
-    logger.debug(s"Job ${job.jobId} acquiring semaphore (available: ${batchSemaphore.availablePermits()})")
+    // Acquire permit for this job (limits concurrent jobs, not batches)
+    logger.debug(s"Job ${job.jobId} acquiring job semaphore (available: ${batchSemaphore.availablePermits()})")
     batchSemaphore.acquire()
-    logger.debug(s"Job ${job.jobId} acquired semaphore")
+    logger.debug(s"Job ${job.jobId} acquired job semaphore")
 
     try {
       // Check if job was cancelled while waiting
@@ -465,9 +488,9 @@ object AsyncMergeOnWriteManager {
       results
 
     } finally {
-      // Always release semaphore
+      // Always release job semaphore
       batchSemaphore.release()
-      logger.debug(s"Job ${job.jobId} released semaphore")
+      logger.debug(s"Job ${job.jobId} released job semaphore")
     }
   }
 

@@ -769,6 +769,24 @@ class MergeSplitsExecutor(
 
               sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
 
+              // Set scheduler pool for FAIR scheduling (if enabled)
+              // With FAIR scheduler, tasks from different jobs will be interleaved
+              // rather than completing one job before starting the next.
+              //
+              // Priority order:
+              // 1. Explicit config: spark.indextables.merge.schedulerPool
+              // 2. Inherited from current context (e.g., user set pool before write)
+              // 3. Default: "default"
+              //
+              // For writes and merges to share resources fairly, they must use the same pool.
+              // User should set pool before write: sc.setLocalProperty("spark.scheduler.pool", "indexing")
+              val inheritedPool = Option(sparkSession.sparkContext.getLocalProperty("spark.scheduler.pool"))
+              val schedulerPool = sparkSession.conf
+                .getOption("spark.indextables.merge.schedulerPool")
+                .orElse(inheritedPool)
+                .getOrElse("default")
+              sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", schedulerPool)
+
               val batchStartTime = System.currentTimeMillis()
 
               val physicalMergeResults =
@@ -790,6 +808,7 @@ class MergeSplitsExecutor(
                     .collect()
                 } finally {
                   sparkSession.sparkContext.clearJobGroup()
+                  sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
                   // Clean up per-batch broadcast to free memory
                   try {
                     broadcastAwsConfig.destroy()
