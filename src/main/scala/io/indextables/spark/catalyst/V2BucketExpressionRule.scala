@@ -60,8 +60,11 @@ object V2BucketExpressionRule extends Rule[LogicalPlan] {
 
   // Storage for bucket configurations keyed by relation object
   // Using WeakHashMap so configs are automatically GC'd when relations are no longer referenced
-  // This prevents stale configs from affecting subsequent queries (fixes "unexpected column count" errors)
   private val bucketConfigStorage = new WeakHashMap[DataSourceV2Relation, BucketAggregationConfig]()
+
+  // Track which relation ID the current bucket config was set for
+  // This helps detect when we're in a new query vs same query different optimization pass
+  private val currentBucketConfigRelationId: ThreadLocal[Option[Int]] = ThreadLocal.withInitial(() => None)
 
   // Special marker prefix for bucket group columns
   val BUCKET_GROUP_MARKER = "__bucket_group__"
