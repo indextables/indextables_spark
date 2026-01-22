@@ -101,27 +101,64 @@ class S3CloudStorageProvider(
     }
 
   /**
-   * Normalize a path to table level by removing filename if present. This ensures that credential providers are always
-   * created with the table path, not individual split file paths. IMPORTANT: Preserves the original scheme (s3a://,
-   * s3://, etc.) to ensure credential providers receive the same URI scheme as specified by the user.
+   * Normalize a path to table root level by removing filenames and Hive-style partition paths.
+   * This ensures that credential providers are always created with the table root path,
+   * not individual split file paths or partition subdirectories.
+   *
+   * Normalization rules (applied in order):
+   *   1. If path ends with a data file (.split, .avro, .json, .gz), truncate to the last '/'
+   *   2. Strip all trailing Hive-style partition paths (/key=value/)
+   *
+   * Examples:
+   *   - s3://bucket/table/part-00000.split → s3://bucket/table
+   *   - s3://bucket/table/data.avro → s3://bucket/table
+   *   - s3://bucket/table/metadata.json → s3://bucket/table
+   *   - s3://bucket/table/data.json.gz → s3://bucket/table
+   *   - s3://bucket/table/year=2024/month=01/part-00000.split → s3://bucket/table
+   *   - s3://bucket/table/year=2024/month=01 → s3://bucket/table
+   *   - s3://bucket/table/_transaction_log → s3://bucket/table/_transaction_log (unchanged - not a partition)
+   *
+   * IMPORTANT: Preserves the original scheme (s3a://, s3://, etc.) to ensure credential
+   * providers receive the same URI scheme as specified by the user.
    */
   private def normalizeToTablePath(path: String): String = {
     val uri      = new URI(path)
-    val pathPart = uri.getPath
+    var pathPart = uri.getPath
 
-    // If the path ends with a .split file, remove it to get the table path
-    if (pathPart != null && pathPart.endsWith(".split")) {
-      val splitIndex = pathPart.lastIndexOf('/')
-      if (splitIndex > 0) {
-        val tablePath = pathPart.substring(0, splitIndex)
-        // Preserve the original scheme, authority, query, and fragment
-        new URI(uri.getScheme, uri.getAuthority, tablePath, uri.getQuery, uri.getFragment).toString
-      } else {
-        path // Fallback to original path if we can't determine table path
-      }
-    } else {
-      path // Not a split file path, use as-is
+    if (pathPart == null || pathPart.isEmpty) {
+      return path
     }
+
+    // Step 1: If the path ends with a data file extension, truncate to the last '/'
+    // Supported extensions: .split (IndexTables), .avro (Avro), .json (JSON), .gz (compressed)
+    val dataFileExtensions = Seq(".split", ".avro", ".json", ".gz")
+    if (dataFileExtensions.exists(ext => pathPart.endsWith(ext))) {
+      val lastSlash = pathPart.lastIndexOf('/')
+      if (lastSlash > 0) {
+        pathPart = pathPart.substring(0, lastSlash)
+      }
+    }
+
+    // Step 2: Strip all trailing Hive-style partition paths (/key=value)
+    // Keep stripping while the last path segment contains '=' (Hive partition format)
+    var modified = true
+    while (modified && pathPart.length > 1) {
+      val lastSlash = pathPart.lastIndexOf('/')
+      if (lastSlash > 0) {
+        val lastSegment = pathPart.substring(lastSlash + 1)
+        // Check if this segment is a Hive-style partition (contains '=' but is not empty)
+        if (lastSegment.nonEmpty && lastSegment.contains('=') && !lastSegment.startsWith("=")) {
+          pathPart = pathPart.substring(0, lastSlash)
+        } else {
+          modified = false
+        }
+      } else {
+        modified = false
+      }
+    }
+
+    // Preserve the original scheme, authority, query, and fragment
+    new URI(uri.getScheme, uri.getAuthority, pathPart, uri.getQuery, uri.getFragment).toString
   }
 
   /**
