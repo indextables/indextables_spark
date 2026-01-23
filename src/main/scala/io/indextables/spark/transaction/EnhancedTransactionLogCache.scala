@@ -23,6 +23,7 @@ import scala.collection.concurrent.TrieMap
 
 import com.google.common.cache.{Cache, CacheBuilder, RemovalListener, RemovalNotification}
 import com.google.common.cache.{CacheStats => GuavaCacheStats}
+import io.indextables.spark.transaction.avro.StateManifest
 import org.slf4j.LoggerFactory
 
 /**
@@ -85,14 +86,55 @@ object EnhancedTransactionLogCache {
       .build[String, LastCheckpointInfoCached]()
   }
 
+  // Global cache for Avro state manifests - keyed by state directory path (includes version)
+  // e.g., "s3://bucket/table/_transaction_log/state-v00000000000000000100"
+  private lazy val _globalAvroStateManifestCache: Cache[String, StateManifest] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global Avro state manifest cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .removalListener(new RemovalListener[String, StateManifest] {
+        override def onRemoval(notification: RemovalNotification[String, StateManifest]): Unit =
+          logger.debug(s"Evicted global Avro state manifest: ${notification.getKey}, reason: ${notification.getCause}")
+      })
+      .build[String, StateManifest]()
+  }
+
+  // Global cache for Avro file lists - keyed by (tablePath, avroVersion)
+  // This caches the Seq[AddAction] result after expensive JSON processing (filterEmptyObjectMappings)
+  // to avoid re-parsing schemas on every query
+  case class AvroFileListKey(tablePath: String, avroVersion: Long)
+
+  private lazy val _globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global Avro file list cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .removalListener(new RemovalListener[AvroFileListKey, Seq[AddAction]] {
+        override def onRemoval(notification: RemovalNotification[AvroFileListKey, Seq[AddAction]]): Unit =
+          logger.debug(s"Evicted global Avro file list: ${notification.getKey}, reason: ${notification.getCause}")
+      })
+      .build[AvroFileListKey, Seq[AddAction]]()
+  }
+
   // Accessors for the lazy caches
   private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
   private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
+  private[transaction] def globalAvroStateManifestCache: Cache[String, StateManifest] = _globalAvroStateManifestCache
+  private[transaction] def globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = _globalAvroFileListCache
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {
     globalCheckpointActionsCache.invalidateAll()
     globalLastCheckpointInfoCache.invalidateAll()
+    globalAvroStateManifestCache.invalidateAll()
+    globalAvroFileListCache.invalidateAll()
     logger.info("Cleared all global checkpoint caches")
   }
 
@@ -106,11 +148,25 @@ object EnhancedTransactionLogCache {
       .asScala
       .filter(_.tablePath == tablePath)
       .foreach(globalCheckpointActionsCache.invalidate)
+    // Invalidate Avro state manifests for this table (state dir paths contain the table path)
+    globalAvroStateManifestCache
+      .asMap()
+      .keySet()
+      .asScala
+      .filter(_.contains(tablePath))
+      .foreach(globalAvroStateManifestCache.invalidate)
+    // Invalidate Avro file lists for this table
+    globalAvroFileListCache
+      .asMap()
+      .keySet()
+      .asScala
+      .filter(_.tablePath == tablePath)
+      .foreach(globalAvroFileListCache.invalidate)
   }
 
   /** Get global cache statistics */
-  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats) =
-    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats())
+  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
+    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats())
 }
 
 /**
@@ -409,6 +465,73 @@ class EnhancedTransactionLogCache(
     logger.debug(s"Invalidated GLOBAL checkpoint actions cache for $tablePath version $checkpointVersion")
   }
 
+  /**
+   * Get or compute Avro state manifest - caches the StateManifest read from _manifest.json.
+   * Uses GLOBAL cache shared across all TransactionLog instances.
+   * Key is the full state directory path (e.g., "s3://bucket/table/_transaction_log/state-v00000000000000000100")
+   */
+  def getOrComputeAvroStateManifest(
+    stateDirPath: String,
+    compute: => StateManifest
+  ): StateManifest =
+    Option(EnhancedTransactionLogCache.globalAvroStateManifestCache.getIfPresent(stateDirPath)) match {
+      case Some(manifest) =>
+        logger.debug(s"GLOBAL Avro state manifest cache HIT for $stateDirPath (version ${manifest.stateVersion})")
+        manifest
+      case None =>
+        logger.debug(s"GLOBAL Avro state manifest cache MISS for $stateDirPath - reading from storage")
+        val manifest = compute
+        EnhancedTransactionLogCache.globalAvroStateManifestCache.put(stateDirPath, manifest)
+        logger.info(s"Cached Avro state manifest in GLOBAL cache for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
+        manifest
+    }
+
+  /** Invalidate Avro state manifest cache for a specific state directory */
+  def invalidateAvroStateManifest(stateDirPath: String): Unit = {
+    EnhancedTransactionLogCache.globalAvroStateManifestCache.invalidate(stateDirPath)
+    logger.debug(s"Invalidated GLOBAL Avro state manifest cache for $stateDirPath")
+  }
+
+  /**
+   * Get or compute Avro file list - caches the Seq[AddAction] after expensive schema processing.
+   * Uses GLOBAL cache shared across all TransactionLog instances.
+   * Key is (tablePath, avroVersion) to ensure cache is invalidated when new checkpoints are written.
+   *
+   * This is critical for performance: the toAddActions() conversion calls filterEmptyObjectMappings()
+   * which parses JSON for every file entry. Without this global cache, every query would re-parse.
+   */
+  def getOrComputeAvroFileList(
+    tablePath: String,
+    avroVersion: Long,
+    compute: => Seq[AddAction]
+  ): Seq[AddAction] = {
+    import EnhancedTransactionLogCache.AvroFileListKey
+    val key = AvroFileListKey(tablePath, avroVersion)
+    Option(EnhancedTransactionLogCache.globalAvroFileListCache.getIfPresent(key)) match {
+      case Some(files) =>
+        logger.debug(s"GLOBAL Avro file list cache HIT for $tablePath version $avroVersion (${files.size} files)")
+        files
+      case None =>
+        logger.debug(s"GLOBAL Avro file list cache MISS for $tablePath version $avroVersion - computing with schema processing")
+        val files = compute
+        EnhancedTransactionLogCache.globalAvroFileListCache.put(key, files)
+        logger.info(s"Cached Avro file list in GLOBAL cache for $tablePath version $avroVersion (${files.size} files)")
+        files
+    }
+  }
+
+  /** Invalidate Avro file list cache for a specific table */
+  def invalidateAvroFileList(tablePath: String): Unit = {
+    import scala.jdk.CollectionConverters._
+    EnhancedTransactionLogCache.globalAvroFileListCache
+      .asMap()
+      .keySet()
+      .asScala
+      .filter(_.tablePath == tablePath)
+      .foreach(EnhancedTransactionLogCache.globalAvroFileListCache.invalidate)
+    logger.debug(s"Invalidated GLOBAL Avro file list cache for $tablePath")
+  }
+
   /** Get or create a lazy value for expensive computations */
   def getOrCreateLazyValue[T](key: String, compute: => T): LazyValue[T] =
     lazyValueCache.getOrElseUpdate(key, new LazyValue(compute)).asInstanceOf[LazyValue[T]]
@@ -519,6 +642,8 @@ class EnhancedTransactionLogCache(
       protocolCacheStats = protocolCache.stats(),
       checkpointActionsCacheStats = EnhancedTransactionLogCache.globalCheckpointActionsCache.stats(),
       lastCheckpointInfoCacheStats = EnhancedTransactionLogCache.globalLastCheckpointInfoCache.stats(),
+      avroStateManifestCacheStats = EnhancedTransactionLogCache.globalAvroStateManifestCache.stats(),
+      avroFileListCacheStats = EnhancedTransactionLogCache.globalAvroFileListCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -551,6 +676,8 @@ class EnhancedTransactionLogCache(
     // Global caches are cleaned up via their own TTL expiration
     EnhancedTransactionLogCache.globalCheckpointActionsCache.cleanUp()
     EnhancedTransactionLogCache.globalLastCheckpointInfoCache.cleanUp()
+    EnhancedTransactionLogCache.globalAvroStateManifestCache.cleanUp()
+    EnhancedTransactionLogCache.globalAvroFileListCache.cleanUp()
   }
 }
 
@@ -609,6 +736,8 @@ case class CacheStatistics(
   protocolCacheStats: GuavaCacheStats,
   checkpointActionsCacheStats: GuavaCacheStats,
   lastCheckpointInfoCacheStats: GuavaCacheStats,
+  avroStateManifestCacheStats: GuavaCacheStats,
+  avroFileListCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -620,7 +749,9 @@ case class CacheStatistics(
       checkpointCacheStats,
       protocolCacheStats,
       checkpointActionsCacheStats,
-      lastCheckpointInfoCacheStats
+      lastCheckpointInfoCacheStats,
+      avroStateManifestCacheStats,
+      avroFileListCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -640,7 +771,9 @@ case class CacheStatistics(
       checkpointCacheStats,
       protocolCacheStats,
       checkpointActionsCacheStats,
-      lastCheckpointInfoCacheStats
+      lastCheckpointInfoCacheStats,
+      avroStateManifestCacheStats,
+      avroFileListCacheStats
     ).map(_.evictionCount()).sum
 
   /** Get checkpoint actions cache hit rate specifically - useful for monitoring the fix */
@@ -655,5 +788,19 @@ case class CacheStatistics(
     val requests = lastCheckpointInfoCacheStats.requestCount()
     if (requests == 0) 0.0
     else lastCheckpointInfoCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get Avro state manifest cache hit rate specifically */
+  def avroStateManifestHitRate: Double = {
+    val requests = avroStateManifestCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else avroStateManifestCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get Avro file list cache hit rate specifically - critical for avoiding expensive JSON parsing */
+  def avroFileListHitRate: Double = {
+    val requests = avroFileListCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else avroFileListCacheStats.hitCount().toDouble / requests
   }
 }

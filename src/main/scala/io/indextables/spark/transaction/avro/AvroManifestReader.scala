@@ -44,6 +44,9 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
 
   private val log = LoggerFactory.getLogger(getClass)
 
+  // Use shared thread pool from companion object to avoid creating threads on every parallel read
+  private implicit val sharedExecutionContext: ExecutionContext = AvroManifestReader.sharedExecutionContext
+
   /**
    * Read all file entries from a single Avro manifest file.
    *
@@ -120,7 +123,7 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    * @param manifestPaths
    *   Paths to manifest files
    * @param parallelism
-   *   Maximum number of parallel reads (default: 8)
+   *   Maximum number of parallel reads (default: 8, ignored - uses shared thread pool)
    * @return
    *   Combined sequence of all file entries
    */
@@ -135,32 +138,25 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
       return readManifest(manifestPaths.head)
     }
 
-    log.debug(s"Reading ${manifestPaths.size} manifests in parallel (parallelism=$parallelism)")
+    log.debug(s"Reading ${manifestPaths.size} manifests in parallel (using shared thread pool)")
     val startTime = System.currentTimeMillis()
 
-    // Use fixed thread pool for parallel reads
-    implicit val ec: ExecutionContext =
-      ExecutionContext.fromExecutorService(java.util.concurrent.Executors.newFixedThreadPool(parallelism))
-
-    try {
-      val futures = manifestPaths.map { path =>
-        Future {
-          readManifest(path)
-        }
-      }
-
-      val results = Await.result(Future.sequence(futures), 5.minutes)
-      val allEntries = results.flatten
-
-      val duration = System.currentTimeMillis() - startTime
-      log.info(
-        s"Read ${allEntries.size} entries from ${manifestPaths.size} manifests in ${duration}ms " +
-          s"(avg ${duration / manifestPaths.size}ms per manifest)")
-
-      allEntries
-    } finally {
-      ec.asInstanceOf[java.util.concurrent.ExecutorService].shutdown()
+    // Use shared thread pool from companion object - avoids thread creation overhead on every call
+    val futures = manifestPaths.map { path =>
+      Future {
+        readManifest(path)
+      }(sharedExecutionContext)
     }
+
+    val results = Await.result(Future.sequence(futures)(implicitly, sharedExecutionContext), 5.minutes)
+    val allEntries = results.flatten
+
+    val duration = System.currentTimeMillis() - startTime
+    log.info(
+      s"Read ${allEntries.size} entries from ${manifestPaths.size} manifests in ${duration}ms " +
+        s"(avg ${duration / manifestPaths.size}ms per manifest)")
+
+    allEntries
   }
 
   /**
@@ -245,6 +241,32 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
 }
 
 object AvroManifestReader {
+
+  private val log = LoggerFactory.getLogger(getClass)
+
+  /**
+   * Shared thread pool for parallel manifest reads.
+   * Using a cached thread pool allows threads to be reused across reads while
+   * still scaling up for parallel workloads. Threads are terminated after 60s of idle time.
+   */
+  private lazy val sharedThreadPool: java.util.concurrent.ExecutorService = {
+    log.info("Initializing shared thread pool for Avro manifest parallel reads")
+    java.util.concurrent.Executors.newCachedThreadPool(new java.util.concurrent.ThreadFactory {
+      private val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val t = new Thread(r, s"avro-manifest-reader-${counter.incrementAndGet()}")
+        t.setDaemon(true) // Don't prevent JVM shutdown
+        t
+      }
+    })
+  }
+
+  /**
+   * Shared execution context backed by the shared thread pool.
+   * This avoids creating new thread pools on every parallel read operation.
+   */
+  private[avro] lazy val sharedExecutionContext: ExecutionContext =
+    ExecutionContext.fromExecutorService(sharedThreadPool)
 
   /**
    * Create a reader for the given cloud provider.

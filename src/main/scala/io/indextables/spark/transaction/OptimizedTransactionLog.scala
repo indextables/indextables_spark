@@ -113,6 +113,9 @@ class OptimizedTransactionLog(
   // Avro state configuration
   private val manifestIO = StateManifestIO(cloudProvider)
 
+  // Cached AvroManifestReader - stateless but avoids object allocation overhead per query
+  private lazy val avroReader = io.indextables.spark.transaction.avro.AvroManifestReader(cloudProvider)
+
   // Lazy initialization of StateWriter for Avro incremental writes
   private lazy val stateWriter: StateWriter = {
     val compression = Option(options.get(StateConfig.COMPRESSION_KEY))
@@ -688,17 +691,32 @@ class OptimizedTransactionLog(
     if (checkpointInfo.exists(_.format.contains(StateConfig.Format.AVRO_STATE))) {
       val info = checkpointInfo.get
       val stateDirPath = s"${transactionLogPath.toString}/${info.stateDir.get}"
-      logger.debug(s"Avro mode: reading directly from Avro state at $stateDirPath")
 
       try {
-        val stateManifest = manifestIO.readStateManifest(stateDirPath)
-        val avroReader = io.indextables.spark.transaction.avro.AvroManifestReader(cloudProvider)
-        val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
-        val fileEntries = avroReader.readManifestsParallel(manifestPaths)
-        val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
-        val addActions = avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-        logger.debug(s"Avro mode: returning ${addActions.size} files from Avro state")
-        return addActions
+        // Use GLOBAL Avro file list cache to avoid expensive schema processing on every query
+        // The toAddActions() call invokes filterEmptyObjectMappings() which parses JSON for each file
+        // Using global cache ensures this expensive operation happens only once across all queries
+        val cached = enhancedCache.getOrComputeAvroFileList(
+          tablePath.toString,
+          info.version,
+          {
+            logger.debug(s"Avro mode: GLOBAL cache miss, reading from Avro state at $stateDirPath")
+
+            // Use cached state manifest to avoid repeated S3 reads
+            val stateManifest = enhancedCache.getOrComputeAvroStateManifest(
+              stateDirPath,
+              manifestIO.readStateManifest(stateDirPath)
+            )
+            // Use cached avroReader field to avoid object allocation per query
+            val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
+            val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+            val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
+            // This toAddActions call is expensive (JSON parsing) - cached globally
+            avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+          }
+        )
+        logger.debug(s"Avro mode: returning ${cached.size} files from GLOBAL cache (version=${info.version})")
+        return cached
       } catch {
         case e: Exception =>
           logger.warn(s"Failed to read from Avro state $stateDirPath, falling back to standard: ${e.getMessage}")
@@ -855,23 +873,28 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing metadata from transaction log")
 
-        // Get checkpoint version and metadata (if available) - uses cached checkpoint info
-        val checkpointVersion                    = getLastCheckpointInfoCached().map(_.version)
-        var baseMetadata: Option[MetadataAction] = None
+        // Get checkpoint info - uses cached checkpoint info
+        val checkpointInfoOpt = getLastCheckpointInfoCached()
+        val checkpointVersion = checkpointInfoOpt.map(_.version)
+
+        // Fast path for Avro mode: checkpoint contains complete state, no JSON versions to scan
+        val isAvroMode = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
 
         // Try checkpoint first if available - uses cached checkpoint actions
-        getCheckpointActionsCached() match {
-          case Some(checkpointActions) =>
-            checkpointActions.collectFirst { case metadata: MetadataAction => metadata } match {
-              case Some(metadata) =>
-                logger.info(s"Found metadata in checkpoint (version ${checkpointVersion.getOrElse("unknown")})")
-                baseMetadata = Some(metadata)
-              case None => // No metadata in checkpoint, continue searching
-            }
-          case None => // No checkpoint, continue with version files
+        val baseMetadata: Option[MetadataAction] = getCheckpointActionsCached().flatMap { checkpointActions =>
+          checkpointActions.collectFirst { case metadata: MetadataAction => metadata }.map { metadata =>
+            logger.info(s"Found metadata in checkpoint (version ${checkpointVersion.getOrElse("unknown")})")
+            metadata
+          }
         }
 
-        // CRITICAL: Check versions AFTER checkpoint for MetadataAction updates
+        // In Avro mode, checkpoint is the complete source of truth - no JSON versions to scan
+        if (isAvroMode && baseMetadata.isDefined) {
+          logger.info("Avro mode: using checkpoint metadata directly (no version scanning needed)")
+          return baseMetadata.get
+        }
+
+        // JSON mode: Check versions AFTER checkpoint for MetadataAction updates
         // Schema deduplication may have registered new schemas after the checkpoint
         val latestVersion = getLatestVersion()
         val startVersion  = checkpointVersion.map(_ + 1).getOrElse(latestVersion)
@@ -989,6 +1012,10 @@ class OptimizedTransactionLog(
       tablePath.toString, {
         logger.info("Computing protocol from transaction log")
 
+        // Check if we're in Avro mode - checkpoint is complete source of truth
+        val checkpointInfoOpt = getLastCheckpointInfoCached()
+        val isAvroMode = checkpointInfoOpt.exists(_.format.contains(StateConfig.Format.AVRO_STATE))
+
         // Try checkpoint first if available - uses cached checkpoint actions
         getCheckpointActionsCached() match {
           case Some(checkpointActions) =>
@@ -996,10 +1023,15 @@ class OptimizedTransactionLog(
               case Some(protocol) =>
                 logger.info("Found protocol in checkpoint (cached)")
                 return protocol
-              case None => // Continue searching in version files
+              case None =>
+                // No protocol in checkpoint, continue searching in version files
             }
-          case None => // No checkpoint, continue with version files
+          case None =>
+            // No checkpoint, continue with version files
         }
+
+        // In Avro mode with checkpoint, we already returned above if protocol was found
+        // If we get here in Avro mode, fall through to version file search (handles edge cases)
 
         // Look for protocol in reverse chronological order
         val latestVersion = getLatestVersion()
@@ -1226,6 +1258,17 @@ class OptimizedTransactionLog(
   // Private helper methods
 
   private def getLatestVersion(): Long = {
+    // Fast path for Avro mode: the checkpoint version IS the latest version
+    // since Avro state is the complete source of truth (no incremental JSON versions)
+    val checkpointInfo = getLastCheckpointInfoCached()
+    if (checkpointInfo.exists(_.format.contains(StateConfig.Format.AVRO_STATE))) {
+      val latest = checkpointInfo.get.version
+      logger.debug(s" getLatestVersion: Avro mode fast path, checkpoint version = $latest")
+      versionCounter.updateAndGet(current => math.max(current, latest))
+      return latest
+    }
+
+    // JSON mode: need to scan version files
     val versions = getVersions()
     val latest   = versions.sorted.lastOption.getOrElse(-1L)
     logger.debug(s" getLatestVersion: found versions ${versions.sorted.mkString(", ")}, latest = $latest")
@@ -1695,7 +1738,7 @@ class OptimizedTransactionLog(
         logger.debug(s"Reading existing files directly from Avro state: $stateDirPath")
         try {
           val stateManifest = manifestIO.readStateManifest(stateDirPath)
-          val avroReader = io.indextables.spark.transaction.avro.AvroManifestReader(cloudProvider)
+          // Use cached avroReader field to avoid object allocation per query
           val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
           val fileEntries = avroReader.readManifestsParallel(manifestPaths)
           val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)

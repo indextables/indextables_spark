@@ -25,7 +25,7 @@ import org.apache.spark.sql.types.{BooleanType, LongType, StringType}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
-import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, TransactionLogCheckpoint, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, MetadataAction, TransactionLogCheckpoint, TransactionLogFactory}
 import io.indextables.spark.transaction.avro.{ConcurrentStateWriteException, FileEntry, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
@@ -126,14 +126,18 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
 
           if (stateFormat.equalsIgnoreCase("avro")) {
             // Write checkpoint in Avro state format
-            createAvroStateCheckpoint(
+            val result = createAvroStateCheckpoint(
               transactionLogPath,
               cloudProvider,
               currentVersion,
               allFiles,
+              metadata,
               options,
               resolvedPath.toString
             )
+            // Invalidate cache AFTER checkpoint creation so subsequent reads use the new checkpoint
+            transactionLog.invalidateCache()
+            result
           } else {
             // Use existing JSON checkpoint format
             val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
@@ -150,6 +154,9 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
               .getOrElse(protocol.minReaderVersion.toLong)
 
             logger.info(s"Checkpoint created successfully at version $currentVersion with protocol V$newProtocolVersion")
+
+            // Invalidate cache AFTER checkpoint creation so subsequent reads use the new checkpoint
+            transactionLog.invalidateCache()
 
             Seq(
               Row(
@@ -195,6 +202,7 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       cloudProvider: io.indextables.spark.io.CloudStorageProvider,
       currentVersion: Long,
       allFiles: Seq[AddAction],
+      metadata: MetadataAction,
       options: org.apache.spark.sql.util.CaseInsensitiveStringMap,
       resolvedPathStr: String): Seq[Row] = {
 
@@ -254,14 +262,26 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
       FileEntry.fromAddAction(add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)), currentVersion, timestamp)
     }
 
-    logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
+    // Serialize MetadataAction to JSON for storage in state manifest
+    // This enables fast getMetadata() without scanning version files
+    val metadataJson = try {
+      val metadataWrapper = Map("metaData" -> metadata)
+      Some(JsonUtil.mapper.writeValueAsString(metadataWrapper))
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Failed to serialize MetadataAction: ${e.getMessage}")
+        None
+    }
+
+    logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}, hasMetadata=${metadataJson.isDefined}")
 
     // Write compacted state with retry support for concurrent conflicts
     // This uses conditional writes for _manifest.json and automatic version increment on conflict
     val writeResult = stateWriter.writeStateWithRetry(
       currentVersion,
       fileEntries,
-      schemaRegistry.toMap
+      schemaRegistry.toMap,
+      metadataJson
     )
 
     // Extract the actual version and state directory from the write result

@@ -37,12 +37,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
 
   private val log = LoggerFactory.getLogger(getClass)
 
-  private val mapper: ObjectMapper = {
-    val m = new ObjectMapper()
-    m.registerModule(DefaultScalaModule)
-    m.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    m
-  }
+  // Use shared ObjectMapper from companion object - Jackson ObjectMapper creation is expensive
+  private val mapper: ObjectMapper = StateManifestIO.sharedMapper
 
   /** Manifest file name within a state directory */
   val MANIFEST_FILE_NAME = "_manifest.json"
@@ -403,6 +399,19 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
 }
 
 object StateManifestIO {
+
+  /**
+   * Shared ObjectMapper for JSON parsing.
+   * Jackson ObjectMapper creation is expensive (class loading, module registration),
+   * so we share a single instance across all StateManifestIO instances.
+   * ObjectMapper is thread-safe for read operations after configuration.
+   */
+  private[avro] lazy val sharedMapper: ObjectMapper = {
+    val m = new ObjectMapper()
+    m.registerModule(DefaultScalaModule)
+    m.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    m
+  }
 
   /**
    * Create a StateManifestIO for the given cloud provider.
