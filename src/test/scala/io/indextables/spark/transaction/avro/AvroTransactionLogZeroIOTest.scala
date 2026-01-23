@@ -450,12 +450,13 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       assert(count > 0, "Query should return some results")
 
       val parseCalls = SchemaDeduplication.getParseCallCount()
-      // With 1 unique schema, should be exactly 1 parse call (or maybe a few if there are edge cases)
-      // But definitely NOT 10+ (one per split file)
-      assert(parseCalls <= 3,
-        s"Initial partition-filtered query should parse schema at most a few times (for unique schemas), " +
+      // With 1 unique schema, should be EXACTLY 1 parse call:
+      // - First file: cache miss → parse → cache
+      // - Subsequent files: cache hit → no parse
+      assert(parseCalls == 1,
+        s"Initial partition-filtered query should parse schema exactly once per unique schema, " +
           s"but got $parseCalls parses. This indicates the bug where restoreSchemas() was called " +
-          s"after Avro path already restored schemas.")
+          s"after Avro path already restored schemas, or caching is not working.")
     }
   }
 
@@ -485,9 +486,9 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       assert(count == 500, s"Expected 500 rows, got $count")
 
       val parseCalls = SchemaDeduplication.getParseCallCount()
-      // With 1 unique schema, should be 1 parse call (cached filtering)
-      assert(parseCalls <= 3,
-        s"Initial unfiltered query should parse schema at most a few times (for unique schemas), " +
+      // With 1 unique schema, should be EXACTLY 1 parse call (cached filtering)
+      assert(parseCalls == 1,
+        s"Initial unfiltered query should parse schema exactly once per unique schema, " +
           s"but got $parseCalls parses. This indicates filterEmptyObjectMappings is not being cached.")
     }
   }
