@@ -17,7 +17,7 @@
 
 package io.indextables.spark.transaction.avro
 
-import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
 
 /**
  * Data models for Avro-based state file format.
@@ -151,7 +151,11 @@ object FileEntry {
    */
   def toAddAction(entry: FileEntry, schemaRegistry: Map[String, String] = Map.empty): AddAction = {
     // Restore docMappingJson from schema registry if docMappingRef is present
-    val docMappingJson = entry.docMappingRef.flatMap(ref => schemaRegistry.get(ref))
+    // Apply filterEmptyObjectMappings to handle always-null struct/array fields
+    // (same fix as in SchemaDeduplication.restoreSchemas for JSON code path)
+    val docMappingJson = entry.docMappingRef
+      .flatMap(ref => schemaRegistry.get(ref))
+      .map(SchemaDeduplication.filterEmptyObjectMappings)
 
     AddAction(
       path = entry.path,

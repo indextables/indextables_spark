@@ -57,6 +57,10 @@ class RealS3TruncateTimeTravelTest extends RealS3TestBase {
     // Load AWS credentials from ~/.aws/credentials
     awsCredentials = loadAwsCredentials()
 
+    // Use JSON format since this test validates JSON transaction log time travel behavior
+    // With Avro state format (the new default), transaction log structure differs
+    spark.conf.set("spark.indextables.state.format", "json")
+
     if (awsCredentials.isDefined) {
       val (accessKey, secretKey) = awsCredentials.get
 

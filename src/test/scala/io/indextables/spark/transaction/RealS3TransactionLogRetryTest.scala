@@ -54,6 +54,14 @@ class RealS3TransactionLogRetryTest extends RealS3TestBase {
   private val testBucket = Option(System.getProperty("test.s3.bucket")).getOrElse("test-tantivy4sparkbucket")
   private val testPrefix = Option(System.getProperty("test.s3.prefix")).getOrElse("retry-tests")
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Use JSON format since this test validates JSON transaction log version file creation
+    // With Avro state format (the new default), subsequent writes use state directories
+    // instead of separate version files, which this test's assertions depend on
+    spark.conf.set("spark.indextables.state.format", "json")
+  }
+
   private def getTestSchema(): StructType =
     StructType(
       Seq(

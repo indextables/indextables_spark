@@ -57,6 +57,11 @@ class RealS3CompressionIntegrationTest extends RealS3TestBase {
   override def beforeAll(): Unit = {
     super.beforeAll()
 
+    // Use JSON format since this test validates JSON transaction log compression behavior
+    // With Avro state format (the new default), subsequent writes use state directories
+    // instead of separate version files, which this test's assertions depend on
+    spark.conf.set("spark.indextables.state.format", "json")
+
     // Load AWS credentials from ~/.aws/credentials
     awsCredentials = loadAwsCredentials()
 
