@@ -19,6 +19,7 @@ package io.indextables.spark.transaction.avro
 
 import io.indextables.spark.io.CloudStorageProvider
 import io.indextables.spark.transaction.{EnhancedTransactionLogCache, SchemaDeduplication}
+import io.indextables.spark.transaction.avro.{AvroManifestReader, StateManifestIO}
 import io.indextables.spark.TestBase
 
 /**
@@ -45,6 +46,7 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     CloudStorageProvider.resetCounters()
     StateManifestIO.resetReadCounter()
     SchemaDeduplication.resetParseCounter()
+    AvroManifestReader.resetReadCounter()
   }
 
   test("query after read should cause zero StateManifest reads") {
@@ -316,6 +318,101 @@ class AvroTransactionLogZeroIOTest extends TestBase {
       val parsesAfterSecond = SchemaDeduplication.getParseCallCount()
       assert(parsesAfterSecond == 0,
         s"Second read should not parse any schemas (all cached), but got $parsesAfterSecond")
+    }
+  }
+
+  test("Avro manifest files should be cached across partition-filtered queries") {
+    withTempPath { tempPath =>
+      // Write partitioned test data to create multiple manifests
+      val df = spark.range(100)
+        .selectExpr(
+          "id",
+          "concat('text_', id) as content",
+          "CAST(id % 5 AS STRING) as partition_col"
+        )
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .partitionBy("partition_col")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear caches and reset counters
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      AvroManifestReader.resetReadCounter()
+      StateManifestIO.resetReadCounter()
+
+      // First filtered query - should read Avro manifest files from storage
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf.filter("partition_col = '1'").count()
+
+      val avroReadsAfterFirst = AvroManifestReader.getReadCount()
+      assert(avroReadsAfterFirst >= 1, s"First query should read Avro manifest files, got $avroReadsAfterFirst reads")
+
+      // Reset counter
+      AvroManifestReader.resetReadCounter()
+
+      // Second filtered query with DIFFERENT filter - should use cached Avro manifest files
+      readDf.filter("partition_col = '2'").count()
+      val avroReadsAfterSecond = AvroManifestReader.getReadCount()
+      assert(avroReadsAfterSecond == 0,
+        s"Second filtered query should use cached Avro manifest files, but got $avroReadsAfterSecond reads")
+
+      // Third query - unfiltered - should also use cached Avro manifests
+      readDf.count()
+      val avroReadsAfterThird = AvroManifestReader.getReadCount()
+      assert(avroReadsAfterThird == 0,
+        s"Unfiltered query should use cached Avro manifest files, but got $avroReadsAfterThird reads")
+    }
+  }
+
+  test("repeated partition-filtered queries should cause zero cloud IO") {
+    withTempPath { tempPath =>
+      // Write partitioned test data
+      val df = spark.range(100)
+        .selectExpr(
+          "id",
+          "concat('text_', id) as content",
+          "CAST(id % 3 AS STRING) as part"
+        )
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .partitionBy("part")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear caches
+      EnhancedTransactionLogCache.clearGlobalCaches()
+
+      // First filtered query - populates all caches
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf.filter("part = '0'").count()
+
+      // Reset ALL counters
+      StateManifestIO.resetReadCounter()
+      AvroManifestReader.resetReadCounter()
+      SchemaDeduplication.resetParseCounter()
+
+      // 10 repeated partition-filtered queries - should ALL be cache hits
+      (1 to 10).foreach { i =>
+        val part = i % 3  // Cycle through partitions
+        readDf.filter(s"part = '$part'").count()
+      }
+
+      // Assert ZERO cloud I/O for transaction log metadata
+      assert(StateManifestIO.getReadCount() == 0,
+        s"Repeated partition-filtered queries should NOT read StateManifest, but got ${StateManifestIO.getReadCount()}")
+      assert(AvroManifestReader.getReadCount() == 0,
+        s"Repeated partition-filtered queries should NOT read Avro manifest files, but got ${AvroManifestReader.getReadCount()}")
+      assert(SchemaDeduplication.getParseCallCount() == 0,
+        s"Repeated partition-filtered queries should NOT parse schemas, but got ${SchemaDeduplication.getParseCallCount()}")
     }
   }
 }

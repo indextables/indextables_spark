@@ -359,7 +359,7 @@ class CheckpointCacheBypassTest extends TestBase {
       EnhancedTransactionLogCache.clearGlobalCaches()
 
       // Get initial global cache stats
-      val (actionsStatsBefore, lastCheckpointStatsBefore, avroManifestStatsBefore, avroFileListStatsBefore, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val (actionsStatsBefore, lastCheckpointStatsBefore, avroManifestStatsBefore, avroFileListStatsBefore, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
       val missCountBefore = actionsStatsBefore.missCount() + lastCheckpointStatsBefore.missCount() + avroManifestStatsBefore.missCount() + avroFileListStatsBefore.missCount()
 
       println(s"\n=== Global cache before any reads ===")
@@ -375,7 +375,7 @@ class CheckpointCacheBypassTest extends TestBase {
       // Force schema resolution (this is what triggers the checkpoint read)
       val schema1 = readDf1.schema
 
-      val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val (actionsStatsAfterSchema, lastCheckpointStatsAfterSchema, _, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after schema inference ===")
       println(
@@ -391,7 +391,7 @@ class CheckpointCacheBypassTest extends TestBase {
 
       val schema2 = readDf2.schema
 
-      val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
+      val (actionsStatsAfterSecond, lastCheckpointStatsAfterSecond, _, _, _, _) = EnhancedTransactionLogCache.getGlobalCacheStats()
 
       println(s"\n=== Global cache after second schema read ===")
       println(

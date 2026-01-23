@@ -137,12 +137,27 @@ object EnhancedTransactionLogCache {
       .build[String, String]()
   }
 
+  // Global cache for Avro manifest file contents - keyed by manifest file path
+  // Manifest files are immutable once written, so safe to cache indefinitely
+  // This avoids re-reading .avro files on every partition-filtered query
+  private lazy val _globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global Avro manifest file cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=500")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(500)  // Each manifest can be large, limit total cached manifests
+      .recordStats()
+      .build[String, Seq[io.indextables.spark.transaction.avro.FileEntry]]()
+  }
+
   // Accessors for the lazy caches
   private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
   private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
   private[transaction] def globalAvroStateManifestCache: Cache[String, StateManifest] = _globalAvroStateManifestCache
   private[transaction] def globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = _globalAvroFileListCache
   private[transaction] def globalFilteredSchemaCache: Cache[String, String] = _globalFilteredSchemaCache
+  private[transaction] def globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = _globalAvroManifestFileCache
 
   /**
    * Get or compute a filtered schema - caches the result of filterEmptyObjectMappings.
@@ -166,6 +181,29 @@ object EnhancedTransactionLogCache {
         filtered
     }
 
+  /**
+   * Get or compute Avro manifest file entries - caches the parsed FileEntry records.
+   *
+   * Avro manifest files (.avro) are immutable once written. Caching their contents
+   * avoids re-reading from cloud storage on every partition-filtered query.
+   *
+   * @param manifestPath Full path to the manifest file (used as cache key)
+   * @param compute Lazy computation that reads and parses the manifest file
+   * @return Sequence of FileEntry records
+   */
+  def getOrComputeAvroManifestFile(manifestPath: String, compute: => Seq[io.indextables.spark.transaction.avro.FileEntry]): Seq[io.indextables.spark.transaction.avro.FileEntry] =
+    Option(globalAvroManifestFileCache.getIfPresent(manifestPath)) match {
+      case Some(entries) =>
+        logger.debug(s"GLOBAL Avro manifest file cache HIT for $manifestPath (${entries.size} entries)")
+        entries
+      case None =>
+        logger.debug(s"GLOBAL Avro manifest file cache MISS for $manifestPath - reading from storage")
+        val entries = compute
+        globalAvroManifestFileCache.put(manifestPath, entries)
+        logger.debug(s"Cached Avro manifest file $manifestPath (${entries.size} entries)")
+        entries
+    }
+
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {
     globalCheckpointActionsCache.invalidateAll()
@@ -173,6 +211,7 @@ object EnhancedTransactionLogCache {
     globalAvroStateManifestCache.invalidateAll()
     globalAvroFileListCache.invalidateAll()
     globalFilteredSchemaCache.invalidateAll()
+    globalAvroManifestFileCache.invalidateAll()
     logger.info("Cleared all global checkpoint caches")
   }
 
@@ -203,8 +242,8 @@ object EnhancedTransactionLogCache {
   }
 
   /** Get global cache statistics */
-  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
-    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats(), globalFilteredSchemaCache.stats())
+  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
+    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats(), globalFilteredSchemaCache.stats(), globalAvroManifestFileCache.stats())
 }
 
 /**
@@ -683,6 +722,7 @@ class EnhancedTransactionLogCache(
       avroStateManifestCacheStats = EnhancedTransactionLogCache.globalAvroStateManifestCache.stats(),
       avroFileListCacheStats = EnhancedTransactionLogCache.globalAvroFileListCache.stats(),
       filteredSchemaCacheStats = EnhancedTransactionLogCache.globalFilteredSchemaCache.stats(),
+      avroManifestFileCacheStats = EnhancedTransactionLogCache.globalAvroManifestFileCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -718,6 +758,7 @@ class EnhancedTransactionLogCache(
     EnhancedTransactionLogCache.globalAvroStateManifestCache.cleanUp()
     EnhancedTransactionLogCache.globalAvroFileListCache.cleanUp()
     EnhancedTransactionLogCache.globalFilteredSchemaCache.cleanUp()
+    EnhancedTransactionLogCache.globalAvroManifestFileCache.cleanUp()
   }
 }
 
@@ -779,6 +820,7 @@ case class CacheStatistics(
   avroStateManifestCacheStats: GuavaCacheStats,
   avroFileListCacheStats: GuavaCacheStats,
   filteredSchemaCacheStats: GuavaCacheStats,
+  avroManifestFileCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -793,7 +835,8 @@ case class CacheStatistics(
       lastCheckpointInfoCacheStats,
       avroStateManifestCacheStats,
       avroFileListCacheStats,
-      filteredSchemaCacheStats
+      filteredSchemaCacheStats,
+      avroManifestFileCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -816,7 +859,8 @@ case class CacheStatistics(
       lastCheckpointInfoCacheStats,
       avroStateManifestCacheStats,
       avroFileListCacheStats,
-      filteredSchemaCacheStats
+      filteredSchemaCacheStats,
+      avroManifestFileCacheStats
     ).map(_.evictionCount()).sum
 
   /** Get checkpoint actions cache hit rate specifically - useful for monitoring the fix */
@@ -852,5 +896,12 @@ case class CacheStatistics(
     val requests = filteredSchemaCacheStats.requestCount()
     if (requests == 0) 0.0
     else filteredSchemaCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get Avro manifest file cache hit rate - avoids re-reading .avro files from cloud storage */
+  def avroManifestFileHitRate: Double = {
+    val requests = avroManifestFileCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else avroManifestFileCacheStats.hitCount().toDouble / requests
   }
 }

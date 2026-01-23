@@ -50,14 +50,33 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
   /**
    * Read all file entries from a single Avro manifest file.
    *
+   * Uses global cache to avoid re-reading the same manifest file from cloud storage.
+   * Manifest files are immutable once written, so caching is safe.
+   *
    * @param manifestPath
    *   Full path to the manifest file (e.g., "s3://bucket/table/_transaction_log/state-v.../manifest-xxx.avro")
    * @return
    *   Sequence of FileEntry records
    */
   def readManifest(manifestPath: String): Seq[FileEntry] = {
-    log.debug(s"Reading Avro manifest: $manifestPath")
+    import io.indextables.spark.transaction.EnhancedTransactionLogCache
+
+    // Use global cache for manifest file contents
+    EnhancedTransactionLogCache.getOrComputeAvroManifestFile(manifestPath, {
+      readManifestUncached(manifestPath)
+    })
+  }
+
+  /**
+   * Read all file entries from a single Avro manifest file without caching.
+   * This is the actual I/O operation - only called on cache miss.
+   */
+  private def readManifestUncached(manifestPath: String): Seq[FileEntry] = {
+    log.debug(s"Reading Avro manifest from storage: $manifestPath")
     val startTime = System.currentTimeMillis()
+
+    // Track actual reads for testing/monitoring
+    AvroManifestReader.incrementReadCounter()
 
     val entries = Try {
       val inputStream = cloudProvider.openInputStream(manifestPath)
@@ -243,6 +262,18 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
 object AvroManifestReader {
 
   private val log = LoggerFactory.getLogger(getClass)
+
+  // Instrumentation counter for testing - tracks actual cloud reads of manifest files
+  private val readCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
+  /** Get the number of times Avro manifest files have actually been read from cloud storage (for testing) */
+  def getReadCount(): Long = readCounter.get()
+
+  /** Reset the read counter (for testing) */
+  def resetReadCounter(): Unit = readCounter.set(0)
+
+  /** Increment the read counter (called by instance readManifestUncached) */
+  private[avro] def incrementReadCounter(): Unit = readCounter.incrementAndGet()
 
   /**
    * Shared thread pool for parallel manifest reads.
