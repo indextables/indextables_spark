@@ -700,19 +700,24 @@ class OptimizedTransactionLog(
           tablePath.toString,
           info.version,
           {
-            logger.debug(s"Avro mode: GLOBAL cache miss, reading from Avro state at $stateDirPath")
+            logger.info(s"Avro mode: GLOBAL file list cache miss, computing for $stateDirPath")
 
             // Use cached state manifest to avoid repeated S3 reads
             val stateManifest = enhancedCache.getOrComputeAvroStateManifest(
               stateDirPath,
               manifestIO.readStateManifest(stateDirPath)
             )
+            logger.info(s"Avro mode: StateManifest has ${stateManifest.schemaRegistry.size} schemas, " +
+              s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests")
+
             // Use cached avroReader field to avoid object allocation per query
             val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
             val fileEntries = avroReader.readManifestsParallel(manifestPaths)
             val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
             // This toAddActions call is expensive (JSON parsing) - cached globally
-            avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+            val result = avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+            logger.info(s"Avro mode: toAddActions completed, returning ${result.size} AddActions")
+            result
           }
         )
         logger.debug(s"Avro mode: returning ${cached.size} files from GLOBAL cache (version=${info.version})")

@@ -549,8 +549,16 @@ class TransactionLogCheckpoint(
         // Validate protocol version before proceeding
         validateProtocolVersion(actions)
 
-        // Restore schemas from registry (handles both legacy and deduplicated checkpoints)
-        restoreSchemas(actions)
+        // Restore schemas from registry (only for non-Avro checkpoints)
+        // Avro checkpoints already have schemas restored via FileEntry.toAddAction with cached filtering
+        info.format match {
+          case Some(StateConfig.Format.AVRO_STATE) =>
+            // Avro path: schemas already restored with cached filterEmptyObjectMappings in readAvroStateCheckpoint
+            actions
+          case _ =>
+            // JSON path: need to restore schemas from MetadataAction configuration
+            restoreSchemas(actions)
+        }
       } match {
         case Success(actions)                     => Some(actions)
         case Failure(e: ProtocolVersionException) =>

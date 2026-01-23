@@ -255,6 +255,12 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
    *   AddAction representations
    */
   def toAddActions(entries: Seq[FileEntry], schemaRegistry: Map[String, String] = Map.empty): Seq[AddAction] = {
+    // Diagnostic logging for performance debugging
+    val uniqueRefs = entries.flatMap(_.docMappingRef).distinct
+    if (entries.size > 100) {
+      log.info(s"toAddActions: processing ${entries.size} entries, schemaRegistry has ${schemaRegistry.size} schemas, " +
+        s"entries have ${uniqueRefs.size} unique docMappingRefs")
+    }
     entries.map(e => FileEntry.toAddAction(e, schemaRegistry))
   }
 }

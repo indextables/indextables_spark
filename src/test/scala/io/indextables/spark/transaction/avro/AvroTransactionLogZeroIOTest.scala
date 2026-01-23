@@ -415,4 +415,80 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         s"Repeated partition-filtered queries should NOT parse schemas, but got ${SchemaDeduplication.getParseCallCount()}")
     }
   }
+
+  test("REGRESSION: initial partition-filtered query should parse schema only once per unique schema") {
+    // This test catches the bug where getActionsFromCheckpointWithFilters() was calling
+    // restoreSchemas() AFTER readAvroStateCheckpoint() had already restored schemas,
+    // causing double-filtering (and N schema parses instead of 1 for N files with 1 schema)
+    withTempPath { tempPath =>
+      // Write partitioned test data with 5 partitions, creating multiple splits
+      val df = spark.range(500)
+        .selectExpr(
+          "id",
+          "concat('text_', id) as content",
+          "CAST(id % 5 AS STRING) as part"
+        )
+        .repartition(10)  // Create 10 splits to make N > 1
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .partitionBy("part")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear ALL caches and counters
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      SchemaDeduplication.resetParseCounter()
+
+      // FIRST partition-filtered query - this goes through getActionsFromCheckpointWithFilters
+      // Should parse schema only once (or a small number for unique schemas), NOT once per file
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      val count = readDf.filter("part = '0'").count()
+      assert(count > 0, "Query should return some results")
+
+      val parseCalls = SchemaDeduplication.getParseCallCount()
+      // With 1 unique schema, should be exactly 1 parse call (or maybe a few if there are edge cases)
+      // But definitely NOT 10+ (one per split file)
+      assert(parseCalls <= 3,
+        s"Initial partition-filtered query should parse schema at most a few times (for unique schemas), " +
+          s"but got $parseCalls parses. This indicates the bug where restoreSchemas() was called " +
+          s"after Avro path already restored schemas.")
+    }
+  }
+
+  test("REGRESSION: initial unfiltered query should also parse schema only once per unique schema") {
+    // Similar test for the listFilesOptimized() path
+    withTempPath { tempPath =>
+      // Write test data with multiple splits
+      val df = spark.range(500)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(10)  // Create 10 splits
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear ALL caches and counters
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      SchemaDeduplication.resetParseCounter()
+
+      // First read - should parse schema only once
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      val count = readDf.count()
+      assert(count == 500, s"Expected 500 rows, got $count")
+
+      val parseCalls = SchemaDeduplication.getParseCallCount()
+      // With 1 unique schema, should be 1 parse call (cached filtering)
+      assert(parseCalls <= 3,
+        s"Initial unfiltered query should parse schema at most a few times (for unique schemas), " +
+          s"but got $parseCalls parses. This indicates filterEmptyObjectMappings is not being cached.")
+    }
+  }
 }

@@ -316,10 +316,12 @@ object SchemaDeduplication {
   ): Seq[Action] = {
 
     // Build hash -> schema map from registry, applying filter if enabled
+    // Use CACHED filtering to avoid repeated JSON parsing for same schema
     val schemaMap = registry.collect {
       case (key, value) if key.startsWith(SCHEMA_KEY_PREFIX) =>
-        val schema = if (filterEmptyObjects) filterEmptyObjectMappings(value) else value
-        key.stripPrefix(SCHEMA_KEY_PREFIX) -> schema
+        val hash = key.stripPrefix(SCHEMA_KEY_PREFIX)
+        val schema = if (filterEmptyObjects) filterEmptyObjectMappingsCached(hash, value) else value
+        hash -> schema
     }
 
     actions.map {
@@ -337,9 +339,12 @@ object SchemaDeduplication {
         }
 
       // Also filter inline docMappingJson (legacy format without deduplication)
+      // Use CACHED filtering by computing hash first
       case add: AddAction if add.docMappingJson.isDefined && filterEmptyObjects =>
-        val filteredSchema = filterEmptyObjectMappings(add.docMappingJson.get)
-        if (filteredSchema != add.docMappingJson.get) {
+        val schema = add.docMappingJson.get
+        val hash = computeSchemaHash(schema)
+        val filteredSchema = filterEmptyObjectMappingsCached(hash, schema)
+        if (filteredSchema != schema) {
           add.copy(docMappingJson = Some(filteredSchema))
         } else {
           add

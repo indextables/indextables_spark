@@ -172,10 +172,9 @@ object EnhancedTransactionLogCache {
   def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
     Option(globalFilteredSchemaCache.getIfPresent(schemaHash)) match {
       case Some(filtered) =>
-        logger.debug(s"GLOBAL filtered schema cache HIT for hash $schemaHash")
         filtered
       case None =>
-        logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing")
+        logger.info(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing (cache size=${globalFilteredSchemaCache.size()})")
         val filtered = compute
         globalFilteredSchemaCache.put(schemaHash, filtered)
         filtered
