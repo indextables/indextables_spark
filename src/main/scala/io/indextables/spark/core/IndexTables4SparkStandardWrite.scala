@@ -385,51 +385,92 @@ class IndexTables4SparkStandardWrite(
    * Evaluate if merge-on-write should run after transaction commit.
    *
    * This method:
-   *   1. Checks if merge-on-write is enabled 2. Counts mergeable groups from the transaction log 3. Compares against
-   *      threshold (defaultParallelism * mergeGroupMultiplier) 4. Invokes MERGE SPLITS command if worthwhile
+   *   1. Checks if merge-on-write is enabled
+   *   2. Checks if merge already in progress for this table
+   *   3. Calculates batch size and threshold using new formulas
+   *   4. Counts mergeable groups from the transaction log
+   *   5. If async enabled, submits to AsyncMergeOnWriteManager
+   *   6. Otherwise invokes MERGE SPLITS command synchronously
+   *
+   * New threshold formula: threshold = batchSize × minBatchesToTrigger
+   * Batch size formula: batchSize = max(1, totalClusterCpus × batchCpuFraction)
    */
   private def evaluateAndExecuteMergeOnWrite(
     writeOptions: org.apache.spark.sql.util.CaseInsensitiveStringMap
   ): Boolean =
     try {
-      // Check if merge-on-write is enabled
-      val mergeOnWriteEnabled = writeOptions.getOrDefault("spark.indextables.mergeOnWrite.enabled", "false").toBoolean
+      import io.indextables.spark.merge.{AsyncMergeOnWriteConfig, AsyncMergeOnWriteManager}
 
-      if (!mergeOnWriteEnabled) {
+      // Load configuration
+      val config = AsyncMergeOnWriteConfig.fromOptions(writeOptions)
+
+      if (!config.enabled) {
         logger.debug("Merge-on-write is disabled, skipping post-commit evaluation")
         return false
       }
 
       logger.info("🔀 Merge-on-write enabled - evaluating if merge is worthwhile...")
 
-      // Get configuration
-      val mergeGroupMultiplier = writeOptions
-        .getOrDefault(
-          "spark.indextables.mergeOnWrite.mergeGroupMultiplier",
-          "2.0"
-        )
-        .toDouble
-      val targetSize = writeOptions.getOrDefault(
-        "spark.indextables.mergeOnWrite.targetSize",
-        "4G"
-      )
+      // Configure manager with current config (always configure when merge-on-write enabled)
+      AsyncMergeOnWriteManager.configure(config)
 
-      // Get Spark session for default parallelism
-      val spark              = org.apache.spark.sql.SparkSession.active
-      val defaultParallelism = spark.sparkContext.defaultParallelism
-      val threshold          = (defaultParallelism * mergeGroupMultiplier).toInt
+      // Check if merge already in progress for this table
+      val tablePathStr = tablePath.toString
+      if (AsyncMergeOnWriteManager.isMergeInProgress(tablePathStr)) {
+        logger.info(s"Merge already in progress for $tablePathStr, skipping")
+        return false
+      }
 
-      logger.info(s"Merge threshold: $threshold merge groups (parallelism: $defaultParallelism × multiplier: $mergeGroupMultiplier)")
+      // Get Spark session for default parallelism (represents total cluster CPUs)
+      val spark = org.apache.spark.sql.SparkSession.active
+      val totalClusterCpus = spark.sparkContext.defaultParallelism
+
+      // Calculate batch size and threshold using new formulas
+      val batchSize = config.calculateBatchSize(totalClusterCpus)
+      val threshold = config.calculateMergeThreshold(totalClusterCpus)
+
+      logger.info(s"Merge config: batchSize=$batchSize (CPUs: $totalClusterCpus × fraction: ${config.batchCpuFraction}), " +
+        s"threshold=$threshold (batchSize: $batchSize × minBatches: ${config.minBatchesToTrigger})")
 
       // Count mergeable groups using MergeSplitsExecutor (dry-run to get accurate count)
-      val mergeGroups = countMergeGroupsUsingExecutor(targetSize, writeOptions)
+      val mergeGroups = countMergeGroupsUsingExecutor(config.targetSizeString, writeOptions)
 
       logger.info(s"Found $mergeGroups mergeable groups (threshold: $threshold)")
 
       if (mergeGroups >= threshold) {
-        logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS")
-        executeMergeSplitsCommand(writeOptions)
-        true // Merge was executed
+        if (config.asyncEnabled) {
+          // Async execution - submit to manager and return immediately
+          logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - submitting async merge job")
+
+          // Convert writeOptions to Map and merge with hadoop config
+          import scala.jdk.CollectionConverters._
+          val optionsMap = writeOptions.asCaseSensitiveMap().asScala.toMap
+          val mergedOptions = serializedHadoopConf ++ optionsMap
+
+          // Submit async job
+          AsyncMergeOnWriteManager.submitMergeJob(
+            tablePath = tablePathStr,
+            totalMergeGroups = mergeGroups,
+            batchSize = batchSize,
+            transactionLog = transactionLog,
+            writeOptions = mergedOptions,
+            serializedHadoopConf = serializedHadoopConf,
+            sparkSession = spark
+          ) match {
+            case Right(job) =>
+              logger.info(s"Async merge job ${job.jobId} submitted for $tablePathStr")
+            case Left(reason) =>
+              logger.warn(s"Async merge job rejected: $reason")
+          }
+
+          true // Merge job was submitted (async)
+
+        } else {
+          // Synchronous execution (existing behavior)
+          logger.info(s"✅ Merge worthwhile: $mergeGroups groups ≥ $threshold threshold - executing MERGE SPLITS synchronously")
+          executeMergeSplitsCommand(writeOptions)
+          true // Merge was executed
+        }
       } else {
         logger.info(s"⏭️  Merge not worthwhile: $mergeGroups groups < $threshold threshold - skipping")
         false // Merge was not executed

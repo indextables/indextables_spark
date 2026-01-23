@@ -72,6 +72,7 @@ statement
         (WHERE whereClause=predicateToken)?
         (ASYNC MODE)?                                           #prewarmCache
     | DESCRIBE indexTablesKeyword PREWARM JOBS                  #describePrewarmJobs
+    | DESCRIBE indexTablesKeyword MERGE JOBS                    #describeMergeJobs
     | WAIT FOR indexTablesKeyword PREWARM JOBS
         (path=STRING | table=qualifiedName)?
         (JOB jobId=STRING)?

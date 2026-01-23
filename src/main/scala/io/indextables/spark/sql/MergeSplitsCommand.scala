@@ -769,6 +769,21 @@ class MergeSplitsExecutor(
 
               sparkSession.sparkContext.setJobGroup(jobGroup, jobDescription, interruptOnCancel = true)
 
+              // Set scheduler pool for FAIR scheduling (if enabled)
+              // With spark.scheduler.mode=FAIR, the root pool uses FAIR scheduling between pools
+              // while dynamically-created pools use FIFO within themselves.
+              //
+              // We use separate pools for writes and merges:
+              // - Writes should use "indextables-write" pool (user sets via setLocalProperty)
+              // - Merges use "indextables-merge" pool (automatic)
+              //
+              // This gives each operation type a fair share of cluster resources.
+              // No XML config needed - just spark.scheduler.mode=FAIR.
+              val schedulerPool = sparkSession.conf
+                .getOption("spark.indextables.merge.schedulerPool")
+                .getOrElse("indextables-merge")
+              sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", schedulerPool)
+
               val batchStartTime = System.currentTimeMillis()
 
               val physicalMergeResults =
@@ -790,6 +805,7 @@ class MergeSplitsExecutor(
                     .collect()
                 } finally {
                   sparkSession.sparkContext.clearJobGroup()
+                  sparkSession.sparkContext.setLocalProperty("spark.scheduler.pool", null)
                   // Clean up per-batch broadcast to free memory
                   try {
                     broadcastAwsConfig.destroy()

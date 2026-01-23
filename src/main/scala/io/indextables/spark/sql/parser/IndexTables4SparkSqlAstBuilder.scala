@@ -27,6 +27,7 @@ import io.indextables.spark.sql.{
   CheckpointCommand,
   DescribeDiskCacheCommand,
   DescribeEnvironmentCommand,
+  DescribeMergeJobsCommand,
   DescribePrewarmJobsCommand,
   DescribeStorageStatsCommand,
   DescribeTransactionLogCommand,
@@ -503,6 +504,13 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
     logger.debug("visitDescribePrewarmJobs called")
     val result = DescribePrewarmJobsCommand()
     logger.debug(s"Created DescribePrewarmJobsCommand: $result")
+    result
+  }
+
+  override def visitDescribeMergeJobs(ctx: DescribeMergeJobsContext): LogicalPlan = {
+    logger.debug("visitDescribeMergeJobs called")
+    val result = DescribeMergeJobsCommand()
+    logger.debug(s"Created DescribeMergeJobsCommand: $result")
     result
   }
 
