@@ -801,7 +801,7 @@ class OptimizedTransactionLog(
     }
 
     // Restore schemas directly using the hash -> schema map (no prefix manipulation needed)
-    // Also apply empty object filtering to the restored schemas
+    // Also apply empty object filtering using CACHED version to avoid JSON parsing on every call
     logger.debug(s"Restoring schemas in ${addActions.count(_.docMappingRef.isDefined)} AddActions using cached registry (${schemaRegistry.size} schemas)")
     val restored = addActions
       .map {
@@ -809,17 +809,20 @@ class OptimizedTransactionLog(
           val hash = add.docMappingRef.get
           schemaRegistry.get(hash) match {
             case Some(schema) =>
-              // Apply empty object filtering to the restored schema
-              val filteredSchema = SchemaDeduplication.filterEmptyObjectMappings(schema)
+              // Apply empty object filtering using CACHED version (keyed by schema hash)
+              // This avoids repeated JSON parsing for files that share the same schema
+              val filteredSchema = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
               add.copy(docMappingJson = Some(filteredSchema), docMappingRef = None)
             case None =>
               logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
               add
           }
-        // Also filter inline docMappingJson (legacy format)
+        // Also filter inline docMappingJson (legacy format) - compute hash for caching
         case add: AddAction if add.docMappingJson.isDefined =>
-          val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
-          if (filtered != add.docMappingJson.get) {
+          val schema = add.docMappingJson.get
+          val hash = SchemaDeduplication.computeSchemaHash(schema)
+          val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+          if (filtered != schema) {
             add.copy(docMappingJson = Some(filtered))
           } else {
             add
@@ -844,12 +847,16 @@ class OptimizedTransactionLog(
   /**
    * Filter inline docMappingJson to remove empty object fields.
    * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
+   * Uses CACHED version to avoid repeated JSON parsing.
    */
   private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
     addActions.map { add =>
       if (add.docMappingJson.isDefined) {
-        val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
-        if (filtered != add.docMappingJson.get) {
+        val schema = add.docMappingJson.get
+        // Compute hash for caching, then use cached filtering
+        val hash = SchemaDeduplication.computeSchemaHash(schema)
+        val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+        if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))
         } else {
           add

@@ -151,11 +151,14 @@ object FileEntry {
    */
   def toAddAction(entry: FileEntry, schemaRegistry: Map[String, String] = Map.empty): AddAction = {
     // Restore docMappingJson from schema registry if docMappingRef is present
-    // Apply filterEmptyObjectMappings to handle always-null struct/array fields
-    // (same fix as in SchemaDeduplication.restoreSchemas for JSON code path)
-    val docMappingJson = entry.docMappingRef
-      .flatMap(ref => schemaRegistry.get(ref))
-      .map(SchemaDeduplication.filterEmptyObjectMappings)
+    // Apply filterEmptyObjectMappingsCached to handle always-null struct/array fields
+    // Uses global cache keyed by schema hash to avoid repeated JSON parsing
+    // (same fix as in SchemaDeduplication.restoreSchemas for JSON code path, but cached)
+    val docMappingJson = entry.docMappingRef.flatMap { ref =>
+      schemaRegistry.get(ref).map { schema =>
+        SchemaDeduplication.filterEmptyObjectMappingsCached(ref, schema)
+      }
+    }
 
     AddAction(
       path = entry.path,

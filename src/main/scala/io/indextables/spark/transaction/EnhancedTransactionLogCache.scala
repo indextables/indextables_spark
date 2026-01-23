@@ -123,11 +123,48 @@ object EnhancedTransactionLogCache {
       .build[AvroFileListKey, Seq[AddAction]]()
   }
 
+  // Global cache for filtered schemas - keyed by schema hash
+  // filterEmptyObjectMappings is expensive (JSON parsing) but produces same result for same input
+  // This cache ensures we only parse each unique schema once
+  private lazy val _globalFilteredSchemaCache: Cache[String, String] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global filtered schema cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=1000")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(1000)  // Typically few unique schemas even for large tables
+      .recordStats()
+      .build[String, String]()
+  }
+
   // Accessors for the lazy caches
   private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
   private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
   private[transaction] def globalAvroStateManifestCache: Cache[String, StateManifest] = _globalAvroStateManifestCache
   private[transaction] def globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = _globalAvroFileListCache
+  private[transaction] def globalFilteredSchemaCache: Cache[String, String] = _globalFilteredSchemaCache
+
+  /**
+   * Get or compute a filtered schema - caches the result of filterEmptyObjectMappings.
+   *
+   * The filterEmptyObjectMappings function parses JSON which is expensive. Since the same
+   * schema hash always produces the same filtered result, we cache based on the schema hash.
+   *
+   * @param schemaHash The schema hash (used as cache key)
+   * @param compute Lazy computation that returns the filtered schema
+   * @return Filtered schema string
+   */
+  def getOrComputeFilteredSchema(schemaHash: String, compute: => String): String =
+    Option(globalFilteredSchemaCache.getIfPresent(schemaHash)) match {
+      case Some(filtered) =>
+        logger.debug(s"GLOBAL filtered schema cache HIT for hash $schemaHash")
+        filtered
+      case None =>
+        logger.debug(s"GLOBAL filtered schema cache MISS for hash $schemaHash - computing")
+        val filtered = compute
+        globalFilteredSchemaCache.put(schemaHash, filtered)
+        filtered
+    }
 
   /** Clear all global caches (for testing) */
   def clearGlobalCaches(): Unit = {
@@ -135,6 +172,7 @@ object EnhancedTransactionLogCache {
     globalLastCheckpointInfoCache.invalidateAll()
     globalAvroStateManifestCache.invalidateAll()
     globalAvroFileListCache.invalidateAll()
+    globalFilteredSchemaCache.invalidateAll()
     logger.info("Cleared all global checkpoint caches")
   }
 
@@ -165,8 +203,8 @@ object EnhancedTransactionLogCache {
   }
 
   /** Get global cache statistics */
-  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
-    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats())
+  def getGlobalCacheStats(): (GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats, GuavaCacheStats) =
+    (globalCheckpointActionsCache.stats(), globalLastCheckpointInfoCache.stats(), globalAvroStateManifestCache.stats(), globalAvroFileListCache.stats(), globalFilteredSchemaCache.stats())
 }
 
 /**
@@ -644,6 +682,7 @@ class EnhancedTransactionLogCache(
       lastCheckpointInfoCacheStats = EnhancedTransactionLogCache.globalLastCheckpointInfoCache.stats(),
       avroStateManifestCacheStats = EnhancedTransactionLogCache.globalAvroStateManifestCache.stats(),
       avroFileListCacheStats = EnhancedTransactionLogCache.globalAvroFileListCache.stats(),
+      filteredSchemaCacheStats = EnhancedTransactionLogCache.globalFilteredSchemaCache.stats(),
       lazyValueCount = lazyValueCache.size
     )
 
@@ -678,6 +717,7 @@ class EnhancedTransactionLogCache(
     EnhancedTransactionLogCache.globalLastCheckpointInfoCache.cleanUp()
     EnhancedTransactionLogCache.globalAvroStateManifestCache.cleanUp()
     EnhancedTransactionLogCache.globalAvroFileListCache.cleanUp()
+    EnhancedTransactionLogCache.globalFilteredSchemaCache.cleanUp()
   }
 }
 
@@ -738,6 +778,7 @@ case class CacheStatistics(
   lastCheckpointInfoCacheStats: GuavaCacheStats,
   avroStateManifestCacheStats: GuavaCacheStats,
   avroFileListCacheStats: GuavaCacheStats,
+  filteredSchemaCacheStats: GuavaCacheStats,
   lazyValueCount: Int) {
   def totalHitRate: Double = {
     val allStats = Seq(
@@ -751,7 +792,8 @@ case class CacheStatistics(
       checkpointActionsCacheStats,
       lastCheckpointInfoCacheStats,
       avroStateManifestCacheStats,
-      avroFileListCacheStats
+      avroFileListCacheStats,
+      filteredSchemaCacheStats
     )
 
     val totalHits     = allStats.map(_.hitCount()).sum
@@ -773,7 +815,8 @@ case class CacheStatistics(
       checkpointActionsCacheStats,
       lastCheckpointInfoCacheStats,
       avroStateManifestCacheStats,
-      avroFileListCacheStats
+      avroFileListCacheStats,
+      filteredSchemaCacheStats
     ).map(_.evictionCount()).sum
 
   /** Get checkpoint actions cache hit rate specifically - useful for monitoring the fix */
@@ -802,5 +845,12 @@ case class CacheStatistics(
     val requests = avroFileListCacheStats.requestCount()
     if (requests == 0) 0.0
     else avroFileListCacheStats.hitCount().toDouble / requests
+  }
+
+  /** Get filtered schema cache hit rate specifically - avoids JSON parsing in filterEmptyObjectMappings */
+  def filteredSchemaHitRate: Double = {
+    val requests = filteredSchemaCacheStats.requestCount()
+    if (requests == 0) 0.0
+    else filteredSchemaCacheStats.hitCount().toDouble / requests
   }
 }

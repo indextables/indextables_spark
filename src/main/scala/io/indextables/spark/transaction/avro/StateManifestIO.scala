@@ -55,6 +55,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     val manifestPath = s"$stateDir/$MANIFEST_FILE_NAME"
     log.debug(s"Reading state manifest: $manifestPath")
 
+    // Increment counter for testing/monitoring - tracks actual cloud reads
+    StateManifestIO.incrementReadCounter()
+
     Try {
       val content = cloudProvider.readFile(manifestPath)
       val json = new String(content, "UTF-8")
@@ -399,6 +402,18 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
 }
 
 object StateManifestIO {
+
+  // Instrumentation counter for testing - tracks actual cloud reads of state manifests
+  private val readCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
+  /** Get the number of times readStateManifest has actually read from cloud storage (for testing) */
+  def getReadCount(): Long = readCounter.get()
+
+  /** Reset the read counter (for testing) */
+  def resetReadCounter(): Unit = readCounter.set(0)
+
+  /** Increment the read counter (called by instance readStateManifest) */
+  private[avro] def incrementReadCounter(): Unit = readCounter.incrementAndGet()
 
   /**
    * Shared ObjectMapper for JSON parsing.

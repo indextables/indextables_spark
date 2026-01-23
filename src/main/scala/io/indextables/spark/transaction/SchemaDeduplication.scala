@@ -51,6 +51,15 @@ object SchemaDeduplication {
   /** ObjectMapper for parsing JSON */
   private val mapper: ObjectMapper = new ObjectMapper()
 
+  // Instrumentation counters for testing/monitoring - track how many times parsing actually happens
+  private val parseCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
+  /** Get the number of times filterEmptyObjectMappings has actually parsed JSON (for testing) */
+  def getParseCallCount(): Long = parseCounter.get()
+
+  /** Reset the parse call counter (for testing) */
+  def resetParseCounter(): Unit = parseCounter.set(0)
+
   /**
    * Recursively sort all object keys in a JsonNode tree to create a canonical representation.
    *
@@ -201,6 +210,9 @@ object SchemaDeduplication {
    * This filter removes those problematic fields so aggregation queries can succeed.
    * The removed fields have no indexed data anyway (all values were null).
    *
+   * NOTE: This method parses JSON which is expensive. For repeated calls with the same
+   * schema, use filterEmptyObjectMappingsCached instead.
+   *
    * @param docMappingJson
    *   The original docMappingJson string (array of field mappings)
    * @return
@@ -208,6 +220,8 @@ object SchemaDeduplication {
    */
   def filterEmptyObjectMappings(docMappingJson: String): String =
     try {
+      // Track actual parse calls for testing/monitoring
+      parseCounter.incrementAndGet()
       val rootNode = mapper.readTree(docMappingJson)
 
       rootNode match {
@@ -259,6 +273,27 @@ object SchemaDeduplication {
       false
     }
   }
+
+  /**
+   * Cached version of filterEmptyObjectMappings that uses the global schema cache.
+   *
+   * The filterEmptyObjectMappings function parses JSON which is expensive (~1ms per call).
+   * Since the same schema hash always produces the same filtered result, we cache based
+   * on the schema hash. This provides a massive performance improvement when reading
+   * tables with thousands of files that all share the same schema.
+   *
+   * @param schemaHash
+   *   The schema hash (from docMappingRef) - used as cache key
+   * @param docMappingJson
+   *   The schema JSON to filter
+   * @return
+   *   Filtered docMappingJson with empty object fields removed
+   */
+  def filterEmptyObjectMappingsCached(schemaHash: String, docMappingJson: String): String =
+    EnhancedTransactionLogCache.getOrComputeFilteredSchema(
+      schemaHash,
+      filterEmptyObjectMappings(docMappingJson)
+    )
 
   /**
    * Restore schemas in a sequence of actions using a registry.

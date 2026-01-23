@@ -79,9 +79,9 @@ case class InvalidateTransactionLogCacheCommand(
         logger.info("Global transaction log cache invalidation requested - clearing all global caches")
 
         // Get stats before clearing
-        val (actionsStats, checkpointStats, avroManifestStats, avroFileListStats) = io.indextables.spark.transaction.EnhancedTransactionLogCache.getGlobalCacheStats()
-        val hitsBefore = actionsStats.hitCount() + checkpointStats.hitCount() + avroManifestStats.hitCount() + avroFileListStats.hitCount()
-        val missesBefore = actionsStats.missCount() + checkpointStats.missCount() + avroManifestStats.missCount() + avroFileListStats.missCount()
+        val (actionsStats, checkpointStats, avroManifestStats, avroFileListStats, filteredSchemaStats) = io.indextables.spark.transaction.EnhancedTransactionLogCache.getGlobalCacheStats()
+        val hitsBefore = actionsStats.hitCount() + checkpointStats.hitCount() + avroManifestStats.hitCount() + avroFileListStats.hitCount() + filteredSchemaStats.hitCount()
+        val missesBefore = actionsStats.missCount() + checkpointStats.missCount() + avroManifestStats.missCount() + avroFileListStats.missCount() + filteredSchemaStats.missCount()
         val totalRequests = hitsBefore + missesBefore
         val hitRateBefore = if (totalRequests > 0) f"${(hitsBefore.toDouble / totalRequests) * 100}%.1f%%" else "N/A"
 

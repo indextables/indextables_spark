@@ -579,6 +579,8 @@ class TransactionLogCheckpoint(
    * not to contain matching files based on partition bounds, providing significant speedup
    * for partition-filtered queries on large tables.
    *
+   * Uses the global StateManifest cache to avoid repeated cloud storage reads across queries.
+   *
    * @param info
    *   Checkpoint info with stateDir
    * @param partitionFilters
@@ -597,8 +599,19 @@ class TransactionLogCheckpoint(
     val manifestIO = StateManifestIO(cloudProvider)
     val manifestReader = AvroManifestReader(cloudProvider)
 
-    // Read the state manifest (_manifest.json)
-    val stateManifest = manifestIO.readStateManifest(stateDirPath)
+    // Use GLOBAL StateManifest cache to avoid repeated cloud storage reads
+    // The StateManifest is immutable once written, so safe to cache indefinitely
+    val stateManifest = Option(EnhancedTransactionLogCache.globalAvroStateManifestCache.getIfPresent(stateDirPath)) match {
+      case Some(cached) =>
+        logger.debug(s"StateManifest cache HIT for $stateDirPath (version ${cached.stateVersion})")
+        cached
+      case None =>
+        logger.debug(s"StateManifest cache MISS for $stateDirPath - reading from storage")
+        val manifest = manifestIO.readStateManifest(stateDirPath)
+        EnhancedTransactionLogCache.globalAvroStateManifestCache.put(stateDirPath, manifest)
+        logger.info(s"Cached StateManifest for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
+        manifest
+    }
 
     // Apply partition pruning if filters are provided
     val manifestsToRead = if (partitionFilters.nonEmpty) {
@@ -618,6 +631,7 @@ class TransactionLogCheckpoint(
     val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
 
     // Convert FileEntries to AddActions with schema registry for docMappingJson restoration
+    // This now uses cached filterEmptyObjectMappings via FileEntry.toAddAction
     val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
 
     // Build the full action list (Protocol + Metadata + AddActions)
