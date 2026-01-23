@@ -31,7 +31,7 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, RemoveAction, TransactionLog, TransactionLogFactory}
+import io.indextables.spark.transaction.{AddAction, PartitionPredicateUtils, RemoveAction, TransactionLog, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
@@ -598,9 +598,36 @@ class MergeSplitsExecutor(
 
     // === SINGLE PLANNING PHASE: Read transaction log ONCE and plan ALL merge groups upfront ===
 
-    // Get current files from transaction log (in order they were added)
-    val allFiles = transactionLog.listFiles().sortBy(_.modificationTime)
-    logger.info(s"Found ${allFiles.length} split files in transaction log")
+    // Parse partition predicates and convert to Spark Filters for Avro manifest pruning
+    val (parsedPredicates, partitionFilters) = if (partitionPredicates.nonEmpty && metadata.partitionColumns.nonEmpty) {
+      try {
+        val parsed = PartitionPredicateUtils.parseAndValidatePredicates(
+          partitionPredicates,
+          partitionSchema,
+          sparkSession
+        )
+        val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
+        logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
+        (parsed, filters)
+      } catch {
+        case e: IllegalArgumentException =>
+          logger.warn(s"Failed to parse partition predicates for manifest pruning: ${e.getMessage}")
+          (Seq.empty, Seq.empty)
+      }
+    } else {
+      (Seq.empty, Seq.empty)
+    }
+
+    // Get current files from transaction log with manifest-level pruning if filters are available
+    val allFiles = if (partitionFilters.nonEmpty) {
+      val files = transactionLog.listFilesWithPartitionFilters(partitionFilters).sortBy(_.modificationTime)
+      logger.info(s"Found ${files.length} split files using Avro manifest pruning")
+      files
+    } else {
+      val files = transactionLog.listFiles().sortBy(_.modificationTime)
+      logger.info(s"Found ${files.length} split files in transaction log")
+      files
+    }
 
     // Filter out files that are currently in cooldown period
     val trackingEnabled = sparkSession.conf.get("spark.indextables.skippedFiles.trackingEnabled", "true").toBoolean

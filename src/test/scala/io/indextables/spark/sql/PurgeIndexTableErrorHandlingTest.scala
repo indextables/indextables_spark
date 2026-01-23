@@ -42,6 +42,8 @@ class PurgeIndexTableErrorHandlingTest extends AnyFunSuite with BeforeAndAfterEa
       .appName("PurgeOrphanedSplitsErrorHandlingTest")
       .config("spark.ui.enabled", "false")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Use JSON format since this test validates JSON transaction log structure
+      .config("spark.indextables.state.format", "json")
       .getOrCreate()
 
     tempDir = Files.createTempDirectory("purge_error_test").toString

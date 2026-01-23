@@ -151,19 +151,35 @@ case class PrewarmCacheCommand(
         metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
       )
 
-      // Get all active splits
-      var addActions = transactionLog.listFiles()
-      logger.info(s"Found ${addActions.length} splits in transaction log")
+      // Parse predicates and convert to Spark Filters for Avro manifest pruning
+      val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
+        val parsed = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+        val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
+        logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
+        (parsed, filters)
+      } else {
+        (Seq.empty, Seq.empty)
+      }
+
+      // Get active splits with manifest-level pruning if filters are available
+      var addActions = if (partitionFilters.nonEmpty) {
+        val actions = transactionLog.listFilesWithPartitionFilters(partitionFilters)
+        logger.info(s"Found ${actions.length} splits using Avro manifest pruning")
+        actions
+      } else {
+        val actions = transactionLog.listFiles()
+        logger.info(s"Found ${actions.length} splits in transaction log")
+        actions
+      }
 
       // Sort by modificationTime descending (newest first) so newest data gets hot first
       addActions = addActions.sortBy(_.modificationTime)(Ordering[Long].reverse)
 
-      // Apply partition predicates if specified
-      if (wherePredicates.nonEmpty) {
-        val parsedPredicates =
-          PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+      // Apply in-memory partition filtering for any predicates not converted to Spark Filters
+      // This handles complex predicates that couldn't be pushed down to manifest pruning
+      if (parsedPredicates.nonEmpty) {
         addActions = PartitionPredicateUtils.filterAddActionsByPredicates(addActions, partitionSchema, parsedPredicates)
-        logger.info(s"After partition filtering: ${addActions.length} splits")
+        logger.info(s"After in-memory partition filtering: ${addActions.length} splits")
       }
 
       if (addActions.isEmpty) {
@@ -425,19 +441,35 @@ case class PrewarmCacheCommand(
         metadata.partitionColumns.map(name => StructField(name, StringType, nullable = true))
       )
 
-      // Get all active splits
-      var addActions = transactionLog.listFiles()
-      logger.info(s"Found ${addActions.length} splits in transaction log")
+      // Parse predicates and convert to Spark Filters for Avro manifest pruning
+      val (parsedPredicates, partitionFilters) = if (wherePredicates.nonEmpty) {
+        val parsed = PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+        val filters = PartitionPredicateUtils.expressionsToFilters(parsed)
+        logger.info(s"Converted ${filters.length} of ${parsed.length} predicates to Spark Filters for manifest pruning")
+        (parsed, filters)
+      } else {
+        (Seq.empty, Seq.empty)
+      }
+
+      // Get active splits with manifest-level pruning if filters are available
+      var addActions = if (partitionFilters.nonEmpty) {
+        val actions = transactionLog.listFilesWithPartitionFilters(partitionFilters)
+        logger.info(s"Found ${actions.length} splits using Avro manifest pruning")
+        actions
+      } else {
+        val actions = transactionLog.listFiles()
+        logger.info(s"Found ${actions.length} splits in transaction log")
+        actions
+      }
 
       // Sort by modificationTime descending (newest first) so newest data gets hot first
       addActions = addActions.sortBy(_.modificationTime)(Ordering[Long].reverse)
 
-      // Apply partition predicates if specified
-      if (wherePredicates.nonEmpty) {
-        val parsedPredicates =
-          PartitionPredicateUtils.parseAndValidatePredicates(wherePredicates, partitionSchema, sparkSession)
+      // Apply in-memory partition filtering for any predicates not converted to Spark Filters
+      // This handles complex predicates that couldn't be pushed down to manifest pruning
+      if (parsedPredicates.nonEmpty) {
         addActions = PartitionPredicateUtils.filterAddActionsByPredicates(addActions, partitionSchema, parsedPredicates)
-        logger.info(s"After partition filtering: ${addActions.length} splits")
+        logger.info(s"After in-memory partition filtering: ${addActions.length} splits")
       }
 
       if (addActions.isEmpty) {

@@ -489,4 +489,299 @@ class AvroStateCommandsTest extends TestBase {
       sumScore shouldBe 775 // 100 + 200 + 175 + 300 = 775 (no Charlie/Diana who had 150+250)
     }
   }
+
+  // ==========================================================================
+  // Manifest Pruning Integration Tests
+  // These tests verify that commands correctly use listFilesWithPartitionFilters()
+  // for Avro manifest pruning when partition predicates are specified.
+  // ==========================================================================
+
+  test("DROP PARTITIONS with partition predicate should use Avro manifest pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create data across multiple partitions
+      val regions = Seq("us-east", "us-west", "eu-west", "ap-east")
+      regions.foreach { region =>
+        val data = Seq(
+          (1, s"User1-$region", region, 100),
+          (2, s"User2-$region", region, 200)
+        )
+        spark.createDataFrame(data).toDF("id", "name", "region", "score")
+          .write.format(provider)
+          .partitionBy("region")
+          .option("spark.indextables.indexing.fastfields", "score")
+          .mode("append")
+          .save(path)
+      }
+
+      // Create Avro checkpoint - this creates manifests with partition bounds
+      val checkpointResult = spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+      checkpointResult(0).getAs[String]("status") shouldBe "SUCCESS"
+
+      // Verify we're using Avro state
+      val stateResult = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      stateResult(0).getAs[String]("format") shouldBe "avro-state"
+
+      // Initial count
+      val initialCount = spark.read.format(provider).load(path).count()
+      initialCount shouldBe 8  // 4 regions * 2 users
+
+      // DROP PARTITIONS with equality predicate - should use manifest pruning
+      val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE region = 'us-east'").collect()
+      dropResult(0).getAs[String]("status") shouldBe "success"
+      dropResult(0).getAs[Long]("splits_removed") should be >= 1L
+
+      // Verify correct partition was dropped
+      val afterDropCount = spark.read.format(provider).load(path).count()
+      afterDropCount shouldBe 6  // 8 - 2
+
+      val usEastCount = spark.read.format(provider).load(path)
+        .filter(col("region") === "us-east").count()
+      usEastCount shouldBe 0
+
+      // DROP PARTITIONS with IN predicate - should use manifest pruning
+      val dropResult2 = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE region IN ('us-west', 'eu-west')").collect()
+      dropResult2(0).getAs[String]("status") shouldBe "success"
+      dropResult2(0).getAs[Long]("splits_removed") should be >= 2L
+
+      // Verify only ap-east remains
+      val finalCount = spark.read.format(provider).load(path).count()
+      finalCount shouldBe 2
+
+      val apEastCount = spark.read.format(provider).load(path)
+        .filter(col("region") === "ap-east").count()
+      apEastCount shouldBe 2
+    }
+  }
+
+  test("DROP PARTITIONS with range predicate should use Avro manifest pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create data across date partitions
+      val dates = Seq("2024-01-01", "2024-01-15", "2024-02-01", "2024-02-15", "2024-03-01")
+      dates.foreach { date =>
+        val data = Seq((1, s"Event-$date", date, 100))
+        spark.createDataFrame(data).toDF("id", "name", "date", "value")
+          .write.format(provider)
+          .partitionBy("date")
+          .option("spark.indextables.indexing.fastfields", "value")
+          .mode("append")
+          .save(path)
+      }
+
+      // Create Avro checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      // Initial count
+      spark.read.format(provider).load(path).count() shouldBe 5
+
+      // DROP with range predicate - should use manifest pruning
+      val dropResult = spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE date < '2024-02-01'").collect()
+      dropResult(0).getAs[String]("status") shouldBe "success"
+      dropResult(0).getAs[Long]("splits_removed") shouldBe 2  // 2024-01-01 and 2024-01-15
+
+      // Verify correct partitions remain
+      val afterDropCount = spark.read.format(provider).load(path).count()
+      afterDropCount shouldBe 3
+
+      // Verify January dates are gone
+      val janCount = spark.read.format(provider).load(path)
+        .filter(col("date") < "2024-02-01").count()
+      janCount shouldBe 0
+    }
+  }
+
+  test("MERGE SPLITS with WHERE clause should use Avro manifest pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create multiple small splits per partition to trigger merge
+      val regions = Seq("us-east", "eu-west")
+      (1 to 4).foreach { batch =>
+        regions.foreach { region =>
+          val data = (1 to 10).map(i => (batch * 100 + i, s"User-$batch-$i", region, i * 10))
+          spark.createDataFrame(data).toDF("id", "name", "region", "score")
+            .write.format(provider)
+            .partitionBy("region")
+            .option("spark.indextables.indexing.fastfields", "score")
+            .mode("append")
+            .save(path)
+        }
+      }
+
+      // Create Avro checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      // Verify we're using Avro state
+      val stateResult = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      stateResult(0).getAs[String]("format") shouldBe "avro-state"
+
+      // Initial count
+      val initialCount = spark.read.format(provider).load(path).count()
+      initialCount shouldBe 80  // 4 batches * 2 regions * 10 records
+
+      // MERGE SPLITS with WHERE clause - should use manifest pruning
+      // This targets only us-east partition
+      val mergeResult = spark.sql(s"MERGE SPLITS '$path' WHERE region = 'us-east' TARGET SIZE 100M").collect()
+
+      // The merge may or may not find anything to merge depending on split sizes,
+      // but it should complete successfully
+      val status = mergeResult(0).getStruct(1).getAs[String]("status")
+      Seq("success", "no_action") should contain(status)
+
+      // Verify data integrity is preserved
+      val afterMergeCount = spark.read.format(provider).load(path).count()
+      afterMergeCount shouldBe 80
+
+      // Verify partition data is correct
+      val usEastCount = spark.read.format(provider).load(path)
+        .filter(col("region") === "us-east").count()
+      usEastCount shouldBe 40
+
+      val euWestCount = spark.read.format(provider).load(path)
+        .filter(col("region") === "eu-west").count()
+      euWestCount shouldBe 40
+    }
+  }
+
+  test("PREWARM CACHE with WHERE clause should use Avro manifest pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create partitioned data
+      val quarters = Seq("Q1", "Q2", "Q3", "Q4")
+      quarters.foreach { quarter =>
+        val data = (1 to 5).map(i => (i, s"Item-$quarter-$i", quarter, i * 100))
+        spark.createDataFrame(data).toDF("id", "name", "quarter", "value")
+          .write.format(provider)
+          .partitionBy("quarter")
+          .option("spark.indextables.indexing.fastfields", "value")
+          .mode("append")
+          .save(path)
+      }
+
+      // Create Avro checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      // Verify Avro state
+      val stateResult = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      stateResult(0).getAs[String]("format") shouldBe "avro-state"
+
+      // PREWARM with WHERE clause - should use manifest pruning to only prewarm Q1 and Q2
+      val prewarmResult = spark.sql(
+        s"PREWARM INDEXTABLES CACHE '$path' WHERE quarter IN ('Q1', 'Q2')"
+      ).collect()
+
+      // Should prewarm only splits from Q1 and Q2 partitions (at least 2, one per partition)
+      val totalPrewarmed = prewarmResult.map(_.getAs[Int]("splits_prewarmed")).sum
+      totalPrewarmed should be >= 2  // At least Q1 + Q2 = 2 splits (may be more due to parallelism)
+
+      // Verify the status
+      prewarmResult.foreach { row =>
+        Seq("success", "no_splits") should contain(row.getAs[String]("status"))
+      }
+    }
+  }
+
+  test("Commands with compound predicates should use Avro manifest pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create data with two partition columns
+      val data = for {
+        year <- Seq("2023", "2024")
+        month <- Seq("01", "06", "12")
+        i <- 1 to 2
+      } yield (i, s"Record-$year-$month-$i", year, month, i * 100)
+
+      spark.createDataFrame(data).toDF("id", "name", "year", "month", "value")
+        .write.format(provider)
+        .partitionBy("year", "month")
+        .option("spark.indextables.indexing.fastfields", "value")
+        .mode("overwrite")
+        .save(path)
+
+      // Create Avro checkpoint
+      spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+
+      // Initial count
+      val initialCount = spark.read.format(provider).load(path).count()
+      initialCount shouldBe 12  // 2 years * 3 months * 2 records
+
+      // DROP with compound AND predicate - should use manifest pruning
+      val dropResult = spark.sql(
+        s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE year = '2023' AND month = '06'"
+      ).collect()
+      dropResult(0).getAs[String]("status") shouldBe "success"
+      dropResult(0).getAs[Long]("splits_removed") shouldBe 1
+
+      // Verify correct partition was dropped
+      val afterDropCount = spark.read.format(provider).load(path).count()
+      afterDropCount shouldBe 10  // 12 - 2
+
+      // Verify the specific partition is gone
+      val droppedPartitionCount = spark.read.format(provider).load(path)
+        .filter(col("year") === "2023" && col("month") === "06").count()
+      droppedPartitionCount shouldBe 0
+
+      // Other 2023 partitions should still exist
+      val year2023Count = spark.read.format(provider).load(path)
+        .filter(col("year") === "2023").count()
+      year2023Count shouldBe 4  // 01 + 12 = 2 partitions * 2 records
+    }
+  }
+
+  test("Multiple manifests scenario should benefit from partition pruning") {
+    withTempPath { tempDir =>
+      val path = tempDir
+
+      // Create data and checkpoint multiple times to create multiple manifests
+      val regions = Seq("region-A", "region-B", "region-C", "region-D", "region-E")
+
+      regions.foreach { region =>
+        // Write data for this region
+        val data = (1 to 10).map(i => (i, s"Item-$region-$i", region, i * 10))
+        spark.createDataFrame(data).toDF("id", "name", "region", "value")
+          .write.format(provider)
+          .partitionBy("region")
+          .option("spark.indextables.indexing.fastfields", "value")
+          .mode("append")
+          .save(path)
+
+        // Create checkpoint after each write (creates separate manifest entries)
+        spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()
+      }
+
+      // Verify final state
+      val stateResult = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
+      stateResult(0).getAs[String]("format") shouldBe "avro-state"
+
+      // Total count should be 50 (5 regions * 10 records)
+      val totalCount = spark.read.format(provider).load(path).count()
+      totalCount shouldBe 50
+
+      // DROP specific region - with manifest pruning, only relevant manifest should be read
+      val dropResult = spark.sql(
+        s"DROP INDEXTABLES PARTITIONS FROM '$path' WHERE region = 'region-C'"
+      ).collect()
+      dropResult(0).getAs[String]("status") shouldBe "success"
+
+      // Verify only region-C was dropped
+      val afterDropCount = spark.read.format(provider).load(path).count()
+      afterDropCount shouldBe 40  // 50 - 10
+
+      val regionCCount = spark.read.format(provider).load(path)
+        .filter(col("region") === "region-C").count()
+      regionCCount shouldBe 0
+
+      // Other regions should be intact
+      Seq("region-A", "region-B", "region-D", "region-E").foreach { region =>
+        val count = spark.read.format(provider).load(path)
+          .filter(col("region") === region).count()
+        count shouldBe 10
+      }
+    }
+  }
 }

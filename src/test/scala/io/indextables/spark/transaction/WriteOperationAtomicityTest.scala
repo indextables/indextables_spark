@@ -40,6 +40,12 @@ class WriteOperationAtomicityTest extends TestBase {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[WriteOperationAtomicityTest])
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Use JSON format since this test validates JSON transaction log file structure
+    spark.conf.set("spark.indextables.state.format", "json")
+  }
+
   // ============================================================================
   // TRANSACTION LOG ATOMICITY TESTS
   // ============================================================================

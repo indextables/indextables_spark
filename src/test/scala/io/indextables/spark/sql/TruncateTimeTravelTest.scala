@@ -38,6 +38,8 @@ class TruncateTimeTravelTest extends TestBase {
 
   override def beforeAll(): Unit = {
     super.beforeAll()
+    // Use JSON format since this test validates JSON transaction log file structure
+    spark.conf.set("spark.indextables.state.format", "json")
     // Set checkpoint interval low for testing
     spark.conf.set("spark.indextables.checkpoint.interval", "5")
   }

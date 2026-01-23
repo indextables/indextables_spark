@@ -57,6 +57,8 @@ class PurgeRaceConditionBugReproductionTest extends AnyFunSuite with BeforeAndAf
       .appName("PurgeRaceConditionBugReproductionTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Use JSON format since this test validates JSON transaction log cleanup
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.checkpoint.enabled", "true")
       .config("spark.indextables.checkpoint.interval", "10")
       .getOrCreate()

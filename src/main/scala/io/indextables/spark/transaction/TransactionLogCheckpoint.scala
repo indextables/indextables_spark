@@ -28,7 +28,7 @@ import scala.util.{Failure, Success, Try}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.avro.{AvroManifestReader, PartitionPruner, StateConfig, StateManifestIO}
+import io.indextables.spark.transaction.avro.{AvroManifestReader, FileEntry, PartitionPruner, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
 
 import org.apache.spark.sql.sources.Filter
@@ -146,42 +146,179 @@ class TransactionLogCheckpoint(
     logger.info(s"Creating checkpoint for version $currentVersion with ${allActions.length} actions")
 
     try {
-      // Apply schema deduplication to reduce checkpoint size
-      // This replaces docMappingJson with docMappingRef in AddActions
-      val deduplicatedActions = applySchemaDeduplication(allActions)
+      // Check if Avro state format is enabled
+      val stateFormat = Option(options.get(StateConfig.FORMAT_KEY))
+        .getOrElse(StateConfig.FORMAT_DEFAULT)
 
-      // Determine if we should use multi-part checkpoint
-      val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
-
-      // Always upgrade to V3 protocol for new checkpoints
-      // This ensures consistent behavior and enables V3 features (schema deduplication, multi-part)
-      val finalActions = upgradeProtocolForV3Features(deduplicatedActions)
-
-      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
-      val numFiles        = allActions.count(_.isInstanceOf[AddAction])
-      val estimatedSize   = StreamingActionWriter.estimateSerializedSize(allActions)
-
-      val checkpointInfoOpt = if (shouldUseMultiPart) {
-        createMultiPartCheckpoint(currentVersion, finalActions, compressionInfo)
+      if (stateFormat.equalsIgnoreCase("avro")) {
+        // Write checkpoint in Avro state format
+        createAvroStateCheckpoint(currentVersion, allActions)
       } else {
-        Some(createSinglePartCheckpoint(currentVersion, finalActions, compressionInfo))
-      }
-
-      checkpointInfoOpt match {
-        case Some(checkpointInfo) =>
-          writeLastCheckpointFile(checkpointInfo.copy(numFiles = numFiles, sizeInBytes = estimatedSize))
-          val partInfo = checkpointInfo.parts.map(p => s" ($p parts)").getOrElse("")
-          logger.info(
-            s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$partInfo$compressionInfo"
-          )
-        case None =>
-          // Another writer completed the checkpoint first (for multi-part only)
-          logger.info(s"Checkpoint for version $currentVersion was created by another writer")
+        // Use existing JSON checkpoint format
+        createJsonCheckpoint(currentVersion, allActions)
       }
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint for version $currentVersion", e)
         throw e
+    }
+  }
+
+  /**
+   * Create checkpoint in JSON format (legacy and multi-part).
+   */
+  private def createJsonCheckpoint(
+    currentVersion: Long,
+    allActions: Seq[Action]
+  ): Unit = {
+    // Apply schema deduplication to reduce checkpoint size
+    // This replaces docMappingJson with docMappingRef in AddActions
+    val deduplicatedActions = applySchemaDeduplication(allActions)
+
+    // Determine if we should use multi-part checkpoint
+    val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
+
+    // Always upgrade to V3 protocol for new checkpoints
+    // This ensures consistent behavior and enables V3 features (schema deduplication, multi-part)
+    val finalActions = upgradeProtocolForV3Features(deduplicatedActions)
+
+    val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+    val numFiles        = allActions.count(_.isInstanceOf[AddAction])
+    val estimatedSize   = StreamingActionWriter.estimateSerializedSize(allActions)
+
+    val checkpointInfoOpt = if (shouldUseMultiPart) {
+      createMultiPartCheckpoint(currentVersion, finalActions, compressionInfo)
+    } else {
+      Some(createSinglePartCheckpoint(currentVersion, finalActions, compressionInfo))
+    }
+
+    checkpointInfoOpt match {
+      case Some(checkpointInfo) =>
+        writeLastCheckpointFile(checkpointInfo.copy(numFiles = numFiles, sizeInBytes = estimatedSize))
+        val partInfo = checkpointInfo.parts.map(p => s" ($p parts)").getOrElse("")
+        logger.info(
+          s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$partInfo$compressionInfo"
+        )
+      case None =>
+        // Another writer completed the checkpoint first (for multi-part only)
+        logger.info(s"Checkpoint for version $currentVersion was created by another writer")
+    }
+  }
+
+  /**
+   * Create checkpoint in Avro state format with retry support for concurrent write conflicts.
+   *
+   * This writes a compacted state with all live files sorted by partition values for optimal pruning.
+   * Uses conditional writes and retry logic to handle concurrent checkpoint creation.
+   */
+  private def createAvroStateCheckpoint(
+    currentVersion: Long,
+    allActions: Seq[Action]
+  ): Unit = {
+    val compression = Option(options.get(StateConfig.COMPRESSION_KEY))
+      .getOrElse(StateConfig.COMPRESSION_DEFAULT)
+    val compressionLevel = Option(options.get(StateConfig.COMPRESSION_LEVEL_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.COMPRESSION_LEVEL_DEFAULT)
+    val entriesPerManifest = Option(options.get(StateConfig.ENTRIES_PER_MANIFEST_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.ENTRIES_PER_MANIFEST_DEFAULT)
+
+    // Build retry configuration from options
+    val retryConfig = StateRetryConfig(
+      maxAttempts = Option(options.get(StateConfig.RETRY_MAX_ATTEMPTS_KEY))
+        .map(_.toInt)
+        .getOrElse(StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT),
+      baseDelayMs = Option(options.get(StateConfig.RETRY_BASE_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_BASE_DELAY_MS_DEFAULT),
+      maxDelayMs = Option(options.get(StateConfig.RETRY_MAX_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+    )
+
+    val stateWriter = StateWriter(
+      cloudProvider,
+      transactionLogPath.toString,
+      compression,
+      compressionLevel,
+      entriesPerManifest,
+      retryConfig
+    )
+
+    val manifestIO = StateManifestIO(cloudProvider)
+
+    // Extract AddActions from allActions
+    val allFiles = allActions.collect { case add: AddAction => add }
+
+    // Build schema registry from AddActions with docMappingJson
+    // This deduplicates schema storage and allows restoration when reading
+    import java.security.MessageDigest
+    val schemaRegistry = scala.collection.mutable.Map[String, String]()
+
+    def hashSchema(json: String): String = {
+      val md = MessageDigest.getInstance("SHA-256")
+      val digest = md.digest(json.getBytes("UTF-8"))
+      digest.take(8).map("%02x".format(_)).mkString
+    }
+
+    // Convert AddActions to FileEntries with current version and timestamp
+    // Also build schema registry and set docMappingRef
+    val timestamp = System.currentTimeMillis()
+    val fileEntries = allFiles.map { add =>
+      val refAndJson = add.docMappingJson.map { json =>
+        val ref = add.docMappingRef.getOrElse(hashSchema(json))
+        schemaRegistry.put(ref, json)
+        ref
+      }
+      FileEntry.fromAddAction(add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)), currentVersion, timestamp)
+    }
+
+    logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
+
+    // Write compacted state with retry support for concurrent conflicts
+    // This uses conditional writes for _manifest.json and automatic version increment on conflict
+    val writeResult = stateWriter.writeStateWithRetry(
+      currentVersion,
+      fileEntries,
+      schemaRegistry.toMap
+    )
+
+    // Extract the actual version and state directory from the write result
+    val actualVersion = writeResult.version
+    val stateDir = manifestIO.formatStateDir(actualVersion)
+
+    if (writeResult.conflictDetected) {
+      logger.info(s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
+        s"(original version $currentVersion had concurrent conflict)")
+    }
+
+    // Update _last_checkpoint to point to new Avro state
+    // Use version-checked write to avoid regressing to an older checkpoint
+    val lastCheckpointInfo = LastCheckpointInfo(
+      version = actualVersion,
+      size = fileEntries.size,
+      sizeInBytes = fileEntries.map(_.size).sum,
+      numFiles = fileEntries.size,
+      createdTime = timestamp,
+      parts = None,
+      checkpointId = None,
+      format = Some(StateConfig.Format.AVRO_STATE),
+      stateDir = Some(stateDir)
+    )
+
+    val lastCheckpointJson = io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
+    val checkpointUpdated = manifestIO.writeLastCheckpointIfNewer(
+      transactionLogPath.toString,
+      actualVersion,
+      lastCheckpointJson
+    )
+
+    if (checkpointUpdated) {
+      logger.info(s"Avro state checkpoint created successfully at version $actualVersion (format=avro-state)")
+    } else {
+      logger.info(s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
+        s"(a newer checkpoint already exists)")
     }
   }
 

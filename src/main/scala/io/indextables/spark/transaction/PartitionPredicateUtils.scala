@@ -17,8 +17,16 @@
 
 package io.indextables.spark.transaction
 
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
+import org.apache.spark.sql.catalyst.expressions.{And => CatalystAnd, Or => CatalystOr, Not => CatalystNot}
+import org.apache.spark.sql.catalyst.expressions.{EqualTo => CatalystEqualTo, GreaterThan => CatalystGreaterThan}
+import org.apache.spark.sql.catalyst.expressions.{GreaterThanOrEqual => CatalystGreaterThanOrEqual}
+import org.apache.spark.sql.catalyst.expressions.{LessThan => CatalystLessThan, LessThanOrEqual => CatalystLessThanOrEqual}
+import org.apache.spark.sql.catalyst.expressions.{In => CatalystIn, IsNull => CatalystIsNull, IsNotNull => CatalystIsNotNull}
+import org.apache.spark.sql.catalyst.expressions.{StartsWith => CatalystStartsWith}
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.unsafe.types.UTF8String
@@ -232,4 +240,105 @@ object PartitionPredicateUtils {
    */
   def buildPartitionSchema(partitionColumns: Seq[String]): StructType =
     StructType(partitionColumns.map(name => StructField(name, StringType, nullable = true)))
+
+  /**
+   * Convert Catalyst Expression predicates to Spark sources Filter objects for Avro manifest pruning.
+   *
+   * This enables commands like PREWARM, DROP PARTITIONS, and MERGE SPLITS to benefit from partition-based manifest
+   * pruning when using the Avro state format.
+   *
+   * @param predicates
+   *   Parsed Catalyst Expression predicates
+   * @return
+   *   Sequence of Spark sources Filter objects (unsupported expressions are filtered out)
+   */
+  def expressionsToFilters(predicates: Seq[Expression]): Seq[Filter] =
+    predicates.flatMap(expressionToFilter)
+
+  /**
+   * Convert a single Catalyst Expression to a Spark sources Filter.
+   *
+   * @param expression
+   *   Catalyst Expression to convert
+   * @return
+   *   Some(Filter) if conversion is supported, None otherwise
+   */
+  def expressionToFilter(expression: Expression): Option[Filter] =
+    expression match {
+      // Equality: column = value
+      case CatalystEqualTo(UnresolvedAttribute(nameParts), Literal(value, _)) =>
+        Some(EqualTo(nameParts.mkString("."), value))
+      case CatalystEqualTo(Literal(value, _), UnresolvedAttribute(nameParts)) =>
+        Some(EqualTo(nameParts.mkString("."), value))
+
+      // Greater than: column > value
+      case CatalystGreaterThan(UnresolvedAttribute(nameParts), Literal(value, _)) =>
+        Some(GreaterThan(nameParts.mkString("."), value))
+      case CatalystGreaterThan(Literal(value, _), UnresolvedAttribute(nameParts)) =>
+        Some(LessThan(nameParts.mkString("."), value))
+
+      // Greater than or equal: column >= value
+      case CatalystGreaterThanOrEqual(UnresolvedAttribute(nameParts), Literal(value, _)) =>
+        Some(GreaterThanOrEqual(nameParts.mkString("."), value))
+      case CatalystGreaterThanOrEqual(Literal(value, _), UnresolvedAttribute(nameParts)) =>
+        Some(LessThanOrEqual(nameParts.mkString("."), value))
+
+      // Less than: column < value
+      case CatalystLessThan(UnresolvedAttribute(nameParts), Literal(value, _)) =>
+        Some(LessThan(nameParts.mkString("."), value))
+      case CatalystLessThan(Literal(value, _), UnresolvedAttribute(nameParts)) =>
+        Some(GreaterThan(nameParts.mkString("."), value))
+
+      // Less than or equal: column <= value
+      case CatalystLessThanOrEqual(UnresolvedAttribute(nameParts), Literal(value, _)) =>
+        Some(LessThanOrEqual(nameParts.mkString("."), value))
+      case CatalystLessThanOrEqual(Literal(value, _), UnresolvedAttribute(nameParts)) =>
+        Some(GreaterThanOrEqual(nameParts.mkString("."), value))
+
+      // IN: column IN (value1, value2, ...)
+      case CatalystIn(UnresolvedAttribute(nameParts), values) =>
+        val literalValues = values.collect { case Literal(v, _) => v }
+        if (literalValues.length == values.length) {
+          Some(In(nameParts.mkString("."), literalValues.toArray))
+        } else {
+          None // Some values are not literals
+        }
+
+      // IS NULL: column IS NULL
+      case CatalystIsNull(UnresolvedAttribute(nameParts)) =>
+        Some(IsNull(nameParts.mkString(".")))
+
+      // IS NOT NULL: column IS NOT NULL
+      case CatalystIsNotNull(UnresolvedAttribute(nameParts)) =>
+        Some(IsNotNull(nameParts.mkString(".")))
+
+      // LIKE 'prefix%': column LIKE 'prefix%'
+      case CatalystStartsWith(UnresolvedAttribute(nameParts), Literal(prefix, StringType)) =>
+        Some(StringStartsWith(nameParts.mkString("."), prefix.toString))
+
+      // AND: left AND right
+      case CatalystAnd(left, right) =>
+        (expressionToFilter(left), expressionToFilter(right)) match {
+          case (Some(l), Some(r)) => Some(And(l, r))
+          case (Some(l), None)    => Some(l) // Use what we can convert
+          case (None, Some(r))    => Some(r)
+          case (None, None)       => None
+        }
+
+      // OR: left OR right
+      case CatalystOr(left, right) =>
+        // For OR, both sides must convert successfully
+        (expressionToFilter(left), expressionToFilter(right)) match {
+          case (Some(l), Some(r)) => Some(Or(l, r))
+          case _                  => None // Can't partially convert OR
+        }
+
+      // NOT: NOT expr
+      case CatalystNot(child) =>
+        expressionToFilter(child).map(Not)
+
+      case _ =>
+        logger.debug(s"Cannot convert expression to Filter for manifest pruning: ${expression.getClass.getSimpleName}")
+        None
+    }
 }

@@ -54,7 +54,8 @@ class ConcurrentStateWriteTest extends TestBase {
 
       result.length shouldBe 1
       result(0).getAs[String]("status") shouldBe "SUCCESS"
-      result(0).getAs[Long]("checkpoint_version") should be > 0L
+      // Version 0 is valid for the first checkpoint after a single write operation
+      result(0).getAs[Long]("checkpoint_version") should be >= 0L
 
       // Verify state was written
       val state = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()

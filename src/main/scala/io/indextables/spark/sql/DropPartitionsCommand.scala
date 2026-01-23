@@ -147,21 +147,34 @@ case class DropPartitionsCommand(
         sparkSession
       )
 
-      // Get all current files
-      val allFiles = transactionLog.listFiles()
+      // Convert predicates to Spark Filters for Avro manifest pruning
+      val partitionFilters = PartitionPredicateUtils.expressionsToFilters(parsedPredicates)
+      logger.info(s"Converted ${partitionFilters.length} of ${parsedPredicates.length} predicates to Spark Filters for manifest pruning")
+
+      // Get files with manifest-level pruning if filters are available
+      val allFiles = if (partitionFilters.nonEmpty) {
+        val files = transactionLog.listFilesWithPartitionFilters(partitionFilters)
+        logger.info(s"Found ${files.length} split files using Avro manifest pruning")
+        files
+      } else {
+        val files = transactionLog.listFiles()
+        logger.info(s"Found ${files.length} split files in transaction log")
+        files
+      }
+
       if (allFiles.isEmpty) {
         logger.info(s"No files found in table: $tablePath")
         return Seq(Row(tablePath.toString, "no_action", 0L, 0L, 0L, "Table is empty"))
       }
 
-      logger.info(s"Found ${allFiles.length} split files in transaction log")
-
-      // Filter files by partition predicates
+      // Apply in-memory partition filtering for precise matching
+      // (manifest pruning may include files from overlapping partition ranges)
       val matchingFiles = PartitionPredicateUtils.filterAddActionsByPredicates(
         allFiles,
         partitionSchema,
         parsedPredicates
       )
+      logger.info(s"After in-memory partition filtering: ${matchingFiles.length} matching splits")
 
       if (matchingFiles.isEmpty) {
         logger.info(s"No partitions match the specified predicates: ${userPartitionPredicates.mkString(", ")}")

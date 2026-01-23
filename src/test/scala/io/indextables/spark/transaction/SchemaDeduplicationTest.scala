@@ -199,9 +199,13 @@ class SchemaDeduplicationTest extends TestBase {
   test("checkpoint roundtrip with schema deduplication") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+      // Use JSON format for checkpoint testing
+      val jsonOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        java.util.Map.of("spark.indextables.state.format", "json")
+      )
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
         tempPath,
-        new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        jsonOptions,
         spark.sparkContext.hadoopConfiguration
       )
 
@@ -212,7 +216,7 @@ class SchemaDeduplicationTest extends TestBase {
         val checkpoint = new TransactionLogCheckpoint(
           transactionLogPath,
           cloudProvider,
-          new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+          jsonOptions
         )
 
         // Create actions with schema
@@ -417,10 +421,11 @@ class SchemaDeduplicationTest extends TestBase {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
 
+      // Use JSON format for this test since it tests JSON checkpoint schema deduplication
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.checkpoint.enabled",
-          "false"
+          "spark.indextables.checkpoint.enabled", "false",
+          "spark.indextables.state.format", "json"
         )
       )
 
@@ -614,6 +619,7 @@ class SchemaDeduplicationTest extends TestBase {
       }
 
       // Write 12 batches to trigger checkpoint at version 10
+      // Use JSON format for this test since it tests JSON checkpoint schema deduplication
       (1 to 12).foreach { i =>
         val mode = if (i == 1) "overwrite" else "append"
         val df   = createDF(i)
@@ -622,6 +628,7 @@ class SchemaDeduplicationTest extends TestBase {
           .mode(mode)
           .option("spark.indextables.checkpoint.enabled", "true")
           .option("spark.indextables.checkpoint.interval", "10")
+          .option("spark.indextables.state.format", "json")
           .save(tempPath)
       }
 

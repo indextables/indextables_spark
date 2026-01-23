@@ -87,7 +87,10 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("cache improves performance on repeated reads") {
-    val options = new CaseInsensitiveStringMap(Collections.emptyMap())
+    // Use JSON format since this test validates JSON transaction log caching behavior
+    val options = new CaseInsensitiveStringMap(
+      Map("spark.indextables.state.format" -> "json").asJava
+    )
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
 
     // Initialize the transaction log
@@ -129,7 +132,10 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("cache invalidation works after writes") {
-    val options = new CaseInsensitiveStringMap(Collections.emptyMap())
+    // Use JSON format since this test validates JSON transaction log caching behavior
+    val options = new CaseInsensitiveStringMap(
+      Map("spark.indextables.state.format" -> "json").asJava
+    )
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
 
     // Initialize the transaction log
@@ -156,9 +162,11 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
 
   test("cache expires after configured time") {
     // Use very short expiration for testing
+    // Use JSON format since this test validates JSON transaction log caching behavior
     val shortExpirationSeconds = 1L
     val options = new CaseInsensitiveStringMap(
       Map(
+        "spark.indextables.state.format" -> "json",
         "spark.indextables.transaction.cache.expirationSeconds" -> shortExpirationSeconds.toString
       ).asJava
     )
@@ -195,7 +203,10 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("manual cache invalidation works") {
-    val options = new CaseInsensitiveStringMap(Collections.emptyMap())
+    // Use JSON format since this test validates JSON transaction log caching behavior
+    val options = new CaseInsensitiveStringMap(
+      Map("spark.indextables.state.format" -> "json").asJava
+    )
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
 
     // Initialize and add data
@@ -228,7 +239,10 @@ class TransactionLogCacheTest extends TestBase with BeforeAndAfterEach {
   }
 
   test("metadata caching works correctly") {
-    val options = new CaseInsensitiveStringMap(Collections.emptyMap())
+    // Use JSON format since this test validates JSON transaction log caching behavior
+    val options = new CaseInsensitiveStringMap(
+      Map("spark.indextables.state.format" -> "json").asJava
+    )
     transactionLog = TransactionLogFactory.create(new Path(tablePath), spark, options)
 
     // Initialize the transaction log

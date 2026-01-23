@@ -243,12 +243,14 @@ class AvroStateIntegrationTest extends TestBase {
         .mode("overwrite")
         .save(path)
 
-      // Before checkpoint - should show 'none' or 'json'
+      // Before explicit checkpoint - format depends on whether auto-checkpoint was triggered
       val beforeCheckpoint = spark.sql(s"DESCRIBE INDEXTABLES STATE '$path'").collect()
       beforeCheckpoint.length shouldBe 1
-      // Format could be 'none' if no checkpoint exists yet, or 'json' if auto-checkpoint happened
+      // Format could be 'none' if no checkpoint exists yet, 'json'/'json-multipart' for JSON format,
+      // or 'avro-state' if Avro is the default and auto-checkpoint happened
       val formatBefore = beforeCheckpoint(0).getAs[String]("format")
-      (formatBefore == "none" || formatBefore == "json" || formatBefore == "json-multipart") shouldBe true
+      val validFormats = Set("none", "json", "json-multipart", "avro-state")
+      validFormats.contains(formatBefore) shouldBe true
 
       // Create Avro checkpoint
       spark.sql(s"CHECKPOINT INDEXTABLES '$path'").collect()

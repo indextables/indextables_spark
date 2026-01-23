@@ -192,6 +192,20 @@ class TransactionLogAdapter(
   override def removeFile(path: String, deletionTimestamp: Long = System.currentTimeMillis()): Long =
     optimizedLog.removeFile(path, deletionTimestamp)
 
+  override def commitRemoveActions(removeActions: Seq[RemoveAction]): Long = {
+    val result = optimizedLog.commitRemoveActions(removeActions)
+    // Invalidate adapter's cache after remove operation
+    super.invalidateCache()
+    result
+  }
+
+  override def commitMergeSplits(removeActions: Seq[RemoveAction], addActions: Seq[AddAction]): Long = {
+    val result = optimizedLog.commitMergeSplits(removeActions, addActions)
+    // Invalidate adapter's cache after merge operation
+    super.invalidateCache()
+    result
+  }
+
   override def getCacheStats(): Option[CacheStats] = {
     // Convert EnhancedTransactionLogCache statistics to legacy CacheStats format
     val enhancedStats = optimizedLog.getCacheStatistics()

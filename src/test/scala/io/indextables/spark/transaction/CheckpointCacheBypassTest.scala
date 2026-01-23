@@ -47,6 +47,12 @@ import io.indextables.spark.TestBase
  */
 class CheckpointCacheBypassTest extends TestBase {
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Use JSON format since this test validates JSON checkpoint caching behavior
+    spark.conf.set("spark.indextables.state.format", "json")
+  }
+
   /**
    * A wrapper around CloudStorageProvider that counts file read operations. This allows us to measure the actual I/O
    * happening at the storage layer.
@@ -684,11 +690,13 @@ class CheckpointCacheBypassTest extends TestBase {
     // This test verifies that once a DataFrame is created (read), executing
     // queries on it should NOT cause any additional storage calls for checkpoint info.
     // Read operations can make storage calls, but query execution must reuse cached data.
+    // Use JSON format since this test validates JSON checkpoint caching behavior.
     withTempPath { tempPath =>
       // Write a table first
       val df = spark.range(100).selectExpr("id", "concat('text_', id) as content")
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "1")
         .mode("overwrite")
@@ -759,11 +767,13 @@ class CheckpointCacheBypassTest extends TestBase {
   test("ASSERT: SQL cache invalidation causes storage calls to resume") {
     // This test verifies that after calling INVALIDATE INDEXTABLES TRANSACTION LOG CACHE,
     // subsequent reads DO cause storage calls again (proving the cache was actually invalidated)
+    // Use JSON format since this test validates JSON checkpoint caching behavior.
     withTempPath { tempPath =>
       // Write a table first
       val df = spark.range(100).selectExpr("id", "concat('text_', id) as content")
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "1")
         .mode("overwrite")
@@ -865,11 +875,13 @@ class CheckpointCacheBypassTest extends TestBase {
   test("ASSERT: global SQL INVALIDATE clears all transaction log caches") {
     // This test verifies that INVALIDATE INDEXTABLES TRANSACTION LOG CACHE (without FOR clause)
     // clears all global caches, causing subsequent reads to make storage calls
+    // Use JSON format since this test validates JSON checkpoint caching behavior.
     withTempPath { tempPath =>
       // Write a table first
       val df = spark.range(100).selectExpr("id", "concat('text_', id) as content")
       df.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "1")
         .mode("overwrite")

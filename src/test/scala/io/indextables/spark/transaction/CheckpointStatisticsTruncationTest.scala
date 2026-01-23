@@ -56,8 +56,10 @@ class CheckpointStatisticsTruncationTest
       ).toDF("id", "description", "score")
 
       // Write initial data (will create transaction file with long statistics)
+      // Use JSON format since this test validates JSON checkpoint file format
       data.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
         .option("spark.indextables.indexing.fastfields", "score")
         .option("spark.indextables.checkpoint.enabled", "false") // Disable auto checkpoint
         .mode("overwrite")
@@ -71,6 +73,7 @@ class CheckpointStatisticsTruncationTest
 
         appendData.write
           .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .option("spark.indextables.state.format", "json")
           .option("spark.indextables.checkpoint.enabled", "false") // Still no checkpoint
           .mode("append")
           .save(tablePath)
@@ -83,6 +86,7 @@ class CheckpointStatisticsTruncationTest
 
       finalData.write
         .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
         .option("spark.indextables.checkpoint.enabled", "true")
         .option("spark.indextables.checkpoint.interval", "1")          // Create checkpoint immediately
         .option("spark.indextables.stats.truncation.enabled", "true")  // Ensure truncation enabled

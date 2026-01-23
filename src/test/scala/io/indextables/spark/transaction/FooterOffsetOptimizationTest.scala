@@ -134,6 +134,7 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       val transactionLog = TransactionLogFactory.create(new org.apache.hadoop.fs.Path(tempDir.toString), spark)
 
       // Create AddAction with footer offset metadata
+      // Note: hotcacheStartOffset and hotcacheLength are deprecated as of v0.24.1
       val optimizedAddAction = AddAction(
         path = "optimized.split",
         partitionValues = Map.empty,
@@ -144,8 +145,6 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
         // Footer offset optimization metadata
         footerStartOffset = Some(48000L),
         footerEndOffset = Some(49500L),
-        hotcacheStartOffset = Some(2000L),
-        hotcacheLength = Some(46000L),
         hasFooterOffsets = true
       )
 
@@ -172,16 +171,13 @@ class FooterOffsetOptimizationTest extends TestBase with BeforeAndAfterEach {
       // Verify optimized file has footer offset metadata
       assert(optimizedFile.footerStartOffset.contains(48000L))
       assert(optimizedFile.footerEndOffset.contains(49500L))
-      assert(optimizedFile.hotcacheStartOffset.contains(2000L))
-      assert(optimizedFile.hotcacheLength.contains(46000L))
+      // Note: hotcache fields are deprecated and not persisted in Avro format
       assert(optimizedFile.hasFooterOffsets)
       println("✅ Optimized file footer metadata persisted correctly")
 
       // Verify standard file has default values
       assert(standardFile.footerStartOffset.isEmpty)
       assert(standardFile.footerEndOffset.isEmpty)
-      assert(standardFile.hotcacheStartOffset.isEmpty)
-      assert(standardFile.hotcacheLength.isEmpty)
       assert(!standardFile.hasFooterOffsets)
       println("✅ Standard file has correct default values")
     }
