@@ -242,7 +242,8 @@ case class StateManifest(
     manifests: Seq[ManifestInfo],
     tombstones: Seq[String] = Seq.empty,
     schemaRegistry: Map[String, String] = Map.empty,
-    protocolVersion: Int = 4)
+    protocolVersion: Int = 4,
+    metadata: Option[String] = None)  // JSON-encoded MetadataAction for fast getMetadata()
     extends Serializable
 
 /**

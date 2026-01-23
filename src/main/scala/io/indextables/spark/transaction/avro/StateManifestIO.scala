@@ -96,7 +96,8 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
       manifests = parseManifestInfoList(root.get("manifests")),
       tombstones = parseTombstones(root.get("tombstones")),
       schemaRegistry = parseSchemaRegistry(root.get("schemaRegistry")),
-      protocolVersion = root.path("protocolVersion").asInt(4)
+      protocolVersion = root.path("protocolVersion").asInt(4),
+      metadata = Option(root.get("metadata")).filterNot(_.isNull).map(_.asText())
     )
   }
 
@@ -249,6 +250,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     }
 
     root.put("protocolVersion", manifest.protocolVersion)
+
+    // Metadata (JSON-encoded MetadataAction for fast getMetadata)
+    manifest.metadata.foreach(root.put("metadata", _))
 
     mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root)
   }

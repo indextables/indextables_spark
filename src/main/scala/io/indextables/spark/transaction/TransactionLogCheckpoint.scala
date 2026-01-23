@@ -248,8 +248,16 @@ class TransactionLogCheckpoint(
 
     val manifestIO = StateManifestIO(cloudProvider)
 
-    // Extract AddActions from allActions
+    // Extract AddActions and MetadataAction from allActions
     val allFiles = allActions.collect { case add: AddAction => add }
+    val metadataAction = allActions.collectFirst { case m: MetadataAction => m }
+
+    // Serialize MetadataAction to JSON for storage in state manifest
+    // This enables fast getMetadata() without scanning version files
+    val metadataJson = metadataAction.map { m =>
+      val metadataWrapper = Map("metaData" -> m)
+      JsonUtil.mapper.writeValueAsString(metadataWrapper)
+    }
 
     // Build schema registry from AddActions with docMappingJson
     // This deduplicates schema storage and allows restoration when reading
@@ -281,7 +289,8 @@ class TransactionLogCheckpoint(
     val writeResult = stateWriter.writeStateWithRetry(
       currentVersion,
       fileEntries,
-      schemaRegistry.toMap
+      schemaRegistry.toMap,
+      metadataJson
     )
 
     // Extract the actual version and state directory from the write result
@@ -621,6 +630,22 @@ class TransactionLogCheckpoint(
       readerFeatures = Some(Set("avroState")),
       writerFeatures = Some(Set("avroState"))
     )
+
+    // Add MetadataAction from state manifest if present
+    // This enables fast getMetadata() without scanning version files
+    stateManifest.metadata.foreach { metadataJson =>
+      try {
+        val jsonNode = JsonUtil.mapper.readTree(metadataJson)
+        if (jsonNode.has("metaData")) {
+          val metadata = JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+          actions += metadata
+          logger.debug(s"Restored MetadataAction from Avro state checkpoint")
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to parse metadata from Avro state checkpoint: ${e.getMessage}")
+      }
+    }
 
     // Log schema registry usage
     if (stateManifest.schemaRegistry.nonEmpty) {

@@ -111,6 +111,8 @@ class StateWriter(
    *   All live file entries (for compacted state)
    * @param schemaRegistry
    *   Schema registry for doc mapping deduplication
+   * @param metadata
+   *   Optional JSON-encoded MetadataAction for fast getMetadata() in read path
    * @return
    *   StateWriteResult containing the written state directory, actual version, and retry info
    * @throws ConcurrentStateWriteException
@@ -119,7 +121,8 @@ class StateWriter(
   def writeStateWithRetry(
       currentVersion: Long,
       liveFiles: Seq[FileEntry],
-      schemaRegistry: Map[String, String]): StateWriteResult = {
+      schemaRegistry: Map[String, String],
+      metadata: Option[String] = None): StateWriteResult = {
 
     var attempt = 1
     var version = currentVersion
@@ -145,7 +148,7 @@ class StateWriter(
         }
       } else {
         // Try to write the state with conditional manifest write
-        val success = tryWriteCompactedState(stateDir, liveFiles, version, schemaRegistry)
+        val success = tryWriteCompactedState(stateDir, liveFiles, version, schemaRegistry, metadata)
 
         if (success) {
           log.info(s"Successfully wrote state at version $version (attempt $attempt)")
@@ -190,7 +193,8 @@ class StateWriter(
       stateDir: String,
       liveFiles: Seq[FileEntry],
       version: Long,
-      schemaRegistry: Map[String, String]): Boolean = {
+      schemaRegistry: Map[String, String],
+      metadata: Option[String]): Boolean = {
 
     // Create directory (safe - directory names are versioned)
     if (!cloudProvider.exists(stateDir)) {
@@ -234,7 +238,8 @@ class StateWriter(
       manifests = newManifests,
       tombstones = Seq.empty,
       schemaRegistry = schemaRegistry,
-      protocolVersion = 4
+      protocolVersion = 4,
+      metadata = metadata
     )
 
     // Use conditional write for _manifest.json - this is the commit point
