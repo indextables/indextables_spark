@@ -33,11 +33,13 @@ class DescribeTransactionLogTest extends AnyFunSuite with BeforeAndAfterEach {
   var tempDir: String     = _
 
   override def beforeEach(): Unit = {
+    // Use JSON format since these tests validate JSON transaction log structure
     spark = SparkSession
       .builder()
       .appName("DescribeTransactionLogTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.checkpoint.enabled", "true")
       .config("spark.indextables.checkpoint.interval", "10")
       .getOrCreate()

@@ -22,7 +22,7 @@ import java.util.Base64
 
 import scala.jdk.CollectionConverters._
 
-import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.{JsonNode, MapperFeature, ObjectMapper, SerializationFeature}
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import org.slf4j.LoggerFactory
 
@@ -49,7 +49,24 @@ object SchemaDeduplication {
   private val HASH_LENGTH = 16
 
   /** ObjectMapper for parsing JSON */
-  private val mapper: ObjectMapper = new ObjectMapper()
+  // Configure ObjectMapper to sort properties alphabetically for consistent hashing
+  // This ensures that JSON serialization produces the same output regardless of
+  // the original field ordering in the input JSON.
+  private val mapper: ObjectMapper = {
+    val m = new ObjectMapper()
+    m.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+    m.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    m
+  }
+
+  // Instrumentation counters for testing/monitoring - track how many times parsing actually happens
+  private val parseCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
+  /** Get the number of times filterEmptyObjectMappings has actually parsed JSON (for testing) */
+  def getParseCallCount(): Long = parseCounter.get()
+
+  /** Reset the parse call counter (for testing) */
+  def resetParseCounter(): Unit = parseCounter.set(0)
 
   /**
    * Recursively sort all object keys in a JsonNode tree to create a canonical representation.
@@ -115,11 +132,17 @@ object SchemaDeduplication {
    *   A 16-character Base64-encoded hash
    */
   def computeSchemaHash(docMappingJson: String): String = {
-    // Normalize the JSON to canonical form for consistent hashing
+    // Normalize the JSON to canonical form for consistent hashing.
+    // Uses Jackson with SORT_PROPERTIES_ALPHABETICALLY to ensure object keys
+    // are serialized in consistent order. Arrays of named objects are sorted
+    // by the "name" field using sortJsonNode().
     val canonicalJson =
       try {
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode   = mapper.readTree(docMappingJson)
         val sortedNode = sortJsonNode(jsonNode)
+        // The mapper is configured with SORT_PROPERTIES_ALPHABETICALLY,
+        // so writeValueAsString produces consistent key ordering
         mapper.writeValueAsString(sortedNode)
       } catch {
         case e: Exception =>
@@ -201,6 +224,9 @@ object SchemaDeduplication {
    * This filter removes those problematic fields so aggregation queries can succeed.
    * The removed fields have no indexed data anyway (all values were null).
    *
+   * NOTE: This method parses JSON which is expensive. For repeated calls with the same
+   * schema, use filterEmptyObjectMappingsCached instead.
+   *
    * @param docMappingJson
    *   The original docMappingJson string (array of field mappings)
    * @return
@@ -208,6 +234,9 @@ object SchemaDeduplication {
    */
   def filterEmptyObjectMappings(docMappingJson: String): String =
     try {
+      // Track actual parse calls for testing/monitoring
+      parseCounter.incrementAndGet()
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       val rootNode = mapper.readTree(docMappingJson)
 
       rootNode match {
@@ -261,6 +290,50 @@ object SchemaDeduplication {
   }
 
   /**
+   * Cached version of filterEmptyObjectMappings that uses the global schema cache.
+   *
+   * The filterEmptyObjectMappings function parses JSON which is expensive (~1ms per call).
+   * Since the same schema hash always produces the same filtered result, we cache based
+   * on the schema hash. This provides a massive performance improvement when reading
+   * tables with thousands of files that all share the same schema.
+   *
+   * @param schemaHash
+   *   The schema hash (from docMappingRef) - used as cache key
+   * @param docMappingJson
+   *   The schema JSON to filter
+   * @return
+   *   Filtered docMappingJson with empty object fields removed
+   */
+  def filterEmptyObjectMappingsCached(schemaHash: String, docMappingJson: String): String =
+    EnhancedTransactionLogCache.getOrComputeFilteredSchema(
+      schemaHash,
+      filterEmptyObjectMappings(docMappingJson)
+    )
+
+  /**
+   * Pre-filter an entire schema registry to remove empty object fields.
+   *
+   * This should be called ONCE when loading a StateManifest, NOT per file entry.
+   * The filtered registry can then be passed to toAddActions for simple lookups.
+   *
+   * Uses cached filtering so each unique schema is only parsed once.
+   *
+   * @param schemaRegistry
+   *   Map of schema hash -> schema JSON
+   * @return
+   *   Map of schema hash -> filtered schema JSON
+   */
+  def filterSchemaRegistry(schemaRegistry: Map[String, String]): Map[String, String] = {
+    if (schemaRegistry.isEmpty) {
+      return schemaRegistry
+    }
+    logger.debug(s"Pre-filtering schema registry with ${schemaRegistry.size} schemas")
+    schemaRegistry.map { case (hash, schema) =>
+      hash -> filterEmptyObjectMappingsCached(hash, schema)
+    }
+  }
+
+  /**
    * Restore schemas in a sequence of actions using a registry.
    *
    * This replaces docMappingRef with docMappingJson for AddActions.
@@ -281,10 +354,12 @@ object SchemaDeduplication {
   ): Seq[Action] = {
 
     // Build hash -> schema map from registry, applying filter if enabled
+    // Use CACHED filtering to avoid repeated JSON parsing for same schema
     val schemaMap = registry.collect {
       case (key, value) if key.startsWith(SCHEMA_KEY_PREFIX) =>
-        val schema = if (filterEmptyObjects) filterEmptyObjectMappings(value) else value
-        key.stripPrefix(SCHEMA_KEY_PREFIX) -> schema
+        val hash = key.stripPrefix(SCHEMA_KEY_PREFIX)
+        val schema = if (filterEmptyObjects) filterEmptyObjectMappingsCached(hash, value) else value
+        hash -> schema
     }
 
     actions.map {
@@ -292,19 +367,21 @@ object SchemaDeduplication {
         val hash = add.docMappingRef.get
         schemaMap.get(hash) match {
           case Some(schema) =>
-            add.copy(
-              docMappingJson = Some(schema),
-              docMappingRef = None // Clear ref after restoration
-            )
+            // IMPORTANT: Preserve docMappingRef so DocMappingMetadata cache uses hash as key
+            // Clearing it would cause O(n) cache misses (one per file)
+            add.copy(docMappingJson = Some(schema))
           case None =>
             logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
             add // Return unchanged if schema not found
         }
 
       // Also filter inline docMappingJson (legacy format without deduplication)
+      // Use docMappingRef as hash if available to avoid expensive JSON normalization
       case add: AddAction if add.docMappingJson.isDefined && filterEmptyObjects =>
-        val filteredSchema = filterEmptyObjectMappings(add.docMappingJson.get)
-        if (filteredSchema != add.docMappingJson.get) {
+        val schema = add.docMappingJson.get
+        val hash = add.docMappingRef.getOrElse(computeSchemaHash(schema))
+        val filteredSchema = filterEmptyObjectMappingsCached(hash, schema)
+        if (filteredSchema != schema) {
           add.copy(docMappingJson = Some(filteredSchema))
         } else {
           add

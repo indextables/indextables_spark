@@ -30,8 +30,12 @@ class BatchTransactionLogTest extends TestBase {
 
   test("should create single transaction with multiple ADD entries like Delta Lake") {
     withTempPath { tempPath =>
-      val tablePath      = new Path(tempPath)
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      val tablePath = new Path(tempPath)
+      // Use JSON format for this test since it checks JSON file structure
+      val jsonOptions = new CaseInsensitiveStringMap(
+        java.util.Map.of("spark.indextables.state.format", "json")
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, jsonOptions)
 
       try {
 

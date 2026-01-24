@@ -241,23 +241,29 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
   }
 
   test("DESCRIBE TRANSACTION LOG should show remove actions after DROP PARTITIONS") {
+    // Use JSON format since this test validates JSON transaction log structure
     val tablePath = s"$tempDir/describe_test"
 
-    val sparkSession = spark
-    import sparkSession.implicits._
-    val data = Seq(
-      (1, "Alice", "2023"),
-      (2, "Bob", "2024")
-    ).toDF("id", "name", "year")
+    // Set session-level format to ensure DROP PARTITIONS uses JSON format
+    spark.conf.set("spark.indextables.state.format", "json")
 
-    data.write
-      .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
-      .partitionBy("year")
-      .mode("overwrite")
-      .save(tablePath)
+    try {
+      val sparkSession = spark
+      import sparkSession.implicits._
+      val data = Seq(
+        (1, "Alice", "2023"),
+        (2, "Bob", "2024")
+      ).toDF("id", "name", "year")
 
-    // Drop 2023 partitions
-    spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2023'").collect()
+      data.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.state.format", "json")
+        .partitionBy("year")
+        .mode("overwrite")
+        .save(tablePath)
+
+      // Drop 2023 partitions
+      spark.sql(s"DROP INDEXTABLES PARTITIONS FROM '$tablePath' WHERE year = '2023'").collect()
 
     // Use DESCRIBE TRANSACTION LOG to verify remove actions
     // Schema: version, log_file_path, action_type, path, partition_values, ...
@@ -274,6 +280,9 @@ class DropPartitionsIntegrationTest extends AnyFunSuite with BeforeAndAfterEach 
       removeActionPath != null && removeActionPath.endsWith(".split"),
       s"Expected remove action for a .split file, got: $removeActionPath"
     )
+    } finally {
+      spark.conf.unset("spark.indextables.state.format")
+    }
   }
 
   test("PURGE INDEXTABLE should clean up files from dropped partitions after retention") {

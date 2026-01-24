@@ -45,6 +45,9 @@ class RealAzureEndToEndTest extends RealAzureTestBase {
 
   override def beforeAll(): Unit = {
     super.beforeAll()
+    // Use JSON format since this test validates JSON transaction log structure
+    // With Avro state format (the new default), transaction log structure differs
+    spark.conf.set("spark.indextables.state.format", "json")
     // Skip all tests if Azure credentials are not available
     assume(
       hasAzureCredentials(),

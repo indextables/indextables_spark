@@ -111,14 +111,15 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       )
 
     // Set threshold high enough that merge should NOT trigger
-    // With 64-core default parallelism and multiplier 2.0, threshold = 128 groups
-    // Our many small files should pack into < 128 groups with 4GB target size
+    // New config: threshold = batchSize * minBatchesToTrigger
+    // With very high minBatchesToTrigger, threshold will be high enough to prevent merge
+    // Our many small files with 4GB target should form few groups, well below threshold
     appendDf.write
       .mode("append")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "4G")
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "2.0")
+      .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1000") // Very high threshold
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1") // Lower threshold for tests
       .partitionBy("year")
       .save(tablePath)
@@ -161,12 +162,13 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .repartition(numPartitions)
 
     // Write with low threshold - should trigger merge
+    // New config: threshold = batchSize * minBatchesToTrigger (default: 1)
     df.write
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
-      .option("spark.indextables.mergeOnWrite.targetSize", "10M")           // Small target = many groups
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Very low multiplier
+      .option("spark.indextables.mergeOnWrite.targetSize", "10M")          // Small target = many groups
+      .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1")   // Low threshold (default)
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .partitionBy("year")
       .save(tablePath)
@@ -192,12 +194,14 @@ class MergeOnWriteGroupCountBugTest extends TestBase with BeforeAndAfterEach {
       .selectExpr("id", "CAST(id AS STRING) as text", "2025 as year")
       .coalesce(1) // Single partition = single file
 
+    // New config: threshold = batchSize * minBatchesToTrigger
+    // Even with low threshold, merge shouldn't trigger because there are no valid groups
     df.write
       .mode("overwrite")
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
       .option("spark.indextables.mergeOnWrite.enabled", "true")
       .option("spark.indextables.mergeOnWrite.targetSize", "100M")
-      .option("spark.indextables.mergeOnWrite.mergeGroupMultiplier", "0.1") // Low threshold
+      .option("spark.indextables.mergeOnWrite.minBatchesToTrigger", "1") // Low threshold (default)
       .option("spark.indextables.mergeOnWrite.minDiskSpaceGB", "1")
       .partitionBy("year")
       .save(tablePath)

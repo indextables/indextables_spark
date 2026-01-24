@@ -211,7 +211,8 @@ class TransactionLogPerformanceTest extends TestBase {
           "spark.indextables.checkpoint.enabled"     -> "true",
           "spark.indextables.checkpoint.interval"    -> "3",
           "spark.indextables.checkpoint.parallelism" -> "2",
-          "spark.indextables.transaction.optimized.enabled" -> "false" // Use standard transaction log for checkpoint testing
+          "spark.indextables.transaction.optimized.enabled" -> "false", // Use standard transaction log for checkpoint testing
+          "spark.indextables.state.format" -> "json" // Use JSON format for checkpoint file testing
         ).asJava
       )
 
@@ -268,7 +269,8 @@ class TransactionLogPerformanceTest extends TestBase {
           "spark.indextables.checkpoint.enabled"        -> "true",
           "spark.indextables.checkpoint.interval"       -> "5",    // Create checkpoint every 5 transactions
           "spark.indextables.checkpoint.parallelism"    -> "4",
-          "spark.indextables.transaction.cache.enabled" -> "false" // Disable cache to test actual checkpoint reading
+          "spark.indextables.transaction.cache.enabled" -> "false", // Disable cache to test actual checkpoint reading
+          "spark.indextables.state.format" -> "json" // Use JSON format for checkpoint file testing
         ).asJava
       )
 
@@ -383,7 +385,8 @@ class TransactionLogPerformanceTest extends TestBase {
           "spark.indextables.checkpoint.interval"       -> "3",   // Checkpoint every 3 transactions
           "spark.indextables.logRetention.duration"     -> "100", // 100ms retention (very short for testing)
           "spark.indextables.checkpoint.parallelism"    -> "2",
-          "spark.indextables.transaction.cache.enabled" -> "false"
+          "spark.indextables.transaction.cache.enabled" -> "false",
+          "spark.indextables.state.format" -> "json" // Use JSON format for checkpoint file testing
         ).asJava
       )
 

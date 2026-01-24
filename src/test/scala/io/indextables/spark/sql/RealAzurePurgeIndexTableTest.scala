@@ -44,6 +44,10 @@ class RealAzurePurgeIndexTableTest extends RealAzureTestBase {
   override def beforeAll(): Unit = {
     super.beforeAll()
 
+    // Use JSON format since this test validates JSON transaction log purge behavior
+    // With Avro state format (the new default), transaction log structure differs
+    spark.conf.set("spark.indextables.state.format", "json")
+
     if (hasAzureCredentials()) {
       val storageAccount = getStorageAccount.getOrElse("unknown")
       azureBasePath = s"wasbs://$testContainer@$storageAccount.blob.core.windows.net/purge-test-$testRunId"

@@ -225,6 +225,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
   }
 
   test("can read table with mixed compressed and uncompressed transaction logs") {
+    // Use JSON format since this test validates JSON transaction log compression
     val tablePath = s"$testDir/mixed_compression_table"
 
     val sparkSession = spark
@@ -234,6 +235,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     val df1 = Seq(("id1", "content1", 100)).toDF("id", "content", "score")
     df1.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.state.format", "json")
       .option("spark.indextables.transaction.compression.enabled", "false")
       .mode(SaveMode.Overwrite)
       .save(tablePath)
@@ -242,6 +244,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     val df2 = Seq(("id2", "content2", 200)).toDF("id", "content", "score")
     df2.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.state.format", "json")
       .option("spark.indextables.transaction.compression.enabled", "true")
       .mode(SaveMode.Append)
       .save(tablePath)
@@ -250,6 +253,7 @@ class CompressedTransactionLogIntegrationTest extends AnyFunSuite with BeforeAnd
     val df3 = Seq(("id3", "content3", 300)).toDF("id", "content", "score")
     df3.write
       .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+      .option("spark.indextables.state.format", "json")
       .option("spark.indextables.transaction.compression.enabled", "true")
       .mode(SaveMode.Append)
       .save(tablePath)

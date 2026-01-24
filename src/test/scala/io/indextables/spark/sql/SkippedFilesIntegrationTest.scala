@@ -38,6 +38,12 @@ import org.scalatest.matchers.should.Matchers
  */
 class SkippedFilesIntegrationTest extends TestBase with Matchers {
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Use JSON format since this test validates JSON transaction log structure with SkipAction entries
+    spark.conf.set("spark.indextables.state.format", "json")
+  }
+
   test("should record and track skipped files with timestamps and cooldown") {
     withTempPath { outputPath =>
       println(s"\n🔧 Testing complete skipped files tracking functionality")

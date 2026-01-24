@@ -28,7 +28,10 @@ import scala.util.{Failure, Success, Try}
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.avro.{AvroManifestReader, FileEntry, PartitionPruner, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.transaction.compression.{CompressionCodec, CompressionUtils}
+
+import org.apache.spark.sql.sources.Filter
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -49,7 +52,9 @@ case class LastCheckpointInfo(
   numFiles: Long,
   createdTime: Long,
   parts: Option[Int] = None,          // Number of parts for multi-part checkpoint (None = single file)
-  checkpointId: Option[String] = None // Unique ID for multi-part checkpoint
+  checkpointId: Option[String] = None, // Unique ID for multi-part checkpoint
+  format: Option[String] = None,      // Checkpoint format: "json", "json-multipart", "avro-state"
+  stateDir: Option[String] = None     // State directory name for avro-state format (e.g., "state-v00000000000000000100")
 )
 
 /**
@@ -141,42 +146,200 @@ class TransactionLogCheckpoint(
     logger.info(s"Creating checkpoint for version $currentVersion with ${allActions.length} actions")
 
     try {
-      // Apply schema deduplication to reduce checkpoint size
-      // This replaces docMappingJson with docMappingRef in AddActions
-      val deduplicatedActions = applySchemaDeduplication(allActions)
+      // Check if Avro state format is enabled
+      val stateFormat = Option(options.get(StateConfig.FORMAT_KEY))
+        .getOrElse(StateConfig.FORMAT_DEFAULT)
 
-      // Determine if we should use multi-part checkpoint
-      val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
-
-      // Always upgrade to V3 protocol for new checkpoints
-      // This ensures consistent behavior and enables V3 features (schema deduplication, multi-part)
-      val finalActions = upgradeProtocolForV3Features(deduplicatedActions)
-
-      val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
-      val numFiles        = allActions.count(_.isInstanceOf[AddAction])
-      val estimatedSize   = StreamingActionWriter.estimateSerializedSize(allActions)
-
-      val checkpointInfoOpt = if (shouldUseMultiPart) {
-        createMultiPartCheckpoint(currentVersion, finalActions, compressionInfo)
+      if (stateFormat.equalsIgnoreCase("avro")) {
+        // Write checkpoint in Avro state format
+        createAvroStateCheckpoint(currentVersion, allActions)
       } else {
-        Some(createSinglePartCheckpoint(currentVersion, finalActions, compressionInfo))
-      }
-
-      checkpointInfoOpt match {
-        case Some(checkpointInfo) =>
-          writeLastCheckpointFile(checkpointInfo.copy(numFiles = numFiles, sizeInBytes = estimatedSize))
-          val partInfo = checkpointInfo.parts.map(p => s" ($p parts)").getOrElse("")
-          logger.info(
-            s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$partInfo$compressionInfo"
-          )
-        case None =>
-          // Another writer completed the checkpoint first (for multi-part only)
-          logger.info(s"Checkpoint for version $currentVersion was created by another writer")
+        // Use existing JSON checkpoint format
+        createJsonCheckpoint(currentVersion, allActions)
       }
     } catch {
       case e: Exception =>
         logger.error(s"Failed to create checkpoint for version $currentVersion", e)
         throw e
+    }
+  }
+
+  /**
+   * Create checkpoint in JSON format (legacy and multi-part).
+   */
+  private def createJsonCheckpoint(
+    currentVersion: Long,
+    allActions: Seq[Action]
+  ): Unit = {
+    // Apply schema deduplication to reduce checkpoint size
+    // This replaces docMappingJson with docMappingRef in AddActions
+    val deduplicatedActions = applySchemaDeduplication(allActions)
+
+    // Determine if we should use multi-part checkpoint
+    val shouldUseMultiPart = multiPartEnabled && deduplicatedActions.length > actionsPerPart
+
+    // Always upgrade to V3 protocol for new checkpoints
+    // This ensures consistent behavior and enables V3 features (schema deduplication, multi-part)
+    val finalActions = upgradeProtocolForV3Features(deduplicatedActions)
+
+    val compressionInfo = codec.map(c => s" (compressed with ${c.name})").getOrElse("")
+    val numFiles        = allActions.count(_.isInstanceOf[AddAction])
+    val estimatedSize   = StreamingActionWriter.estimateSerializedSize(allActions)
+
+    val checkpointInfoOpt = if (shouldUseMultiPart) {
+      createMultiPartCheckpoint(currentVersion, finalActions, compressionInfo)
+    } else {
+      Some(createSinglePartCheckpoint(currentVersion, finalActions, compressionInfo))
+    }
+
+    checkpointInfoOpt match {
+      case Some(checkpointInfo) =>
+        writeLastCheckpointFile(checkpointInfo.copy(numFiles = numFiles, sizeInBytes = estimatedSize))
+        val partInfo = checkpointInfo.parts.map(p => s" ($p parts)").getOrElse("")
+        logger.info(
+          s"Successfully created checkpoint at version $currentVersion with ${allActions.length} actions$partInfo$compressionInfo"
+        )
+      case None =>
+        // Another writer completed the checkpoint first (for multi-part only)
+        logger.info(s"Checkpoint for version $currentVersion was created by another writer")
+    }
+  }
+
+  /**
+   * Create checkpoint in Avro state format with retry support for concurrent write conflicts.
+   *
+   * This writes a compacted state with all live files sorted by partition values for optimal pruning.
+   * Uses conditional writes and retry logic to handle concurrent checkpoint creation.
+   */
+  private def createAvroStateCheckpoint(
+    currentVersion: Long,
+    allActions: Seq[Action]
+  ): Unit = {
+    val compression = Option(options.get(StateConfig.COMPRESSION_KEY))
+      .getOrElse(StateConfig.COMPRESSION_DEFAULT)
+    val compressionLevel = Option(options.get(StateConfig.COMPRESSION_LEVEL_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.COMPRESSION_LEVEL_DEFAULT)
+    val entriesPerManifest = Option(options.get(StateConfig.ENTRIES_PER_MANIFEST_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.ENTRIES_PER_MANIFEST_DEFAULT)
+
+    // Build retry configuration from options
+    val retryConfig = StateRetryConfig(
+      maxAttempts = Option(options.get(StateConfig.RETRY_MAX_ATTEMPTS_KEY))
+        .map(_.toInt)
+        .getOrElse(StateConfig.RETRY_MAX_ATTEMPTS_DEFAULT),
+      baseDelayMs = Option(options.get(StateConfig.RETRY_BASE_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_BASE_DELAY_MS_DEFAULT),
+      maxDelayMs = Option(options.get(StateConfig.RETRY_MAX_DELAY_MS_KEY))
+        .map(_.toLong)
+        .getOrElse(StateConfig.RETRY_MAX_DELAY_MS_DEFAULT)
+    )
+
+    val stateWriter = StateWriter(
+      cloudProvider,
+      transactionLogPath.toString,
+      compression,
+      compressionLevel,
+      entriesPerManifest,
+      retryConfig
+    )
+
+    val manifestIO = StateManifestIO(cloudProvider)
+
+    // Extract AddActions and MetadataAction from allActions
+    val allFiles = allActions.collect { case add: AddAction => add }
+    val metadataAction = allActions.collectFirst { case m: MetadataAction => m }
+
+    // Serialize MetadataAction to JSON for storage in state manifest
+    // This enables fast getMetadata() without scanning version files
+    val metadataJson = metadataAction.map { m =>
+      val metadataWrapper = Map("metaData" -> m)
+      JsonUtil.mapper.writeValueAsString(metadataWrapper)
+    }
+
+    // Build schema registry from AddActions with docMappingJson
+    // This deduplicates schema storage and allows restoration when reading
+    // IMPORTANT: Use SchemaDeduplication.computeSchemaHash for normalized hashing
+    // This ensures semantically identical schemas (different JSON ordering) get the same hash
+    val schemaRegistry = scala.collection.mutable.Map[String, String]()
+
+    // Check if we need to re-normalize schemas (threshold-based optimization)
+    // If unique docMappingRef count is above threshold, there may be buggy hashes that need consolidation
+    val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
+    val existingRefCount = allFiles.flatMap(_.docMappingRef).toSet.size
+    val shouldRenormalize = existingRefCount > renormalizeThreshold
+
+    if (shouldRenormalize) {
+      logger.info(s"Schema renormalization triggered: $existingRefCount unique docMappingRef values exceeds threshold of $renormalizeThreshold")
+    }
+
+    // Convert AddActions to FileEntries with current version and timestamp
+    // Also build schema registry and set docMappingRef
+    val timestamp = System.currentTimeMillis()
+    val fileEntries = allFiles.map { add =>
+      val refAndJson = add.docMappingJson.map { json =>
+        // Compute normalized hash if renormalizing, otherwise trust existing ref
+        val ref = if (shouldRenormalize) {
+          SchemaDeduplication.computeSchemaHash(json)
+        } else {
+          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        }
+        schemaRegistry.put(ref, json)
+        ref
+      }
+      FileEntry.fromAddAction(add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)), currentVersion, timestamp)
+    }
+
+    logger.info(s"Creating Avro state checkpoint at version $currentVersion with ${fileEntries.size} files, schemaRegistry size=${schemaRegistry.size}")
+
+    // Write compacted state with retry support for concurrent conflicts
+    // This uses conditional writes for _manifest.json and automatic version increment on conflict
+    val writeResult = stateWriter.writeStateWithRetry(
+      currentVersion,
+      fileEntries,
+      schemaRegistry.toMap,
+      metadataJson
+    )
+
+    // Extract the actual version and state directory from the write result
+    val actualVersion = writeResult.version
+    val stateDir = manifestIO.formatStateDir(actualVersion)
+
+    if (writeResult.conflictDetected) {
+      logger.info(s"Checkpoint created at version $actualVersion after ${writeResult.attempts} attempts " +
+        s"(original version $currentVersion had concurrent conflict)")
+    }
+
+    // Update _last_checkpoint to point to new Avro state
+    // Use version-checked write to avoid regressing to an older checkpoint
+    val lastCheckpointInfo = LastCheckpointInfo(
+      version = actualVersion,
+      size = fileEntries.size,
+      sizeInBytes = fileEntries.map(_.size).sum,
+      numFiles = fileEntries.size,
+      createdTime = timestamp,
+      parts = None,
+      checkpointId = None,
+      format = Some(StateConfig.Format.AVRO_STATE),
+      stateDir = Some(stateDir)
+    )
+
+    val lastCheckpointJson = io.indextables.spark.util.JsonUtil.mapper.writeValueAsString(lastCheckpointInfo)
+    val checkpointUpdated = manifestIO.writeLastCheckpointIfNewer(
+      transactionLogPath.toString,
+      actualVersion,
+      lastCheckpointJson
+    )
+
+    if (checkpointUpdated) {
+      logger.info(s"Avro state checkpoint created successfully at version $actualVersion (format=avro-state)")
+    } else {
+      logger.info(s"Avro state written at version $actualVersion, but _last_checkpoint not updated " +
+        s"(a newer checkpoint already exists)")
     }
   }
 
@@ -359,22 +522,55 @@ class TransactionLogCheckpoint(
   }
 
   def getActionsFromCheckpoint(): Option[Seq[Action]] =
+    getActionsFromCheckpointWithFilters(Seq.empty)
+
+  /**
+   * Get actions from checkpoint with optional partition filters for Avro state format.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
+   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
+   * for large tables with many partitions.
+   *
+   * @param partitionFilters
+   *   Partition filters to apply for manifest pruning (only used with Avro state format)
+   * @return
+   *   Actions from the checkpoint, or None if no checkpoint exists
+   */
+  def getActionsFromCheckpointWithFilters(partitionFilters: Seq[Filter]): Option[Seq[Action]] =
     getLastCheckpointInfo().flatMap { info =>
       Try {
-        val actions = info.checkpointId match {
-          case Some(_) =>
-            // New format: manifest-based multi-part checkpoint
-            readMultiPartCheckpointFromManifest(info.version)
-          case None =>
-            // Legacy format: single-file checkpoint (actions directly in file)
-            readLegacySingleFileCheckpoint(info.version)
+        val actions = info.format match {
+          case Some(StateConfig.Format.AVRO_STATE) =>
+            // Avro state format: read from state directory with partition pruning
+            readAvroStateCheckpoint(info, partitionFilters)
+          case _ =>
+            // JSON formats (legacy and multi-part) - emit deprecation warning
+            if (StateConfig.Format.isJsonFormat(info.format)) {
+              logger.warn(StateConfig.JSON_FORMAT_DEPRECATION_WARNING)
+            }
+            info.checkpointId match {
+              case Some(_) =>
+                // New format: manifest-based multi-part checkpoint
+                readMultiPartCheckpointFromManifest(info.version)
+              case None =>
+                // Legacy format: single-file checkpoint (actions directly in file)
+                readLegacySingleFileCheckpoint(info.version)
+            }
         }
 
         // Validate protocol version before proceeding
         validateProtocolVersion(actions)
 
-        // Restore schemas from registry (handles both legacy and deduplicated checkpoints)
-        restoreSchemas(actions)
+        // Restore schemas from registry (only for non-Avro checkpoints)
+        // Avro checkpoints already have schemas restored via FileEntry.toAddAction with cached filtering
+        info.format match {
+          case Some(StateConfig.Format.AVRO_STATE) =>
+            // Avro path: schemas already restored with cached filterEmptyObjectMappings in readAvroStateCheckpoint
+            actions
+          case _ =>
+            // JSON path: need to restore schemas from MetadataAction configuration
+            restoreSchemas(actions)
+        }
       } match {
         case Success(actions)                     => Some(actions)
         case Failure(e: ProtocolVersionException) =>
@@ -385,6 +581,120 @@ class TransactionLogCheckpoint(
           None
       }
     }
+
+  /**
+   * Read checkpoint data from Avro state format.
+   *
+   * The Avro state format stores file entries in binary Avro manifests, providing 10x faster reads than JSON and enabling
+   * partition pruning for gigantic tables.
+   */
+  private def readAvroStateCheckpoint(info: LastCheckpointInfo): Seq[Action] = {
+    readAvroStateCheckpoint(info, partitionFilters = Seq.empty)
+  }
+
+  /**
+   * Read checkpoint data from Avro state format with partition filtering.
+   *
+   * When partition filters are provided, the pruner can skip entire manifests that are known
+   * not to contain matching files based on partition bounds, providing significant speedup
+   * for partition-filtered queries on large tables.
+   *
+   * Uses the global StateManifest cache to avoid repeated cloud storage reads across queries.
+   *
+   * @param info
+   *   Checkpoint info with stateDir
+   * @param partitionFilters
+   *   Optional partition filters for manifest pruning
+   * @return
+   *   Actions from the checkpoint
+   */
+  private def readAvroStateCheckpoint(info: LastCheckpointInfo, partitionFilters: Seq[Filter]): Seq[Action] = {
+    val stateDir = info.stateDir.getOrElse(
+      throw new IllegalStateException(s"Avro state checkpoint is missing stateDir: version=${info.version}")
+    )
+
+    val stateDirPath = new Path(transactionLogPath, stateDir).toString
+    logger.debug(s"Reading Avro state checkpoint: version=${info.version}, stateDir=$stateDir")
+
+    val manifestIO = StateManifestIO(cloudProvider)
+    val manifestReader = AvroManifestReader(cloudProvider)
+
+    // Use GLOBAL StateManifest cache to avoid repeated cloud storage reads
+    // The StateManifest is immutable once written, so safe to cache indefinitely
+    val stateManifest = Option(EnhancedTransactionLogCache.globalAvroStateManifestCache.getIfPresent(stateDirPath)) match {
+      case Some(cached) =>
+        logger.debug(s"StateManifest cache HIT for $stateDirPath (version ${cached.stateVersion})")
+        cached
+      case None =>
+        logger.debug(s"StateManifest cache MISS for $stateDirPath - reading from storage")
+        val manifest = manifestIO.readStateManifest(stateDirPath)
+        EnhancedTransactionLogCache.globalAvroStateManifestCache.put(stateDirPath, manifest)
+        logger.info(s"Cached StateManifest for $stateDirPath (version ${manifest.stateVersion}, ${manifest.numFiles} files)")
+        manifest
+    }
+
+    // Apply partition pruning if filters are provided
+    val manifestsToRead = if (partitionFilters.nonEmpty) {
+      val prunedManifests = PartitionPruner.pruneManifests(stateManifest.manifests, partitionFilters)
+      logger.info(
+        s"Partition pruning: reading ${prunedManifests.size} of ${stateManifest.manifests.size} manifests")
+      prunedManifests
+    } else {
+      stateManifest.manifests
+    }
+
+    // Read selected Avro manifests in parallel
+    val manifestPaths = manifestsToRead.map(m => s"$stateDirPath/${m.path}")
+    val fileEntries = manifestReader.readManifestsParallel(manifestPaths)
+
+    // Apply tombstones to filter out removed files
+    val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
+
+    // Convert FileEntries to AddActions with schema registry for docMappingJson restoration
+    // This now uses cached filterEmptyObjectMappings via FileEntry.toAddAction
+    val addActions = manifestReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+
+    // Build the full action list (Protocol + Metadata + AddActions)
+    val actions = scala.collection.mutable.ListBuffer[Action]()
+
+    // Add Protocol action for compatibility
+    actions += ProtocolAction(
+      minReaderVersion = stateManifest.protocolVersion,
+      minWriterVersion = stateManifest.protocolVersion,
+      readerFeatures = Some(Set("avroState")),
+      writerFeatures = Some(Set("avroState"))
+    )
+
+    // Add MetadataAction from state manifest if present
+    // This enables fast getMetadata() without scanning version files
+    stateManifest.metadata.foreach { metadataJson =>
+      try {
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
+        val jsonNode = JsonUtil.mapper.readTree(metadataJson)
+        if (jsonNode.has("metaData")) {
+          val metadata = JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
+          actions += metadata
+          logger.debug(s"Restored MetadataAction from Avro state checkpoint")
+        }
+      } catch {
+        case e: Exception =>
+          logger.warn(s"Failed to parse metadata from Avro state checkpoint: ${e.getMessage}")
+      }
+    }
+
+    // Log schema registry usage
+    if (stateManifest.schemaRegistry.nonEmpty) {
+      logger.debug(s"Restored docMappingJson from ${stateManifest.schemaRegistry.size} schema registry entries")
+    }
+
+    actions ++= addActions
+
+    logger.info(
+      s"Read Avro state checkpoint: version=${info.version}, " +
+        s"files=${liveEntries.size}, tombstones=${stateManifest.tombstones.size}")
+
+    actions.toSeq
+  }
 
   /**
    * Read a legacy single-file checkpoint (actions directly in file).
@@ -562,6 +872,7 @@ class TransactionLogCheckpoint(
    * Uses treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes.
    */
   private def parseActionLine(line: String): Action = {
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
     val jsonNode = JsonUtil.mapper.readTree(line)
 
     if (jsonNode.has("protocol")) {
@@ -583,6 +894,7 @@ class TransactionLogCheckpoint(
     val lines = content.split("\n").filter(_.nonEmpty)
 
     lines.map { line =>
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       val jsonNode = JsonUtil.mapper.readTree(line)
 
       // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes
@@ -624,6 +936,7 @@ class TransactionLogCheckpoint(
 
     Try {
       val content = new String(cloudProvider.readFile(LAST_CHECKPOINT.toString), "UTF-8")
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       JsonUtil.mapper.readValue(content, classOf[LastCheckpointInfo])
     } match {
       case Success(info) => Some(info)

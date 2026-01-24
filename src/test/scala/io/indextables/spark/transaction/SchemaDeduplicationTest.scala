@@ -94,9 +94,10 @@ class SchemaDeduplicationTest extends TestBase {
     restoredAdds(0).docMappingJson shouldBe Some(smallSchema)
     restoredAdds(1).docMappingJson shouldBe Some(largeSchema)
 
-    // docMappingRef should be cleared
-    restoredAdds(0).docMappingRef shouldBe None
-    restoredAdds(1).docMappingRef shouldBe None
+    // docMappingRef should be PRESERVED for caching (not cleared)
+    // This is important: preserving docMappingRef allows DocMappingMetadata cache to use hash as key
+    restoredAdds(0).docMappingRef shouldBe Some(hash1)
+    restoredAdds(1).docMappingRef shouldBe Some(hash2)
   }
 
   test("deduplicateSchemas should preserve existing registry entries") {
@@ -199,9 +200,13 @@ class SchemaDeduplicationTest extends TestBase {
   test("checkpoint roundtrip with schema deduplication") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
+      // Use JSON format for checkpoint testing
+      val jsonOptions = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        java.util.Map.of("spark.indextables.state.format", "json")
+      )
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
         tempPath,
-        new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        jsonOptions,
         spark.sparkContext.hadoopConfiguration
       )
 
@@ -212,7 +217,7 @@ class SchemaDeduplicationTest extends TestBase {
         val checkpoint = new TransactionLogCheckpoint(
           transactionLogPath,
           cloudProvider,
-          new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+          jsonOptions
         )
 
         // Create actions with schema
@@ -237,8 +242,8 @@ class SchemaDeduplicationTest extends TestBase {
         val restoredAdds = restoredActions.collect { case a: AddAction => a }
         restoredAdds.length shouldBe 5
         restoredAdds.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-          add.docMappingRef shouldBe None // Should be cleared after restoration
+          add.docMappingJson shouldBe defined  // Schema should be restored from registry
+          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
@@ -417,10 +422,11 @@ class SchemaDeduplicationTest extends TestBase {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
 
+      // Use JSON format for this test since it tests JSON checkpoint schema deduplication
       val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
         java.util.Map.of(
-          "spark.indextables.checkpoint.enabled",
-          "false"
+          "spark.indextables.checkpoint.enabled", "false",
+          "spark.indextables.state.format", "json"
         )
       )
 
@@ -614,6 +620,7 @@ class SchemaDeduplicationTest extends TestBase {
       }
 
       // Write 12 batches to trigger checkpoint at version 10
+      // Use JSON format for this test since it tests JSON checkpoint schema deduplication
       (1 to 12).foreach { i =>
         val mode = if (i == 1) "overwrite" else "append"
         val df   = createDF(i)
@@ -622,6 +629,7 @@ class SchemaDeduplicationTest extends TestBase {
           .mode(mode)
           .option("spark.indextables.checkpoint.enabled", "true")
           .option("spark.indextables.checkpoint.interval", "10")
+          .option("spark.indextables.state.format", "json")
           .save(tempPath)
       }
 

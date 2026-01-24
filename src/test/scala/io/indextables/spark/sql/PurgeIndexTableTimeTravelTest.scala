@@ -46,6 +46,8 @@ class PurgeIndexTableTimeTravelTest extends AnyFunSuite with BeforeAndAfterEach 
       .appName("PurgeIndexTableTimeTravelTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Use JSON format since this test validates JSON transaction log file cleanup
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.checkpoint.enabled", "true")
       .config("spark.indextables.checkpoint.interval", "10")
       .getOrCreate()

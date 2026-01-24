@@ -112,6 +112,11 @@ class PurgeOrphanedSplitsExecutor(
     val checkpointsDeleted = cleanupOldCheckpointFiles(txLog)
     logger.info(s"Checkpoint cleanup: deleted $checkpointsDeleted old checkpoint files")
 
+    // Step 5b: Clean up old Avro state directories
+    // State directories older than retention period are safe to delete (except the latest one)
+    val stateDirectoriesDeleted = cleanupOldStateDirectories()
+    logger.info(s"State directory cleanup: deleted $stateDirectoriesDeleted old state directories")
+
     // Use all retained files as the valid files set
     val allFiles = allRetainedFiles
 
@@ -501,6 +506,180 @@ class PurgeOrphanedSplitsExecutor(
         0L
     }
 
+  // Regex pattern for Avro state directory detection
+  // State directories have format: state-v00000000000000000100
+  private val StateDirectoryPattern = """^state-v(\d{20})$""".r
+
+  /**
+   * Clean up old Avro state directories based on retention policy.
+   *
+   * State directories follow the format `state-v{version}` and contain:
+   *   - _manifest.json: Metadata about the state
+   *   - manifest-*.avro: Avro manifest files containing file entries
+   *
+   * This method:
+   *   1. Lists all state directories in the transaction log
+   *   2. Identifies the latest state directory (to preserve)
+   *   3. Deletes state directories older than the retention period
+   *
+   * @return
+   *   Number of state directories deleted (or would be deleted in DRY RUN)
+   */
+  private def cleanupOldStateDirectories(): Long =
+    try {
+      val transactionLogPath = new Path(tablePath, "_transaction_log")
+
+      // Get retention configuration - use explicit parameter if provided, otherwise fall back to config
+      val logRetentionDuration = txLogRetentionDuration.getOrElse {
+        spark.conf
+          .getOption("spark.indextables.logRetention.duration")
+          .map(_.toLong)
+          .getOrElse(30L * 24 * 60 * 60 * 1000) // 30 days default
+      }
+
+      val currentTime = System.currentTimeMillis()
+
+      // Use CloudStorageProvider for multi-cloud support with credentials
+      val cloudConfigs = extractCloudStorageConfigs()
+      val optionsMap   = new java.util.HashMap[String, String]()
+      cloudConfigs.foreach { case (k, v) => optionsMap.put(k, v) }
+      val configOptions = new CaseInsensitiveStringMap(optionsMap)
+
+      val provider = CloudStorageProviderFactory.createProvider(
+        transactionLogPath.toString,
+        configOptions,
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        // List all files/directories in transaction log directory
+        val allFiles = provider.listFiles(transactionLogPath.toString, recursive = false)
+
+        // Find state directories
+        val stateDirectories = allFiles.filter { f =>
+          val name = new Path(f.path).getName
+          StateDirectoryPattern.findFirstIn(name).isDefined
+        }
+
+        if (stateDirectories.isEmpty) {
+          logger.info("No Avro state directories found")
+          return 0L
+        }
+
+        // Extract versions and find the latest
+        val stateVersions = stateDirectories.flatMap { f =>
+          val name = new Path(f.path).getName
+          name match {
+            case StateDirectoryPattern(versionStr) => Some((versionStr.toLong, f))
+            case _ => None
+          }
+        }
+
+        val latestVersion = stateVersions.map(_._1).max
+        logger.info(
+          s"Found ${stateDirectories.size} Avro state directories (latest: v$latestVersion, dryRun=$dryRun)"
+        )
+
+        var deletedCount = 0L
+
+        stateVersions.foreach { case (version, stateDir) =>
+          // Never delete the latest state directory
+          if (version == latestVersion) {
+            logger.debug(s"Preserving latest state directory: state-v$version")
+          } else {
+            // Check if the state directory is old enough to delete
+            val fileAge = currentTime - stateDir.modificationTime
+
+            if (fileAge > logRetentionDuration) {
+              if (dryRun) {
+                logger.info(
+                  s"DRY RUN: Would delete old state directory: state-v$version (age: ${fileAge / 1000}s)"
+                )
+                deletedCount += 1
+              } else {
+                // Delete the state directory and all its contents
+                try {
+                  val deleted = deleteDirectoryRecursively(provider, stateDir.path)
+                  if (deleted) {
+                    deletedCount += 1
+                    logger.debug(s"Deleted old state directory: state-v$version (age: ${fileAge / 1000}s)")
+                  }
+                } catch {
+                  case e: Exception =>
+                    logger.warn(s"Failed to delete state directory state-v$version: ${e.getMessage}")
+                }
+              }
+            } else {
+              logger.debug(
+                s"Keeping state directory: state-v$version (age: ${fileAge / 1000}s, retention: ${logRetentionDuration / 1000}s)"
+              )
+            }
+          }
+        }
+
+        if (deletedCount > 0) {
+          val action = if (dryRun) "Would delete" else "Deleted"
+          logger.info(s"$action $deletedCount old state directories")
+        } else {
+          logger.info("No old state directories to delete")
+        }
+
+        deletedCount
+      } finally
+        provider.close()
+
+    } catch {
+      case e: Exception =>
+        // Don't fail the entire purge operation if state directory cleanup fails
+        logger.warn(s"Failed to clean up old state directories: ${e.getMessage}", e)
+        0L
+    }
+
+  /**
+   * Delete a directory and all its contents recursively.
+   *
+   * @param provider
+   *   Cloud storage provider
+   * @param dirPath
+   *   Path to the directory to delete
+   * @return
+   *   true if the directory was successfully deleted
+   */
+  private def deleteDirectoryRecursively(provider: CloudStorageProvider, dirPath: String): Boolean = {
+    try {
+      // List all files in the directory
+      val files = provider.listFiles(dirPath, recursive = true)
+
+      // Delete all files first
+      var allDeleted = true
+      files.filterNot(_.isDirectory).foreach { file =>
+        try {
+          if (!provider.deleteFile(file.path)) {
+            logger.warn(s"Failed to delete file: ${file.path}")
+            allDeleted = false
+          }
+        } catch {
+          case e: Exception =>
+            logger.warn(s"Error deleting file ${file.path}: ${e.getMessage}")
+            allDeleted = false
+        }
+      }
+
+      // Try to delete the directory itself (may or may not be needed depending on storage)
+      try {
+        provider.deleteFile(dirPath)
+      } catch {
+        case _: Exception => // Ignore - directory may already be gone or not supported
+      }
+
+      allDeleted
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Error deleting directory $dirPath: ${e.getMessage}")
+        false
+    }
+  }
+
   /**
    * Determine which transaction log versions will be deleted based on checkpoint and retention policy. This duplicates
    * the logic from cleanupOldTransactionLogFiles but doesn't actually delete.
@@ -845,6 +1024,7 @@ class PurgeOrphanedSplitsExecutor(
       var line = reader.readLine()
       while (line != null) {
         if (line.nonEmpty) {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
@@ -879,6 +1059,7 @@ class PurgeOrphanedSplitsExecutor(
       .split("\n")
       .filter(_.nonEmpty)
       .map { line =>
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(line)
 
         if (jsonNode.has("protocol")) {

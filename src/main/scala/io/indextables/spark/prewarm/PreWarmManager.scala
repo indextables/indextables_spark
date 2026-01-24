@@ -352,35 +352,17 @@ object PreWarmManager {
     }
   }
 
-  /** Extract field names from AddAction metadata (docMappingJson). */
-  private def extractFieldsFromMetadata(addAction: AddAction): Set[String] =
-    addAction.docMappingJson match {
-      case Some(json) =>
-        try {
-          // Parse docMappingJson to extract field names
-          // Format: {"field_mappings":[{"name":"field1",...},{"name":"field2",...}]}
-          val mapper        = new com.fasterxml.jackson.databind.ObjectMapper()
-          val root          = mapper.readTree(json)
-          val fieldMappings = root.path("field_mappings")
-          if (fieldMappings.isArray) {
-            import scala.jdk.CollectionConverters._
-            fieldMappings
-              .elements()
-              .asScala
-              .flatMap(fm => Option(fm.path("name").asText(null)))
-              .map(_.toLowerCase)
-              .toSet
-          } else {
-            Set.empty[String]
-          }
-        } catch {
-          case e: Exception =>
-            logger.debug(s"Failed to parse docMappingJson for field extraction: ${e.getMessage}")
-            Set.empty[String]
-        }
-      case None =>
-        Set.empty[String]
-    }
+  /**
+   * Extract field names from AddAction metadata (docMappingJson).
+   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   */
+  private def extractFieldsFromMetadata(addAction: AddAction): Set[String] = {
+    import io.indextables.spark.transaction.EnhancedTransactionLogCache
+    // Use cached DocMappingMetadata - no JSON parsing here
+    val metadata = EnhancedTransactionLogCache.getDocMappingMetadata(addAction)
+    // Return field names in lowercase for case-insensitive matching
+    metadata.fieldNames.map(_.toLowerCase)
+  }
 
   /**
    * Join on a warmup future for a specific split during query execution. This should be called in the partition reader

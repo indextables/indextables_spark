@@ -326,8 +326,10 @@ class TantivyDirectInterface(
     try {
       import com.fasterxml.jackson.databind.JsonNode
       import io.indextables.spark.util.JsonUtil
+      import io.indextables.spark.transaction.EnhancedTransactionLogCache
 
       // Parse existing doc mapping JSON to extract field configurations
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       val existingMapping = JsonUtil.mapper.readTree(existingDocMapping)
       val existingFields  = Option(existingMapping.get("fields")).map(_.asInstanceOf[JsonNode])
 

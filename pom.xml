@@ -6,7 +6,7 @@
 
     <groupId>io.indextables</groupId>
     <artifactId>indextables_spark</artifactId>
-    <version>0.4.0_spark_3.5.3</version>
+    <version>0.4.5_spark_3.5.3</version>
     <packaging>jar</packaging>
 
     <name>IndexTables4Spark</name>
@@ -160,6 +160,13 @@
             <groupId>com.fasterxml.jackson.module</groupId>
             <artifactId>jackson-module-scala_${scala.compat.version}</artifactId>
             <version>2.15.2</version>
+        </dependency>
+
+        <!-- Apache Avro for state file format -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.11.3</version>
         </dependency>
 
 

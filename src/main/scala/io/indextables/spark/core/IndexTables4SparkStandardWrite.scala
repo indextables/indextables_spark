@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.write.LogicalWriteInfo
 
 import org.apache.hadoop.fs.Path
 
-import io.indextables.spark.transaction.{AddAction, TransactionLog}
+import io.indextables.spark.transaction.{AddAction, EnhancedTransactionLogCache, TransactionLog}
 import org.slf4j.LoggerFactory
 
 /**
@@ -293,6 +293,7 @@ class IndexTables4SparkStandardWrite(
         import io.indextables.spark.util.JsonUtil
         import scala.jdk.CollectionConverters._
 
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val existingMapping = JsonUtil.mapper.readTree(existingDocMapping.get: String)
         logger.debug(s"VALIDATION DEBUG: Parsed existing mapping JSON: $existingMapping")
 

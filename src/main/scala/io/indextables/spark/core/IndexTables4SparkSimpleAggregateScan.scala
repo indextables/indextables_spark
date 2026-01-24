@@ -33,7 +33,7 @@ import org.apache.spark.sql.types.{
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
 
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
 import io.indextables.tantivy4java.split.merge.QuickwitSplit
 import org.slf4j.LoggerFactory
 
@@ -860,34 +860,16 @@ class IndexTables4SparkSimpleAggregateReader(
       fieldName
     }
 
-  /** Read fast fields from docMappingJson metadata in the split */
-  private def getFastFieldsFromDocMapping(): Set[String] =
-    partition.split.docMappingJson match {
-      case Some(mappingJson) =>
-        try {
-          import io.indextables.spark.util.JsonUtil
-          import scala.jdk.CollectionConverters._
-
-          val docMapping = JsonUtil.mapper.readTree(mappingJson)
-
-          if (docMapping.isArray) {
-            docMapping.asScala.flatMap { fieldNode =>
-              val fieldName = Option(fieldNode.get("name")).map(_.asText())
-              val isFast    = Option(fieldNode.get("fast")).map(_.asBoolean()).getOrElse(false)
-
-              if (isFast && fieldName.isDefined) Some(fieldName.get) else None
-            }.toSet
-          } else {
-            Set.empty[String]
-          }
-        } catch {
-          case e: Exception =>
-            logger.debug(s"DOC MAPPING: Failed to parse docMappingJson: ${e.getMessage}")
-            Set.empty[String]
-        }
-
-      case None =>
-        logger.debug("DOC MAPPING: No docMappingJson in split")
-        Set.empty[String]
+  /**
+   * Read fast fields from docMappingJson metadata in the split.
+   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   */
+  private def getFastFieldsFromDocMapping(): Set[String] = {
+    // Use cached DocMappingMetadata - no JSON parsing here
+    val metadata = EnhancedTransactionLogCache.getDocMappingMetadata(partition.split)
+    if (metadata.fastFields.isEmpty) {
+      logger.debug("DOC MAPPING: No fast fields found in split metadata")
     }
+    metadata.fastFields
+  }
 }

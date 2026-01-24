@@ -26,6 +26,7 @@ import scala.util.{Failure, Success, Try}
 import org.apache.spark.sql.types.{DataType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.sources.Filter
 
 import org.apache.hadoop.fs.Path
 
@@ -465,6 +466,74 @@ class TransactionLog(
   }
 
   /**
+   * List files with partition filter pruning for Avro state format.
+   *
+   * When partition filters are provided and the checkpoint is in Avro state format, the reader can
+   * prune entire manifest files that don't contain matching partitions, significantly reducing I/O
+   * for large tables with many partitions.
+   *
+   * Note: This method bypasses the file cache since filtered results shouldn't be cached
+   * (different filters would produce different results).
+   *
+   * @param partitionFilters
+   *   Partition filters for manifest pruning (only used with Avro state format)
+   * @return
+   *   List of AddActions representing files in the table
+   */
+  override def listFilesWithPartitionFilters(partitionFilters: Seq[Filter]): Seq[AddAction] = {
+    // Check protocol before reading
+    assertTableReadable()
+
+    // If no filters provided, use the regular cached path
+    if (partitionFilters.isEmpty) {
+      return listFiles()
+    }
+
+    // Use optimized checkpoint + parallel retrieval approach with partition filters
+    val files = ListBuffer[AddAction]()
+
+    // Try to get base state from checkpoint first with partition filter pruning
+    checkpoint.flatMap(_.getActionsFromCheckpointWithFilters(partitionFilters)) match {
+      case Some(checkpointActions) =>
+        // Apply checkpoint actions first
+        checkpointActions.foreach {
+          case add: AddAction       => files += add
+          case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+          case _                    => // Ignore other actions for file listing
+        }
+
+        // Then apply incremental changes since checkpoint
+        val checkpointVersion       = checkpoint.flatMap(_.getLastCheckpointVersion()).getOrElse(-1L)
+        val allVersions             = getVersions()
+        val versionsAfterCheckpoint = allVersions.filter(_ > checkpointVersion)
+
+        if (versionsAfterCheckpoint.nonEmpty) {
+          logger.debug(
+            s"Reading ${versionsAfterCheckpoint.length} versions after checkpoint $checkpointVersion in parallel"
+          )
+          val parallelResults = checkpoint.get.readVersionsInParallel(versionsAfterCheckpoint)
+
+          // Apply changes in version order
+          for (version <- versionsAfterCheckpoint.sorted)
+            parallelResults.get(version).foreach { actions =>
+              actions.foreach {
+                case add: AddAction       => files += add
+                case remove: RemoveAction => files --= files.filter(_.path == remove.path)
+                case _                    => // Ignore other actions for file listing
+              }
+            }
+        }
+      case None =>
+        // No checkpoint available - fallback to regular listFiles (no filter optimization)
+        return listFiles()
+    }
+
+    val result = files.toSeq
+    // Restore schemas if any AddActions have docMappingRef (schema deduplication was used)
+    restoreSchemasInAddActions(result)
+  }
+
+  /**
    * Restore schemas in AddActions if they use schema references (docMappingRef).
    *
    * This handles schema deduplication by replacing docMappingRef with docMappingJson using the schema registry stored
@@ -515,12 +584,17 @@ class TransactionLog(
   /**
    * Filter inline docMappingJson to remove empty object fields.
    * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
+   * Uses cached filtering to avoid repeated JSON parsing for files with the same schema.
    */
   private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
     addActions.map { add =>
       if (add.docMappingJson.isDefined) {
-        val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
-        if (filtered != add.docMappingJson.get) {
+        val schema = add.docMappingJson.get
+        // Use existing docMappingRef as hash if available, otherwise compute
+        // This avoids expensive JSON normalization on every query
+        val hash = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
+        val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+        if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))
         } else {
           add
@@ -1667,6 +1741,7 @@ class TransactionLog(
       var line = reader.readLine()
       while (line != null) {
         if (line.nonEmpty) {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)

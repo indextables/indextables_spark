@@ -53,6 +53,8 @@ class PurgeOnWriteIntegrationTest extends AnyFunSuite with BeforeAndAfterEach {
       .appName("PurgeOnWriteIntegrationTest")
       .config("spark.ui.enabled", "false")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Use JSON format since this test validates JSON transaction log file cleanup
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.purge.retentionCheckEnabled", "true")
       .getOrCreate()
 

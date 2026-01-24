@@ -36,12 +36,14 @@ class PurgeIndexTableIntegrationTest extends AnyFunSuite with BeforeAndAfterEach
   var fs: FileSystem      = _
 
   override def beforeEach(): Unit = {
+    // Use JSON format since these tests validate JSON checkpoint file structure
     spark = SparkSession
       .builder()
       .master("local[4]")
       .appName("PurgeOrphanedSplitsIntegrationTest")
       .config("spark.ui.enabled", "false")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.purge.retentionCheckEnabled", "true")
       .getOrCreate()
 

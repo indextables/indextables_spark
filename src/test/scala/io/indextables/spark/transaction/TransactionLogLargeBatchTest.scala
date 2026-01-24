@@ -1,11 +1,14 @@
 package io.indextables.spark.transaction
 
 import org.apache.spark.sql.types.{IntegerType, StringType, StructField, StructType}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.TestBase
 import org.scalatest.matchers.should.Matchers._
+
+import scala.jdk.CollectionConverters._
 
 /**
  * Integration test to validate transaction log file naming with large batches (>100 actions). This test ensures the bug
@@ -15,8 +18,12 @@ class TransactionLogLargeBatchTest extends TestBase {
 
   test("transaction log should create properly named files when writing >100 actions") {
     withTempPath { tempDir =>
-      val tablePath      = new Path(tempDir, "large_batch_table")
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      val tablePath = new Path(tempDir, "large_batch_table")
+      // Use JSON format for this test since it checks JSON file naming conventions
+      val jsonOptions = new CaseInsensitiveStringMap(
+        Map("spark.indextables.state.format" -> "json").asJava
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, jsonOptions)
 
       try {
         // Initialize with schema
@@ -76,8 +83,12 @@ class TransactionLogLargeBatchTest extends TestBase {
 
   test("transaction log should create properly named files for versions 2-24") {
     withTempPath { tempDir =>
-      val tablePath      = new Path(tempDir, "multi_version_table")
-      val transactionLog = TransactionLogFactory.create(tablePath, spark)
+      val tablePath = new Path(tempDir, "multi_version_table")
+      // Use JSON format for this test since it checks JSON file naming conventions
+      val jsonOptions = new CaseInsensitiveStringMap(
+        Map("spark.indextables.state.format" -> "json").asJava
+      )
+      val transactionLog = TransactionLogFactory.create(tablePath, spark, jsonOptions)
 
       try {
         // Initialize with schema

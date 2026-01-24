@@ -140,18 +140,18 @@ class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfte
     row.getLong(2) should be >= 0L      // checkpoint_version
     row.getLong(3) should be >= 1L      // num_actions (at least protocol + metadata + 1 file)
     row.getLong(4) should be >= 1L      // num_files
-    row.getLong(5) shouldBe 3L          // protocol_version (V3)
+    row.getLong(5) shouldBe 4L          // protocol_version (V4 with Avro state)
   }
 
-  test("CHECKPOINT INDEXTABLES should upgrade protocol to V3") {
-    val tablePath = new File(tempDir, "v3_upgrade_test").getAbsolutePath
+  test("CHECKPOINT INDEXTABLES should upgrade protocol to V4") {
+    val tablePath = new File(tempDir, "v4_upgrade_test").getAbsolutePath
     createTestTable(tablePath)
 
     val result = spark.sql(s"CHECKPOINT INDEXTABLES '$tablePath'")
     val row    = result.collect().head
 
-    // Protocol version should be 3 (V3)
-    row.getLong(5) shouldBe 3L
+    // Protocol version should be 4 (V4 with Avro state)
+    row.getLong(5) shouldBe 4L
   }
 
   test("CHECKPOINT INDEXTABLES should return ERROR for non-existent table") {
@@ -208,7 +208,7 @@ class CheckpointCommandTest extends AnyFunSuite with Matchers with BeforeAndAfte
     val successCount = spark.sql("SELECT * FROM checkpoint_result WHERE status = 'SUCCESS'").count()
     successCount shouldBe 1
 
-    val v3Count = spark.sql("SELECT * FROM checkpoint_result WHERE protocol_version = 3").count()
-    v3Count shouldBe 1
+    val v4Count = spark.sql("SELECT * FROM checkpoint_result WHERE protocol_version = 4").count()
+    v4Count shouldBe 1
   }
 }

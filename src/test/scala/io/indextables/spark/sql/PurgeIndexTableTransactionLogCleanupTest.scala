@@ -49,6 +49,8 @@ class PurgeIndexTableTransactionLogCleanupTest extends AnyFunSuite with BeforeAn
       .appName("PurgeOrphanedSplitsTransactionLogCleanupTest")
       .master("local[2]")
       .config("spark.sql.extensions", "io.indextables.spark.extensions.IndexTables4SparkExtensions")
+      // Use JSON format since this test validates JSON checkpoint file cleanup
+      .config("spark.indextables.state.format", "json")
       .config("spark.indextables.checkpoint.enabled", "true")
       .config("spark.indextables.checkpoint.interval", "3")
       .getOrCreate()

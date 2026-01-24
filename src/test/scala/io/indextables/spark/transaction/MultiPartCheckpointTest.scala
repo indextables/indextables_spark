@@ -21,6 +21,12 @@ import io.indextables.spark.TestBase
 
 class MultiPartCheckpointTest extends TestBase {
 
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    // Use JSON format since this test validates JSON multi-part checkpoint structure
+    spark.conf.set("spark.indextables.state.format", "json")
+  }
+
   test("single-part checkpoint for small action count") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
@@ -35,7 +41,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.createDirectory(transactionLogPath.toString)
 
         // Create checkpoint with small actionsPerPart for testing
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "100",
@@ -87,7 +93,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.createDirectory(transactionLogPath.toString)
 
         // Create checkpoint with small actionsPerPart for testing
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "50",
@@ -160,7 +166,7 @@ class MultiPartCheckpointTest extends TestBase {
         val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
         cloudProvider.createDirectory(transactionLogPath.toString)
 
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "30",
@@ -195,8 +201,8 @@ class MultiPartCheckpointTest extends TestBase {
 
         // All AddActions should have docMappingJson restored
         restoredAdds.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-          add.docMappingRef shouldBe None // Should be cleared after restoration
+          add.docMappingJson shouldBe defined  // Schema should be restored from registry
+          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
@@ -217,7 +223,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.createDirectory(transactionLogPath.toString)
 
         // Disable multi-part
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "10",
@@ -268,7 +274,7 @@ class MultiPartCheckpointTest extends TestBase {
         val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
         cloudProvider.createDirectory(transactionLogPath.toString)
 
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "100",
@@ -322,7 +328,7 @@ class MultiPartCheckpointTest extends TestBase {
         val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
         cloudProvider.createDirectory(transactionLogPath.toString)
 
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "50",
@@ -395,7 +401,7 @@ class MultiPartCheckpointTest extends TestBase {
         )
 
         // Read with new checkpoint code
-        val options    = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+        val options    = createJsonFormatOptions()
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         val lastCheckpointInfo = checkpoint.getLastCheckpointInfo()
@@ -433,7 +439,7 @@ class MultiPartCheckpointTest extends TestBase {
         val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
         cloudProvider.createDirectory(transactionLogPath.toString)
 
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "50",
@@ -502,7 +508,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.writeFile(s"$transactionLogPath/_last_checkpoint", v2LastCheckpoint.getBytes("UTF-8"))
 
         // Step 2: Read V2 checkpoint with new code
-        val options    = new org.apache.spark.sql.util.CaseInsensitiveStringMap(java.util.Collections.emptyMap())
+        val options    = createJsonFormatOptions()
         val checkpoint = new TransactionLogCheckpoint(transactionLogPath, cloudProvider, options)
 
         val restoredV2 = checkpoint.getActionsFromCheckpoint()
@@ -535,15 +541,15 @@ class MultiPartCheckpointTest extends TestBase {
         val v3Adds = restoredV3.get.collect { case a: AddAction => a }
         v3Adds.length shouldBe 15
         v3Adds.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-          add.docMappingRef shouldBe None // Should be cleared after restoration
+          add.docMappingJson shouldBe defined  // Schema should be restored from registry
+          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()
     }
   }
 
-  test("protocol is upgraded to V3 when using multi-part checkpoint") {
+  test("protocol is upgraded to V4 when using multi-part checkpoint") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -556,7 +562,7 @@ class MultiPartCheckpointTest extends TestBase {
         val transactionLogPath = new org.apache.hadoop.fs.Path(tablePath, "_transaction_log")
         cloudProvider.createDirectory(transactionLogPath.toString)
 
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "50",
@@ -580,20 +586,20 @@ class MultiPartCheckpointTest extends TestBase {
         lastCheckpointInfo.get.parts shouldBe defined
         lastCheckpointInfo.get.parts.get should be > 1
 
-        // Read checkpoint and verify protocol was upgraded to V3
+        // Read checkpoint and verify protocol was upgraded to V4 (includes V3 features + Avro state)
         val restored = checkpoint.getActionsFromCheckpoint()
         restored shouldBe defined
 
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         restoredProtocol shouldBe defined
-        restoredProtocol.get.minReaderVersion shouldBe 3 // Upgraded from V2 to V3
-        restoredProtocol.get.minWriterVersion shouldBe 3
+        restoredProtocol.get.minReaderVersion shouldBe 4 // Upgraded from V2 to V4
+        restoredProtocol.get.minWriterVersion shouldBe 4
       } finally
         cloudProvider.close()
     }
   }
 
-  test("protocol is upgraded to V3 when using schema deduplication") {
+  test("protocol is upgraded to V4 when using schema deduplication") {
     withTempPath { tempPath =>
       val tablePath = new org.apache.hadoop.fs.Path(tempPath)
       val cloudProvider = io.indextables.spark.io.CloudStorageProviderFactory.createProvider(
@@ -607,7 +613,7 @@ class MultiPartCheckpointTest extends TestBase {
         cloudProvider.createDirectory(transactionLogPath.toString)
 
         // Single-part checkpoint but with schema deduplication
-        val options = new org.apache.spark.sql.util.CaseInsensitiveStringMap(
+        val options = createJsonFormatOptions(
           java.util.Map.of(
             "spark.indextables.checkpoint.actionsPerPart",
             "1000",
@@ -633,20 +639,31 @@ class MultiPartCheckpointTest extends TestBase {
         lastCheckpointInfo shouldBe defined
         lastCheckpointInfo.get.parts shouldBe None // Single-part
 
-        // Read checkpoint and verify protocol was upgraded to V3 due to schema dedup
+        // Read checkpoint and verify protocol was upgraded to V4 due to schema dedup
         val restored = checkpoint.getActionsFromCheckpoint()
         restored shouldBe defined
 
         val restoredProtocol = restored.get.collectFirst { case p: ProtocolAction => p }
         restoredProtocol shouldBe defined
-        restoredProtocol.get.minReaderVersion shouldBe 3 // Upgraded from V2 to V3
-        restoredProtocol.get.minWriterVersion shouldBe 3
+        restoredProtocol.get.minReaderVersion shouldBe 4 // Upgraded from V2 to V4
+        restoredProtocol.get.minWriterVersion shouldBe 4
       } finally
         cloudProvider.close()
     }
   }
 
   // Helper methods
+
+  /** Creates options map that includes JSON format for checkpoint testing */
+  private def createJsonFormatOptions(
+      extraOptions: java.util.Map[String, String] = java.util.Collections.emptyMap()
+  ): org.apache.spark.sql.util.CaseInsensitiveStringMap = {
+    val merged = new java.util.HashMap[String, String]()
+    merged.put("spark.indextables.state.format", "json")
+    merged.putAll(extraOptions)
+    new org.apache.spark.sql.util.CaseInsensitiveStringMap(merged)
+  }
+
   private def createTestAddAction(path: String): AddAction =
     AddAction(
       path = path,

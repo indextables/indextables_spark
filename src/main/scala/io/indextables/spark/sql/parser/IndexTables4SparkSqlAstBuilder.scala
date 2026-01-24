@@ -29,6 +29,7 @@ import io.indextables.spark.sql.{
   DescribeEnvironmentCommand,
   DescribeMergeJobsCommand,
   DescribePrewarmJobsCommand,
+  DescribeStateCommand,
   DescribeStorageStatsCommand,
   DescribeTransactionLogCommand,
   DropPartitionsCommand,
@@ -570,6 +571,26 @@ class IndexTables4SparkSqlAstBuilder extends IndexTables4SparkSqlBaseBaseVisitor
         logger.error(s"Exception in visitWaitForPrewarmJobs: ${e.getMessage}", e)
         throw e
     }
+  }
+
+  override def visitDescribeState(ctx: DescribeStateContext): LogicalPlan = {
+    logger.debug(s"visitDescribeState called with context: $ctx")
+
+    val tablePath = if (ctx.path != null) {
+      logger.debug(s"Processing path: ${ctx.path.getText}")
+      ParserUtils.string(ctx.path)
+    } else if (ctx.table != null) {
+      logger.debug(s"Processing table: ${ctx.table.getText}")
+      val tableId = visitQualifiedName(ctx.table).asInstanceOf[Seq[String]]
+      tableId.mkString(".")
+    } else {
+      throw new IllegalArgumentException("DESCRIBE STATE requires either a path or table identifier")
+    }
+
+    logger.debug(s"Creating DescribeStateCommand for: $tablePath")
+    val result = DescribeStateCommand(tablePath)
+    logger.debug(s"Created DescribeStateCommand: $result")
+    result
   }
 
   override def visitPrewarmCache(ctx: PrewarmCacheContext): LogicalPlan = {
