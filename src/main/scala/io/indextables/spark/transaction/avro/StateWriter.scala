@@ -269,7 +269,7 @@ class StateWriter(
             val shouldCompact = needsCompaction(manifest, removedPaths.size, compactionConfig)
             if (shouldCompact) {
               log.info(s"Writing compacted state for version $newVersion (compaction triggered)")
-              tryWriteCompactedStateIncremental(stateDir, manifest, newFiles, removedPaths, newVersion, schemaRegistry, metadata)
+              tryWriteCompactedStateIncremental(stateDir, manifest, newFiles, removedPaths, newVersion, schemaRegistry, metadata, compactionConfig)
             } else {
               log.info(s"Writing incremental state for version $newVersion")
               tryWriteIncrementalStateToShared(stateDir, manifest, newFiles, removedPaths, newVersion, schemaRegistry, metadata)
@@ -401,7 +401,8 @@ class StateWriter(
   /**
    * Try to write a compacted state during incremental write (when compaction is needed).
    *
-   * Uses streaming compaction for large tables to avoid loading all entries into memory.
+   * Uses selective compaction when beneficial (only rewrite dirty manifests), falling
+   * back to full compaction (streaming or in-memory) when selective isn't worthwhile.
    *
    * @return true if write succeeded, false if concurrent conflict detected
    */
@@ -412,7 +413,8 @@ class StateWriter(
       removedPaths: Set[String],
       currentVersion: Long,
       schemaRegistry: Map[String, String],
-      metadata: Option[String]): Boolean = {
+      metadata: Option[String],
+      compactionConfig: CompactionConfig = CompactionConfig()): Boolean = {
 
     // Create state directory
     if (!cloudProvider.exists(newStateDir)) {
@@ -428,6 +430,18 @@ class StateWriter(
     // Ensure shared manifest directory exists
     ensureSharedManifestDir()
 
+    // Try selective compaction first (only rewrite dirty manifests)
+    val selectiveResult = trySelectiveCompaction(
+      newStateDir, baseManifest, baseStateDir, newFiles, tombstoneSet,
+      currentVersion, schemaRegistry, metadata, compactionConfig)
+
+    if (selectiveResult.isDefined) {
+      return selectiveResult.get
+    }
+
+    // Fall back to full compaction
+    log.info("Using full compaction (selective not beneficial)")
+
     // Estimate if we need streaming compaction (avoid loading 1M+ entries into memory)
     val estimatedTotalEntries = baseManifest.manifests.map(_.numEntries).sum + newFiles.size
     val useStreaming = estimatedTotalEntries > 100000 // Use streaming for 100K+ entries
@@ -437,45 +451,7 @@ class StateWriter(
       streamingCompact(baseManifest, baseStateDir, newFiles, tombstoneSet, currentVersion)
     } else {
       // Original in-memory approach for smaller tables
-      val manifestPaths = manifestIO.resolveManifestPaths(baseManifest, transactionLogPath, baseStateDir)
-      val existingEntries = manifestReader.readManifestsParallel(manifestPaths)
-      val liveExistingEntries = manifestIO.applyTombstones(existingEntries, baseManifest.tombstones)
-
-      // Combine with new files, filter out removed
-      val allFiles = liveExistingEntries ++ newFiles
-      val liveFiles = if (removedPaths.isEmpty) {
-        allFiles
-      } else {
-        allFiles.filterNot(f => tombstoneSet.contains(f.path))
-      }
-
-      // Sort files by partition values for locality
-      val sortedFiles = liveFiles.sortBy { entry =>
-        entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
-      }
-
-      // Partition into manifest chunks and write to shared location
-      val manifestChunks = if (sortedFiles.isEmpty) {
-        Seq(Seq.empty[FileEntry])
-      } else {
-        sortedFiles.grouped(entriesPerManifest).toSeq
-      }
-
-      val manifests = manifestChunks.map { chunk =>
-        val manifestId = manifestWriter.generateManifestId()
-        val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
-        val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
-
-        if (chunk.nonEmpty) {
-          manifestWriter.writeManifest(fullManifestPath, chunk, compression, compressionLevel)
-        } else {
-          manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
-        }
-
-        manifestWriter.createManifestInfo(manifestRelPath, chunk)
-      }
-
-      (manifests, liveFiles.size.toLong, liveFiles.map(_.size).sum)
+      fullCompactInMemory(baseManifest, baseStateDir, newFiles, tombstoneSet)
     }
 
     // Merge schema registries
@@ -505,6 +481,167 @@ class StateWriter(
     }
 
     written
+  }
+
+  /**
+   * In-memory full compaction for smaller tables.
+   *
+   * @return (newManifests, liveFileCount, totalBytes)
+   */
+  private def fullCompactInMemory(
+      baseManifest: StateManifest,
+      baseStateDir: String,
+      newFiles: Seq[FileEntry],
+      tombstoneSet: Set[String]): (Seq[ManifestInfo], Long, Long) = {
+
+    val manifestPaths = manifestIO.resolveManifestPaths(baseManifest, transactionLogPath, baseStateDir)
+    val existingEntries = manifestReader.readManifestsParallel(manifestPaths)
+    val liveExistingEntries = manifestIO.applyTombstones(existingEntries, baseManifest.tombstones)
+
+    // Combine with new files, filter out removed
+    val allFiles = liveExistingEntries ++ newFiles
+    val liveFiles = allFiles.filterNot(f => tombstoneSet.contains(f.path))
+
+    // Sort files by partition values for locality
+    val sortedFiles = liveFiles.sortBy { entry =>
+      entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
+    }
+
+    // Partition into manifest chunks and write to shared location
+    val manifestChunks = if (sortedFiles.isEmpty) {
+      Seq(Seq.empty[FileEntry])
+    } else {
+      sortedFiles.grouped(entriesPerManifest).toSeq
+    }
+
+    val manifests = manifestChunks.map { chunk =>
+      val manifestId = manifestWriter.generateManifestId()
+      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
+
+      if (chunk.nonEmpty) {
+        manifestWriter.writeManifest(fullManifestPath, chunk, compression, compressionLevel)
+      } else {
+        manifestWriter.writeManifest(fullManifestPath, Seq.empty, compression, compressionLevel)
+      }
+
+      manifestWriter.createManifestInfo(manifestRelPath, chunk)
+    }
+
+    (manifests, liveFiles.size.toLong, liveFiles.map(_.size).sum)
+  }
+
+  /**
+   * Try selective compaction - only rewrite manifests with high tombstone ratios.
+   *
+   * For a table with 10,000 partitions where only 1 partition has high tombstone ratio,
+   * this allows rewriting just that 1 manifest instead of all 10,000 partitions.
+   *
+   * @return Some(true) if write succeeded, Some(false) if conflict, None if selective not beneficial
+   */
+  private def trySelectiveCompaction(
+      newStateDir: String,
+      baseManifest: StateManifest,
+      baseStateDir: String,
+      newFiles: Seq[FileEntry],
+      tombstoneSet: Set[String],
+      currentVersion: Long,
+      schemaRegistry: Map[String, String],
+      metadata: Option[String],
+      compactionConfig: CompactionConfig): Option[Boolean] = {
+
+    // Normalize manifest paths for reuse
+    val normalizedManifests = normalizeManifestPaths(baseManifest.manifests, baseManifest.stateVersion)
+
+    // Distribute tombstones to manifests based on partition bounds
+    val manifestsWithTombstones = TombstoneDistributor.distributeTombstones(normalizedManifests, tombstoneSet)
+
+    // Partition into keep (clean) and rewrite (dirty)
+    val (keepManifests, rewriteManifests) = TombstoneDistributor.selectivePartition(
+      manifestsWithTombstones, compactionConfig.tombstoneThreshold)
+
+    // Check if selective compaction is beneficial
+    if (!TombstoneDistributor.isSelectiveCompactionBeneficial(keepManifests, rewriteManifests)) {
+      return None // Fall back to full compaction
+    }
+
+    log.info(s"Using selective compaction: keeping ${keepManifests.size} clean manifests, " +
+      s"rewriting ${rewriteManifests.size} dirty manifests")
+
+    // Process dirty manifests - read entries, filter tombstones, write new manifest
+    val rewrittenManifests = rewriteManifests.flatMap { dirtyManifest =>
+      val manifestPath = manifestIO.resolveManifestPath(dirtyManifest, transactionLogPath, baseStateDir)
+      val entries = manifestReader.readManifest(manifestPath)
+
+      // Filter out tombstones
+      val liveEntries = entries.filterNot(e => tombstoneSet.contains(e.path))
+
+      if (liveEntries.isEmpty) {
+        // No live entries - don't write empty manifest
+        None
+      } else {
+        // Sort by partition for locality
+        val sortedEntries = liveEntries.sortBy { entry =>
+          entry.partitionValues.toSeq.sorted.map(_._2).mkString("|")
+        }
+
+        val manifestId = manifestWriter.generateManifestId()
+        val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+        val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
+
+        manifestWriter.writeManifest(fullManifestPath, sortedEntries, compression, compressionLevel)
+        Some(manifestWriter.createManifestInfo(manifestRelPath, sortedEntries))
+      }
+    }
+
+    // Add new files manifest
+    val newFilesManifest = if (newFiles.nonEmpty) {
+      val manifestId = manifestWriter.generateManifestId()
+      val manifestRelPath = s"${StateConfig.SHARED_MANIFEST_DIR}/manifest-$manifestId.avro"
+      val fullManifestPath = s"$transactionLogPath/$manifestRelPath"
+
+      manifestWriter.writeManifest(fullManifestPath, newFiles, compression, compressionLevel)
+      Some(manifestWriter.createManifestInfo(manifestRelPath, newFiles))
+    } else {
+      None
+    }
+
+    // Combine: kept manifests (cleared tombstone counts) + rewritten + new files
+    val cleanedKeepManifests = keepManifests.map(_.copy(tombstoneCount = 0, liveEntryCount = -1))
+    val allManifests = cleanedKeepManifests ++ rewrittenManifests ++ newFilesManifest.toSeq
+
+    // Calculate totals
+    val liveFileCount = allManifests.map(_.numEntries).sum
+    val totalBytes = baseManifest.totalBytes + newFiles.map(_.size).sum // Estimate
+
+    // Merge schema registries
+    val mergedRegistry = baseManifest.schemaRegistry ++ schemaRegistry
+
+    // Create state manifest (no tombstones after selective compaction!)
+    val stateManifest = StateManifest(
+      formatVersion = 1,
+      stateVersion = currentVersion,
+      createdAt = System.currentTimeMillis(),
+      numFiles = liveFileCount,
+      totalBytes = totalBytes,
+      manifests = allManifests,
+      tombstones = Seq.empty, // Clean! All tombstones applied during selective compaction
+      schemaRegistry = mergedRegistry,
+      protocolVersion = 4,
+      metadata = metadata
+    )
+
+    // Use conditional write for _manifest.json - this is the commit point
+    val written = manifestIO.writeStateManifestIfNotExists(newStateDir, stateManifest)
+
+    if (written) {
+      log.info(
+        s"Wrote selectively compacted state: version=$currentVersion, files=$liveFileCount, " +
+          s"kept=${keepManifests.size}, rewritten=${rewriteManifests.size}, " +
+          s"manifests=${allManifests.size}, tombstones=0")
+    }
+
+    Some(written)
   }
 
   /**
