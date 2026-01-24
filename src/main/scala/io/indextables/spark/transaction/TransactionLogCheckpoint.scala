@@ -261,21 +261,17 @@ class TransactionLogCheckpoint(
 
     // Build schema registry from AddActions with docMappingJson
     // This deduplicates schema storage and allows restoration when reading
-    import java.security.MessageDigest
+    // IMPORTANT: Use SchemaDeduplication.computeSchemaHash for normalized hashing
+    // This ensures semantically identical schemas (different JSON ordering) get the same hash
     val schemaRegistry = scala.collection.mutable.Map[String, String]()
-
-    def hashSchema(json: String): String = {
-      val md = MessageDigest.getInstance("SHA-256")
-      val digest = md.digest(json.getBytes("UTF-8"))
-      digest.take(8).map("%02x".format(_)).mkString
-    }
 
     // Convert AddActions to FileEntries with current version and timestamp
     // Also build schema registry and set docMappingRef
     val timestamp = System.currentTimeMillis()
     val fileEntries = allFiles.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
-        val ref = add.docMappingRef.getOrElse(hashSchema(json))
+        // Use normalized hash to consolidate semantically identical schemas
+        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
         schemaRegistry.put(ref, json)
         ref
       }
