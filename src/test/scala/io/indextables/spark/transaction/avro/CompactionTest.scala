@@ -372,6 +372,96 @@ class CompactionTest extends TestBase {
     }
   }
 
+  test("selective compaction only rewrites dirty manifests (partition-aware)") {
+    withTempPath { tempPath =>
+      val cloudProvider = CloudStorageProviderFactory.createProvider(
+        tempPath,
+        new CaseInsensitiveStringMap(java.util.Collections.emptyMap()),
+        spark.sparkContext.hadoopConfiguration
+      )
+
+      try {
+        val stateWriter = StateWriter(cloudProvider, tempPath, entriesPerManifest = 50)
+        val manifestIO = StateManifestIO(cloudProvider)
+
+        // Create 3 manifests with different partitions:
+        // - January: 50 files (manifest 1)
+        // - February: 50 files (manifest 2)
+        // - March: 50 files (manifest 3)
+        val januaryFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-01/file$i.split", version = 1, Map("date" -> "2024-01")))
+        val februaryFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-02/file$i.split", version = 1, Map("date" -> "2024-02")))
+        val marchFiles = (1 to 50).map(i =>
+          createTestFileEntry(s"date=2024-03/file$i.split", version = 1, Map("date" -> "2024-03")))
+
+        // Write initial state (creates 3 manifests due to entriesPerManifest=50)
+        val initialResult = stateWriter.writeIncrementalWithRetry(
+          newFiles = januaryFiles ++ februaryFiles ++ marchFiles,
+          removedPaths = Set.empty,
+          schemaRegistry = Map.empty
+        )
+
+        val initialManifest = manifestIO.readStateManifest(initialResult.stateDir)
+        initialManifest.manifests.size shouldBe 3
+        initialManifest.numFiles shouldBe 150
+
+        // Record the initial manifest paths (in shared directory)
+        val initialManifestPaths = initialManifest.manifests.map(_.path).toSet
+
+        // Delete 30 files from March only (60% tombstone ratio for that manifest)
+        // This should trigger selective compaction: keep Jan/Feb manifests, rewrite March
+        val marchTombstones = (1 to 30).map(i => s"date=2024-03/file$i.split").toSet
+
+        val compactionConfig = CompactionConfig(tombstoneThreshold = 0.10) // 10% threshold
+        val compactedResult = stateWriter.writeIncrementalWithRetry(
+          newFiles = Seq.empty,
+          removedPaths = marchTombstones,
+          schemaRegistry = Map.empty,
+          compactionConfig = compactionConfig
+        )
+
+        val compactedManifest = manifestIO.readStateManifest(compactedResult.stateDir)
+
+        // Verify compaction happened (tombstones cleared)
+        compactedManifest.tombstones shouldBe empty
+
+        // Verify correct file count (150 - 30 = 120)
+        compactedManifest.numFiles shouldBe 120
+
+        // Verify we kept some manifests (selective compaction)
+        // The Jan and Feb manifests should be reused (their paths should appear in the new manifest list)
+        val newManifestPaths = compactedManifest.manifests.map(_.path).toSet
+
+        // At least 2 manifests should be reused (Jan and Feb)
+        val reusedManifests = initialManifestPaths.intersect(newManifestPaths)
+        reusedManifests.size should be >= 2
+
+        // Verify data integrity - read all files and check count
+        val manifestReader = AvroManifestReader(cloudProvider)
+        val resolvedPaths = compactedManifest.manifests.map { m =>
+          manifestIO.resolveManifestPath(m, tempPath, compactedResult.stateDir)
+        }
+        val allFiles = manifestReader.readManifestsParallel(resolvedPaths)
+
+        allFiles should have size 120
+
+        // Verify March files were properly filtered (only 20 remain)
+        val marchFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-03"))
+        marchFileCount shouldBe 20
+
+        // Verify Jan and Feb files are intact
+        val janFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-01"))
+        val febFileCount = allFiles.count(_.partitionValues.get("date").contains("2024-02"))
+        janFileCount shouldBe 50
+        febFileCount shouldBe 50
+
+      } finally {
+        cloudProvider.close()
+      }
+    }
+  }
+
   // Helper methods
 
   private def createTestFileEntry(
