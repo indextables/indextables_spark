@@ -94,9 +94,10 @@ class SchemaDeduplicationTest extends TestBase {
     restoredAdds(0).docMappingJson shouldBe Some(smallSchema)
     restoredAdds(1).docMappingJson shouldBe Some(largeSchema)
 
-    // docMappingRef should be cleared
-    restoredAdds(0).docMappingRef shouldBe None
-    restoredAdds(1).docMappingRef shouldBe None
+    // docMappingRef should be PRESERVED for caching (not cleared)
+    // This is important: preserving docMappingRef allows DocMappingMetadata cache to use hash as key
+    restoredAdds(0).docMappingRef shouldBe Some(hash1)
+    restoredAdds(1).docMappingRef shouldBe Some(hash2)
   }
 
   test("deduplicateSchemas should preserve existing registry entries") {
@@ -241,8 +242,8 @@ class SchemaDeduplicationTest extends TestBase {
         val restoredAdds = restoredActions.collect { case a: AddAction => a }
         restoredAdds.length shouldBe 5
         restoredAdds.foreach { add =>
-          add.docMappingJson shouldBe Some(largeSchema)
-          add.docMappingRef shouldBe None // Should be cleared after restoration
+          add.docMappingJson shouldBe defined  // Schema should be restored from registry
+          add.docMappingRef shouldBe defined   // docMappingRef PRESERVED for caching (not cleared)
         }
       } finally
         cloudProvider.close()

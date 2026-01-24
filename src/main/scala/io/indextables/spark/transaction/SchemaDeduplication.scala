@@ -22,7 +22,7 @@ import java.util.Base64
 
 import scala.jdk.CollectionConverters._
 
-import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
+import com.fasterxml.jackson.databind.{JsonNode, MapperFeature, ObjectMapper, SerializationFeature}
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import org.slf4j.LoggerFactory
 
@@ -49,7 +49,15 @@ object SchemaDeduplication {
   private val HASH_LENGTH = 16
 
   /** ObjectMapper for parsing JSON */
-  private val mapper: ObjectMapper = new ObjectMapper()
+  // Configure ObjectMapper to sort properties alphabetically for consistent hashing
+  // This ensures that JSON serialization produces the same output regardless of
+  // the original field ordering in the input JSON.
+  private val mapper: ObjectMapper = {
+    val m = new ObjectMapper()
+    m.configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
+    m.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
+    m
+  }
 
   // Instrumentation counters for testing/monitoring - track how many times parsing actually happens
   private val parseCounter = new java.util.concurrent.atomic.AtomicLong(0)
@@ -124,12 +132,17 @@ object SchemaDeduplication {
    *   A 16-character Base64-encoded hash
    */
   def computeSchemaHash(docMappingJson: String): String = {
-    // Normalize the JSON to canonical form for consistent hashing
+    // Normalize the JSON to canonical form for consistent hashing.
+    // Uses Jackson with SORT_PROPERTIES_ALPHABETICALLY to ensure object keys
+    // are serialized in consistent order. Arrays of named objects are sorted
+    // by the "name" field using sortJsonNode().
     val canonicalJson =
       try {
         EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode   = mapper.readTree(docMappingJson)
         val sortedNode = sortJsonNode(jsonNode)
+        // The mapper is configured with SORT_PROPERTIES_ALPHABETICALLY,
+        // so writeValueAsString produces consistent key ordering
         mapper.writeValueAsString(sortedNode)
       } catch {
         case e: Exception =>
@@ -354,10 +367,9 @@ object SchemaDeduplication {
         val hash = add.docMappingRef.get
         schemaMap.get(hash) match {
           case Some(schema) =>
-            add.copy(
-              docMappingJson = Some(schema),
-              docMappingRef = None // Clear ref after restoration
-            )
+            // IMPORTANT: Preserve docMappingRef so DocMappingMetadata cache uses hash as key
+            // Clearing it would cause O(n) cache misses (one per file)
+            add.copy(docMappingJson = Some(schema))
           case None =>
             logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
             add // Return unchanged if schema not found

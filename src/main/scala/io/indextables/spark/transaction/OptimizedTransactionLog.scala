@@ -854,7 +854,9 @@ class OptimizedTransactionLog(
               // Apply empty object filtering using CACHED version (keyed by schema hash)
               // This avoids repeated JSON parsing for files that share the same schema
               val filteredSchema = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
-              add.copy(docMappingJson = Some(filteredSchema), docMappingRef = None)
+              // IMPORTANT: Preserve docMappingRef so DocMappingMetadata cache uses hash as key
+              // Setting docMappingRef = None would cause O(n) cache misses (one per file)
+              add.copy(docMappingJson = Some(filteredSchema))
             case None =>
               logger.warn(s"Schema not found for hash: $hash (path: ${add.path})")
               add
@@ -1746,14 +1748,7 @@ class OptimizedTransactionLog(
     val removedPaths = removeActions.map(_.path).toSet
 
     // Build schema registry from AddActions
-    import java.security.MessageDigest
     val newSchemaRegistry = scala.collection.mutable.Map[String, String]()
-
-    def hashSchema(json: String): String = {
-      val md = MessageDigest.getInstance("SHA-256")
-      val digest = md.digest(json.getBytes("UTF-8"))
-      digest.take(8).map("%02x".format(_)).mkString
-    }
 
     // Get current version from Avro state or JSON version files (for migration)
     // Re-read checkpoint info to get fresh data after cache invalidation
@@ -1814,7 +1809,7 @@ class OptimizedTransactionLog(
     val liveExistingFiles = existingFiles.filterNot(f => removedPaths.contains(f.path))
     liveExistingFiles.foreach { add =>
       add.docMappingJson.foreach { json =>
-        val ref = add.docMappingRef.getOrElse(hashSchema(json))
+        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
         newSchemaRegistry.put(ref, json)
       }
     }
@@ -1823,7 +1818,7 @@ class OptimizedTransactionLog(
     val existingFileEntries = liveExistingFiles.map { add =>
       // For existing files, use version 0 if unknown (will be preserved in compaction)
       val refAndJson = add.docMappingJson.map { json =>
-        add.docMappingRef.getOrElse(hashSchema(json))
+        add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
       }
       FileEntry.fromAddAction(
         add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)),
@@ -1835,7 +1830,7 @@ class OptimizedTransactionLog(
     // Convert new AddActions to FileEntries
     val newFileEntries = addActions.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
-        val ref = add.docMappingRef.getOrElse(hashSchema(json))
+        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
         newSchemaRegistry.put(ref, json)
         ref
       }
