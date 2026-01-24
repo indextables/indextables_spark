@@ -346,6 +346,12 @@ object StateConfig {
 
   val RETRY_MAX_DELAY_MS_KEY = s"$PREFIX.retry.maxDelayMs"
   val RETRY_MAX_DELAY_MS_DEFAULT = 5000L
+
+  // Schema normalization configuration
+  // If unique docMappingRef count exceeds this threshold, re-normalize all schemas to consolidate
+  // This handles tables with buggy non-normalized hashes that need consolidation during checkpoint
+  val SCHEMA_RENORMALIZE_THRESHOLD_KEY = s"$PREFIX.schema.renormalizeThreshold"
+  val SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT = 5
 }
 
 /**

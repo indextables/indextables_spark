@@ -265,13 +265,29 @@ class TransactionLogCheckpoint(
     // This ensures semantically identical schemas (different JSON ordering) get the same hash
     val schemaRegistry = scala.collection.mutable.Map[String, String]()
 
+    // Check if we need to re-normalize schemas (threshold-based optimization)
+    // If unique docMappingRef count is above threshold, there may be buggy hashes that need consolidation
+    val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
+    val existingRefCount = allFiles.flatMap(_.docMappingRef).toSet.size
+    val shouldRenormalize = existingRefCount > renormalizeThreshold
+
+    if (shouldRenormalize) {
+      logger.info(s"Schema renormalization triggered: $existingRefCount unique docMappingRef values exceeds threshold of $renormalizeThreshold")
+    }
+
     // Convert AddActions to FileEntries with current version and timestamp
     // Also build schema registry and set docMappingRef
     val timestamp = System.currentTimeMillis()
     val fileEntries = allFiles.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
-        // Use normalized hash to consolidate semantically identical schemas
-        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        // Compute normalized hash if renormalizing, otherwise trust existing ref
+        val ref = if (shouldRenormalize) {
+          SchemaDeduplication.computeSchemaHash(json)
+        } else {
+          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        }
         schemaRegistry.put(ref, json)
         ref
       }

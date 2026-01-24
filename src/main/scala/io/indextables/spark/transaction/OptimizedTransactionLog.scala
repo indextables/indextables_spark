@@ -1807,9 +1807,28 @@ class OptimizedTransactionLog(
 
     // Filter out removed files and collect existing schema refs
     val liveExistingFiles = existingFiles.filterNot(f => removedPaths.contains(f.path))
+
+    // Check if we need to re-normalize schemas (threshold-based optimization)
+    // If unique docMappingRef count is above threshold, there may be buggy hashes that need consolidation
+    val renormalizeThreshold = Option(options.get(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_KEY))
+      .map(_.toInt)
+      .getOrElse(StateConfig.SCHEMA_RENORMALIZE_THRESHOLD_DEFAULT)
+    val existingRefCount = liveExistingFiles.flatMap(_.docMappingRef).toSet.size
+    val shouldRenormalize = existingRefCount > renormalizeThreshold
+
+    if (shouldRenormalize) {
+      logger.info(s"Schema renormalization triggered: $existingRefCount unique docMappingRef values exceeds threshold of $renormalizeThreshold")
+    }
+
+    // Collect schema refs from existing files
     liveExistingFiles.foreach { add =>
       add.docMappingJson.foreach { json =>
-        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        // Compute normalized hash if renormalizing, otherwise trust existing ref
+        val ref = if (shouldRenormalize) {
+          SchemaDeduplication.computeSchemaHash(json)
+        } else {
+          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        }
         newSchemaRegistry.put(ref, json)
       }
     }
@@ -1818,7 +1837,12 @@ class OptimizedTransactionLog(
     val existingFileEntries = liveExistingFiles.map { add =>
       // For existing files, use version 0 if unknown (will be preserved in compaction)
       val refAndJson = add.docMappingJson.map { json =>
-        add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        // Compute normalized hash if renormalizing, otherwise trust existing ref
+        if (shouldRenormalize) {
+          SchemaDeduplication.computeSchemaHash(json)
+        } else {
+          add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        }
       }
       FileEntry.fromAddAction(
         add.copy(docMappingRef = refAndJson.orElse(add.docMappingRef)),
@@ -1828,9 +1852,10 @@ class OptimizedTransactionLog(
     }
 
     // Convert new AddActions to FileEntries
+    // Always compute normalized hash for new files to ensure correct hashes
     val newFileEntries = addActions.map { add =>
       val refAndJson = add.docMappingJson.map { json =>
-        val ref = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
+        val ref = SchemaDeduplication.computeSchemaHash(json)
         newSchemaRegistry.put(ref, json)
         ref
       }

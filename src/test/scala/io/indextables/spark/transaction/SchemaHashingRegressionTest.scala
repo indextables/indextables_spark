@@ -161,6 +161,128 @@ class SchemaHashingRegressionTest extends AnyFunSuite with Matchers {
   }
 
   /**
+   * REGRESSION TEST: Deeply nested field_mappings are normalized.
+   *
+   * Tests that nested structures (struct within struct) are properly normalized
+   * at all levels of nesting.
+   */
+  test("REGRESSION: computeSchemaHash normalizes deeply nested field_mappings") {
+    // Nested struct: outer struct contains inner struct with its own field_mappings
+    val nestedVariant1 =
+      """[{"name":"outer","type":"object","field_mappings":[
+        {"name":"inner","type":"object","field_mappings":[
+          {"name":"deep_a","type":"text"},
+          {"name":"deep_b","type":"u64"}
+        ]},
+        {"name":"simple","type":"bool"}
+      ]}]""".replaceAll("\\s+", "")
+
+    // Same schema with different orderings at ALL levels
+    val nestedVariant2 =
+      """[{"name":"outer","type":"object","field_mappings":[
+        {"name":"simple","type":"bool"},
+        {"name":"inner","type":"object","field_mappings":[
+          {"name":"deep_b","type":"u64"},
+          {"name":"deep_a","type":"text"}
+        ]}
+      ]}]""".replaceAll("\\s+", "")
+
+    // Different key orderings too
+    val nestedVariant3 =
+      """[{"type":"object","name":"outer","field_mappings":[
+        {"type":"bool","name":"simple"},
+        {"field_mappings":[
+          {"type":"u64","name":"deep_b"},
+          {"type":"text","name":"deep_a"}
+        ],"type":"object","name":"inner"}
+      ]}]""".replaceAll("\\s+", "")
+
+    val hashes = Seq(nestedVariant1, nestedVariant2, nestedVariant3).map(SchemaDeduplication.computeSchemaHash)
+    val uniqueHashes = hashes.toSet
+
+    withClue(s"Nested schema variants should produce the same hash.\nHashes: ${hashes.mkString(", ")}\n") {
+      uniqueHashes.size shouldBe 1
+    }
+  }
+
+  /**
+   * REGRESSION TEST: Multiple top-level fields are normalized.
+   *
+   * Tests that schemas with multiple top-level fields in different orders
+   * produce the same hash.
+   */
+  test("REGRESSION: computeSchemaHash normalizes multiple top-level fields") {
+    // Multiple fields at top level
+    val variant1 =
+      """[{"name":"field_z","type":"text"},{"name":"field_a","type":"u64"},{"name":"field_m","type":"bool"}]"""
+
+    val variant2 =
+      """[{"name":"field_a","type":"u64"},{"name":"field_m","type":"bool"},{"name":"field_z","type":"text"}]"""
+
+    val variant3 =
+      """[{"name":"field_m","type":"bool"},{"name":"field_z","type":"text"},{"name":"field_a","type":"u64"}]"""
+
+    val hashes = Seq(variant1, variant2, variant3).map(SchemaDeduplication.computeSchemaHash)
+    val uniqueHashes = hashes.toSet
+
+    withClue(s"Multiple top-level field orderings should produce the same hash.\nHashes: ${hashes.mkString(", ")}\n") {
+      uniqueHashes.size shouldBe 1
+    }
+  }
+
+  /**
+   * REGRESSION TEST: Empty structures are handled correctly.
+   */
+  test("REGRESSION: computeSchemaHash handles empty structures") {
+    // Empty array
+    val emptyArray = "[]"
+    val hash1 = SchemaDeduplication.computeSchemaHash(emptyArray)
+
+    // Should be consistent
+    val hash2 = SchemaDeduplication.computeSchemaHash(emptyArray)
+    hash1 shouldBe hash2
+
+    // Empty object in array
+    val emptyObject = "[{}]"
+    val hash3 = SchemaDeduplication.computeSchemaHash(emptyObject)
+    val hash4 = SchemaDeduplication.computeSchemaHash(emptyObject)
+    hash3 shouldBe hash4
+
+    // Empty field_mappings
+    val emptyFieldMappings1 = """[{"name":"empty_struct","type":"object","field_mappings":[]}]"""
+    val emptyFieldMappings2 = """[{"type":"object","name":"empty_struct","field_mappings":[]}]"""
+    SchemaDeduplication.computeSchemaHash(emptyFieldMappings1) shouldBe
+      SchemaDeduplication.computeSchemaHash(emptyFieldMappings2)
+  }
+
+  /**
+   * REGRESSION TEST: Arrays without "name" field keep original order.
+   *
+   * The normalization should NOT reorder arrays that don't have named objects,
+   * as the order might be semantically significant.
+   */
+  test("REGRESSION: computeSchemaHash preserves order for non-named arrays") {
+    // Arrays of primitives - order matters, should NOT be normalized
+    val primitiveArray1 = """{"values":["a","b","c"]}"""
+    val primitiveArray2 = """{"values":["c","b","a"]}"""
+
+    val hash1 = SchemaDeduplication.computeSchemaHash(primitiveArray1)
+    val hash2 = SchemaDeduplication.computeSchemaHash(primitiveArray2)
+
+    // These should be DIFFERENT - primitive array order is preserved
+    withClue("Primitive arrays should preserve order (different hashes):\n") {
+      hash1 should not be hash2
+    }
+
+    // But key ordering should still be normalized
+    val keyOrder1 = """{"type":"array","values":["a","b"]}"""
+    val keyOrder2 = """{"values":["a","b"],"type":"array"}"""
+
+    SchemaDeduplication.computeSchemaHash(keyOrder1) shouldBe
+      SchemaDeduplication.computeSchemaHash(keyOrder2)
+  }
+
+  /**
    * REGRESSION TEST: deduplicateSchemas consolidates semantically identical schemas.
    *
    * Simulates the production scenario where different executors produce the same
