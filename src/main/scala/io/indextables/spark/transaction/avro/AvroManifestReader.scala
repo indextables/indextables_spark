@@ -18,7 +18,7 @@
 package io.indextables.spark.transaction.avro
 
 import io.indextables.spark.io.CloudStorageProvider
-import io.indextables.spark.transaction.AddAction
+import io.indextables.spark.transaction.{AddAction, SchemaDeduplication}
 
 import org.apache.avro.file.DataFileStream
 import org.apache.avro.generic.{GenericDatumReader, GenericRecord}
@@ -261,7 +261,10 @@ class AvroManifestReader(cloudProvider: CloudStorageProvider) {
       log.info(s"toAddActions: processing ${entries.size} entries, schemaRegistry has ${schemaRegistry.size} schemas, " +
         s"entries have ${uniqueRefs.size} unique docMappingRefs")
     }
-    entries.map(e => FileEntry.toAddAction(e, schemaRegistry))
+    // Pre-filter the schemaRegistry ONCE, not per file entry
+    // This avoids JSON parsing overhead for each file
+    val filteredRegistry = SchemaDeduplication.filterSchemaRegistry(schemaRegistry)
+    entries.map(e => FileEntry.toAddAction(e, filteredRegistry))
   }
 }
 

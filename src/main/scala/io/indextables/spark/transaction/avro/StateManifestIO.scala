@@ -18,6 +18,7 @@
 package io.indextables.spark.transaction.avro
 
 import io.indextables.spark.io.CloudStorageProvider
+import io.indextables.spark.transaction.EnhancedTransactionLogCache
 
 import com.fasterxml.jackson.databind.{DeserializationFeature, JsonNode, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
@@ -84,6 +85,9 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    *   Parsed StateManifest
    */
   def parseStateManifest(json: String): StateManifest = {
+    // Track actual JSON parse calls for testing/monitoring
+    StateManifestIO.incrementParseCounter()
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
     val root = mapper.readTree(json)
 
     StateManifest(
@@ -333,6 +337,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
 
     Try {
       val content = new String(cloudProvider.readFile(lastCheckpointPath), "UTF-8")
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       mapper.readTree(content)
     } match {
       case Success(json) => Some(json)
@@ -406,6 +411,9 @@ object StateManifestIO {
   // Instrumentation counter for testing - tracks actual cloud reads of state manifests
   private val readCounter = new java.util.concurrent.atomic.AtomicLong(0)
 
+  // Instrumentation counter for testing - tracks actual JSON parses of state manifests
+  private val parseCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
   /** Get the number of times readStateManifest has actually read from cloud storage (for testing) */
   def getReadCount(): Long = readCounter.get()
 
@@ -414,6 +422,15 @@ object StateManifestIO {
 
   /** Increment the read counter (called by instance readStateManifest) */
   private[avro] def incrementReadCounter(): Unit = readCounter.incrementAndGet()
+
+  /** Get the number of times parseStateManifest has actually parsed JSON (for testing) */
+  def getParseCount(): Long = parseCounter.get()
+
+  /** Reset the parse counter (for testing) */
+  def resetParseCounter(): Unit = parseCounter.set(0)
+
+  /** Increment the parse counter (called by instance parseStateManifest) */
+  private[avro] def incrementParseCounter(): Unit = parseCounter.incrementAndGet()
 
   /**
    * Shared ObjectMapper for JSON parsing.

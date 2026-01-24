@@ -19,8 +19,96 @@ package io.indextables.spark.transaction
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode}
+import com.fasterxml.jackson.databind.{DeserializationContext, JsonDeserializer, JsonNode, ObjectMapper}
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
+
+import scala.jdk.CollectionConverters._
+
+/**
+ * Pre-parsed metadata extracted from docMappingJson.
+ * This avoids repeated JSON parsing throughout the codebase.
+ *
+ * @param fieldNames All field names in the schema
+ * @param fastFields Fields configured with fast=true (for aggregations)
+ * @param fieldTypes Map of field name -> type (text, string, i64, f64, etc.)
+ * @param indexedFields Fields configured with indexed=true
+ * @param storedFields Fields configured with stored=true
+ */
+case class DocMappingMetadata(
+  fieldNames: Set[String],
+  fastFields: Set[String],
+  fieldTypes: Map[String, String],
+  indexedFields: Set[String] = Set.empty,
+  storedFields: Set[String] = Set.empty
+)
+
+object DocMappingMetadata {
+  private val mapper = new ObjectMapper()
+
+  /** Empty metadata for when no docMappingJson is available */
+  val empty: DocMappingMetadata = DocMappingMetadata(Set.empty, Set.empty, Map.empty, Set.empty, Set.empty)
+
+  /**
+   * Parse docMappingJson into structured metadata.
+   * Handles both array format and field_mappings wrapper format.
+   */
+  def parse(docMappingJson: String): DocMappingMetadata = {
+    if (docMappingJson == null || docMappingJson.isEmpty) {
+      return empty
+    }
+
+    try {
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
+      val root = mapper.readTree(docMappingJson)
+
+      // Determine the array of field definitions
+      // Format 1: Direct array [{"name":"field1",...}, ...]
+      // Format 2: Wrapped {"field_mappings":[{"name":"field1",...}, ...]}
+      val fieldsArray = if (root.isArray) {
+        root
+      } else if (root.has("field_mappings") && root.get("field_mappings").isArray) {
+        root.get("field_mappings")
+      } else {
+        return empty
+      }
+
+      val fieldNames = scala.collection.mutable.Set[String]()
+      val fastFields = scala.collection.mutable.Set[String]()
+      val fieldTypes = scala.collection.mutable.Map[String, String]()
+      val indexedFields = scala.collection.mutable.Set[String]()
+      val storedFields = scala.collection.mutable.Set[String]()
+
+      fieldsArray.elements().asScala.foreach { fieldNode =>
+        val name = Option(fieldNode.get("name")).map(_.asText()).getOrElse("")
+        if (name.nonEmpty) {
+          fieldNames += name
+
+          val isFast = Option(fieldNode.get("fast")).exists(_.asBoolean(false))
+          if (isFast) {
+            fastFields += name
+          }
+
+          val isIndexed = Option(fieldNode.get("indexed")).exists(_.asBoolean(false))
+          if (isIndexed) {
+            indexedFields += name
+          }
+
+          val isStored = Option(fieldNode.get("stored")).exists(_.asBoolean(false))
+          if (isStored) {
+            storedFields += name
+          }
+
+          val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
+          fieldTypes += (name -> fieldType)
+        }
+      }
+
+      DocMappingMetadata(fieldNames.toSet, fastFields.toSet, fieldTypes.toMap, indexedFields.toSet, storedFields.toSet)
+    } catch {
+      case _: Exception => empty
+    }
+  }
+}
 
 sealed trait Action extends Serializable
 

@@ -33,6 +33,37 @@ import org.slf4j.LoggerFactory
 object EnhancedTransactionLogCache {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // ============================================================================
+  // GLOBAL JSON PARSE COUNTER - tracks ALL ObjectMapper.readTree calls
+  // ============================================================================
+  // This counter is incremented by all JSON parsing operations across the codebase.
+  // Use this to verify that caching is working and we're not parsing more than expected.
+  private val globalJsonParseCounter = new java.util.concurrent.atomic.AtomicLong(0)
+
+  // Debug mode: when enabled, incrementGlobalJsonParseCounter() throws an exception
+  // to capture stack traces showing where JSON parsing is happening
+  @volatile private var throwOnJsonParse: Boolean = false
+
+  /** Get the total number of ObjectMapper.readTree calls across all components (for testing) */
+  def getGlobalJsonParseCount(): Long = globalJsonParseCounter.get()
+
+  /** Reset the global JSON parse counter (for testing) */
+  def resetGlobalJsonParseCounter(): Unit = globalJsonParseCounter.set(0)
+
+  /** Enable debug mode that throws on JSON parse (for stack trace capture) */
+  def enableThrowOnJsonParse(): Unit = { throwOnJsonParse = true }
+
+  /** Disable debug mode that throws on JSON parse */
+  def disableThrowOnJsonParse(): Unit = { throwOnJsonParse = false }
+
+  /** Increment the global JSON parse counter - call this from any ObjectMapper.readTree usage */
+  def incrementGlobalJsonParseCounter(): Unit = {
+    globalJsonParseCounter.incrementAndGet()
+    if (throwOnJsonParse) {
+      throw new RuntimeException("DEBUG: JSON parse detected - stack trace for debugging")
+    }
+  }
+
   // Global cache key types
   case class CheckpointActionsKey(tablePath: String, checkpointVersion: Long)
   case class LastCheckpointInfoCached(info: Option[LastCheckpointInfo], cachedAt: Long)
@@ -137,6 +168,19 @@ object EnhancedTransactionLogCache {
       .build[String, String]()
   }
 
+  // Global cache for parsed DocMappingMetadata - keyed by schema hash or raw JSON
+  // Avoids parsing docMappingJson multiple times to extract field names, fast fields, etc.
+  private lazy val _globalDocMappingMetadataCache: Cache[String, DocMappingMetadata] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global doc mapping metadata cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=1000")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(1000)  // Typically few unique schemas
+      .recordStats()
+      .build[String, DocMappingMetadata]()
+  }
+
   // Global cache for Avro manifest file contents - keyed by manifest file path
   // Manifest files are immutable once written, so safe to cache indefinitely
   // This avoids re-reading .avro files on every partition-filtered query
@@ -151,13 +195,104 @@ object EnhancedTransactionLogCache {
       .build[String, Seq[io.indextables.spark.transaction.avro.FileEntry]]()
   }
 
+  // Global cache for MetadataAction - keyed by table path
+  // Metadata is immutable for a given table version, so safe to cache across TransactionLog instances
+  // This avoids re-parsing transaction log JSON when creating new DataFrames on the same table
+  private lazy val _globalMetadataCache: Cache[String, MetadataAction] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global metadata cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .build[String, MetadataAction]()
+  }
+
+  // Global cache for ProtocolAction - keyed by table path
+  private lazy val _globalProtocolCache: Cache[String, ProtocolAction] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global protocol cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=$globalCheckpointCacheMaxSize")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(globalCheckpointCacheMaxSize)
+      .recordStats()
+      .build[String, ProtocolAction]()
+  }
+
+  // Global cache for version actions - keyed by (tablePath, version)
+  // Caches parsed actions from transaction log version files
+  case class VersionCacheKey(tablePath: String, version: Long)
+  private lazy val _globalVersionCache: Cache[VersionCacheKey, Seq[Action]] = synchronized {
+    cachesInitialized = true
+    logger.info(s"Initializing global version cache: TTL=${globalCheckpointCacheTTLMinutes}min, maxSize=500")
+    CacheBuilder
+      .newBuilder()
+      .expireAfterAccess(globalCheckpointCacheTTLMinutes, TimeUnit.MINUTES)
+      .maximumSize(500)  // Cache multiple versions across tables
+      .recordStats()
+      .build[VersionCacheKey, Seq[Action]]()
+  }
+
   // Accessors for the lazy caches
   private[transaction] def globalCheckpointActionsCache: Cache[CheckpointActionsKey, Seq[Action]] = _globalCheckpointActionsCache
   private[transaction] def globalLastCheckpointInfoCache: Cache[String, LastCheckpointInfoCached] = _globalLastCheckpointInfoCache
   private[transaction] def globalAvroStateManifestCache: Cache[String, StateManifest] = _globalAvroStateManifestCache
   private[transaction] def globalAvroFileListCache: Cache[AvroFileListKey, Seq[AddAction]] = _globalAvroFileListCache
   private[transaction] def globalFilteredSchemaCache: Cache[String, String] = _globalFilteredSchemaCache
+  private[transaction] def globalDocMappingMetadataCache: Cache[String, DocMappingMetadata] = _globalDocMappingMetadataCache
   private[transaction] def globalAvroManifestFileCache: Cache[String, Seq[io.indextables.spark.transaction.avro.FileEntry]] = _globalAvroManifestFileCache
+  private[transaction] def globalMetadataCache: Cache[String, MetadataAction] = _globalMetadataCache
+  private[transaction] def globalProtocolCache: Cache[String, ProtocolAction] = _globalProtocolCache
+  private[transaction] def globalVersionCache: Cache[VersionCacheKey, Seq[Action]] = _globalVersionCache
+
+  /**
+   * Get or compute MetadataAction from global cache - shared across all TransactionLog instances.
+   * This avoids re-parsing transaction log JSON when creating new DataFrames on the same table.
+   */
+  def getOrComputeGlobalMetadata(tablePath: String, compute: => MetadataAction): MetadataAction =
+    Option(globalMetadataCache.getIfPresent(tablePath)) match {
+      case Some(metadata) =>
+        logger.debug(s"GLOBAL metadata cache HIT for $tablePath")
+        metadata
+      case None =>
+        logger.debug(s"GLOBAL metadata cache MISS for $tablePath - computing")
+        val metadata = compute
+        globalMetadataCache.put(tablePath, metadata)
+        metadata
+    }
+
+  /**
+   * Get or compute ProtocolAction from global cache - shared across all TransactionLog instances.
+   */
+  def getOrComputeGlobalProtocol(tablePath: String, compute: => ProtocolAction): ProtocolAction =
+    Option(globalProtocolCache.getIfPresent(tablePath)) match {
+      case Some(protocol) =>
+        logger.debug(s"GLOBAL protocol cache HIT for $tablePath")
+        protocol
+      case None =>
+        logger.debug(s"GLOBAL protocol cache MISS for $tablePath - computing")
+        val protocol = compute
+        globalProtocolCache.put(tablePath, protocol)
+        protocol
+    }
+
+  /**
+   * Get or compute version actions from global cache - shared across all TransactionLog instances.
+   * This avoids re-parsing transaction log JSON files when creating new DataFrames on the same table.
+   */
+  def getOrComputeGlobalVersionActions(tablePath: String, version: Long, compute: => Seq[Action]): Seq[Action] =
+    Option(globalVersionCache.getIfPresent(VersionCacheKey(tablePath, version))) match {
+      case Some(actions) =>
+        logger.debug(s"GLOBAL version cache HIT for $tablePath version $version")
+        actions
+      case None =>
+        logger.debug(s"GLOBAL version cache MISS for $tablePath version $version - computing")
+        val actions = compute
+        globalVersionCache.put(VersionCacheKey(tablePath, version), actions)
+        actions
+    }
 
   /**
    * Get or compute a filtered schema - caches the result of filterEmptyObjectMappings.
@@ -178,6 +313,39 @@ object EnhancedTransactionLogCache {
         val filtered = compute
         globalFilteredSchemaCache.put(schemaHash, filtered)
         filtered
+    }
+
+  /**
+   * Get or compute DocMappingMetadata - parses docMappingJson once and caches the extracted metadata.
+   *
+   * This avoids repeated JSON parsing to extract field names, fast fields, etc.
+   * The key can be either a schema hash (if available) or the raw JSON string.
+   *
+   * @param key The cache key (schema hash or raw JSON)
+   * @param docMappingJson The raw JSON to parse if not cached
+   * @return Parsed DocMappingMetadata
+   */
+  def getOrComputeDocMappingMetadata(key: String, docMappingJson: String): DocMappingMetadata =
+    Option(globalDocMappingMetadataCache.getIfPresent(key)) match {
+      case Some(metadata) =>
+        metadata
+      case None =>
+        val metadata = DocMappingMetadata.parse(docMappingJson)
+        globalDocMappingMetadataCache.put(key, metadata)
+        metadata
+    }
+
+  /**
+   * Get DocMappingMetadata for an AddAction, using the schema hash as cache key when available.
+   */
+  def getDocMappingMetadata(addAction: AddAction): DocMappingMetadata =
+    addAction.docMappingJson match {
+      case Some(json) =>
+        // Use docMappingRef (schema hash) as key if available, otherwise use the JSON itself
+        val key = addAction.docMappingRef.getOrElse(json)
+        getOrComputeDocMappingMetadata(key, json)
+      case None =>
+        DocMappingMetadata.empty
     }
 
   /**
@@ -210,7 +378,11 @@ object EnhancedTransactionLogCache {
     globalAvroStateManifestCache.invalidateAll()
     globalAvroFileListCache.invalidateAll()
     globalFilteredSchemaCache.invalidateAll()
+    globalDocMappingMetadataCache.invalidateAll()
     globalAvroManifestFileCache.invalidateAll()
+    globalMetadataCache.invalidateAll()
+    globalProtocolCache.invalidateAll()
+    globalVersionCache.invalidateAll()
     logger.info("Cleared all global checkpoint caches")
   }
 
@@ -404,17 +576,8 @@ class EnhancedTransactionLogCache(
     tablePath: String,
     compute: => MetadataAction
   ): MetadataAction = {
-    val key = MetadataCacheKey(tablePath)
-    Option(metadataCache.getIfPresent(key)) match {
-      case Some(metadata) =>
-        logger.debug(s"Metadata cache hit for $tablePath")
-        metadata
-      case None =>
-        logger.debug(s"Metadata cache miss for $tablePath")
-        val metadata = compute
-        metadataCache.put(key, metadata)
-        metadata
-    }
+    // Delegate to GLOBAL cache for cross-TransactionLog caching
+    EnhancedTransactionLogCache.getOrComputeGlobalMetadata(tablePath, compute)
   }
 
   /** Get or compute protocol */
@@ -422,17 +585,8 @@ class EnhancedTransactionLogCache(
     tablePath: String,
     compute: => ProtocolAction
   ): ProtocolAction = {
-    val key = MetadataCacheKey(tablePath)
-    Option(protocolCache.getIfPresent(key)) match {
-      case Some(protocol) =>
-        logger.debug(s"Protocol cache hit for $tablePath")
-        protocol
-      case None =>
-        logger.debug(s"Protocol cache miss for $tablePath")
-        val protocol = compute
-        protocolCache.put(key, protocol)
-        protocol
-    }
+    // Delegate to GLOBAL cache for cross-TransactionLog caching
+    EnhancedTransactionLogCache.getOrComputeGlobalProtocol(tablePath, compute)
   }
 
   /** Get or compute version actions */
@@ -441,17 +595,8 @@ class EnhancedTransactionLogCache(
     version: Long,
     compute: => Seq[Action]
   ): Seq[Action] = {
-    val key = LogCacheKey(tablePath, version)
-    Option(versionCache.getIfPresent(key)) match {
-      case Some(actions) =>
-        logger.debug(s"Version cache hit for $tablePath version $version")
-        actions
-      case None =>
-        logger.debug(s"Version cache miss for $tablePath version $version")
-        val actions = compute
-        versionCache.put(key, actions)
-        actions
-    }
+    // Delegate to GLOBAL cache for cross-TransactionLog caching
+    EnhancedTransactionLogCache.getOrComputeGlobalVersionActions(tablePath, version, compute)
   }
 
   /** Get or compute checkpoint info */

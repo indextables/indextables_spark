@@ -1024,6 +1024,7 @@ class PurgeOrphanedSplitsExecutor(
       var line = reader.readLine()
       while (line != null) {
         if (line.nonEmpty) {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
@@ -1058,6 +1059,7 @@ class PurgeOrphanedSplitsExecutor(
       .split("\n")
       .filter(_.nonEmpty)
       .map { line =>
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(line)
 
         if (jsonNode.has("protocol")) {

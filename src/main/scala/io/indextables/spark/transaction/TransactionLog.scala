@@ -584,12 +584,16 @@ class TransactionLog(
   /**
    * Filter inline docMappingJson to remove empty object fields.
    * This handles legacy format AddActions that have docMappingJson directly (not via docMappingRef).
+   * Uses cached filtering to avoid repeated JSON parsing for files with the same schema.
    */
   private def filterInlineDocMappings(addActions: Seq[AddAction]): Seq[AddAction] =
     addActions.map { add =>
       if (add.docMappingJson.isDefined) {
-        val filtered = SchemaDeduplication.filterEmptyObjectMappings(add.docMappingJson.get)
-        if (filtered != add.docMappingJson.get) {
+        val schema = add.docMappingJson.get
+        // Compute hash for caching, then use cached filtering
+        val hash = SchemaDeduplication.computeSchemaHash(schema)
+        val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
+        if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))
         } else {
           add
@@ -1736,6 +1740,7 @@ class TransactionLog(
       var line = reader.readLine()
       while (line != null) {
         if (line.nonEmpty) {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)

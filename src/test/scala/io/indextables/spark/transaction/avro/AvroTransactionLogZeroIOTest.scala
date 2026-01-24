@@ -43,8 +43,10 @@ class AvroTransactionLogZeroIOTest extends TestBase {
     super.beforeEach()
     // Clear all caches and reset counters before each test
     EnhancedTransactionLogCache.clearGlobalCaches()
+    EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
     CloudStorageProvider.resetCounters()
     StateManifestIO.resetReadCounter()
+    StateManifestIO.resetParseCounter()
     SchemaDeduplication.resetParseCounter()
     AvroManifestReader.resetReadCounter()
   }
@@ -491,5 +493,330 @@ class AvroTransactionLogZeroIOTest extends TestBase {
         s"Initial unfiltered query should parse schema exactly once per unique schema, " +
           s"but got $parseCalls parses. This indicates filterEmptyObjectMappings is not being cached.")
     }
+  }
+
+  test("REGRESSION: 100 splits with 1 schema should parse schema exactly once") {
+    // Stress test with 100 splits to catch any caching gaps
+    withTempPath { tempPath =>
+      // Write 100 splits with 1 unique schema
+      val df = spark.range(10000)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(100)  // Create 100 splits
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear ALL caches and counters
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      SchemaDeduplication.resetParseCounter()
+      StateManifestIO.resetReadCounter()
+      StateManifestIO.resetParseCounter()
+
+      // First read - should parse schema exactly once
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      val count = readDf.count()
+      assert(count == 10000, s"Expected 10000 rows, got $count")
+
+      // Verify schema filtering happens exactly once per unique schema
+      val schemaParseCalls = SchemaDeduplication.getParseCallCount()
+      assert(schemaParseCalls == 1,
+        s"100 splits with 1 unique schema should parse schema exactly once, " +
+          s"but got $schemaParseCalls parses. This indicates a caching gap.")
+
+      // Verify StateManifest is parsed exactly once (cached)
+      val manifestParseCalls = StateManifestIO.getParseCount()
+      assert(manifestParseCalls == 1,
+        s"StateManifest should be parsed exactly once (cached), " +
+          s"but got $manifestParseCalls parses.")
+    }
+  }
+
+  test("GLOBAL JSON PARSE: initial read parses are O(1), subsequent queries minimal") {
+    // This test validates the GLOBAL JSON parse counter across all components.
+    // For Avro state format, we expect:
+    // - Initial read: a small constant number of parses (NOT proportional to file count)
+    //   These include: _last_checkpoint, StateManifest metadata, metadata action,
+    //   schema filtering, and DocMappingMetadata extraction
+    // - Subsequent queries: minimal parses (ideally 0, but some metadata access may occur)
+    withTempPath { tempPath =>
+      // Write test data with 10 splits and 1 unique schema
+      val df = spark.range(1000)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(10)  // Create 10 splits
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear ALL caches and reset GLOBAL counter
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+
+      // Initial read - should have a small constant number of parses (NOT 10)
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      val count = readDf.count()
+      assert(count == 1000, s"Expected 1000 rows, got $count")
+
+      val globalParsesAfterRead = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      // The parse count should be O(1) - a small constant, not proportional to file count
+      // Expected parses: _last_checkpoint (1), StateManifest metadata (1), metadata action (1),
+      // schema filtering (1 per unique schema), DocMappingMetadata (1 per unique schema)
+      assert(globalParsesAfterRead <= 10,
+        s"Initial read should trigger a small constant number of JSON parses (O(1)), " +
+          s"but got $globalParsesAfterRead. This may indicate per-file parsing.")
+
+      // Reset counters for subsequent query tracking
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      SchemaDeduplication.resetParseCounter()
+
+      // Subsequent queries on the SAME DataFrame should trigger ZERO JSON parses.
+      // All metadata, protocol, version actions, and schemas are cached globally.
+      readDf.count()
+      val parsesAfterCount = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+
+      readDf.filter("id > 500").count()
+      val parsesAfterFilter = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+
+      readDf.agg(Map("id" -> "sum")).collect()
+      val parsesAfterAgg = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+
+      // Debug: identify which query causes parsing
+      if (parsesAfterCount > 0) println(s"DEBUG: count() caused $parsesAfterCount parses")
+      if (parsesAfterFilter > parsesAfterCount) println(s"DEBUG: filter() caused ${parsesAfterFilter - parsesAfterCount} parses")
+      if (parsesAfterAgg > parsesAfterFilter) println(s"DEBUG: agg() caused ${parsesAfterAgg - parsesAfterFilter} parses")
+
+      val globalParsesAfterQueries = parsesAfterAgg
+      val schemaParsesAfterQueries = SchemaDeduplication.getParseCallCount()
+
+      // STRICT: Subsequent queries must trigger ZERO JSON parses
+      assert(globalParsesAfterQueries == 0,
+        s"Subsequent queries on same DataFrame should trigger ZERO JSON parses, " +
+          s"but got $globalParsesAfterQueries. This indicates a cache bypass.")
+
+      // Schema parsing must also be 0
+      assert(schemaParsesAfterQueries == 0,
+        s"Schema filtering should be fully cached - got $schemaParsesAfterQueries parses")
+    }
+  }
+
+  test("GLOBAL JSON PARSE: parse count is constant regardless of file count") {
+    // This test verifies that JSON parse count is O(1) not O(n) with respect to file count
+    withTempPath { tempPath =>
+      // Write 100 splits with 1 unique schema
+      val df = spark.range(10000)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(100)  // Create 100 splits
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear caches and reset counter
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+
+      // Read 100-split table
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf.count()
+
+      val globalParsesFor100Splits = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      // With 100 splits but 1 unique schema, parse count should still be small constant
+      // If it were O(n), we'd see ~100 parses
+      assert(globalParsesFor100Splits <= 10,
+        s"100 splits with 1 schema should trigger <=10 JSON parses, but got $globalParsesFor100Splits. " +
+          s"This indicates per-file parsing instead of per-schema parsing.")
+    }
+  }
+
+  test("GLOBAL JSON PARSE: new DataFrame on same table uses cached schemas") {
+    // Validates that global caches work across DataFrame instances
+    // The key validation is that SCHEMA parsing (the expensive O(n) operation) is cached.
+    withTempPath { tempPath =>
+      // Write test data
+      val df = spark.range(500)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(5)
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear caches and reset counters
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      SchemaDeduplication.resetParseCounter()
+
+      // First DataFrame - populates caches
+      val readDf1 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf1.count()
+
+      val parsesAfterFirst = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val schemaParsesAfterFirst = SchemaDeduplication.getParseCallCount()
+      // First read requires parsing metadata structures - should be small constant
+      assert(parsesAfterFirst <= 10,
+        s"First read should parse a small constant number of JSON structures, got $parsesAfterFirst")
+      assert(schemaParsesAfterFirst == 1,
+        s"First read should parse schema exactly once, got $schemaParsesAfterFirst")
+
+      // Reset counters
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      SchemaDeduplication.resetParseCounter()
+
+      // NEW DataFrame instance on same table - should use global caches for EVERYTHING
+      // Metadata, protocol, version actions, and schemas are all cached globally
+      val readDf2 = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf2.count()
+
+      val parsesAfterSecond = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      val schemaParsesAfterSecond = SchemaDeduplication.getParseCallCount()
+
+      // STRICT: New DataFrame on same table should trigger ZERO JSON parses
+      // All metadata, protocol, version actions, and schemas are cached globally
+      assert(parsesAfterSecond == 0,
+        s"New DataFrame on same table should trigger ZERO JSON parses (all cached globally), " +
+          s"but got $parsesAfterSecond. This indicates a cache bypass.")
+
+      // Schema parsing must also be 0
+      assert(schemaParsesAfterSecond == 0,
+        s"New DataFrame should NOT re-parse schemas (cached), but got $schemaParsesAfterSecond schema parses")
+    }
+  }
+
+  // ============================================================================
+  // DEBUG TEST: Capture stack traces to identify where JSON parsing happens
+  // ============================================================================
+
+  test("DEBUG: capture stack traces for JSON parsing on subsequent queries") {
+    withTempPath { tempPath =>
+      // Write test data with multiple splits (matches failing test setup)
+      val df = spark.range(1000)
+        .selectExpr("id", "concat('text_', id) as content")
+        .repartition(10)  // Create 10 splits
+      df.write
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .option("spark.indextables.checkpoint.enabled", "true")
+        .option("spark.indextables.checkpoint.interval", "1")
+        .mode("overwrite")
+        .save(tempPath)
+
+      // Clear caches
+      EnhancedTransactionLogCache.clearGlobalCaches()
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      EnhancedTransactionLogCache.disableThrowOnJsonParse()  // Ensure disabled for initial read
+
+      // Initial read - populate caches
+      val readDf = spark.read
+        .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+        .load(tempPath)
+      readDf.count()
+
+      println(s"=== Initial read completed, global JSON parses: ${EnhancedTransactionLogCache.getGlobalJsonParseCount()} ===")
+
+      // Test 1: count() on SAME DataFrame
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      EnhancedTransactionLogCache.enableThrowOnJsonParse()
+
+      try {
+        println("=== Test 1: count() on SAME DataFrame ===")
+        readDf.count()
+        println("=== count() completed without JSON parsing (GOOD!) ===")
+      } catch {
+        case e: Exception if findDebugException(e) =>
+          println("=== JSON PARSING DETECTED ON count() ===")
+          e.printStackTrace()
+          fail(s"Unexpected JSON parsing on count(). See stack trace above.")
+      } finally {
+        EnhancedTransactionLogCache.disableThrowOnJsonParse()
+      }
+
+      // Test 2: filter() on SAME DataFrame - THIS IS THE ONE THAT FAILS
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+
+      // First, run WITHOUT throw-on-parse to see if any parsing happens
+      readDf.filter("id > 500").count()
+      val filterParseCount = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+      println(s"=== Test 2: filter() on SAME DataFrame - parse count: $filterParseCount ===")
+
+      if (filterParseCount > 0) {
+        // Re-run WITH throw-on-parse to capture stack trace
+        println("=== Re-running filter() WITH throw-on-parse to capture stack trace ===")
+        EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+        EnhancedTransactionLogCache.enableThrowOnJsonParse()
+        try {
+          readDf.filter("id > 500").count()
+          println("=== filter() re-run completed without throwing (exception was swallowed somewhere) ===")
+          println("=== Checking if parse counter increased... ===")
+          val rerunParseCount = EnhancedTransactionLogCache.getGlobalJsonParseCount()
+          println(s"=== Re-run parse count: $rerunParseCount ===")
+        } catch {
+          case e: Exception =>
+            if (findDebugException(e)) {
+              println("=== JSON PARSING DETECTED ON filter() ===")
+              println("Stack trace shows where caching is being bypassed:")
+              e.printStackTrace()
+            } else {
+              println(s"=== Non-debug exception: ${e.getClass.getName}: ${e.getMessage} ===")
+              e.printStackTrace()
+            }
+        } finally {
+          EnhancedTransactionLogCache.disableThrowOnJsonParse()
+        }
+        // Don't fail - we want to capture the info
+        println(s"=== filter() caused $filterParseCount parse(s) - this needs investigation ===")
+      } else {
+        println("=== filter() completed without JSON parsing (GOOD!) ===")
+      }
+
+      // Test 3: NEW DataFrame on same table
+      EnhancedTransactionLogCache.resetGlobalJsonParseCounter()
+      EnhancedTransactionLogCache.enableThrowOnJsonParse()
+
+      try {
+        println("=== Test 3: NEW DataFrame on same table ===")
+        val readDf2 = spark.read
+          .format("io.indextables.spark.core.IndexTables4SparkTableProvider")
+          .load(tempPath)
+        readDf2.count()
+        println("=== NEW DataFrame query completed without JSON parsing (GOOD!) ===")
+      } catch {
+        case e: Exception if findDebugException(e) =>
+          println("=== JSON PARSING DETECTED ON NEW DATAFRAME ===")
+          e.printStackTrace()
+          fail(s"Unexpected JSON parsing on new DataFrame. See stack trace above.")
+      } finally {
+        EnhancedTransactionLogCache.disableThrowOnJsonParse()
+      }
+    }
+  }
+
+  /** Helper to check if exception chain contains DEBUG message */
+  private def findDebugException(e: Throwable): Boolean = {
+    var cause: Throwable = e
+    while (cause != null) {
+      if (cause.getMessage != null && cause.getMessage.contains("DEBUG: JSON parse detected")) {
+        return true
+      }
+      cause = cause.getCause
+    }
+    false
   }
 }

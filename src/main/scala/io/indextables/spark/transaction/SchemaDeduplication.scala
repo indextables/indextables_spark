@@ -127,6 +127,7 @@ object SchemaDeduplication {
     // Normalize the JSON to canonical form for consistent hashing
     val canonicalJson =
       try {
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode   = mapper.readTree(docMappingJson)
         val sortedNode = sortJsonNode(jsonNode)
         mapper.writeValueAsString(sortedNode)
@@ -222,6 +223,7 @@ object SchemaDeduplication {
     try {
       // Track actual parse calls for testing/monitoring
       parseCounter.incrementAndGet()
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       val rootNode = mapper.readTree(docMappingJson)
 
       rootNode match {
@@ -294,6 +296,29 @@ object SchemaDeduplication {
       schemaHash,
       filterEmptyObjectMappings(docMappingJson)
     )
+
+  /**
+   * Pre-filter an entire schema registry to remove empty object fields.
+   *
+   * This should be called ONCE when loading a StateManifest, NOT per file entry.
+   * The filtered registry can then be passed to toAddActions for simple lookups.
+   *
+   * Uses cached filtering so each unique schema is only parsed once.
+   *
+   * @param schemaRegistry
+   *   Map of schema hash -> schema JSON
+   * @return
+   *   Map of schema hash -> filtered schema JSON
+   */
+  def filterSchemaRegistry(schemaRegistry: Map[String, String]): Map[String, String] = {
+    if (schemaRegistry.isEmpty) {
+      return schemaRegistry
+    }
+    logger.debug(s"Pre-filtering schema registry with ${schemaRegistry.size} schemas")
+    schemaRegistry.map { case (hash, schema) =>
+      hash -> filterEmptyObjectMappingsCached(hash, schema)
+    }
+  }
 
   /**
    * Restore schemas in a sequence of actions using a registry.

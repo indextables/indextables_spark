@@ -355,6 +355,7 @@ class ParallelTransactionLogOperations(
       while (line != null) {
         if (line.nonEmpty) {
           Try {
+            EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
             val jsonNode = JsonUtil.mapper.readTree(line)
 
             // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes (OOM fix)
@@ -385,6 +386,7 @@ class ParallelTransactionLogOperations(
       .filter(_.nonEmpty)
       .flatMap { line =>
         Try {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
 
           if (jsonNode.has("metaData")) {

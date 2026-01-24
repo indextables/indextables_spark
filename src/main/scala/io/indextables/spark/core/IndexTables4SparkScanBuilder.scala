@@ -45,7 +45,7 @@ import io.indextables.spark.expressions.{
   RangeConfig,
   RangeExpression
 }
-import io.indextables.spark.transaction.TransactionLog
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, TransactionLog}
 import org.slf4j.LoggerFactory
 
 class IndexTables4SparkScanBuilder(
@@ -1326,6 +1326,8 @@ class IndexTables4SparkScanBuilder(
   /**
    * Get fast fields from the actual table schema/docMappingJson, not from configuration. This reads the transaction log
    * to determine which fields are actually configured as fast.
+   *
+   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
    */
   private def getActualFastFieldsFromSchema(): Set[String] =
     try {
@@ -1333,57 +1335,26 @@ class IndexTables4SparkScanBuilder(
 
       // Read existing files from transaction log to get docMappingJson
       val existingFiles = transactionLog.listFiles()
-      val existingDocMapping = existingFiles
-        .flatMap(_.docMappingJson)
-        .headOption // Get the first available doc mapping
+      val firstWithDocMapping = existingFiles.find(_.docMappingJson.isDefined)
 
-      if (existingDocMapping.isDefined) {
-        logger.debug("Found doc mapping, parsing fast fields")
+      firstWithDocMapping match {
+        case Some(addAction) =>
+          // Use cached DocMappingMetadata - no JSON parsing here
+          val metadata = EnhancedTransactionLogCache.getDocMappingMetadata(addAction)
+          logger.debug(s"Actual fast fields from schema: ${metadata.fastFields.mkString(", ")}")
+          metadata.fastFields
 
-        // Parse the docMappingJson to extract fast field information
-        import io.indextables.spark.util.JsonUtil
-        import scala.jdk.CollectionConverters._
-
-        val mappingJson = existingDocMapping.get
-        logger.debug(s"Full docMappingJson: ${mappingJson
-            .take(500)}${if (mappingJson.length > 500) "..." else ""}")
-        val docMapping = JsonUtil.mapper.readTree(mappingJson)
-
-        if (docMapping.isArray) {
-          val fastFields = docMapping.asScala.flatMap { fieldNode =>
-            val fieldName = Option(fieldNode.get("name")).map(_.asText())
-            val isFast = Option(fieldNode.get("fast"))
-              .map(_.asBoolean())
-              .getOrElse(false)
-            val fieldType = Option(fieldNode.get("type")).map(_.asText()).getOrElse("unknown")
-
-            logger.debug(s"Field entry: name=${fieldName.getOrElse("N/A")}, fast=$isFast, type=$fieldType")
-
-            if (isFast && fieldName.isDefined) {
-              logger.debug(s"✓ Found fast field: ${fieldName.get}")
-              Some(fieldName.get)
-            } else {
-              None
-            }
-          }.toSet
-
-          logger.debug(s"Actual fast fields from schema: ${fastFields.mkString(", ")}")
-          fastFields
-        } else {
-          logger.debug("Doc mapping is not an array - unexpected format")
-          Set.empty[String]
-        }
-      } else {
-        logger.debug("No doc mapping found - likely new table, falling back to configuration-based validation")
-        // Fall back to configuration-based validation for new tables
-        val fastFieldsStr = config
-          .get("spark.indextables.indexing.fastfields")
-          .getOrElse("")
-        if (fastFieldsStr.nonEmpty) {
-          fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
-        } else {
-          Set.empty[String]
-        }
+        case None =>
+          logger.debug("No doc mapping found - likely new table, falling back to configuration-based validation")
+          // Fall back to configuration-based validation for new tables
+          val fastFieldsStr = config
+            .get("spark.indextables.indexing.fastfields")
+            .getOrElse("")
+          if (fastFieldsStr.nonEmpty) {
+            fastFieldsStr.split(",").map(_.trim).filterNot(_.isEmpty).toSet
+          } else {
+            Set.empty[String]
+          }
       }
     } catch {
       case e: Exception =>

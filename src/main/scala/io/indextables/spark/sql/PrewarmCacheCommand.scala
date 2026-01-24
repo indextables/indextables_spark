@@ -29,7 +29,7 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.prewarm.{AsyncPrewarmJobManager, AsyncPrewarmJobResult, IndexComponentMapping}
 import io.indextables.spark.storage.{DriverSplitLocalityManager, GlobalSplitCacheManager}
-import io.indextables.spark.transaction.{PartitionPredicateUtils, TransactionLogFactory}
+import io.indextables.spark.transaction.{EnhancedTransactionLogCache, PartitionPredicateUtils, TransactionLogFactory}
 import io.indextables.spark.util.{ConfigNormalization, ConfigUtils, ProtocolNormalizer, SplitMetadataFactory}
 import io.indextables.tantivy4java.split.SplitSearcher.IndexComponent
 import org.slf4j.LoggerFactory
@@ -1013,34 +1013,16 @@ case class PrewarmCacheCommand(
     }
   }
 
-  /** Extract field names from AddAction metadata (docMappingJson). */
-  private def extractFieldsFromMetadata(addAction: io.indextables.spark.transaction.AddAction): Set[String] =
-    addAction.docMappingJson match {
-      case Some(json) =>
-        try {
-          // Parse docMappingJson to extract field names
-          // Format: {"field_mappings":[{"name":"field1",...},{"name":"field2",...}]}
-          val mapper        = new com.fasterxml.jackson.databind.ObjectMapper()
-          val root          = mapper.readTree(json)
-          val fieldMappings = root.path("field_mappings")
-          if (fieldMappings.isArray) {
-            fieldMappings
-              .elements()
-              .asScala
-              .flatMap(fm => Option(fm.path("name").asText(null)))
-              .map(_.toLowerCase)
-              .toSet
-          } else {
-            Set.empty[String]
-          }
-        } catch {
-          case e: Exception =>
-            logger.debug(s"Failed to parse docMappingJson for field extraction: ${e.getMessage}")
-            Set.empty[String]
-        }
-      case None =>
-        Set.empty[String]
-    }
+  /**
+   * Extract field names from AddAction metadata (docMappingJson).
+   * Uses cached DocMappingMetadata to avoid repeated JSON parsing.
+   */
+  private def extractFieldsFromMetadata(addAction: io.indextables.spark.transaction.AddAction): Set[String] = {
+    // Use cached DocMappingMetadata - no JSON parsing here
+    val metadata = EnhancedTransactionLogCache.getDocMappingMetadata(addAction)
+    // Return field names in lowercase for case-insensitive matching
+    metadata.fieldNames.map(_.toLowerCase)
+  }
 }
 
 /** Internal task representation for prewarm distribution. */

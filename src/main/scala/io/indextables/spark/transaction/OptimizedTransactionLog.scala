@@ -674,8 +674,19 @@ class OptimizedTransactionLog(
           }
         }
 
-        // Restore schemas
-        restoreSchemasInAddActions(files.toSeq)
+        // Restore schemas (only for non-Avro checkpoints)
+        // Avro checkpoints already have schemas restored via FileEntry.toAddAction with cached filtering
+        val result = if (isAvroCheckpoint) {
+          // Avro path: schemas already restored in readAvroStateCheckpoint
+          files.toSeq
+        } else {
+          // JSON path: need to restore schemas
+          restoreSchemasInAddActions(files.toSeq)
+        }
+
+        // Pre-populate DocMappingMetadata cache to avoid JSON parsing on first filter operation
+        result.foreach(EnhancedTransactionLogCache.getDocMappingMetadata)
+        result
 
       case None =>
         // No checkpoint available - fallback to regular listFiles
@@ -700,24 +711,44 @@ class OptimizedTransactionLog(
           tablePath.toString,
           info.version,
           {
-            logger.info(s"Avro mode: GLOBAL file list cache miss, computing for $stateDirPath")
+            // Before computing, check if checkpoint actions are already cached
+            // (e.g., from getMetadata/getSchema calls during table initialization)
+            // This avoids duplicate StateManifest reads and schema filtering
+            val checkpointKey = EnhancedTransactionLogCache.CheckpointActionsKey(tablePath.toString, info.version)
+            Option(EnhancedTransactionLogCache.globalCheckpointActionsCache.getIfPresent(checkpointKey)) match {
+              case Some(cachedActions) =>
+                logger.info(s"Avro mode: GLOBAL file list cache miss, but found actions in checkpoint cache - extracting AddActions")
+                val addActions = cachedActions.collect { case add: AddAction => add }
+                // Pre-populate DocMappingMetadata cache even when extracting from checkpoint cache
+                addActions.foreach(EnhancedTransactionLogCache.getDocMappingMetadata)
+                addActions
+              case None =>
+                logger.info(s"Avro mode: GLOBAL file list cache miss, computing for $stateDirPath")
 
-            // Use cached state manifest to avoid repeated S3 reads
-            val stateManifest = enhancedCache.getOrComputeAvroStateManifest(
-              stateDirPath,
-              manifestIO.readStateManifest(stateDirPath)
-            )
-            logger.info(s"Avro mode: StateManifest has ${stateManifest.schemaRegistry.size} schemas, " +
-              s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests")
+                // Use cached state manifest to avoid repeated S3 reads
+                val stateManifest = enhancedCache.getOrComputeAvroStateManifest(
+                  stateDirPath,
+                  manifestIO.readStateManifest(stateDirPath)
+                )
+                logger.info(s"Avro mode: StateManifest has ${stateManifest.schemaRegistry.size} schemas, " +
+                  s"${stateManifest.numFiles} files, ${stateManifest.manifests.size} manifests")
 
-            // Use cached avroReader field to avoid object allocation per query
-            val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
-            val fileEntries = avroReader.readManifestsParallel(manifestPaths)
-            val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
-            // This toAddActions call is expensive (JSON parsing) - cached globally
-            val result = avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
-            logger.info(s"Avro mode: toAddActions completed, returning ${result.size} AddActions")
-            result
+                // Use cached avroReader field to avoid object allocation per query
+                val manifestPaths = stateManifest.manifests.map(m => s"$stateDirPath/${m.path}")
+                val fileEntries = avroReader.readManifestsParallel(manifestPaths)
+                val liveEntries = manifestIO.applyTombstones(fileEntries, stateManifest.tombstones)
+                // This toAddActions call is expensive (JSON parsing) - cached globally
+                val result = avroReader.toAddActions(liveEntries, stateManifest.schemaRegistry)
+                logger.info(s"Avro mode: toAddActions completed, returning ${result.size} AddActions")
+
+                // Pre-populate DocMappingMetadata cache to avoid JSON parsing on first filter operation
+                // Due to schema deduplication, many files share the same schema, so we only parse each unique schema once
+                val uniqueSchemas = result.flatMap(a => a.docMappingRef.orElse(a.docMappingJson.map(_.hashCode.toString))).toSet
+                result.foreach(EnhancedTransactionLogCache.getDocMappingMetadata)
+                logger.debug(s"Avro mode: pre-populated DocMappingMetadata cache for ${uniqueSchemas.size} unique schemas")
+
+                result
+            }
           }
         )
         logger.debug(s"Avro mode: returning ${cached.size} files from GLOBAL cache (version=${info.version})")
@@ -765,7 +796,13 @@ class OptimizedTransactionLog(
         // Restore schemas BEFORE caching to avoid running restoration on every listFiles() call
         // This is a significant performance optimization: schema restoration creates new AddAction
         // objects, so doing it once during cache computation vs. on every call is much more efficient
-        restoreSchemasInAddActions(rawFiles)
+        val restored = restoreSchemasInAddActions(rawFiles)
+
+        // Pre-populate DocMappingMetadata cache to avoid JSON parsing on first filter operation
+        restored.foreach(EnhancedTransactionLogCache.getDocMappingMetadata)
+        logger.debug(s"JSON mode: pre-populated DocMappingMetadata cache")
+
+        restored
       }
     )
 
@@ -1252,11 +1289,9 @@ class OptimizedTransactionLog(
       val files = listFilesOptimized()
       logger.debug(s"Prewarmed file list: ${files.size} files")
 
-      // 4. Load checkpoint info if available
-      checkpoint.foreach { cp =>
-        cp.getLastCheckpointInfo().foreach { info =>
-          logger.debug(s"Prewarmed checkpoint info: version ${info.version}")
-        }
+      // 4. Load checkpoint info if available (use cached version to avoid JSON parsing)
+      getLastCheckpointInfoCached().foreach { info =>
+        logger.debug(s"Prewarmed checkpoint info: version ${info.version}")
       }
 
       val elapsed = System.currentTimeMillis() - startTime
@@ -1532,6 +1567,7 @@ class OptimizedTransactionLog(
       while (line != null) {
         if (line.nonEmpty) {
           Try {
+            EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
             val jsonNode = JsonUtil.mapper.readTree(line)
             parseAction(jsonNode)
           } match {
@@ -1556,6 +1592,7 @@ class OptimizedTransactionLog(
       .filter(_.nonEmpty)
       .flatMap { line =>
         Try {
+          EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
           val jsonNode = JsonUtil.mapper.readTree(line)
           parseAction(jsonNode)
         }.toOption

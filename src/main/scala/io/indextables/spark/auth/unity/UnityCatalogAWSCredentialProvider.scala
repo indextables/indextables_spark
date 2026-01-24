@@ -29,6 +29,7 @@ import org.apache.hadoop.conf.Configuration
 import com.amazonaws.auth.{AWSCredentials, AWSCredentialsProvider, BasicSessionCredentials}
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.google.common.cache.{Cache, CacheBuilder, CacheStats}
+import io.indextables.spark.transaction.EnhancedTransactionLogCache
 import io.indextables.spark.util.{ConfigSource, ConfigurationResolver, HadoopConfigSource}
 import org.slf4j.LoggerFactory
 
@@ -229,6 +230,7 @@ class UnityCatalogAWSCredentialProvider(uri: URI, conf: Configuration) extends A
 
   /** Parse the API response JSON into CachedCredentials. */
   private def parseCredentialsResponse(json: String): CachedCredentials = {
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
     val root     = objectMapper.readTree(json)
     val awsCreds = root.get("aws_temp_credentials")
 

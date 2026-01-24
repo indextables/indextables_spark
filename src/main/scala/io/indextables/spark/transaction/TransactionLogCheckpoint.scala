@@ -657,6 +657,7 @@ class TransactionLogCheckpoint(
     // This enables fast getMetadata() without scanning version files
     stateManifest.metadata.foreach { metadataJson =>
       try {
+        EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
         val jsonNode = JsonUtil.mapper.readTree(metadataJson)
         if (jsonNode.has("metaData")) {
           val metadata = JsonUtil.mapper.treeToValue(jsonNode.get("metaData"), classOf[MetadataAction])
@@ -859,6 +860,7 @@ class TransactionLogCheckpoint(
    * Uses treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes.
    */
   private def parseActionLine(line: String): Action = {
+    EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
     val jsonNode = JsonUtil.mapper.readTree(line)
 
     if (jsonNode.has("protocol")) {
@@ -880,6 +882,7 @@ class TransactionLogCheckpoint(
     val lines = content.split("\n").filter(_.nonEmpty)
 
     lines.map { line =>
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       val jsonNode = JsonUtil.mapper.readTree(line)
 
       // Use treeToValue instead of toString + readValue to avoid re-serializing large JSON nodes
@@ -921,6 +924,7 @@ class TransactionLogCheckpoint(
 
     Try {
       val content = new String(cloudProvider.readFile(LAST_CHECKPOINT.toString), "UTF-8")
+      EnhancedTransactionLogCache.incrementGlobalJsonParseCounter()
       JsonUtil.mapper.readValue(content, classOf[LastCheckpointInfo])
     } match {
       case Success(info) => Some(info)
