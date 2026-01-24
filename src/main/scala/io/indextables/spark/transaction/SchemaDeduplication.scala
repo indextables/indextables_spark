@@ -376,10 +376,10 @@ object SchemaDeduplication {
         }
 
       // Also filter inline docMappingJson (legacy format without deduplication)
-      // Use CACHED filtering by computing hash first
+      // Use docMappingRef as hash if available to avoid expensive JSON normalization
       case add: AddAction if add.docMappingJson.isDefined && filterEmptyObjects =>
         val schema = add.docMappingJson.get
-        val hash = computeSchemaHash(schema)
+        val hash = add.docMappingRef.getOrElse(computeSchemaHash(schema))
         val filteredSchema = filterEmptyObjectMappingsCached(hash, schema)
         if (filteredSchema != schema) {
           add.copy(docMappingJson = Some(filteredSchema))

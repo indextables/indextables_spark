@@ -380,7 +380,7 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
    * @param lastCheckpointJson
    *   JSON content to write
    * @return
-   *   true if written (new version was greater), false if skipped (existing version was >= new)
+   *   true if written (new version was >= existing), false if skipped (existing version was > new)
    */
   def writeLastCheckpointIfNewer(
       transactionLogPath: String,
@@ -393,12 +393,14 @@ class StateManifestIO(cloudProvider: CloudStorageProvider) {
     val currentVersion = getCurrentCheckpointVersion(transactionLogPath)
 
     currentVersion match {
-      case Some(existingVersion) if existingVersion >= newVersion =>
-        log.info(s"Skipping _last_checkpoint update: existing version $existingVersion >= new version $newVersion")
+      case Some(existingVersion) if existingVersion > newVersion =>
+        // Only skip if existing version is strictly greater (newer)
+        // Allow same version updates to support format upgrades (JSON -> Avro)
+        log.info(s"Skipping _last_checkpoint update: existing version $existingVersion > new version $newVersion")
         false
 
       case _ =>
-        // Either no existing file, or existing version is lower - write the new checkpoint
+        // Either no existing file, existing version is lower, or same version (format upgrade)
         cloudProvider.writeFile(lastCheckpointPath, lastCheckpointJson.getBytes("UTF-8"))
         log.debug(s"Updated _last_checkpoint to version $newVersion")
         true

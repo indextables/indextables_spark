@@ -590,8 +590,9 @@ class TransactionLog(
     addActions.map { add =>
       if (add.docMappingJson.isDefined) {
         val schema = add.docMappingJson.get
-        // Compute hash for caching, then use cached filtering
-        val hash = SchemaDeduplication.computeSchemaHash(schema)
+        // Use existing docMappingRef as hash if available, otherwise compute
+        // This avoids expensive JSON normalization on every query
+        val hash = add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(schema))
         val filtered = SchemaDeduplication.filterEmptyObjectMappingsCached(hash, schema)
         if (filtered != schema) {
           add.copy(docMappingJson = Some(filtered))

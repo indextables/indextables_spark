@@ -26,7 +26,7 @@ import org.apache.hadoop.fs.Path
 
 import io.indextables.spark.io.CloudStorageProviderFactory
 import io.indextables.spark.transaction.{AddAction, LastCheckpointInfo, MetadataAction, TransactionLogCheckpoint, TransactionLogFactory}
-import io.indextables.spark.transaction.avro.{ConcurrentStateWriteException, FileEntry, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
+import io.indextables.spark.transaction.avro.{FileEntry, StateConfig, StateManifestIO, StateRetryConfig, StateWriter}
 import io.indextables.spark.util.JsonUtil
 import org.slf4j.LoggerFactory
 
@@ -269,6 +269,7 @@ case class CheckpointCommand(tablePath: String) extends LeafRunnableCommand {
         } else {
           add.docMappingRef.getOrElse(SchemaDeduplication.computeSchemaHash(json))
         }
+        // Store in Avro state manifest (keys are just the hash, no prefix)
         schemaRegistry.put(ref, json)
         ref
       }
